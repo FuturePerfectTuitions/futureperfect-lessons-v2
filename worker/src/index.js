@@ -34,7 +34,8 @@ async function checkBindings(env) {
   const checks = {
     studentsKv: { bound: Boolean(env.STUDENTS_KV), ok: false },
     lessonsKv: { bound: Boolean(env.LESSONS_KV), ok: false },
-    d1: { bound: Boolean(env.DB), ok: false }
+    d1: { bound: Boolean(env.DB), ok: false },
+    materialsR2: { bound: Boolean(env.MATERIALS_R2), ok: false }
   };
 
   try {
@@ -64,6 +65,15 @@ async function checkBindings(env) {
     checks.d1.error = 'D1_QUERY_FAILED';
   }
 
+  try {
+    if (env.MATERIALS_R2) {
+      await env.MATERIALS_R2.list({ limit: 1 });
+      checks.materialsR2.ok = true;
+    }
+  } catch (error) {
+    checks.materialsR2.error = 'R2_LIST_FAILED';
+  }
+
   return checks;
 }
 
@@ -76,35 +86,61 @@ export default {
       if (!Object.keys(cors).length) {
         return new Response(null, { status: 403 });
       }
-      return new Response(null, { status: 204, headers: cors });
+
+      return new Response(null, {
+        status: 204,
+        headers: cors
+      });
     }
 
     if (url.pathname === '/api/health' && request.method === 'GET') {
       const bindings = await checkBindings(env);
-      const infrastructureHealthy =
-        bindings.studentsKv.ok && bindings.lessonsKv.ok && bindings.d1.ok;
 
-      return json({
-        ok: true,
-        service: 'fpt-portal-v2-worker',
-        environment: env.ENVIRONMENT || 'development',
-        studentLoginEnabled: false,
-        infrastructureHealthy,
-        bindings,
-        timestamp: new Date().toISOString()
-      }, { status: 200, headers: cors });
+      const infrastructureHealthy =
+        bindings.studentsKv.ok &&
+        bindings.lessonsKv.ok &&
+        bindings.d1.ok &&
+        bindings.materialsR2.ok;
+
+      return json(
+        {
+          ok: true,
+          service: 'fpt-portal-v2-worker',
+          environment: env.ENVIRONMENT || 'development',
+          studentLoginEnabled: false,
+          infrastructureHealthy,
+          bindings,
+          timestamp: new Date().toISOString()
+        },
+        {
+          status: 200,
+          headers: cors
+        }
+      );
     }
 
     if (url.pathname.startsWith('/api/')) {
-      return json({
-        error: 'NOT_IMPLEMENTED',
-        message: 'Portal V2 API route not implemented yet.'
-      }, { status: 501, headers: cors });
+      return json(
+        {
+          error: 'NOT_IMPLEMENTED',
+          message: 'Portal V2 API route not implemented yet.'
+        },
+        {
+          status: 501,
+          headers: cors
+        }
+      );
     }
 
-    return json({
-      service: 'fpt-portal-v2-worker',
-      message: 'Future Perfect Tuitions Portal V2 Worker'
-    }, { status: 200, headers: cors });
+    return json(
+      {
+        service: 'fpt-portal-v2-worker',
+        message: 'Future Perfect Tuitions Portal V2 Worker'
+      },
+      {
+        status: 200,
+        headers: cors
+      }
+    );
   }
 };
