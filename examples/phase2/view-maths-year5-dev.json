@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "viewId": "maths-year5-dev",
+  "subject": "maths",
+  "label": "Year 5 Development",
+  "testOnly": true,
+  "lessonIds": ["DEV-M01"]
+}
