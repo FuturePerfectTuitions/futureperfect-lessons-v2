@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-M01",
+  "title": "Development Test Lesson",
+  "description": "A temporary Phase 2 lesson used only to prove KV and D1 data access.",
+  "subject": "maths",
+  "active": true,
+  "testOnly": true,
+  "core": {
+    "preLessonSheets": [],
+    "video": null,
+    "homeworks": [],
+    "otherResources": []
+  },
+  "vr": null
+}
