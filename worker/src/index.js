@@ -82,12 +82,31 @@ async function phase2Diagnostics(env) {
   const lessonKey = 'lesson:DEV-M01';
   const viewKey = 'view:maths-year5-dev';
 
-  const [student, lesson, view, entitlementCountRow] = await Promise.all([
-    env.STUDENTS_KV.get(studentKey, { type: 'json' }),
-    env.LESSONS_KV.get(lessonKey, { type: 'json' }),
-    env.LESSONS_KV.get(viewKey, { type: 'json' }),
-    env.DB.prepare('SELECT COUNT(*) AS count FROM lesson_entitlements').first()
-  ]);
+  const [student, lesson, view, entitlementCountRow, entitlementRow] =
+    await Promise.all([
+      env.STUDENTS_KV.get(studentKey, { type: 'json' }),
+      env.LESSONS_KV.get(lessonKey, { type: 'json' }),
+      env.LESSONS_KV.get(viewKey, { type: 'json' }),
+      env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM lesson_entitlements'
+      ).first(),
+      env.DB.prepare(
+        `SELECT
+           portal_user_id_norm,
+           lesson_id,
+           core_access,
+           vr_access,
+           source,
+           first_granted_at,
+           last_confirmed_at,
+           source_batch_code,
+           source_lesson_date
+         FROM lesson_entitlements
+         WHERE portal_user_id_norm = ? AND lesson_id = ?`
+      )
+        .bind('test0101', 'DEV-M01')
+        .first()
+    ]);
 
   return {
     student: {
@@ -100,6 +119,7 @@ async function phase2Diagnostics(env) {
       accountStatus: student?.accountStatus ?? null,
       batches: Array.isArray(student?.batches) ? student.batches : []
     },
+
     lesson: {
       key: lessonKey,
       found: Boolean(lesson),
@@ -109,6 +129,7 @@ async function phase2Diagnostics(env) {
       active: lesson?.active ?? null,
       testOnly: lesson?.testOnly ?? null
     },
+
     view: {
       key: viewKey,
       found: Boolean(view),
@@ -117,10 +138,27 @@ async function phase2Diagnostics(env) {
       label: view?.label ?? null,
       lessonIds: Array.isArray(view?.lessonIds) ? view.lessonIds : []
     },
+
     d1: {
       table: 'lesson_entitlements',
       readable: entitlementCountRow !== null,
-      rowCount: Number(entitlementCountRow?.count ?? 0)
+      rowCount: Number(entitlementCountRow?.count ?? 0),
+      testEntitlement: entitlementRow
+        ? {
+            found: true,
+            portalUserIdNorm: entitlementRow.portal_user_id_norm,
+            lessonId: entitlementRow.lesson_id,
+            coreAccess: Number(entitlementRow.core_access) === 1,
+            vrAccess: Number(entitlementRow.vr_access) === 1,
+            source: entitlementRow.source,
+            firstGrantedAt: entitlementRow.first_granted_at,
+            lastConfirmedAt: entitlementRow.last_confirmed_at,
+            sourceBatchCode: entitlementRow.source_batch_code,
+            sourceLessonDate: entitlementRow.source_lesson_date
+          }
+        : {
+            found: false
+          }
     }
   };
 }
@@ -182,11 +220,18 @@ export default {
 
       try {
         const diagnostics = await phase2Diagnostics(env);
+
         const dataFoundationHealthy =
           diagnostics.student.found &&
           diagnostics.lesson.found &&
           diagnostics.view.found &&
-          diagnostics.d1.readable;
+          diagnostics.d1.readable &&
+          diagnostics.d1.testEntitlement.found &&
+          diagnostics.d1.testEntitlement.portalUserIdNorm === 'test0101' &&
+          diagnostics.d1.testEntitlement.lessonId === 'DEV-M01' &&
+          diagnostics.d1.testEntitlement.coreAccess === true &&
+          diagnostics.d1.testEntitlement.vrAccess === false &&
+          diagnostics.d1.testEntitlement.source === 'excel';
 
         return json(
           {
