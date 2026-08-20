@@ -1,12 +1,19 @@
 # Phase 2 — Data Foundation Setup
 
+**Status: COMPLETE — verified 20 August 2026.**
+
 ## 1. D1
 
-Open Cloudflare D1 database `fpt_portal_v2_db` → Console and execute the complete contents of:
+Database: `fpt_portal_v2_db`
+
+Applied migration:
 
 `worker/migrations/0001_lesson_entitlements.sql`
 
-Expected result: table `lesson_entitlements` plus index `idx_lesson_entitlements_lesson_id`.
+Created:
+
+- table `lesson_entitlements`;
+- index `idx_lesson_entitlements_lesson_id`.
 
 ## 2. Students KV dummy record
 
@@ -16,9 +23,11 @@ Key:
 
 `student:test0101`
 
-Value: exact contents of:
+Value source:
 
 `examples/phase2/student-test0101.json`
+
+Status: created and Worker-read verified.
 
 ## 3. Lessons KV dummy lesson
 
@@ -28,9 +37,11 @@ Key:
 
 `lesson:DEV-M01`
 
-Value: exact contents of:
+Value source:
 
 `examples/phase2/lesson-DEV-M01.json`
+
+Status: created and Worker-read verified.
 
 ## 4. Lessons KV dummy view
 
@@ -40,21 +51,48 @@ Key:
 
 `view:maths-year5-dev`
 
-Value: exact contents of:
+Value source:
 
 `examples/phase2/view-maths-year5-dev.json`
 
-## 5. Do not add real data yet
+Status: created and Worker-read verified.
 
-Phase 2 uses dummy/test data only. The existing live portal remains untouched.
+## 5. Dummy D1 entitlement
 
-## 6. Next code checkpoint
+Created test entitlement:
 
-After the three dummy KV records and D1 table exist, update the Worker with Phase 2 diagnostic routes that read:
+`test0101 + DEV-M01`
 
-- the dummy student;
-- the dummy lesson;
-- the dummy view;
-- the D1 entitlement table.
+Verified through the Worker with core access true, VR access false and source `excel`.
 
-Then verify all four from the GitHub Pages development site/Worker before proceeding to the complete one-lesson end-to-end build.
+## 6. Idempotency
+
+The same Student + Lesson upsert was executed twice.
+
+Verified:
+
+- row count remained 1;
+- first-granted timestamp remained unchanged;
+- last-confirmed timestamp updated.
+
+## 7. Worker diagnostic
+
+Route:
+
+`GET /api/dev/phase2`
+
+Verified result:
+
+`dataFoundationHealthy: true`
+
+Full evidence is recorded in:
+
+`docs/data/PHASE2_VERIFICATION.md`
+
+## 8. Real data remains deferred
+
+Phase 2 used dummy/test data only. The existing live portal remains untouched and normal student login remains disabled.
+
+## 9. Next checkpoint
+
+Proceed to Phase 3: get one complete Maths lesson working end-to-end from the V2 data model before loading the full catalogue.
