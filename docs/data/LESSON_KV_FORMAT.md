@@ -14,6 +14,18 @@ This permits shared curricula. For example, the same canonical Maths lesson can 
 
 ---
 
+## R2 path convention
+
+The implemented development bucket uses lowercase subject folders and compact year folders:
+
+`maths/Y5/Autumn/Y5M1/...`
+
+`english/Y4/Autumn/Y4E1/...`
+
+Term folders (`Autumn`, `Spring`, `Summer`) are content-organisation folders only. They do not create term sections in student navigation. Exact R2 object keys are always stored explicitly in the lesson record and are never permanently derived from the Lesson ID.
+
+---
+
 ## Canonical lesson record
 
 Key example:
@@ -35,7 +47,7 @@ Value:
       {
         "resourceId": "Y5M12-pre-01",
         "displayName": "PreLesson Sheet",
-        "r2Key": "Maths/Year5/Spring/Y5M12/PreLesson/Y5M12 PreLesson Sheet.pdf"
+        "r2Key": "maths/Y5/Spring/Y5M12/PreLesson/Y5M12 PreLesson Sheet.pdf"
       }
     ],
     "video": {
@@ -48,12 +60,12 @@ Value:
         "homework": {
           "resourceId": "Y5M12-hw-01-file",
           "displayName": "Homework",
-          "r2Key": "Maths/Year5/Spring/Y5M12/Homework/Y5M12 Homework.pdf"
+          "r2Key": "maths/Y5/Spring/Y5M12/Homework/Y5M12 Homework.pdf"
         },
         "answerPack": {
           "resourceId": "Y5M12-hw-01-answer",
           "displayName": "Answer Pack",
-          "r2Key": "Maths/Year5/Spring/Y5M12/Answers/Y5M12 Homework Answer Pack.pdf"
+          "r2Key": "maths/Y5/Spring/Y5M12/Answers/Y5M12 Homework Answer Pack.pdf"
         }
       }
     ],
@@ -89,12 +101,12 @@ English lessons use the same `core` structure. A lesson with optional VR materia
         "sheet": {
           "resourceId": "Y4E12-vr-pre-01-sheet",
           "displayName": "VR PreLesson Sheet",
-          "r2Key": "English/Year4/Spring/Y4E12/VR/PreLesson/VR PreLesson Sheet.pdf"
+          "r2Key": "english/Y4/Spring/Y4E12/VR/PreLesson/VR PreLesson Sheet.pdf"
         },
         "answerKey": {
           "resourceId": "Y4E12-vr-pre-01-answer",
           "displayName": "VR Answer Key",
-          "r2Key": "English/Year4/Spring/Y4E12/VR/PreLesson/VR Answer Key.pdf"
+          "r2Key": "english/Y4/Spring/Y4E12/VR/PreLesson/VR Answer Key.pdf"
         }
       }
     ],
