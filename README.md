@@ -2,41 +2,63 @@
 
 Isolated development repository for the next-generation Future Perfect Tuitions student portal.
 
-## Phase 1 status
+## Phase 1 status — COMPLETE
+
+Phase 1 infrastructure foundation has been built and verified end-to-end.
 
 - V2 repository created separately from the live portal.
-- Static development landing page added.
+- GitHub Pages enabled from `main` / repository root.
+- Development frontend is live.
 - FPT visual shell started using the existing navy/red/white design language.
-- Frontend Worker connectivity tester added.
-- Minimal Worker source added at `worker/src/index.js` with `GET /api/health`.
-- `worker/wrangler.toml` added with the approved GitHub Pages development origin.
+- Separate V2 Worker created and deployed.
+- Frontend → Worker CORS/connectivity verified.
+- `GET /api/health` verifies all configured backend bindings.
+- Separate V2 Students KV created and bound as `STUDENTS_KV`.
+- Separate V2 Lessons KV created and bound as `LESSONS_KV`.
+- Separate V2 D1 database created and bound as `DB`.
+- Development R2 materials bucket bound as `MATERIALS_R2`.
+- Health test confirms Students KV, Lessons KV, D1 and R2 are all bound and readable/queryable.
+- Environment is `development`.
+- Student login remains disabled.
 - No live custom domain / `CNAME` is configured.
-- No student login is implemented or enabled.
-- KV, D1 and R2 bindings will be added only after the separate V2 Cloudflare resources are created.
+- Existing live portal, Worker and KV namespaces remain untouched.
 
 ## Development URL
-
-Once GitHub Pages is enabled from the `main` branch / repository root, the expected development URL is:
 
 `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/`
 
 ## Worker
 
-The intended development Worker name is:
+Worker name:
 
 `fpt-portal-v2-worker`
 
-After the Worker is deployed, add its HTTPS base URL to `config.js`:
+Worker URL:
 
-```js
-window.FPT_V2_CONFIG = Object.freeze({
-  environment: "development",
-  workerBaseUrl: "https://YOUR-V2-WORKER.workers.dev"
-});
-```
+`https://fpt-portal-v2-worker.futureperfectlessons.workers.dev`
 
-Then the development page can test `GET /api/health`.
+Current Worker source:
+
+`worker/src/index.js`
+
+## Cloudflare resources
+
+| Binding | Resource |
+|---|---|
+| `STUDENTS_KV` | `FPT_PORTAL_V2_STUDENTS` |
+| `LESSONS_KV` | `FPT_PORTAL_V2_LESSONS` |
+| `DB` | `fpt_portal_v2_db` |
+| `MATERIALS_R2` | `fpt-materials-dev` |
+
+Environment variables:
+
+- `ENVIRONMENT=development`
+- `ALLOWED_ORIGINS=https://futureperfecttuitions.github.io`
 
 ## Safety rule
 
-The existing live portal, existing Worker and existing KV namespaces must remain untouched while V2 is being built and tested.
+The existing live portal, existing live Worker and existing live KV namespaces must remain untouched while V2 is being built and tested.
+
+## Next phase
+
+Phase 2 — define and implement the V2 data foundations: manual student record format, lesson catalogue format, and the D1 Student + Lesson entitlement table used by Excel.
