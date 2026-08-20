@@ -3,6 +3,7 @@
   const base = String(config.workerBaseUrl || '').replace(/\/$/, '');
 
   const els = {
+    portalLead: document.getElementById('portal-lead'),
     studentChip: document.getElementById('student-chip'),
     status: document.getElementById('phase3-status'),
     error: document.getElementById('phase3-error'),
@@ -31,7 +32,8 @@
     answerButton: document.getElementById('open-answer-button'),
     answerError: document.getElementById('answer-error'),
     viewerPanel: document.getElementById('answer-viewer-panel'),
-    answerViewer: document.getElementById('answer-viewer')
+    viewerLoading: document.getElementById('answer-viewer-loading'),
+    answerPages: document.getElementById('answer-pages')
   };
 
   const screens = {
@@ -47,7 +49,7 @@
     view: null,
     lesson: null,
     answerResource: null,
-    answerBlobUrl: null
+    pdfDocument: null
   };
 
   function showScreen(name) {
@@ -342,16 +344,15 @@
     });
   }
 
-  function revokeAnswerBlob() {
-    if (state.answerBlobUrl) {
-      URL.revokeObjectURL(state.answerBlobUrl);
-      state.answerBlobUrl = null;
-    }
-    els.answerViewer.src = 'about:blank';
+  function clearAnswerViewer() {
+    state.pdfDocument = null;
+    els.answerPages.innerHTML = '';
+    els.viewerLoading.textContent = 'Preparing protected Answer Pack…';
+    els.viewerLoading.hidden = false;
   }
 
   function openAnswerPrompt(resource) {
-    revokeAnswerBlob();
+    clearAnswerViewer();
     state.answerResource = resource;
     els.modalTitle.textContent = resource.displayName || 'Answer Pack';
     els.answerPassword.value = '';
@@ -365,13 +366,58 @@
   }
 
   function closeAnswerModal() {
-    revokeAnswerBlob();
+    clearAnswerViewer();
     state.answerResource = null;
     els.modal.hidden = true;
     els.answerPassword.value = '';
     els.answerError.hidden = true;
     els.promptPanel.hidden = false;
     els.viewerPanel.hidden = true;
+  }
+
+  async function renderProtectedPdf(blob) {
+    if (!window.pdfjsLib) {
+      throw new Error('PDF viewer library did not load.');
+    }
+
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+    state.pdfDocument = pdf;
+
+    els.answerPages.innerHTML = '';
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const availableWidth = Math.max(280, els.answerPages.clientWidth - 32);
+      const cssScale = Math.min(1.6, availableWidth / baseViewport.width);
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      const renderViewport = page.getViewport({ scale: cssScale * pixelRatio });
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'answer-page';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(renderViewport.width);
+      canvas.height = Math.ceil(renderViewport.height);
+      canvas.style.width = `${Math.floor(baseViewport.width * cssScale)}px`;
+      canvas.style.height = `${Math.floor(baseViewport.height * cssScale)}px`;
+      canvas.setAttribute('aria-label', `Answer Pack page ${pageNumber}`);
+
+      wrapper.appendChild(canvas);
+      els.answerPages.appendChild(wrapper);
+
+      const context = canvas.getContext('2d', { alpha: false });
+      await page.render({
+        canvasContext: context,
+        viewport: renderViewport
+      }).promise;
+    }
+
+    els.viewerLoading.hidden = true;
   }
 
   async function submitAnswerPassword(event) {
@@ -410,13 +456,15 @@
       }
 
       const blob = await response.blob();
-      revokeAnswerBlob();
-      state.answerBlobUrl = URL.createObjectURL(blob);
-      els.answerViewer.src = `${state.answerBlobUrl}#toolbar=0&navpanes=0`;
+      clearAnswerViewer();
       els.promptPanel.hidden = true;
       els.viewerPanel.hidden = false;
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      await renderProtectedPdf(blob);
     } catch (error) {
-      els.answerError.textContent = 'Could not reach the protected resource service.';
+      els.viewerPanel.hidden = true;
+      els.promptPanel.hidden = false;
+      els.answerError.textContent = String(error?.message || 'Could not reach the protected resource service.');
       els.answerError.hidden = false;
     } finally {
       els.answerButton.disabled = false;
@@ -446,6 +494,7 @@
 
       state.data = data;
       els.studentChip.textContent = `${data.student.firstName} · ${data.student.portalUserId}`;
+      els.portalLead.textContent = 'Development proof: browse this test student’s entitled Maths lesson and protected resources.';
 
       if (data.phase3Healthy) {
         setStatus(true, 'Phase 3 data, entitlement and all three private R2 files are available.');
@@ -470,8 +519,17 @@
   els.modal.addEventListener('click', event => {
     if (event.target === els.modal) closeAnswerModal();
   });
+  els.answerPages.addEventListener('contextmenu', event => event.preventDefault());
+
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !els.modal.hidden) closeAnswerModal();
+    if (event.key === 'Escape' && !els.modal.hidden) {
+      closeAnswerModal();
+      return;
+    }
+
+    if (!els.modal.hidden && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+      event.preventDefault();
+    }
   });
 
   load();
