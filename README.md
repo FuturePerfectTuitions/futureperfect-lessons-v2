@@ -24,14 +24,46 @@ Verified:
 - Dummy curriculum view `view:maths-year5-dev`.
 - Development diagnostic route `GET /api/dev/phase2`.
 - D1 entitlement `test0101 + DEV-M01` reads correctly.
-- Duplicate Student + Lesson upsert is idempotent: row count remains 1 while `last_confirmed_at` updates.
-- Student login remains disabled.
-- No live custom domain / `CNAME` is configured.
-- Existing live portal, Worker and KV namespaces remain untouched.
+- Duplicate Student + Lesson upsert is idempotent.
 
-## Development URL
+### Phase 3 — COMPLETE
+
+One complete real-shaped Maths lesson now works end-to-end for the development student.
+
+Proof lesson:
+
+- Lesson: `Y5M1 Number and Place Value I`
+- Lesson KV: `lesson:Y5M1`
+- View KV: `view:maths-year5`
+- ScreenPal: `cOV0omn3XVh`
+- Development student: `Test0101`
+- D1 entitlement: `test0101 + Y5M1`
+
+Verified student journey:
+
+`Subjects → Maths → Year 5 → Y5M1 → PreLesson Sheet → embedded ScreenPal video → Homework → password-protected Answer Pack`
+
+Verified protected-answer behaviour:
+
+- wrong password is rejected;
+- show/hide eye works;
+- correct password opens the Answer Pack;
+- pages render inside a custom PDF.js viewer;
+- no normal browser PDF download/print toolbar is shown;
+- a small `Test0101 — Future Perfect Tuitions` on-screen watermark is displayed;
+- the Answer Pack password is required each time the protected resource is reopened.
+
+This is still a development proof. Production-grade login/session security is Phase 4.
+
+## Development URLs
+
+Main development status:
 
 `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/`
+
+Phase 3 lesson proof:
+
+`https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase3.html`
 
 ## Worker
 
@@ -47,10 +79,13 @@ Current Worker source:
 
 `worker/src/index.js`
 
-Current diagnostic routes:
+Current development routes:
 
 - `GET /api/health`
-- `GET /api/dev/phase2` (development only)
+- `GET /api/dev/phase2`
+- `GET /api/dev/phase3`
+- `GET /api/dev/phase3/resource`
+- `POST /api/dev/phase3/answer`
 
 ## Cloudflare resources
 
@@ -66,20 +101,24 @@ Environment variables:
 - `ENVIRONMENT=development`
 - `ALLOWED_ORIGINS=https://futureperfecttuitions.github.io`
 
-## Phase 2 data documentation
+## Documentation
 
+- `IMPLEMENTATION_HANDOVER.md`
 - `docs/data/STUDENT_KV_FORMAT.md`
 - `docs/data/LESSON_KV_FORMAT.md`
 - `docs/data/PHASE2_SETUP.md`
 - `docs/data/PHASE2_VERIFICATION.md`
+- `docs/data/PHASE3_VERIFICATION.md`
 - `worker/migrations/0001_lesson_entitlements.sql`
 
 ## Safety rule
 
 The existing live portal, existing live Worker and existing live KV namespaces must remain untouched while V2 is being built and tested.
 
+Normal student login remains disabled until the authentication phase is complete and deliberately switched on.
+
 ## Next phase
 
-**Phase 3 — Get One Complete Maths Lesson Working End-to-End.**
+**Phase 4 — Build Secure Student Authentication.**
 
-Use one real-shaped Maths lesson and one dummy student to prove the full data-driven lesson journey with R2 PreLesson/Homework/Answer Pack and ScreenPal video before loading the real catalogue.
+Replace the fixed development-student mechanism with real username/password authentication and secure sessions while preserving the Phase 3 data-driven lesson journey.
