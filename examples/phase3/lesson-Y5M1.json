@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "Y5M1",
+  "title": "Y5M1 Number and Place Value I",
+  "description": "In this lesson, students develop their understanding of number and place value through reading, representing, comparing and reasoning with whole numbers.",
+  "subject": "maths",
+  "active": true,
+  "core": {
+    "preLessonSheets": [
+      {
+        "resourceId": "Y5M1-pre-01",
+        "displayName": "PreLesson Sheet",
+        "r2Key": "maths/Y5/Autumn/Y5M1/PreLesson/PreLesson Sheet Y5M1 Number and Place Value I.pdf"
+      }
+    ],
+    "video": {
+      "resourceId": "Y5M1-video",
+      "screenpal": "cOV0omn3XVh"
+    },
+    "homeworks": [
+      {
+        "pairId": "Y5M1-hw-01",
+        "homework": {
+          "resourceId": "Y5M1-hw-01-file",
+          "displayName": "Homework",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Homework/Homework L2T1M01 Number and Place Value I.pdf"
+        },
+        "answerPack": {
+          "resourceId": "Y5M1-hw-01-answer",
+          "displayName": "Answer Pack",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Answers/Answer Pack Homework L2T1M01 Number and Place Value I.pdf"
+        }
+      }
+    ],
+    "otherResources": []
+  },
+  "vr": null
+}
