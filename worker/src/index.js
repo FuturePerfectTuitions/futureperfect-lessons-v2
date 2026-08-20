@@ -7,12 +7,17 @@ const json = (body, init = {}) => {
 
 function corsHeaders(request, env) {
   const origin = request.headers.get('Origin') || '';
-  const allowed = new Set(
-    String(env.ALLOWED_ORIGINS || '')
+
+  // Keep the GitHub Pages development origin explicitly allowed even if
+  // the Cloudflare dashboard variable has not yet propagated correctly.
+  // Production/live origins will still be managed through ALLOWED_ORIGINS.
+  const allowed = new Set([
+    'https://futureperfecttuitions.github.io',
+    ...String(env.ALLOWED_ORIGINS || '')
       .split(',')
       .map(value => value.trim())
       .filter(Boolean)
-  );
+  ]);
 
   if (!origin || !allowed.has(origin)) return {};
 
