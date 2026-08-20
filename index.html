@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Future Perfect Tuitions — Portal V2 Development</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <div class="airmail-border" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="brand-wrap">
+      <div class="brand-mark">FPT</div>
+      <div>
+        <div class="brand-name">Future Perfect Tuitions</div>
+        <div class="brand-subtitle">Student Portal V2</div>
+      </div>
+    </div>
+    <span class="dev-badge">DEVELOPMENT</span>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero-card">
+      <p class="eyebrow">Phase 1</p>
+      <h1>Portal V2 development environment</h1>
+      <p class="lead">This is the isolated V2 site. The existing live student portal is not being changed.</p>
+
+      <div class="status-grid">
+        <article class="status-card">
+          <span class="status-label">Frontend</span>
+          <strong class="status-ok">Connected</strong>
+          <p>GitHub Pages V2 repository</p>
+        </article>
+
+        <article class="status-card">
+          <span class="status-label">Worker API</span>
+          <strong id="worker-status" class="status-wait">Not configured</strong>
+          <p id="worker-detail">Waiting for the V2 Worker URL.</p>
+        </article>
+      </div>
+
+      <div class="actions">
+        <button id="test-worker" type="button">Test V2 Worker</button>
+      </div>
+
+      <pre id="api-output" class="api-output" aria-live="polite">No Worker test run yet.</pre>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Future Perfect Tuitions · Portal V2 · Development only
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
