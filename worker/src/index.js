@@ -30,6 +30,43 @@ function corsHeaders(request, env) {
   };
 }
 
+async function checkBindings(env) {
+  const checks = {
+    studentsKv: { bound: Boolean(env.STUDENTS_KV), ok: false },
+    lessonsKv: { bound: Boolean(env.LESSONS_KV), ok: false },
+    d1: { bound: Boolean(env.DB), ok: false }
+  };
+
+  try {
+    if (env.STUDENTS_KV) {
+      await env.STUDENTS_KV.list({ limit: 1 });
+      checks.studentsKv.ok = true;
+    }
+  } catch (error) {
+    checks.studentsKv.error = 'KV_READ_FAILED';
+  }
+
+  try {
+    if (env.LESSONS_KV) {
+      await env.LESSONS_KV.list({ limit: 1 });
+      checks.lessonsKv.ok = true;
+    }
+  } catch (error) {
+    checks.lessonsKv.error = 'KV_READ_FAILED';
+  }
+
+  try {
+    if (env.DB) {
+      const row = await env.DB.prepare('SELECT 1 AS ok').first();
+      checks.d1.ok = Number(row?.ok) === 1;
+    }
+  } catch (error) {
+    checks.d1.error = 'D1_QUERY_FAILED';
+  }
+
+  return checks;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -43,11 +80,17 @@ export default {
     }
 
     if (url.pathname === '/api/health' && request.method === 'GET') {
+      const bindings = await checkBindings(env);
+      const infrastructureHealthy =
+        bindings.studentsKv.ok && bindings.lessonsKv.ok && bindings.d1.ok;
+
       return json({
         ok: true,
         service: 'fpt-portal-v2-worker',
         environment: env.ENVIRONMENT || 'development',
         studentLoginEnabled: false,
+        infrastructureHealthy,
+        bindings,
         timestamp: new Date().toISOString()
       }, { status: 200, headers: cors });
     }
