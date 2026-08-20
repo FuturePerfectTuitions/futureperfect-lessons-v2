@@ -2,23 +2,29 @@
 
 Isolated development repository for the next-generation Future Perfect Tuitions student portal.
 
-## Phase 1 status — COMPLETE
+## Completed status
 
-Phase 1 infrastructure foundation has been built and verified end-to-end.
+### Phase 1 — COMPLETE
 
-- V2 repository created separately from the live portal.
-- GitHub Pages enabled from `main` / repository root.
-- Development frontend is live.
-- FPT visual shell started using the existing navy/red/white design language.
-- Separate V2 Worker created and deployed.
-- Frontend → Worker CORS/connectivity verified.
-- `GET /api/health` verifies all configured backend bindings.
-- Separate V2 Students KV created and bound as `STUDENTS_KV`.
-- Separate V2 Lessons KV created and bound as `LESSONS_KV`.
-- Separate V2 D1 database created and bound as `DB`.
-- Development R2 materials bucket bound as `MATERIALS_R2`.
-- Health test confirms Students KV, Lessons KV, D1 and R2 are all bound and readable/queryable.
-- Environment is `development`.
+The isolated V2 infrastructure foundation has been built and verified end-to-end:
+
+`GitHub Pages → V2 Worker → Students KV + Lessons KV + D1 + R2`
+
+### Phase 2 — COMPLETE
+
+The V2 data foundation has been defined, implemented and tested with dummy data.
+
+Verified:
+
+- Student KV format and key convention.
+- Lesson/View/Library KV format and key conventions.
+- D1 `lesson_entitlements` table and index.
+- Dummy student `student:test0101`.
+- Dummy lesson `lesson:DEV-M01`.
+- Dummy curriculum view `view:maths-year5-dev`.
+- Development diagnostic route `GET /api/dev/phase2`.
+- D1 entitlement `test0101 + DEV-M01` reads correctly.
+- Duplicate Student + Lesson upsert is idempotent: row count remains 1 while `last_confirmed_at` updates.
 - Student login remains disabled.
 - No live custom domain / `CNAME` is configured.
 - Existing live portal, Worker and KV namespaces remain untouched.
@@ -41,6 +47,11 @@ Current Worker source:
 
 `worker/src/index.js`
 
+Current diagnostic routes:
+
+- `GET /api/health`
+- `GET /api/dev/phase2` (development only)
+
 ## Cloudflare resources
 
 | Binding | Resource |
@@ -55,10 +66,20 @@ Environment variables:
 - `ENVIRONMENT=development`
 - `ALLOWED_ORIGINS=https://futureperfecttuitions.github.io`
 
+## Phase 2 data documentation
+
+- `docs/data/STUDENT_KV_FORMAT.md`
+- `docs/data/LESSON_KV_FORMAT.md`
+- `docs/data/PHASE2_SETUP.md`
+- `docs/data/PHASE2_VERIFICATION.md`
+- `worker/migrations/0001_lesson_entitlements.sql`
+
 ## Safety rule
 
 The existing live portal, existing live Worker and existing live KV namespaces must remain untouched while V2 is being built and tested.
 
 ## Next phase
 
-Phase 2 — define and implement the V2 data foundations: manual student record format, lesson catalogue format, and the D1 Student + Lesson entitlement table used by Excel.
+**Phase 3 — Get One Complete Maths Lesson Working End-to-End.**
+
+Use one real-shaped Maths lesson and one dummy student to prove the full data-driven lesson journey with R2 PreLesson/Homework/Answer Pack and ScreenPal video before loading the real catalogue.
