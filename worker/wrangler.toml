@@ -1,0 +1,11 @@
+name = "fpt-portal-v2-worker"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+
+[vars]
+ENVIRONMENT = "development"
+ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+
+# Phase 1 note:
+# KV, D1 and R2 bindings are intentionally added only after the
+# corresponding V2 Cloudflare resources have been created.
