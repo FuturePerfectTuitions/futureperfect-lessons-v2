@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Future Perfect Tuitions — Phase 3 Lesson Proof</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <div class="airmail-border" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="brand-wrap">
+      <div class="brand-mark">FPT</div>
+      <div>
+        <div class="brand-name">Future Perfect Tuitions</div>
+        <div class="brand-subtitle">Student Portal V2</div>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="dev-badge">DEVELOPMENT</span>
+      <span id="student-chip" class="student-chip">Loading test student…</span>
+    </div>
+  </header>
+
+  <main class="page-shell portal-shell">
+    <section class="hero-card portal-card">
+      <div class="portal-topline">
+        <div>
+          <p class="eyebrow">Phase 3</p>
+          <h1 id="portal-heading">One complete lesson proof</h1>
+          <p id="portal-lead" class="lead compact-lead">Loading the development student journey…</p>
+        </div>
+        <a class="secondary-link" href="index.html">← Development status</a>
+      </div>
+
+      <div id="phase3-status" class="phase-status status-wait">Checking Phase 3 data and resources…</div>
+      <div id="phase3-error" class="portal-error" hidden></div>
+
+      <nav id="breadcrumbs" class="breadcrumbs" aria-label="Portal navigation" hidden></nav>
+
+      <section id="screen-subjects" class="portal-screen" hidden>
+        <h2>Choose a subject</h2>
+        <div id="subject-grid" class="choice-grid"></div>
+      </section>
+
+      <section id="screen-views" class="portal-screen" hidden>
+        <h2 id="views-heading">Maths</h2>
+        <p class="screen-note">Choose the year or level you want to open.</p>
+        <div id="view-grid" class="choice-grid"></div>
+      </section>
+
+      <section id="screen-lessons" class="portal-screen" hidden>
+        <h2 id="lessons-heading">Lessons</h2>
+        <p class="screen-note">Only lessons currently entitled to this development student are shown.</p>
+        <div id="lesson-list" class="lesson-list"></div>
+      </section>
+
+      <section id="screen-lesson" class="portal-screen" hidden>
+        <div class="lesson-heading-row">
+          <div>
+            <p id="lesson-code" class="eyebrow"></p>
+            <h2 id="lesson-title"></h2>
+            <p id="lesson-description" class="lesson-description"></p>
+          </div>
+        </div>
+
+        <div class="resource-sections">
+          <section id="prelesson-section" class="resource-section" hidden>
+            <div class="section-heading">
+              <div>
+                <span class="resource-kicker">Before the lesson</span>
+                <h3>PreLesson Sheets</h3>
+              </div>
+            </div>
+            <div id="prelesson-list" class="resource-list"></div>
+          </section>
+
+          <section id="video-section" class="resource-section" hidden>
+            <div class="section-heading">
+              <div>
+                <span class="resource-kicker">Main lesson</span>
+                <h3>Video</h3>
+              </div>
+            </div>
+            <div class="player-frame">
+              <iframe id="lesson-player" title="Lesson video" allowfullscreen="true" scrolling="no"></iframe>
+            </div>
+          </section>
+
+          <section id="homework-section" class="resource-section" hidden>
+            <div class="section-heading">
+              <div>
+                <span class="resource-kicker">After the lesson</span>
+                <h3>Homework</h3>
+              </div>
+            </div>
+            <div id="homework-list" class="resource-list"></div>
+          </section>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Future Perfect Tuitions · Portal V2 · Phase 3 development proof only
+  </footer>
+
+  <div id="answer-modal" class="modal-backdrop" hidden>
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="answer-modal-title">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Protected resource</p>
+          <h2 id="answer-modal-title">Answer Pack</h2>
+        </div>
+        <button id="close-answer-modal" class="button-secondary" type="button">Close</button>
+      </div>
+
+      <div id="answer-prompt-panel">
+        <p class="screen-note">Enter this student's current Answer Pack password. The password is required every time a protected answer resource is opened.</p>
+        <form id="answer-form" class="password-form">
+          <label for="answer-password">Answer Pack password</label>
+          <div class="password-row">
+            <input id="answer-password" type="password" maxlength="4" autocomplete="off" required>
+            <button id="toggle-answer-password" class="button-secondary eye-button" type="button" aria-label="Show or hide password">👁</button>
+          </div>
+          <div class="password-actions">
+            <button id="open-answer-button" type="submit">Open Answer Pack</button>
+          </div>
+          <p id="answer-error" class="inline-error" hidden></p>
+        </form>
+      </div>
+
+      <div id="answer-viewer-panel" class="answer-viewer-panel" hidden>
+        <div class="answer-watermark" aria-hidden="true">Test0101 — Future Perfect Tuitions</div>
+        <iframe id="answer-viewer" class="answer-viewer" title="Protected Answer Pack"></iframe>
+      </div>
+    </section>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="assets/phase3.js"></script>
+</body>
+</html>
