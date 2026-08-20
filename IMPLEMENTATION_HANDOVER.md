@@ -1,6 +1,6 @@
 # FPT Portal V2 — Implementation Handover & Build State
 
-**Cumulative version:** 2.0  
+**Cumulative version:** 2.1  
 **Updated:** 20 August 2026  
 **Completed through:** Phase 2 — Define and Implement the V2 Data Foundations
 
@@ -13,6 +13,19 @@ Use this file together with:
 3. This file — actual implementation state.
 
 If implementation differs from an older technical suggestion, this file records what has actually been built. Business-rule changes must still be reflected in the Master Specification.
+
+## Permanent Workflow Change-Control Rule
+
+Whenever Sej changes a workflow, business rule or operating decision, use this sequence before continuing development:
+
+1. **Record the new decision first.** Update the Master Authoritative Specification to state the new rule and issue a new version before implementing around the old rule.
+2. **Assess the impact against reality.** Read the latest Implementation Handover and inspect the current GitHub/Cloudflare implementation so the exact affected components are identified rather than guessed.
+3. **Update the build plan when necessary.** If the new decision changes phase order, checkpoints, launch criteria or testing requirements, update the Steps to Progression as well.
+4. **Implement the smallest coherent technical change.** Change only the required Worker/frontend/KV/D1/R2/Excel components and do not silently revive superseded workflows.
+5. **Test the affected workflow and relevant regressions.** Do not treat a code edit as complete until the changed behaviour has been demonstrated.
+6. **Update the Implementation Handover last.** Record what was actually changed, the live technical names/schema/routes involved, and the verification result.
+
+This is the permanent documentation discipline for Portal V2. The intended new-chat handoff is therefore: latest Master Specification + latest Steps to Progression + latest cumulative Implementation Handover, with GitHub reconnected when code inspection or modification is required.
 
 ## Overall status
 
