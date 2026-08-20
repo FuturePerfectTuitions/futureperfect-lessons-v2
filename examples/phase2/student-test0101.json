@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "portalUserId": "Test0101",
+  "firstName": "Test",
+  "loginPassword": "T1st",
+  "answerPassword": "A2ns",
+  "schoolYear": 5,
+  "vrEligible": false,
+  "accountStatus": "active",
+  "expiresOn": null,
+  "batches": ["Y5MF1"],
+  "fullLibraries": [],
+  "manualLessonAccess": {},
+  "specialAccess": []
+}
