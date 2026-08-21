@@ -1,0 +1,250 @@
+body.phase8-viewer-open {
+  overflow: hidden;
+}
+
+.phase8-answer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(1, 33, 105, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.phase8-answer-backdrop[hidden] {
+  display: none;
+}
+
+.phase8-answer-card {
+  width: min(100%, 980px);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 22px;
+  box-shadow: 0 24px 70px rgba(1, 33, 105, 0.28);
+  border: 1px solid rgba(1, 33, 105, 0.12);
+}
+
+.phase8-answer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #e4e8f0;
+}
+
+.phase8-answer-eyebrow {
+  margin: 0 0 5px;
+  color: #d71920;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.phase8-answer-header h2 {
+  margin: 0;
+  color: #012169;
+  font-size: clamp(1.2rem, 3vw, 1.65rem);
+}
+
+.phase8-answer-close,
+.phase8-answer-open,
+.phase8-answer-eye {
+  font: inherit;
+}
+
+.phase8-answer-close {
+  border: 1px solid #cfd6e4;
+  border-radius: 999px;
+  padding: 9px 15px;
+  background: #fff;
+  color: #012169;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.phase8-answer-prompt {
+  padding: 24px 22px 28px;
+}
+
+.phase8-answer-note {
+  margin: 0 0 20px;
+  color: #4a5568;
+  line-height: 1.6;
+}
+
+.phase8-answer-form {
+  display: grid;
+  gap: 10px;
+  max-width: 430px;
+}
+
+.phase8-answer-form label {
+  color: #012169;
+  font-weight: 800;
+}
+
+.phase8-password-row {
+  position: relative;
+}
+
+.phase8-password-row input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 54px 10px 13px;
+  border: 2px solid #cfd6e4;
+  border-radius: 12px;
+  font: inherit;
+  letter-spacing: 0.12em;
+  box-sizing: border-box;
+}
+
+.phase8-password-row input:focus {
+  outline: none;
+  border-color: #012169;
+  box-shadow: 0 0 0 3px rgba(1, 33, 105, 0.12);
+}
+
+.phase8-answer-eye {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 40px;
+  height: 38px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #012169;
+  cursor: pointer;
+}
+
+.phase8-answer-eye svg {
+  width: 22px;
+  height: 22px;
+}
+
+.phase8-answer-open {
+  justify-self: start;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 18px;
+  background: #d71920;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.phase8-answer-open:disabled {
+  opacity: 0.58;
+  cursor: wait;
+}
+
+.phase8-answer-error,
+.phase8-answer-invalid {
+  margin: 6px 0 0;
+  color: #a11218;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.phase8-answer-viewer {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 20px;
+  background: #eef1f6;
+}
+
+.phase8-answer-watermark {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 -18px 14px;
+  padding: 8px 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #d7dce6;
+  color: #012169;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: right;
+}
+
+.phase8-answer-loading,
+.phase8-answer-invalid {
+  padding: 24px 12px;
+  text-align: center;
+}
+
+.phase8-answer-pages {
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.phase8-answer-page {
+  max-width: 100%;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgba(1, 33, 105, 0.12);
+}
+
+.phase8-answer-page canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.phase8-answer-protection-note {
+  margin: 16px 0 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .phase8-answer-backdrop {
+    padding: 8px;
+  }
+
+  .phase8-answer-card {
+    max-height: calc(100vh - 16px);
+    border-radius: 16px;
+  }
+
+  .phase8-answer-header,
+  .phase8-answer-prompt {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .phase8-answer-viewer {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .phase8-answer-watermark {
+    margin-left: -8px;
+    margin-right: -8px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+@media print {
+  .phase8-answer-backdrop {
+    display: none !important;
+  }
+}
