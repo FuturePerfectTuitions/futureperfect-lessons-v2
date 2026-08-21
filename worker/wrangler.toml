@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index.js"
+main = "src/index-phase7.js"
 compatibility_date = "2026-08-20"
 
 [vars]
@@ -7,7 +7,11 @@ ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
 DEV_LOGIN_ALLOWLIST = "test0101"
 
-# Phase 4 development safety:
+# Phase 7 development entrypoint:
+# src/index-phase7.js layers reusable lesson-page/resource routes over the
+# completed Phase 6 Worker in src/index.js. Existing Phase 1-6 routes continue
+# to delegate to the Phase 6 implementation unchanged.
+#
 # Normal student login remains disabled. Only usernames explicitly listed in
 # DEV_LOGIN_ALLOWLIST may authenticate while ENVIRONMENT=development.
 # Production login remains disabled unless STUDENT_LOGIN_ENABLED=true is
