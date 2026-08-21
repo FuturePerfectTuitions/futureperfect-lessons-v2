@@ -19,11 +19,7 @@ Verified:
 - Student KV format and key convention.
 - Lesson/View/Library KV format and key conventions.
 - D1 `lesson_entitlements` table and index.
-- Dummy student `student:test0101`.
-- Dummy lesson `lesson:DEV-M01`.
-- Dummy curriculum view `view:maths-year5-dev`.
-- Development diagnostic route `GET /api/dev/phase2`.
-- D1 entitlement `test0101 + DEV-M01` reads correctly.
+- Dummy development records.
 - Duplicate Student + Lesson upsert is idempotent.
 
 ### Phase 3 — COMPLETE
@@ -39,13 +35,13 @@ Proof lesson:
 - Development student: `Test0101`
 - D1 entitlement: `test0101 + Y5M1`
 
-Verified student journey:
+Verified journey:
 
 `Subjects → Maths → Year 5 → Y5M1 → PreLesson Sheet → embedded ScreenPal video → Homework → password-protected Answer Pack`
 
 ### Phase 4 — COMPLETE
 
-Secure student authentication/session behaviour is now proven in the isolated development environment.
+Secure student authentication/session behaviour is proven in the isolated development environment.
 
 Verified:
 
@@ -59,11 +55,30 @@ Verified:
 - logout revokes the D1 session;
 - non-allowlisted development users are rejected;
 - wrong password is rejected with generic messaging;
-- withdrawn/expired students can authenticate but operate in globally locked mode;
-- authenticated Phase 4 lesson access remains healthy for the active test student;
-- Phase 2 and Phase 3 regressions still pass.
+- withdrawn/expired students can authenticate but operate in globally locked mode.
 
-Single-device enforcement is implemented at D1 level by migration `0003_single_active_student_session.sql` and trigger `trg_student_sessions_single_active`, so each new session insert revokes older active sessions for the same Portal User ID.
+Single-device enforcement is implemented by migration `0003_single_active_student_session.sql` and trigger `trg_student_sessions_single_active`.
+
+### Phase 5 — COMPLETE
+
+The V2 student-facing visual shell is now implemented at `phase5.html`.
+
+Verified:
+
+- real FPT logo;
+- FPT navy/red palette and pale-grey application background;
+- white rounded cards and pill-style controls;
+- full red/white/blue airmail viewport border;
+- familiar Student Login screen;
+- Phase 4 secure session model retained;
+- first-name-only greeting;
+- easy Logout;
+- exactly two top-level subjects: Maths and English;
+- show/hide password control;
+- generic wrong-password handling;
+- correct login/logout flow;
+- responsive CSS rules;
+- Edge native password reveal suppressed to avoid a duplicate eye control.
 
 Normal real-student login remains deliberately disabled during development.
 
@@ -80,6 +95,10 @@ Phase 3 lesson proof:
 Phase 4 authentication proof:
 
 `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase4.html`
+
+Phase 5 student shell:
+
+`https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase5.html`
 
 ## Worker
 
@@ -109,6 +128,8 @@ Current development routes include:
 - `GET /api/dev/phase4`
 - `GET /api/dev/phase4/resource`
 - `POST /api/dev/phase4/answer`
+
+The Phase 6 student-navigation routes are not implemented yet.
 
 ## Cloudflare resources
 
@@ -142,6 +163,7 @@ Normal student login remains disabled server-side.
 - `docs/data/PHASE2_VERIFICATION.md`
 - `docs/data/PHASE3_VERIFICATION.md`
 - `docs/data/PHASE4_VERIFICATION.md`
+- `docs/data/PHASE5_VERIFICATION.md`
 
 ## Safety rule
 
@@ -149,6 +171,6 @@ The existing live portal, existing live Worker and existing live KV namespaces m
 
 ## Next phase
 
-**Phase 5 — Build the V2 Visual Shell.**
+**Phase 6 — Build Curriculum Navigation.**
 
-Carry the established Future Perfect Tuitions visual identity into the real V2 student shell while keeping the Phase 4 authentication/session model and the proven Phase 3 lesson journey intact.
+Turn the Master Specification's Year/Level, entitlement, historical-access and cross-subject locked-preview rules into the authenticated student navigation while keeping the Phase 4 session model and Phase 5 visual shell intact.
