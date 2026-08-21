@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-P7-MANY",
+  "order": 9002,
+  "title": "Phase 7 Multiple Resources",
+  "description": "Development-only Phase 7 fixture. It deliberately contains multiple PreLesson Sheets, one ScreenPal video, multiple Homework and Answer Pack pairs, and multiple Other Resources so one data-driven renderer can prove all ordinary lesson-pack combinations without page-specific code.",
+  "subject": "maths",
+  "active": true,
+  "testOnly": true,
+  "displayIds": {
+    "maths-year5": "Y5T3M99",
+    "maths-level2": "L2T3M99"
+  },
+  "core": {
+    "preLessonSheets": [
+      {
+        "displayName": "PreLesson Sheet A",
+        "r2Key": "maths/Y5/Autumn/Y5M1/PreLesson/PreLesson Sheet Y5M1 Number and Place Value I.pdf"
+      },
+      {
+        "displayName": "PreLesson Sheet B",
+        "r2Key": "maths/Y5/Autumn/Y5M1/PreLesson/PreLesson Sheet Y5M1 Number and Place Value I.pdf"
+      }
+    ],
+    "video": {
+      "screenpal": "cOV0omn3XVh"
+    },
+    "homeworks": [
+      {
+        "homework": {
+          "displayName": "Homework A",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Homework/Homework L2T1M01 Number and Place Value I.pdf"
+        },
+        "answerPack": {
+          "displayName": "Answer Pack A",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Answers/Answer Pack Homework L2T1M01 Number and Place Value I.pdf"
+        }
+      },
+      {
+        "homework": {
+          "displayName": "Homework B",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Homework/Homework L2T1M01 Number and Place Value I.pdf"
+        },
+        "answerPack": {
+          "displayName": "Answer Pack B",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Answers/Answer Pack Homework L2T1M01 Number and Place Value I.pdf"
+        }
+      }
+    ],
+    "otherResources": [
+      {
+        "displayName": "Other Resource A",
+        "r2Key": "maths/Y5/Autumn/Y5M1/PreLesson/PreLesson Sheet Y5M1 Number and Place Value I.pdf"
+      },
+      {
+        "displayName": "Other Resource B",
+        "r2Key": "maths/Y5/Autumn/Y5M1/Homework/Homework L2T1M01 Number and Place Value I.pdf"
+      }
+    ]
+  },
+  "vr": null
+}
