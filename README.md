@@ -6,79 +6,83 @@ Isolated development repository for the next-generation Future Perfect Tuitions 
 
 ### Phase 1 — COMPLETE
 
-The isolated V2 infrastructure foundation has been built and verified end-to-end:
+Isolated V2 infrastructure verified end-to-end:
 
 `GitHub Pages → V2 Worker → Students KV + Lessons KV + D1 + R2`
 
 ### Phase 2 — COMPLETE
 
-The V2 data foundation has been defined, implemented and tested with dummy data.
-
-Verified:
-
-- Student KV format and key convention.
-- Lesson/View/Library KV format and key conventions.
-- D1 `lesson_entitlements` table and index.
-- Dummy development records.
-- Duplicate Student + Lesson upsert is idempotent.
+V2 data foundation and idempotent Student + Lesson entitlement model verified with dummy data.
 
 ### Phase 3 — COMPLETE
 
 One complete real-shaped Maths lesson works end-to-end for the development student.
 
-Proof lesson:
+Canonical proof lesson:
 
-- Lesson: `Y5M1 Number and Place Value I`
-- Lesson KV: `lesson:Y5M1`
-- View KV: `view:maths-year5`
-- ScreenPal: `cOV0omn3XVh`
-- Development student: `Test0101`
-- D1 entitlement: `test0101 + Y5M1`
-
-Verified journey:
-
-`Subjects → Maths → Year 5 → Y5M1 → PreLesson Sheet → embedded ScreenPal video → Homework → password-protected Answer Pack`
+- internal lesson key: `lesson:Y5M1`;
+- canonical entitlement: `test0101 + Y5M1`.
 
 ### Phase 4 — COMPLETE
 
-Secure student authentication/session behaviour is proven in the isolated development environment.
+Secure student authentication/session behaviour verified:
 
-Verified:
-
-- case-insensitive username login;
-- agreed 4-character login-password format;
-- opaque `HttpOnly`/`Secure` browser session cookie;
-- SHA-256 session-token hash stored in D1 rather than the raw browser token;
+- case-insensitive username;
+- agreed 4-character login password;
+- opaque HttpOnly/Secure session cookie;
+- hashed D1 token storage;
 - exactly one active session per Portal User ID — latest login wins;
-- 2-hour sliding inactivity timeout;
-- server-side expiry enforcement;
-- logout revokes the D1 session;
-- non-allowlisted development users are rejected;
-- wrong password is rejected with generic messaging;
-- withdrawn/expired students can authenticate but operate in globally locked mode.
-
-Single-device enforcement is implemented by migration `0003_single_active_student_session.sql` and trigger `trg_student_sessions_single_active`.
+- two-hour sliding inactivity timeout;
+- logout and expiry invalidation;
+- development login allowlist;
+- withdrawn/expired locked-account behaviour.
 
 ### Phase 5 — COMPLETE
 
-The V2 student-facing visual shell is now implemented at `phase5.html`.
+The real V2 visual shell is implemented and browser-verified at `phase5.html`.
+
+Verified FPT identity, familiar Student Login, Maths/English top-level choices, password eye, first-name greeting, logout, responsive styling and the full airmail border.
+
+### Phase 6 — COMPLETE
+
+Curriculum navigation is implemented and browser-verified at `phase6.html`.
 
 Verified:
 
-- real FPT logo;
-- FPT navy/red palette and pale-grey application background;
-- white rounded cards and pill-style controls;
-- full red/white/blue airmail viewport border;
-- familiar Student Login screen;
-- Phase 4 secure session model retained;
-- first-name-only greeting;
-- easy Logout;
-- exactly two top-level subjects: Maths and English;
-- show/hide password control;
-- generic wrong-password handling;
-- correct login/logout flow;
-- responsive CSS rules;
-- Edge native password reveal suppressed to avoid a duplicate eye control.
+- Login → Maths/English → Year or Level → continuous lesson list;
+- normal Maths uses Year presentation;
+- 11+ Maths uses Level presentation;
+- English uses Year / Year 11+ presentation;
+- no Current/Previous grouping;
+- no term-section headings;
+- no internal Batch ID shown;
+- canonical Year/Level de-duplication;
+- Worker-authoritative cross-subject locked previews;
+- historical Full Library continuity;
+- 11+ start-point missed-lesson locked preview;
+- future/unreleased lesson hiding;
+- lesson-list search;
+- student-facing Year/Level lesson IDs.
+
+Example shared canonical Maths lesson:
+
+- normal Year 5 student sees `Y5T1M01 Number and Place Value I`;
+- Level 2 / 11+ student sees `L2T1M01 Number and Place Value I`;
+- canonical/internal entitlement key remains one shared lesson (`Y5M1` in the current proof data).
+
+Authenticated navigation API:
+
+- `GET /api/v1/student/home`
+- `GET /api/v1/student/views/{viewId}/lessons`
+
+D1 migration installed:
+
+- `worker/migrations/0004_curriculum_start_points.sql`
+
+Detailed verification:
+
+- `docs/data/PHASE6_VERIFICATION.md`
+- `docs/data/PHASE6_PERSONA_FIXTURES.md`
 
 Normal real-student login remains deliberately disabled during development.
 
@@ -99,6 +103,10 @@ Phase 4 authentication proof:
 Phase 5 student shell:
 
 `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase5.html`
+
+Phase 6 curriculum navigation:
+
+`https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase6.html`
 
 ## Worker
 
@@ -125,11 +133,11 @@ Current development routes include:
 - `POST /api/v1/student/auth/logout`
 - `GET /api/v1/student/session`
 - `POST /api/v1/student/session/activity`
+- `GET /api/v1/student/home`
+- `GET /api/v1/student/views/{viewId}/lessons`
 - `GET /api/dev/phase4`
 - `GET /api/dev/phase4/resource`
 - `POST /api/dev/phase4/answer`
-
-The Phase 6 student-navigation routes are not implemented yet.
 
 ## Cloudflare resources
 
@@ -144,7 +152,7 @@ Environment variables include:
 
 - `ENVIRONMENT=development`
 - `ALLOWED_ORIGINS=https://futureperfecttuitions.github.io`
-- `DEV_LOGIN_ALLOWLIST=test0101`
+- `DEV_LOGIN_ALLOWLIST=test0101,test0202,test0303` during Phase 6 development testing.
 
 Normal student login remains disabled server-side.
 
@@ -153,6 +161,7 @@ Normal student login remains disabled server-side.
 - `worker/migrations/0001_lesson_entitlements.sql`
 - `worker/migrations/0002_student_sessions.sql`
 - `worker/migrations/0003_single_active_student_session.sql`
+- `worker/migrations/0004_curriculum_start_points.sql`
 
 ## Documentation
 
@@ -164,6 +173,8 @@ Normal student login remains disabled server-side.
 - `docs/data/PHASE3_VERIFICATION.md`
 - `docs/data/PHASE4_VERIFICATION.md`
 - `docs/data/PHASE5_VERIFICATION.md`
+- `docs/data/PHASE6_VERIFICATION.md`
+- `docs/data/PHASE6_PERSONA_FIXTURES.md`
 
 ## Safety rule
 
@@ -171,6 +182,6 @@ The existing live portal, existing live Worker and existing live KV namespaces m
 
 ## Next phase
 
-**Phase 6 — Build Curriculum Navigation.**
+**Phase 7 — Build the Complete Lesson Page Renderer.**
 
-Turn the Master Specification's Year/Level, entitlement, historical-access and cross-subject locked-preview rules into the authenticated student navigation while keeping the Phase 4 session model and Phase 5 visual shell intact.
+Phase 7 must begin in a new chat after reading the latest Master Authoritative Specification v2.3, Steps to Progression v1.3 and cumulative Implementation Handover v3.4, then reconnecting to GitHub and inspecting the actual implementation state.
