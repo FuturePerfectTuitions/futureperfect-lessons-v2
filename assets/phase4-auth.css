@@ -1,0 +1,91 @@
+.auth-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.auth-panel,
+.auth-proof {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #fbfcfe;
+  padding: 22px;
+}
+
+.auth-form {
+  margin-top: 18px;
+}
+
+.auth-form > label {
+  display: block;
+  font-weight: 800;
+  margin: 14px 0 7px;
+}
+
+.auth-form > label:first-child {
+  margin-top: 0;
+}
+
+.auth-form > input,
+.auth-form .password-row input {
+  width: 100%;
+  border: 1px solid #cfd6e2;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 18px;
+}
+
+.auth-form > input:focus,
+.auth-form .password-row input:focus {
+  outline: 3px solid rgba(1,33,105,.12);
+  border-color: var(--fpt-navy);
+}
+
+.session-details {
+  margin: 18px 0 0;
+  display: grid;
+  gap: 10px;
+}
+
+.session-details > div {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #e7ebf1;
+}
+
+.session-details > div:last-child {
+  border-bottom: 0;
+}
+
+.session-details dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.session-details dd {
+  margin: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.auth-proof {
+  margin-top: 18px;
+}
+
+.auth-proof .api-output {
+  margin-top: 16px;
+}
+
+@media (max-width: 760px) {
+  .auth-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .session-details > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
