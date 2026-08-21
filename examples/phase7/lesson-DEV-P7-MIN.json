@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-P7-MIN",
+  "order": 9001,
+  "title": "Phase 7 Minimal Lesson",
+  "description": "Development-only Phase 7 fixture. This lesson intentionally has no PreLesson Sheets, no video, no Homework and no Other Resources so the reusable renderer can prove that empty sections disappear entirely.",
+  "subject": "maths",
+  "active": true,
+  "testOnly": true,
+  "displayIds": {
+    "maths-year5": "Y5T3M98",
+    "maths-level2": "L2T3M98"
+  },
+  "core": {
+    "preLessonSheets": [],
+    "video": null,
+    "homeworks": [],
+    "otherResources": []
+  },
+  "vr": null
+}
