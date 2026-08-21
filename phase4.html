@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Future Perfect Tuitions — Phase 4 Authentication Proof</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <link rel="stylesheet" href="assets/phase4-auth.css">
+</head>
+<body>
+  <div class="airmail-border" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="brand-wrap">
+      <div class="brand-mark">FPT</div>
+      <div>
+        <div class="brand-name">Future Perfect Tuitions</div>
+        <div class="brand-subtitle">Student Portal V2</div>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="dev-badge">DEVELOPMENT</span>
+      <span id="session-chip" class="student-chip">Not signed in</span>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero-card">
+      <div class="portal-topline">
+        <div>
+          <p class="eyebrow">Phase 4</p>
+          <h1>Secure student authentication proof</h1>
+          <p class="lead compact-lead">This development-only page tests the real browser login flow, HttpOnly session cookie, D1-backed session, logout and authenticated lesson access.</p>
+        </div>
+        <a class="secondary-link" href="index.html">← Development status</a>
+      </div>
+
+      <div id="auth-status" class="phase-status status-wait">Checking for an existing development session…</div>
+
+      <div class="auth-layout">
+        <section class="auth-panel" aria-labelledby="login-heading">
+          <p class="eyebrow">Development login</p>
+          <h2 id="login-heading">Sign in</h2>
+          <p class="screen-note">Only usernames explicitly allowed by the V2 development Worker can authenticate. Normal student login remains disabled.</p>
+
+          <form id="login-form" class="auth-form">
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" autocomplete="username" value="TEST0101" required>
+
+            <label for="login-password">Password</label>
+            <div class="password-row">
+              <input id="login-password" name="password" type="password" maxlength="4" autocomplete="current-password" required>
+              <button id="toggle-login-password" class="button-secondary eye-button" type="button" aria-label="Show or hide password">👁</button>
+            </div>
+
+            <div class="password-actions">
+              <button id="login-button" type="submit">Sign in</button>
+            </div>
+            <p id="login-error" class="inline-error" hidden></p>
+          </form>
+        </section>
+
+        <section class="auth-panel" aria-labelledby="session-heading">
+          <p class="eyebrow">Server session</p>
+          <h2 id="session-heading">Authenticated state</h2>
+          <div id="signed-out-panel" class="empty-state">No authenticated browser session is currently available.</div>
+
+          <div id="signed-in-panel" hidden>
+            <dl class="session-details">
+              <div><dt>Student</dt><dd id="session-student">—</dd></div>
+              <div><dt>Status</dt><dd id="session-status">—</dd></div>
+              <div><dt>Last activity</dt><dd id="session-last-activity">—</dd></div>
+              <div><dt>Idle expiry</dt><dd id="session-idle-expiry">—</dd></div>
+            </dl>
+            <div class="actions">
+              <button id="refresh-session" class="button-secondary" type="button">Refresh session</button>
+              <button id="logout-button" type="button">Log out</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="auth-proof" aria-labelledby="proof-heading">
+        <div>
+          <p class="eyebrow">Authenticated API proof</p>
+          <h2 id="proof-heading">Phase 4 lesson access</h2>
+          <p class="screen-note">After a successful browser session is verified, this automatically calls the session-gated Phase 4 lesson route.</p>
+        </div>
+        <pre id="phase4-output" class="api-output">Waiting for an authenticated browser session.</pre>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Future Perfect Tuitions · Portal V2 · Phase 4 development proof only
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="assets/phase4-auth.js"></script>
+</body>
+</html>
