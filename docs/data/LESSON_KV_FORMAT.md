@@ -2,15 +2,16 @@
 
 ## Storage strategy
 
-V2 uses separate KV records rather than one very large bucket array. Lesson content remains canonical; navigation views reference Lesson IDs rather than duplicating lesson content.
+V2 uses separate KV records rather than one very large bucket array. Lesson content remains canonical; curriculum/view records reference canonical Lesson IDs rather than duplicating lesson content.
 
 ### Key families
 
-- `lesson:<LESSON_ID>` — one canonical lesson record.
-- `view:<VIEW_ID>` — one student-facing curriculum/navigation view containing an ordered list of Lesson IDs.
-- `library:<LIBRARY_ID>` — one Full Library definition that dynamically grants access to a view/component set.
+- `lesson:<LESSON_ID>` — one canonical/internal lesson record.
+- `curriculum:<CURRICULUM_CODE>` — canonical curriculum ordering used by the Worker.
+- `view:<VIEW_ID>` — legacy/proof fallback catalogue retained during incremental development.
+- `library:<LIBRARY_ID>` — Full Library definition where applicable.
 
-This permits shared curricula. For example, the same canonical Maths lesson can appear in both normal Year 5 and 11+ Level 2 views without duplicating the lesson record or resources.
+This permits shared curricula. For example, the same canonical Maths lesson can appear in both normal Year 5 and 11+ Level 2 presentation without duplicating the lesson record, resources or entitlement.
 
 ---
 
@@ -23,6 +24,8 @@ The implemented development bucket uses lowercase subject folders and compact ye
 `english/Y4/Autumn/Y4E1/...`
 
 Term folders (`Autumn`, `Spring`, `Summer`) are content-organisation folders only. They do not create term sections in student navigation. Exact R2 object keys are always stored explicitly in the lesson record and are never permanently derived from the Lesson ID.
+
+Raw R2 paths are server-side implementation details and must not be exposed in the student UI.
 
 ---
 
@@ -38,10 +41,15 @@ Value:
 {
   "schemaVersion": 1,
   "lessonId": "Y5M12",
+  "order": 12,
   "title": "Fractions 4",
   "description": "Lesson description and topics...",
   "subject": "maths",
   "active": true,
+  "displayIds": {
+    "maths-year5": "Y5T2M12",
+    "maths-level2": "L2T2M12"
+  },
   "core": {
     "preLessonSheets": [
       {
@@ -77,14 +85,33 @@ Value:
 
 ### Core rules
 
-- `lessonId` is globally unique and immutable once used in production.
-- `title`, `description`, resource paths and ScreenPal references may be updated.
+- `lessonId` is the globally unique canonical/internal entitlement/content key and is immutable once used in production.
+- `displayIds` maps the same canonical lesson to its exact student-facing Lesson ID for each applicable Year/Level view.
+- Shared canonical content does **not** create duplicate lesson records or duplicate entitlements merely because the student-facing alias changes.
+- Example: canonical `Y5M1` may display as `Y5T1M01` in `maths-year5` and `L2T1M01` in `maths-level2`.
+- `order` controls the continuous chronological lesson list; term folders in R2 do not control student chronology.
+- `title`, `description`, display aliases, resource paths and ScreenPal references may be updated without changing the canonical Lesson ID.
 - `active: false` means globally Removed from Portal; stored historical entitlements are not deleted.
 - `preLessonSheets`: zero, one or many.
-- `video`: zero or one main ScreenPal video in the data model; ordinary taught lessons normally have one.
+- `video`: zero or one main ScreenPal video in the ordinary core model.
 - `homeworks`: zero, one or many. Each Homework is explicitly paired with its own Answer Pack.
 - `otherResources`: zero, one or many.
-- R2 object paths are stored explicitly and are never derived permanently from Lesson ID.
+- R2 object paths and ScreenPal references are stored explicitly server-side and are never permanently derived from Lesson ID.
+
+---
+
+## Phase 7 ordinary lesson renderer contract
+
+The reusable lesson page consumes the canonical record above and must:
+
+- show the **student-facing** Lesson ID appropriate to the current view, not the canonical/internal ID;
+- show title and full description/topics;
+- hide PreLesson, Video, Homework and Other Resources sections entirely when the corresponding data is absent;
+- render repeated arrays without page-specific code;
+- keep each Homework visually paired with its Answer Pack;
+- obtain downloads/video through Worker-authorised endpoints rather than exposing raw storage/provider references.
+
+For a locked cross-subject upsell lesson, the Worker may return the real section structure and resource display names, but it must omit usable resource keys and other protected technical references.
 
 ---
 
@@ -117,19 +144,47 @@ English lessons use the same `core` structure. A lesson with optional VR materia
 }
 ```
 
-Protected resources include normal Answer Packs, VR PreLesson Answer Keys and VR Homework Answer Packs. All use the student's same current Answer Pack password.
+Protected resources include normal Answer Packs, VR PreLesson Answer Keys and VR Homework Answer Packs. All use the student's same current Answer Pack password once Phase 8/9 protection is implemented.
 
 ---
 
-## View record
+## Canonical curriculum record
 
-A view is a student-facing Year/Level catalogue. It is an ordered list only; lesson details remain in `lesson:*`.
+The Worker first looks for canonical curriculum ordering.
 
-Key:
+Key example:
 
-`view:maths-year5`
+`curriculum:MATHS_L2`
 
 Value:
+
+```json
+{
+  "lessonIds": ["Y5M01", "Y5M02", "Y5M03"]
+}
+```
+
+Normal Year 5 and Level 2 presentation can both use this same canonical curriculum while choosing different `displayIds` from each lesson record.
+
+Canonical curriculum codes currently include families such as:
+
+- `MATHS_Y2`
+- `MATHS_Y3`
+- `MATHS_L1`
+- `MATHS_L2`
+- `MATHS_L3`
+- `MATHS_Y6_EXTRA`
+- `ENGLISH_Y2` … `ENGLISH_Y6`
+
+---
+
+## Legacy/proof view record
+
+During incremental development, the Worker can fall back to `view:<VIEW_ID>` when the corresponding canonical `curriculum:<CURRICULUM_CODE>` record is not yet loaded.
+
+Example:
+
+`view:maths-year5`
 
 ```json
 {
@@ -141,31 +196,15 @@ Value:
 }
 ```
 
-For a shared 11+ Level 2 view:
-
-```json
-{
-  "schemaVersion": 1,
-  "viewId": "maths-level2",
-  "subject": "maths",
-  "label": "Level 2",
-  "lessonIds": ["Y5M01", "Y5M02", "Y5M03"]
-}
-```
-
-The two views may therefore point to exactly the same lesson IDs while presenting different labels.
-
-English normal and 11+ views can likewise point to the same core English Lesson IDs; VR availability is determined per student/per lesson.
+This fallback exists for staged development/proof data. Production population should prefer canonical curriculum records.
 
 ---
 
 ## Full Library record
 
-Key:
+Key example:
 
 `library:maths-level2-full`
-
-Value:
 
 ```json
 {
@@ -178,26 +217,14 @@ Value:
 }
 ```
 
-An English 11+ library can use:
-
-```json
-{
-  "libraryId": "english-year4-11plus-full",
-  "label": "Full Year 4 11+ English Library",
-  "viewId": "english-year4-11plus",
-  "components": ["core", "vr"],
-  "active": true
-}
-```
-
-Full Libraries are dynamic: adding a future Lesson ID to the referenced view automatically extends the library. No per-student copying of every lesson is required.
+Full Libraries are dynamic: adding a future lesson to the applicable canonical curriculum automatically extends the library. No per-student copying of every lesson is required.
 
 ---
 
 ## Chronology
 
-The order of `lessonIds` in a view is authoritative. Student lists are one continuous chronological curriculum list; term folders in R2 do not create Autumn/Spring/Summer navigation sections.
+Canonical curriculum order plus lesson `order` metadata determines the continuous student chronology. Student lists do not create Autumn/Spring/Summer sections from R2 folders.
 
 ## Special content
 
-11+ Maths Assessments, Year 5 11+ Mocks and VR How-To will use the same principle: canonical content records plus explicit student/view/special access. Their exact rendering records are added when those sections are implemented; Phase 2 does not need to pre-emptively hard-code the legacy bucket design.
+11+ Maths Assessments, Year 5 11+ Mocks and VR How-To use the same principle: canonical content plus explicit student/view/special access. Their exact renderer/protection contracts are added in their respective implementation phases rather than forcing them into the ordinary lesson model prematurely.
