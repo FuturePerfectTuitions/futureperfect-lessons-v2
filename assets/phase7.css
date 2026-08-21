@@ -1,0 +1,268 @@
+.phase7-lesson-screen {
+  min-height: 520px;
+}
+
+.phase7-lesson-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e4e8ef;
+}
+
+.phase7-lesson-code {
+  display: inline-flex;
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #eaf0ff;
+  color: #012169;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.phase7-lesson-title {
+  margin: 0;
+  color: #012169;
+  font-size: clamp(29px, 4vw, 42px);
+  line-height: 1.12;
+}
+
+.phase7-description {
+  max-width: 860px;
+  margin-top: 16px;
+  color: #3d4655;
+  font-size: 16px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.phase7-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #eaf7ee;
+  color: #137333;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.phase7-state.locked {
+  background: #fff8e6;
+  color: #7a4b00;
+}
+
+.phase7-locked-note {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid #f0d99b;
+  border-radius: 14px;
+  background: #fffaf0;
+  color: #6c4706;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.phase7-resource-sections {
+  display: grid;
+  gap: 22px;
+  margin-top: 28px;
+}
+
+.phase7-resource-section {
+  padding: 22px;
+  border: 1px solid #e1e6ee;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(1, 33, 105, 0.05);
+}
+
+.phase7-section-heading {
+  margin-bottom: 16px;
+}
+
+.phase7-section-heading h2 {
+  margin: 3px 0 0;
+  color: #012169;
+  font-size: 22px;
+}
+
+.phase7-kicker {
+  color: #d71920;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.phase7-resource-list,
+.phase7-homework-list {
+  display: grid;
+  gap: 12px;
+}
+
+.phase7-resource-row {
+  min-height: 68px;
+  padding: 14px 16px;
+  border: 1px solid #e4e8ef;
+  border-radius: 14px;
+  background: #fbfcfe;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.phase7-resource-copy {
+  min-width: 0;
+}
+
+.phase7-resource-name {
+  display: block;
+  color: #14213d;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.phase7-resource-meta {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.phase7-resource-action {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #012169;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.phase7-resource-action:hover,
+.phase7-resource-action:focus-visible {
+  background: #00194f;
+  outline: none;
+}
+
+.phase7-resource-action[disabled] {
+  border: 1px solid #e3d49f;
+  background: #fff8e6;
+  color: #7a4b00;
+  cursor: default;
+}
+
+.phase7-resource-action.missing[disabled] {
+  border-color: #e0e4eb;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.phase7-homework-card {
+  padding: 16px;
+  border: 1px solid #dfe4ec;
+  border-radius: 16px;
+  background: #fbfcff;
+}
+
+.phase7-homework-pair-label {
+  margin: 0 0 10px;
+  color: #012169;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.phase7-homework-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.phase7-homework-pair .phase7-resource-row {
+  height: 100%;
+}
+
+.phase7-protected-chip {
+  display: inline-flex;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #fff1f1;
+  color: #a31218;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.phase7-player-frame {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  background: #08152f;
+}
+
+.phase7-player-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.phase7-inline-note {
+  padding: 13px 15px;
+  border-radius: 12px;
+  background: #f6f8fb;
+  color: #596273;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.phase7-error,
+.phase7-error-text {
+  color: #9d1720;
+}
+
+.phase7-error {
+  border-color: #efc6c8;
+  background: #fff7f7;
+}
+
+.phase7-download-status {
+  margin-top: 4px;
+  color: #596273;
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .phase7-lesson-heading {
+    flex-direction: column;
+  }
+
+  .phase7-homework-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .phase7-resource-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .phase7-resource-action {
+    width: 100%;
+  }
+}
