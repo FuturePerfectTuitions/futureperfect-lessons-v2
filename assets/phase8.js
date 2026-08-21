@@ -39,10 +39,10 @@
       captured.viewId = String(url.searchParams.get('viewId') || '').trim();
       captured.answerResources = (Array.isArray(lesson.homeworks) ? lesson.homeworks : [])
         .map(pair => pair?.answerPack || null)
-        .filter(resource => resource?.protected && resource?.resourceKey && resource?.available !== false)
+        .filter(resource => resource?.protected)
         .map(resource => ({
-          resourceKey: String(resource.resourceKey),
-          displayName: String(resource.displayName || 'Answer Pack')
+          resourceKey: resource?.resourceKey ? String(resource.resourceKey) : '',
+          displayName: String(resource?.displayName || 'Answer Pack')
         }));
     } catch (_) {
       captured.viewId = '';
