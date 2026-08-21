@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-P7-ENGLISH",
+  "order": 9001,
+  "title": "Phase 7 English Renderer Proof",
+  "description": "Development-only normal-English fixture. It proves that the same ordinary lesson-page renderer works for English without introducing English-specific page code. Verbal Reasoning is deliberately absent because that extension belongs to Phase 9.",
+  "subject": "english",
+  "active": true,
+  "testOnly": true,
+  "displayIds": {
+    "english-year5": "Y5T3E98",
+    "english-year5-11plus": "Y5T3E98"
+  },
+  "core": {
+    "preLessonSheets": [],
+    "video": null,
+    "homeworks": [],
+    "otherResources": []
+  },
+  "vr": null
+}
