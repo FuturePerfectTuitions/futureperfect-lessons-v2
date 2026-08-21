@@ -368,6 +368,44 @@
     }
   }
 
+  const PHASE6_DISPLAY_ID_FALLBACKS = Object.freeze({
+    'maths-year5': Object.freeze({
+      Y5M1: 'Y5T1M01'
+    }),
+    'maths-level2': Object.freeze({
+      Y5M1: 'L2T1M01'
+    }),
+    'maths-level3': Object.freeze({
+      'DEV-L3-01': 'L3T1M01',
+      'DEV-L3-02': 'L3T1M02',
+      'DEV-L3-03': 'L3T1M03'
+    })
+  });
+
+  function studentFacingLessonId(lesson) {
+    const viewId = String(state.view?.viewId || '');
+    const explicit = String(lesson?.displayLessonId || '').trim();
+    if (explicit) return explicit;
+
+    const fallback = PHASE6_DISPLAY_ID_FALLBACKS[viewId]?.[lesson?.lessonId];
+    return fallback || String(lesson?.lessonId || '');
+  }
+
+  function studentFacingLessonTitle(lesson, displayLessonId) {
+    let title = String(lesson?.title || '').trim();
+    const canonicalId = String(lesson?.lessonId || '').trim();
+
+    for (const prefix of [canonicalId, displayLessonId]) {
+      if (!prefix) continue;
+      const prefixWithSpace = `${prefix} `;
+      if (title.toLowerCase().startsWith(prefixWithSpace.toLowerCase())) {
+        title = title.slice(prefixWithSpace.length).trim();
+      }
+    }
+
+    return title || displayLessonId || canonicalId;
+  }
+
   function renderLessonList() {
     const query = els.lessonSearch.value.trim().toLowerCase();
 
@@ -383,7 +421,9 @@
 
     const filtered = state.lessons.filter(lesson => {
       if (!query) return true;
-      return [lesson.lessonId, lesson.title, lesson.description]
+      const displayLessonId = studentFacingLessonId(lesson);
+      const displayTitle = studentFacingLessonTitle(lesson, displayLessonId);
+      return [displayLessonId, lesson.lessonId, displayTitle, lesson.title, lesson.description]
         .some(value => String(value || '').toLowerCase().includes(query));
     });
 
@@ -402,13 +442,16 @@
       const main = document.createElement('div');
       main.className = 'phase6-lesson-main';
 
+      const displayLessonId = studentFacingLessonId(lesson);
+      const displayTitle = studentFacingLessonTitle(lesson, displayLessonId);
+
       const code = document.createElement('span');
       code.className = 'phase6-lesson-code';
-      code.textContent = lesson.lessonId;
+      code.textContent = displayLessonId;
 
       const title = document.createElement('span');
       title.className = 'phase6-lesson-title';
-      title.textContent = lesson.title;
+      title.textContent = displayTitle;
 
       main.appendChild(code);
       main.appendChild(title);
