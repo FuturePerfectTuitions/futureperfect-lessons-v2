@@ -35,10 +35,11 @@
 
   const state = {
     session: null,
-    portalData: null,
+    home: null,
     subjectKey: null,
     subjectLabel: null,
-    view: null
+    view: null,
+    lessons: []
   };
 
   function api(path, options = {}) {
@@ -78,12 +79,21 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function showLogin() {
-    state.session = null;
-    state.portalData = null;
+  function resetNavigation() {
+    state.home = null;
     state.subjectKey = null;
     state.subjectLabel = null;
     state.view = null;
+    state.lessons = [];
+    els.viewGrid.innerHTML = '';
+    els.lessonList.innerHTML = '';
+    els.lessonEmpty.hidden = true;
+    els.lessonSearch.value = '';
+  }
+
+  function showLogin() {
+    state.session = null;
+    resetNavigation();
     els.portalScreen.hidden = true;
     els.loginScreen.hidden = false;
     els.password.value = '';
@@ -103,17 +113,19 @@
     showPortalScreen('subjects');
 
     if (session?.accountLocked) {
-      setSubjectsMessage('Your account is currently locked. Your portal remains visible, but lesson and resource access is unavailable.');
+      setSubjectsMessage(
+        'Your account is currently locked. Your portal remains visible, but lesson and resource access is unavailable.'
+      );
     } else {
       setSubjectsMessage();
     }
   }
 
-  async function loadNavigationData() {
+  async function loadHome() {
     if (!base || !state.session) return null;
 
     try {
-      const response = await api('/api/dev/phase4', { method: 'GET' });
+      const response = await api('/api/v1/student/home', { method: 'GET' });
       let body = null;
       try {
         body = await response.json();
@@ -125,15 +137,15 @@
       }
 
       if (!response.ok || !body?.ok) {
-        state.portalData = null;
+        state.home = null;
         setSubjectsMessage('Curriculum navigation is temporarily unavailable. Please try again.');
         return null;
       }
 
-      state.portalData = body;
+      state.home = body;
       return body;
     } catch (_) {
-      state.portalData = null;
+      state.home = null;
       setSubjectsMessage('Curriculum navigation is temporarily unavailable. Please try again.');
       return null;
     }
@@ -158,8 +170,9 @@
         return null;
       }
 
+      resetNavigation();
       showPortal(body);
-      await loadNavigationData();
+      await loadHome();
       return body;
     } catch (_) {
       showLogin();
@@ -221,8 +234,8 @@
     try {
       if (base) await api('/api/v1/student/auth/logout', { method: 'POST' });
     } catch (_) {
-      // The local UI still returns to login. Server-side expiry/revocation
-      // continues to protect any session that could not be explicitly revoked.
+      // The server-side session still expires/revokes normally if the explicit
+      // logout request cannot complete.
     } finally {
       els.logoutButton.disabled = false;
       showLogin();
@@ -237,46 +250,24 @@
     } catch (_) {}
   }
 
-  function subjectFromData(subjectKey) {
-    return (state.portalData?.subjects || []).find(subject => subject.subject === subjectKey) || null;
-  }
-
-  function makeCrossSubjectPreview(subjectKey) {
-    const year = Number(state.portalData?.student?.schoolYear || 0);
-    if (!Number.isInteger(year) || year < 2 || year > 6) return [];
-
-    if (subjectKey === 'english') {
-      const currentMaths = subjectFromData('maths');
-      if ((currentMaths?.views || []).length) {
-        return [{
-          viewId: `english-year${year}-preview`,
-          label: `Year ${year}`,
-          lessons: [],
-          lockedPreview: true,
-          catalogueAvailable: false
-        }];
-      }
-    }
-
-    return [];
-  }
-
-  function viewsForSubject(subjectKey) {
-    const subject = subjectFromData(subjectKey);
-    const realViews = Array.isArray(subject?.views) ? subject.views : [];
-    if (realViews.length) return realViews;
-    return makeCrossSubjectPreview(subjectKey);
+  function subjectFromHome(subjectKey) {
+    return (state.home?.subjects || []).find(subject => subject.subject === subjectKey) || {
+      subject: subjectKey,
+      views: []
+    };
   }
 
   function renderViews(subjectKey, subjectLabel) {
     state.subjectKey = subjectKey;
     state.subjectLabel = subjectLabel;
     state.view = null;
+    state.lessons = [];
 
     els.viewsHeading.textContent = subjectLabel;
     els.viewGrid.innerHTML = '';
 
-    const views = viewsForSubject(subjectKey);
+    const subject = subjectFromHome(subjectKey);
+    const views = Array.isArray(subject.views) ? subject.views : [];
 
     if (!views.length) {
       const empty = document.createElement('div');
@@ -298,13 +289,22 @@
 
       const meta = document.createElement('span');
       meta.className = 'phase6-view-card-meta';
+
       if (view.lockedPreview) {
-        meta.textContent = view.catalogueAvailable === false
-          ? 'Cross-subject locked preview'
-          : 'Locked preview';
+        if (view.catalogueAvailable === false) {
+          meta.textContent = 'Cross-subject locked preview';
+        } else {
+          const count = Number(view.visibleLessonCount || 0);
+          meta.textContent = `${count} lesson${count === 1 ? '' : 's'} · locked preview`;
+        }
       } else {
-        const count = Array.isArray(view.lessons) ? view.lessons.length : 0;
-        meta.textContent = `${count} available lesson${count === 1 ? '' : 's'}`;
+        const openCount = Number(view.openLessonCount || 0);
+        const lockedCount = Number(view.lockedLessonCount || 0);
+        if (lockedCount > 0) {
+          meta.textContent = `${openCount} available · ${lockedCount} locked`;
+        } else {
+          meta.textContent = `${openCount} available lesson${openCount === 1 ? '' : 's'}`;
+        }
       }
 
       text.appendChild(title);
@@ -329,34 +329,59 @@
     }
   }
 
-  function chooseSubject(subjectKey, subjectLabel) {
+  async function chooseSubject(subjectKey, subjectLabel) {
     recordActivity();
 
-    if (!state.portalData) {
+    if (!state.home) {
       setSubjectsMessage('Curriculum navigation is still loading. Please try again in a moment.');
-      loadNavigationData();
-      return;
+      const home = await loadHome();
+      if (!home) return;
     }
 
     renderViews(subjectKey, subjectLabel);
     showPortalScreen('views');
   }
 
+  async function fetchViewLessons(view) {
+    const encodedViewId = encodeURIComponent(view.viewId);
+
+    try {
+      const response = await api(
+        `/api/v1/student/views/${encodedViewId}/lessons`,
+        { method: 'GET' }
+      );
+
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (_) {}
+
+      if (response.status === 401) {
+        showLogin();
+        return null;
+      }
+
+      if (!response.ok || !body?.ok) return null;
+      return body;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function renderLessonList() {
-    const view = state.view;
-    const lessons = Array.isArray(view?.lessons) ? view.lessons : [];
     const query = els.lessonSearch.value.trim().toLowerCase();
 
     els.lessonList.innerHTML = '';
     els.lessonEmpty.hidden = true;
 
-    if (view?.catalogueAvailable === false) {
-      els.lessonEmpty.textContent = 'The locked Year 5 English preview is part of the agreed navigation structure. Its lesson catalogue will populate when English core content is added later in the build.';
+    if (state.view?.catalogueAvailable === false) {
+      els.lessonEmpty.textContent =
+        'This Year or Level is part of the agreed portal navigation, but its catalogue has not been loaded into V2 yet.';
       els.lessonEmpty.hidden = false;
       return;
     }
 
-    const filtered = lessons.filter(lesson => {
+    const filtered = state.lessons.filter(lesson => {
       if (!query) return true;
       return [lesson.lessonId, lesson.title, lesson.description]
         .some(value => String(value || '').toLowerCase().includes(query));
@@ -398,25 +423,43 @@
     }
   }
 
-  function openView(view) {
+  async function openView(viewSummary) {
     recordActivity();
-    state.view = view;
+
     els.lessonsEyebrow.textContent = state.subjectLabel || 'Lessons';
-    els.lessonsHeading.textContent = view.label;
+    els.lessonsHeading.textContent = viewSummary.label;
     els.lessonSearch.value = '';
-    renderLessonList();
+    els.lessonList.innerHTML = '';
+    els.lessonEmpty.textContent = 'Loading lessons…';
+    els.lessonEmpty.hidden = false;
     showPortalScreen('lessons');
+
+    const body = await fetchViewLessons(viewSummary);
+    if (!body) {
+      els.lessonEmpty.textContent =
+        'This lesson list is temporarily unavailable. Please go back and try again.';
+      els.lessonEmpty.hidden = false;
+      return;
+    }
+
+    state.view = body.view || viewSummary;
+    state.lessons = Array.isArray(body.lessons) ? body.lessons : [];
+    renderLessonList();
   }
 
   function goSubjects() {
     state.subjectKey = null;
     state.subjectLabel = null;
     state.view = null;
+    state.lessons = [];
     showPortalScreen('subjects');
   }
 
   function goViews() {
-    if (!state.subjectKey || !state.subjectLabel) return goSubjects();
+    if (!state.subjectKey || !state.subjectLabel) {
+      goSubjects();
+      return;
+    }
     renderViews(state.subjectKey, state.subjectLabel);
     showPortalScreen('views');
   }
