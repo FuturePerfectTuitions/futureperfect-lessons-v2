@@ -1,22 +1,22 @@
 # FPT Portal V2 — Implementation Handover & Build State
 
-**Cumulative version:** 3.4  
+**Cumulative version:** 3.5  
 **Updated:** 21 August 2026  
-**Completed through:** Phase 6 — Build Curriculum Navigation
+**Completed through:** Phase 7 — Complete Lesson Page Renderer
 
 ## Authority
 
 Use this file together with:
 
 1. the latest `FPT Portal V2 Master Authoritative Specification` — business/workflow authority;
-2. the latest `FPT Portal V2 — Steps to Progression` — build-sequence authority;
+2. the latest `FPT Portal V2 — Steps to Progression` — build-sequence/checkpoint authority;
 3. this file — actual implementation state;
 4. the current GitHub/Cloudflare state — final authority for what is actually deployed.
 
-Current governing document versions after Phase 6 business-rule correction:
+Current governing document versions after the Phase 7 upsell-presentation refinement:
 
-- Master Authoritative Specification v2.3 — 21 August 2026;
-- Steps to Progression v1.3 — 21 August 2026.
+- Master Authoritative Specification v2.4 — 21 August 2026;
+- Steps to Progression v1.4 — 21 August 2026.
 
 ## Permanent workflow rules
 
@@ -96,7 +96,7 @@ Real FPT visual shell implemented and browser-verified:
 - navy/red palette, pale-grey background and rounded white cards;
 - full red/white/blue airmail border;
 - familiar Student Login;
-- password eye with Edge native duplicate eye suppressed;
+- password eye;
 - first-name greeting;
 - exactly Maths and English at top level;
 - secure Phase 4 session retained;
@@ -109,83 +109,159 @@ Detailed verification: `docs/data/PHASE5_VERIFICATION.md`.
 
 Curriculum navigation is implemented and manually verified.
 
-### Frontend
-
-- `phase6.html`
-- `assets/phase6.css`
-- `assets/phase6.js`
-
 Verified hierarchy:
 
 `Login → Maths / English → Year or Level → continuous chronological lesson list`
 
-No Current/Previous grouping. No Autumn/Spring/Summer sections. No internal Batch ID shown.
+Worker-authoritative navigation covers current Year/Level presentation, historical access, Full Libraries, cross-subject previews, blocked lessons, direct/manual entitlements and the 11+ start-point rule.
 
-### Authenticated Worker navigation API
-
-Implemented and deployed:
+Authenticated routes:
 
 - `GET /api/v1/student/home`
 - `GET /api/v1/student/views/{viewId}/lessons`
 
-The Worker is authoritative for current Year/Level presentation, historical views, Full Libraries, direct/manual lesson access, blocked lessons, cross-subject previews and 11+ start-point visibility.
-
-### 11+ curriculum start point
-
-Migration installed and verified:
+Migration installed:
 
 - `worker/migrations/0004_curriculum_start_points.sql`
 
-D1 table:
+Detailed verification:
 
-- `curriculum_start_points`
+- `docs/data/PHASE6_VERIFICATION.md`
+- `docs/data/PHASE6_PERSONA_FIXTURES.md`
 
-The start point changes presentation only: earlier missed lessons may be shown locked, current entitled lessons remain open, and future unreleased lessons remain hidden.
-
-### Phase 6 personas verified
-
-`Test0101` — normal Year 5 Maths:
-
-- Maths → Year 5;
-- canonical Y5M1 open;
-- English → Year 5 locked preview;
-- search/back/logout verified.
-
-`Test0202` — Year 5 English only:
-
-- English → Year 5 current view;
-- English catalogue correctly reports unavailable because production English content has not yet been loaded;
-- Maths → Year 5 locked preview;
-- existing Y5M1 row appears locked;
-- no internal Batch ID shown.
-
-`Test0303` — Year 5 11+ Maths:
-
-- Maths → Level 2 from `MATHS_L2_FULL`;
-- Maths → Level 3 as current Year 5 11+ curriculum;
-- no duplicate Year 5 Maths view for shared canonical Level 2 content;
-- Level 3 earlier fixture lesson locked;
-- Level 3 current fixture lesson available;
-- Level 3 future fixture lesson hidden;
-- English → Year 5 11+ locked cross-subject preview.
-
-Detailed verification: `docs/data/PHASE6_VERIFICATION.md`.
-Fixture definitions: `docs/data/PHASE6_PERSONA_FIXTURES.md`.
-
-### Student-facing Lesson ID rule added in Phase 6
-
-A business-rule correction was identified during testing and recorded in Master v2.3 / Steps v1.3.
+### Student-facing Lesson ID rule
 
 Canonical/internal Lesson ID and student-facing Lesson ID are separate concepts.
 
-Example for the same shared `MATHS_L2` canonical lesson:
+For the shared proof lesson with canonical key `Y5M1`:
 
 - normal Year 5 presentation: `Y5T1M01 Number and Place Value I`;
 - Level 2 / 11+ presentation: `L2T1M01 Number and Place Value I`.
 
-The canonical/internal entitlement/content key remains `Y5M1` in the current proof data. The presentation alias changes by Year/Level and does not create duplicate entitlement.
+The presentation alias changes by Year/Level without duplicating entitlement.
 
-Phase 6 browser testing verified both Year 5 and Level 2 aliases.
+## Phase 7 — COMPLETE
+
+One reusable ordinary lesson-page renderer is implemented and browser-verified at `phase7.html`.
+
+### Frontend
+
+Phase 7 files:
+
+- `phase7.html`
+- `assets/phase7.css`
+- `assets/phase7.js`
+- `assets/phase7-upsell.js`
+
+The renderer is data-driven and handles ordinary Maths/English lesson packages without lesson-specific page code.
+
+Verified:
+
+- student-facing Lesson ID + title + full description/topics;
+- zero/one/many PreLesson Sheets;
+- zero/one main ScreenPal video;
+- zero/one/many Homework items;
+- explicit Homework → Answer Pack pairing;
+- optional Other Resources;
+- empty sections hidden entirely;
+- Back navigation and Logout retained.
+
+### Phase 7 Worker adapter
+
+Repository source:
+
+- completed Phase 6 base Worker: `worker/src/index.js`;
+- Phase 7 adapter: `worker/src/index-phase7.js`.
+
+The Phase 7 adapter composes the existing Worker instead of replacing authentication/navigation logic.
+
+Added/augmented routes:
+
+- augmented `GET /api/v1/student/views/{viewId}/lessons` with display IDs;
+- `GET /api/v1/student/lessons/{lessonId}?viewId={viewId}`;
+- `GET /api/v1/student/resources/{resourceKey}/download?viewId={viewId}`;
+- `GET /api/v1/student/resources/{resourceKey}/video?viewId={viewId}`.
+
+Manual Cloudflare deployment currently mirrors this composition with a base Phase 6 module plus Phase 7 adapter/entry module.
+
+### Resource safety
+
+For a locked lesson, the safe lesson model exposes resource display names/structure but not usable resource keys. Download/video handlers re-check lesson visibility and reject locked lesson access server-side.
+
+Raw R2 object paths, direct private URLs and raw ScreenPal IDs are not exposed in locked student-facing lesson data.
+
+For an open lesson, downloadable resources are served through Worker access validation.
+
+Phase 8 remains responsible for the stronger per-open Answer Pack/Answer Key password gate and controlled protected-answer viewer.
+
+### Phase 7 fixtures/browser tests
+
+`test0101` / real-shaped `Y5M1`:
+
+- Year 5 alias `Y5T1M01`;
+- PreLesson download works;
+- ScreenPal video embeds;
+- Homework download works;
+- Answer Pack is visibly protected.
+
+`DEV-P7-MIN`:
+
+- no PreLesson, video, Homework or Other Resources;
+- all empty sections disappear entirely.
+
+`DEV-P7-MANY`:
+
+- two PreLesson Sheets;
+- one video;
+- two Homework/Answer Pack pairs;
+- two Other Resources;
+- repeated items render independently with correct pairing.
+
+`DEV-P7-ENGLISH`:
+
+- ordinary English fixture renders through the same reusable lesson page;
+- VR intentionally absent because VR remains Phase 9.
+
+Detailed fixture definitions:
+
+- `docs/data/PHASE7_FIXTURES.md`
+
+Detailed verification:
+
+- `docs/data/PHASE7_VERIFICATION.md`
+
+### Cross-subject upsell presentation refinement
+
+Business rule agreed during Phase 7:
+
+- cross-subject Year/Level cards must not advertise the lock prematurely;
+- cross-subject lesson-list rows remain navigable and do not show Locked;
+- the first explicit Locked/Preview indication appears on the individual lesson page;
+- that page may show lesson metadata, actual section structure and resource display names;
+- actual resources remain locked and inaccessible.
+
+Browser-verified with `test0202` viewing the real-shaped Maths `Y5M1` as an English-only student's cross-subject preview.
+
+This rule is incorporated into Master v2.4 and Steps v1.4.
+
+### Phase 7 display-ID regression correction
+
+During browser testing, `lesson:Y5M1` was found to lack its required `displayIds` field in Lessons KV.
+
+Added:
+
+```json
+"displayIds": {
+  "maths-year5": "Y5T1M01",
+  "maths-level2": "L2T1M01"
+}
+```
+
+Regression proof:
+
+- `test0202` cross-subject Year 5 Maths list/page shows `Y5T1M01`;
+- `test0303` Level 2 list shows `L2T1M01`;
+- canonical entitlement key remains `Y5M1`.
 
 # GitHub and development URLs
 
@@ -196,6 +272,7 @@ Phase 6 browser testing verified both Year 5 and Level 2 aliases.
 - Phase 4 proof: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase4.html`
 - Phase 5 shell: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase5.html`
 - Phase 6 navigation proof: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase6.html`
+- Phase 7 lesson renderer: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase7.html`
 - Worker: `https://fpt-portal-v2-worker.futureperfectlessons.workers.dev`
 - No production `CNAME` configured.
 - Existing live portal repository remains separate and untouched.
@@ -207,49 +284,31 @@ Phase 6 browser testing verified both Year 5 and Level 2 aliases.
 - `phase4.html` — Phase 4 authentication/session proof.
 - `phase5.html` — completed visual-shell proof.
 - `phase6.html` — completed curriculum-navigation proof.
+- `phase7.html` — completed reusable ordinary lesson-page proof.
 - `assets/fpt-logo.png` — real FPT logo.
-- `assets/phase3.js` / `assets/phase3-viewer.css` — Phase 3 resource/protected viewer.
-- `assets/phase4-auth.js` / `assets/phase4-auth.css` — Phase 4 auth proof.
 - `assets/phase5.js` / `assets/phase5.css` — Phase 5 shell.
-- `assets/phase6.js` / `assets/phase6.css` — Phase 6 Year/Level navigation, lesson-list search and student-facing ID presentation.
+- `assets/phase6.js` / `assets/phase6.css` — Phase 6 curriculum navigation.
+- `assets/phase7.js` / `assets/phase7.css` — Phase 7 lesson rendering.
+- `assets/phase7-upsell.js` — cross-subject upsell presentation refinement.
 - `config.js` — Worker base URL.
-- `worker/src/index.js` — canonical V2 Worker source.
+- `worker/src/index.js` — completed Phase 6 base Worker source.
+- `worker/src/index-phase7.js` — Phase 7 Worker adapter.
 - `worker/migrations/0001_lesson_entitlements.sql`
 - `worker/migrations/0002_student_sessions.sql`
 - `worker/migrations/0003_single_active_student_session.sql`
 - `worker/migrations/0004_curriculum_start_points.sql`
-- `docs/data/PHASE2_VERIFICATION.md`
-- `docs/data/PHASE3_VERIFICATION.md`
-- `docs/data/PHASE4_VERIFICATION.md`
-- `docs/data/PHASE5_VERIFICATION.md`
 - `docs/data/PHASE6_VERIFICATION.md`
 - `docs/data/PHASE6_PERSONA_FIXTURES.md`
+- `docs/data/PHASE7_VERIFICATION.md`
+- `docs/data/PHASE7_FIXTURES.md`
 
 # Cloudflare Worker
 
 - Worker name: `fpt-portal-v2-worker`
 - Environment: `development`
-- Development allowlist currently includes `test0101,test0202,test0303` for Phase 6 testing.
+- Development allowlist includes `test0101,test0202,test0303` for current testing.
 - Normal real-student login remains disabled server-side.
-
-## Implemented routes through Phase 6
-
-- `GET /api/health`
-- `GET /api/dev/phase2`
-- `GET /api/dev/phase3`
-- `GET /api/dev/phase3/resource?resourceId=...`
-- `POST /api/dev/phase3/answer`
-- `POST /api/v1/student/auth/login`
-- `POST /api/v1/student/auth/logout`
-- `GET /api/v1/student/session`
-- `POST /api/v1/student/session/activity`
-- `GET /api/v1/student/home`
-- `GET /api/v1/student/views/{viewId}/lessons`
-- `GET /api/dev/phase4`
-- `GET /api/dev/phase4/resource`
-- `POST /api/dev/phase4/answer`
-
-Other unimplemented `/api/*` routes return `501 NOT_IMPLEMENTED`.
+- Worker deployment remains manual through Cloudflare during development.
 
 # Current storage state
 
@@ -259,10 +318,8 @@ Development records include:
 
 - `student:test0101` — earlier Phase 2/3 proof record;
 - `user:test0101` — current normal Year 5 Maths auth persona;
-- `user:test0202` — Phase 6 Year 5 English-only persona;
-- `user:test0303` — Phase 6 Year 5 11+ Maths persona.
-
-Production work must follow the latest Master Specification rather than obsolete Phase 2-only fields.
+- `user:test0202` — Year 5 English-only persona;
+- `user:test0303` — Year 5 11+ Maths persona.
 
 ## Lessons KV
 
@@ -273,7 +330,14 @@ Key families in use:
 - legacy/proof `view:<VIEW_ID>` keys retained as fallbacks during incremental development;
 - `library:<LIBRARY_ID>` where applicable.
 
-Current proof data includes canonical `lesson:Y5M1` and Phase 6 development Level 3 fixture lessons.
+Current Phase 7 development data includes:
+
+- canonical `lesson:Y5M1` with Year 5/Level 2 `displayIds`;
+- `lesson:DEV-P7-MIN`;
+- `lesson:DEV-P7-MANY`;
+- `lesson:DEV-P7-ENGLISH`;
+- `curriculum:ENGLISH_Y5` development proof catalogue;
+- Year 5 Maths fallback proof catalogue containing `Y5M1`, `DEV-P7-MIN`, `DEV-P7-MANY`.
 
 ## D1
 
@@ -289,9 +353,16 @@ Single-active-session trigger:
 
 - `trg_student_sessions_single_active`
 
+Phase 7 development direct entitlements exist for:
+
+- `test0101 + DEV-P7-MIN`;
+- `test0101 + DEV-P7-MANY`.
+
+The current `lesson_entitlements.source` CHECK permits only `excel`, so these development rows use `source='excel'` with `source_batch_code='DEV-P7'`.
+
 # Entitlement source rule retained
 
-Effective ordinary lesson access is the union of independent sources:
+Effective ordinary lesson access remains the union of independent sources:
 
 1. Excel-earned D1 direct entitlement;
 2. manual Student KV lesson access;
@@ -299,7 +370,7 @@ Effective ordinary lesson access is the union of independent sources:
 
 One source must not silently overwrite or destroy another.
 
-# Deliberate non-actions through Phase 6
+# Safety / deliberate non-actions through Phase 7
 
 - No live-domain switch.
 - No production `CNAME` on V2.
@@ -310,29 +381,33 @@ One source must not silently overwrite or destroy another.
 - No Excel/VBA sync endpoint yet.
 - No Admin console.
 - No full English/VR production implementation yet.
-- No complete Phase 7 reusable lesson-page renderer yet.
+- No Phase 8 Answer Pack/Answer Key protection implementation yet.
 
-# Manual Worker deployment rule
+# Phase 7 checkpoint result
 
-Canonical Worker source is `worker/src/index.js` in GitHub. Worker deployment is currently manual through Cloudflare. Whenever Worker source changes, deploy the complete current file deliberately and run relevant regressions before treating the phase as complete.
+**PASS — Phase 7 is complete.**
+
+A range of differently structured ordinary lesson packages render correctly through one reusable page without page-specific code. Empty sections disappear, multiple resources/pairs render correctly, resources remain Worker-gated, cross-subject upsell pages expose safe metadata/structure without granting access, and view-specific student-facing IDs are correct for both Year 5 and Level 2.
 
 # Next incomplete phase
 
-## Phase 7 — Build the Complete Lesson Page Renderer
+## Phase 8 — Build Answer Pack and Answer Key Protection
 
-Purpose: create one reusable data-driven lesson-page component that can render differently structured normal Maths and English lessons.
+Purpose: add the extra per-open password gate and controlled protected-answer viewer.
 
 Required behaviour from the current Steps includes:
 
-- show student-facing Lesson ID, title and full description/topics;
-- show PreLesson Sheets only when present and support zero/one/many;
-- show one main ScreenPal lesson video when present;
-- support zero/one/many Homework items;
-- pair each Homework explicitly with its own Answer Pack;
-- show optional Other Resources;
-- hide empty sections entirely;
-- ensure downloadable resources remain behind Worker access validation;
-- preserve easy Back navigation and Logout;
-- do not expose R2 paths, private URLs or raw ScreenPal IDs in student UI.
+- every protected Answer Pack/Answer Key open prompts for the student's current Answer Pack password;
+- provide show/hide eye control;
+- do not create a session-wide unlock;
+- validate active login session, lesson entitlement, resource ownership and current Answer Pack password before opening;
+- serve protected material through the controlled viewer rather than exposing a raw R2 URL;
+- disable normal download/print controls in the viewer UI;
+- display the small student-username/FPT on-screen watermark/header;
+- invalidate protected access when the main session expires or the Answer Pack password changes.
 
-Phase 7 must begin in a new chat. Before coding, read the latest Master v2.3, Steps v1.3 and this handover, reconnect to GitHub and inspect the current implementation.
+Phase 8 must begin in a new chat. Before coding, read the latest Master v2.4, Steps v1.4 and this v3.5 handover, reconnect to GitHub and inspect the current implementation.
+
+# New-chat start prompt
+
+Continue FPT Portal V2. Start Phase 8 only. Read the latest Master Authoritative Specification v2.4, Steps to Progression v1.4 and Implementation Handover v3.5 first. Reconnect to the GitHub repository FuturePerfectTuitions/futureperfect-lessons-v2 and inspect the actual current implementation before changing anything. Phase 7 is complete. Build Answer Pack and Answer Key protection only, without changing the existing live portal. For any Cloudflare/KV/D1/manual step, guide me as a beginner in small explicit steps.
