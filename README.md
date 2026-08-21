@@ -57,7 +57,7 @@ Verified:
 - no term-section headings;
 - no internal Batch ID shown;
 - canonical Year/Level de-duplication;
-- Worker-authoritative cross-subject locked previews;
+- Worker-authoritative cross-subject previews;
 - historical Full Library continuity;
 - 11+ start-point missed-lesson locked preview;
 - future/unreleased lesson hiding;
@@ -70,19 +70,35 @@ Example shared canonical Maths lesson:
 - Level 2 / 11+ student sees `L2T1M01 Number and Place Value I`;
 - canonical/internal entitlement key remains one shared lesson (`Y5M1` in the current proof data).
 
-Authenticated navigation API:
+### Phase 7 — COMPLETE
 
-- `GET /api/v1/student/home`
-- `GET /api/v1/student/views/{viewId}/lessons`
+The reusable complete ordinary lesson-page renderer is implemented and browser-verified at `phase7.html`.
 
-D1 migration installed:
+Verified through materially different lesson packages:
 
-- `worker/migrations/0004_curriculum_start_points.sql`
+- real-shaped `Y5M1` with PreLesson Sheet, ScreenPal video, Homework and protected Answer Pack;
+- `DEV-P7-MIN` with all optional resource sections absent;
+- `DEV-P7-MANY` with multiple PreLesson Sheets, multiple Homework/Answer Pack pairs and multiple Other Resources;
+- `DEV-P7-ENGLISH` through the same ordinary lesson-page renderer;
+- locked cross-subject lesson pages show safe metadata/section structure while resources remain inaccessible;
+- Year/Level cards and lesson-list rows do not reveal the cross-subject upsell lock prematurely — the first explicit Locked/Preview state is on the individual lesson page;
+- shared canonical `Y5M1` displays correctly as `Y5T1M01` in Year 5 and `L2T1M01` in Level 2;
+- empty sections disappear entirely;
+- Back navigation and Logout remain available;
+- raw R2 paths, private URLs and raw ScreenPal IDs are not exposed in student-facing lesson metadata.
+
+Phase 7 uses:
+
+- `phase7.html`
+- `assets/phase7.css`
+- `assets/phase7.js`
+- `assets/phase7-upsell.js`
+- `worker/src/index-phase7.js` as the Phase 7 Worker adapter over the completed Phase 6 base Worker.
 
 Detailed verification:
 
-- `docs/data/PHASE6_VERIFICATION.md`
-- `docs/data/PHASE6_PERSONA_FIXTURES.md`
+- `docs/data/PHASE7_VERIFICATION.md`
+- `docs/data/PHASE7_FIXTURES.md`
 
 Normal real-student login remains deliberately disabled during development.
 
@@ -108,6 +124,10 @@ Phase 6 curriculum navigation:
 
 `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase6.html`
 
+Phase 7 complete lesson renderer:
+
+`https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase7.html`
+
 ## Worker
 
 Worker name:
@@ -118,9 +138,13 @@ Worker URL:
 
 `https://fpt-portal-v2-worker.futureperfectlessons.workers.dev`
 
-Canonical Worker source:
+Completed Phase 6 base Worker source:
 
 `worker/src/index.js`
+
+Phase 7 adapter source:
+
+`worker/src/index-phase7.js`
 
 Current development routes include:
 
@@ -135,6 +159,9 @@ Current development routes include:
 - `POST /api/v1/student/session/activity`
 - `GET /api/v1/student/home`
 - `GET /api/v1/student/views/{viewId}/lessons`
+- `GET /api/v1/student/lessons/{lessonId}?viewId={viewId}`
+- `GET /api/v1/student/resources/{resourceKey}/download?viewId={viewId}`
+- `GET /api/v1/student/resources/{resourceKey}/video?viewId={viewId}`
 - `GET /api/dev/phase4`
 - `GET /api/dev/phase4/resource`
 - `POST /api/dev/phase4/answer`
@@ -152,7 +179,7 @@ Environment variables include:
 
 - `ENVIRONMENT=development`
 - `ALLOWED_ORIGINS=https://futureperfecttuitions.github.io`
-- `DEV_LOGIN_ALLOWLIST=test0101,test0202,test0303` during Phase 6 development testing.
+- `DEV_LOGIN_ALLOWLIST=test0101,test0202,test0303` during development testing.
 
 Normal student login remains disabled server-side.
 
@@ -175,6 +202,8 @@ Normal student login remains disabled server-side.
 - `docs/data/PHASE5_VERIFICATION.md`
 - `docs/data/PHASE6_VERIFICATION.md`
 - `docs/data/PHASE6_PERSONA_FIXTURES.md`
+- `docs/data/PHASE7_VERIFICATION.md`
+- `docs/data/PHASE7_FIXTURES.md`
 
 ## Safety rule
 
@@ -182,6 +211,6 @@ The existing live portal, existing live Worker and existing live KV namespaces m
 
 ## Next phase
 
-**Phase 7 — Build the Complete Lesson Page Renderer.**
+**Phase 8 — Build Answer Pack and Answer Key Protection.**
 
-Phase 7 must begin in a new chat after reading the latest Master Authoritative Specification v2.3, Steps to Progression v1.3 and cumulative Implementation Handover v3.4, then reconnecting to GitHub and inspecting the actual implementation state.
+Phase 8 must begin in a new chat after reading the latest Master Authoritative Specification, Steps to Progression and cumulative Implementation Handover, then reconnecting to GitHub and inspecting the actual implementation state.
