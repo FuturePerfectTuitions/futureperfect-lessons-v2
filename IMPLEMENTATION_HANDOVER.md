@@ -1,8 +1,8 @@
 # FPT Portal V2 — Implementation Handover & Build State
 
-**Cumulative version:** 3.0  
-**Updated:** 20 August 2026  
-**Completed through:** Phase 3 — Get One Complete Maths Lesson Working End-to-End
+**Cumulative version:** 3.2  
+**Updated:** 21 August 2026  
+**Completed through:** Phase 4 — Build Secure Student Authentication
 
 ## Authority
 
@@ -27,9 +27,9 @@ Whenever Sej changes a workflow, business rule or operating decision:
 
 Do not allow documentation and the deployed system to drift apart.
 
-## Overall status
+# Overall status
 
-### Phase 1 — COMPLETE
+## Phase 1 — COMPLETE
 
 The isolated V2 development environment is operational and separate from the live portal.
 
@@ -39,7 +39,7 @@ Verified chain:
 
 `GET /api/health` returns `HTTP 200`, `infrastructureHealthy: true`, and all four bindings report healthy.
 
-### Phase 2 — COMPLETE
+## Phase 2 — COMPLETE
 
 The V2 data foundation has been implemented and tested with dummy data.
 
@@ -53,9 +53,9 @@ Verified:
 - Dummy view `view:maths-year5-dev`.
 - D1 duplicate Student + Lesson confirmation is idempotent.
 
-### Phase 3 — COMPLETE
+## Phase 3 — COMPLETE
 
-One complete real-shaped Maths lesson now works end-to-end for the development student.
+One complete real-shaped Maths lesson works end-to-end for the development student.
 
 Verified journey:
 
@@ -63,99 +63,113 @@ Verified journey:
 
 The lesson page and navigation are data-driven from KV/D1/R2 rather than a hard-coded lesson-specific page.
 
-Normal student login remains disabled.
+## Phase 4 — COMPLETE
 
-## GitHub
+Secure student authentication/session behaviour is now implemented and manually verified in the isolated V2 development environment.
+
+Verified lifecycle:
+
+`credentials → opaque HttpOnly cookie → hashed D1 session → authenticated lesson/resource access → sliding 2-hour inactivity → single-device replacement → logout/session-expiry invalidation`
+
+Normal production student login remains disabled.
+
+# GitHub
 
 - Repository: `FuturePerfectTuitions/futureperfect-lessons-v2`
 - Default branch: `main`
 - Development frontend: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/`
 - Phase 3 page: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase3.html`
+- Phase 4 page: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase4.html`
 - No production `CNAME` configured.
 - Existing live portal repository remains separate and untouched.
 
-### Important repo files
+## Important repo files
 
 - `index.html` — development/status page.
 - `phase3.html` — Phase 3 data-driven lesson proof.
+- `phase4.html` — real-browser Phase 4 authentication/session proof.
 - `assets/styles.css` — FPT visual shell/shared styles.
 - `assets/phase3.js` — Phase 3 navigation/resource/protected-viewer logic.
 - `assets/phase3-viewer.css` — protected PDF page-viewer styles.
+- `assets/phase4-auth.js` — Phase 4 browser login/session proof logic; uses `credentials: include` and never reads the HttpOnly cookie.
+- `assets/phase4-auth.css` — Phase 4 proof-page styles.
 - `config.js` — V2 Worker base URL.
 - `worker/src/index.js` — canonical V2 Worker source.
-- `worker/migrations/0001_lesson_entitlements.sql` — applied D1 schema.
-- `docs/data/STUDENT_KV_FORMAT.md`
-- `docs/data/LESSON_KV_FORMAT.md`
-- `docs/data/PHASE2_SETUP.md`
+- `worker/migrations/0001_lesson_entitlements.sql` — D1 lesson-entitlement schema.
+- `worker/migrations/0002_student_sessions.sql` — D1 server-session schema.
+- `worker/migrations/0003_single_active_student_session.sql` — single-active-session migration/trigger.
 - `docs/data/PHASE2_VERIFICATION.md`
 - `docs/data/PHASE3_VERIFICATION.md`
-- `examples/phase2/*`
-- `examples/phase3/lesson-Y5M1.json`
-- `examples/phase3/view-maths-year5.json`
+- `docs/data/PHASE4_VERIFICATION.md`
 - `README.md`
 - `IMPLEMENTATION_HANDOVER.md`
 
-## Cloudflare Worker
+# Cloudflare Worker
 
 - Worker name: `fpt-portal-v2-worker`
 - Worker URL: `https://fpt-portal-v2-worker.futureperfectlessons.workers.dev`
 - Environment: `development`
-- Student login enabled: `false`
+- Normal student login enabled: `false`
+- Development login allowlist includes only the designated test user(s), currently `test0101`.
 
-### Current routes
+## Current routes relevant through Phase 4
 
 - `GET /api/health` — infrastructure health.
 - `GET /api/dev/phase2` — Phase 2 diagnostic.
-- `GET /api/dev/phase3` — builds the development student's current Maths portal data and confirms R2 resource presence.
-- `GET /api/dev/phase3/resource?resourceId=...` — serves entitled unprotected Phase 3 PDFs from private R2.
-- `POST /api/dev/phase3/answer` — validates the development student's Answer Pack password and returns the entitled protected PDF.
-- Other `/api/*` routes return `501 NOT_IMPLEMENTED`.
+- `GET /api/dev/phase3` — Phase 3 portal proof.
+- `GET /api/dev/phase3/resource?resourceId=...` — Phase 3 unprotected R2 resource proof.
+- `POST /api/dev/phase3/answer` — Phase 3 protected Answer Pack proof.
+- `POST /api/v1/student/auth/login` — verifies allowed development credentials and creates an opaque server session.
+- `POST /api/v1/student/auth/logout` — revokes the current session and clears its cookie.
+- `GET /api/v1/student/session` — validates the current session and returns student/session state.
+- `POST /api/v1/student/session/activity` — throttled sliding inactivity refresh.
+- `GET /api/dev/phase4` — authenticated Phase 4 lesson-access proof.
+- `GET /api/dev/phase4/resource` — authenticated Phase 4 resource proof.
+- `POST /api/dev/phase4/answer` — authenticated Phase 4 protected Answer Pack proof.
+- Other unimplemented `/api/*` routes return `501 NOT_IMPLEMENTED`.
 
-### Environment variables
+## Environment variables/configuration
 
 - `ENVIRONMENT = development`
 - `ALLOWED_ORIGINS = https://futureperfecttuitions.github.io`
+- `DEV_LOGIN_ALLOWLIST = test0101`
+- Normal real-student login remains disabled server-side.
 
-## Cloudflare bindings
+# Cloudflare bindings
 
 | Worker binding | Cloudflare resource | Purpose |
 |---|---|---|
 | `STUDENTS_KV` | `FPT_PORTAL_V2_STUDENTS` | Manually maintained student/config records |
 | `LESSONS_KV` | `FPT_PORTAL_V2_LESSONS` | Lesson catalogue/views/libraries |
-| `DB` | `fpt_portal_v2_db` | Direct Student + Lesson entitlements |
+| `DB` | `fpt_portal_v2_db` | Direct Student + Lesson entitlements and student sessions |
 | `MATERIALS_R2` | `fpt-materials-dev` | Development PreLesson/Homework/Answer files |
 
-## Student KV model currently implemented
+# Student KV state through Phase 4
 
-Canonical key:
+Two test-shape student keys currently coexist because Phase 2/3 and Phase 4 were developed incrementally:
 
-`student:<portal-user-id-lowercase>`
+- `student:test0101` — earlier Phase 2/3 development record.
+- `user:test0101` — Phase 4 authentication-oriented record.
 
-Dummy development key:
+The Phase 4 record contains fields such as:
 
-`student:test0101`
-
-Fields currently include:
-
-- `schemaVersion`
-- `portalUserId`
 - `firstName`
-- `loginPassword`
+- `p` — current development login password
 - `answerPassword`
 - `schoolYear`
 - `vrEligible`
-- `accountStatus`
-- `expiresOn`
+- `status`
+- `expires`
 - `batches`
 - `fullLibraries`
-- `manualLessonAccess`
-- `specialAccess`
+- `manualAccess`
+- `blockedLessons`
 
-Excel-earned lesson entitlements are not stored inside Student KV.
+The final production student shape must follow the current Master Authoritative Specification; do not infer production schema from obsolete Phase 2-only field names.
 
-## Lessons KV model currently implemented
+# Lessons KV state through Phase 4
 
-Key families:
+Key families include:
 
 - `lesson:<LESSON_ID>` — canonical lesson metadata/resources.
 - `view:<VIEW_ID>` — ordered student-facing Year/Level catalogue.
@@ -167,12 +181,12 @@ The implemented R2 path convention is lowercase subject + compact year + term + 
 
 Terms are R2 organisation only and do not create student navigation sections.
 
-## D1 state
+# D1 state
 
 Database: `fpt_portal_v2_db`  
 Database ID: `97250a54-fa91-45ad-a002-3c4566b1fc38`
 
-Table: `lesson_entitlements`
+## Table: `lesson_entitlements`
 
 Primary key:
 
@@ -190,16 +204,41 @@ Fields:
 - `source_batch_code`
 - `source_lesson_date`
 
-The `source` constraint is currently `excel`; broader source modelling is deferred until the relevant phase.
-
-### Current development rows for Test0101
+Current development rows include:
 
 - `test0101 + DEV-M01`
 - `test0101 + Y5M1`
 
-Both have core access; VR access is false.
+## Table: `student_sessions`
 
-## Phase 2 idempotency proof
+Fields verified:
+
+- `token_hash`
+- `portal_user_id_norm`
+- `created_at`
+- `last_activity_at`
+- `idle_expires_at`
+- `revoked_at`
+
+D1 stores only the SHA-256 hash of the opaque browser token; observed hexadecimal hash length is 64 characters.
+
+### Single-active-session enforcement
+
+Business rule: exactly one active session per Portal User ID; latest successful login wins.
+
+Applied migration:
+
+`worker/migrations/0003_single_active_student_session.sql`
+
+Installed trigger:
+
+`trg_student_sessions_single_active`
+
+Mechanism: immediately before a new `student_sessions` row is inserted, D1 sets `revoked_at` on every older non-revoked session for the same `portal_user_id_norm`. This gives database-level server-side enforcement independent of browser behaviour.
+
+This rule was manually proven with two browsers: the newer login remained valid and the earlier Chrome session was rejected on its next authenticated request.
+
+# Phase 2 idempotency proof retained
 
 The same Student + Lesson upsert was executed twice for `DEV-M01`.
 
@@ -209,9 +248,9 @@ Verified:
 - first-granted timestamp stayed unchanged;
 - last-confirmed timestamp updated.
 
-This is the foundation for the later Excel sync workflow.
+This remains the foundation for the later Excel sync workflow.
 
-# Phase 3 implementation detail
+# Phase 3 implementation detail retained
 
 ## Proof lesson
 
@@ -235,54 +274,94 @@ Public R2 access remains disabled.
 
 The physical Homework/Answer filenames use the source-curriculum code `L2T1M01`, while the canonical portal lesson is `Y5M1`. This is valid because exact R2 object keys are explicitly stored in the lesson record and are independent of the immutable Portal Lesson ID.
 
-## Phase 3 backend verification
+## Protected viewer
 
-Observed from `GET /api/dev/phase3`:
-
-- `ok: true`
-- `phase: 3`
-- `phase3Healthy: true`
-- `studentFound: true`
-- `viewFound: true`
-- Y5M1 entitlement found through D1
-- PreLesson `available: true`
-- Homework `available: true`
-- Answer Pack `available: true`
-- Answer Pack `passwordRequired: true`
-- ScreenPal `cOV0omn3XVh`
-
-## Phase 3 student-facing verification
-
-Verified manually:
-
-1. Subject screen shows Maths and disabled Phase-3 English placeholder.
-2. Maths opens Year 5.
-3. Year 5 shows exactly one released lesson, Y5M1.
-4. Y5M1 lesson page displays title/description/resources from data.
-5. PreLesson opens correctly through the Worker from private R2.
-6. ScreenPal video embeds correctly.
-7. Homework opens correctly through the Worker from private R2.
-8. Answer Pack requires password.
-9. Wrong Answer Pack password is rejected.
-10. Show/hide eye works.
-11. Correct Answer Pack password opens the actual pages.
-12. Protected Answer Pack uses a custom PDF.js page renderer with no ordinary browser PDF toolbar.
-13. On-screen watermark `Test0101 — Future Perfect Tuitions` is displayed.
-14. Closing/reopening the protected resource returns to the password prompt.
-
-## Protected viewer implementation note
-
-The first Phase 3 implementation used a browser PDF iframe. Chrome displayed an intermediate PDF/Open surface, which did not meet the intended protected-view experience. It was replaced with a PDF.js canvas/page renderer during Phase 3.
+The first Phase 3 implementation used a browser PDF iframe. Chrome displayed an intermediate PDF/Open surface, so it was replaced with a PDF.js canvas/page renderer.
 
 This hides ordinary PDF download/print controls. It does not claim absolute anti-copy protection; screenshots and advanced browser inspection cannot be fully prevented on the web.
 
-## Phase 3 security limitation
+# Phase 4 verification — COMPLETE
 
-Phase 3 intentionally uses a fixed development student and development-only routes. It proves the lesson/resource architecture only.
+A detailed test record is committed at:
 
-It is **not** the final authentication/session model. Production-grade authentication and session enforcement are Phase 4.
+`docs/data/PHASE4_VERIFICATION.md`
 
-## Entitlement source rule retained
+Manual verification completed on 21 August 2026 included the following.
+
+## Regression protection
+
+- Phase 2 diagnostic remained healthy.
+- Phase 3 diagnostic remained healthy and still returned Y5M1 with PreLesson, ScreenPal, Homework and Answer Pack availability.
+
+## Credentials and identity
+
+- `TEST0101` successfully authenticated and normalised to `test0101`.
+- Wrong valid-format password was rejected.
+- Non-allowlisted `OTHER0101` was rejected.
+- Generic invalid-login wording was shown.
+- Normal student login remained disabled.
+
+## Browser/session security
+
+- Login issued `fpt_v2_session` as an opaque `HttpOnly`, `Secure` browser cookie.
+- Browser authentication worked from GitHub Pages using `credentials: include`.
+- Session token was never exposed to page JavaScript.
+- D1 stored only the SHA-256 token hash.
+- Session idle expiry was exactly two hours after activity.
+- Refreshing authenticated activity moved both last-activity and idle-expiry timestamps forward by the same amount.
+
+## Logout and expiry
+
+- Logout cleared browser authentication and set `revoked_at` on the corresponding D1 row.
+- Forced past `idle_expires_at` caused the next authenticated request to lose the session.
+- Therefore session expiry is enforced server-side rather than merely displayed in the UI.
+
+## Single-device login
+
+- Existing active sessions were first cleared.
+- D1 single-session trigger was installed and verified.
+- Chrome logged in successfully.
+- A second browser logged in as the same student.
+- The second browser stayed authenticated.
+- The original Chrome session became invalid on refresh.
+
+Result: PASS — exactly one active session per Portal User ID; latest successful login wins.
+
+## Withdrawn/expired account behaviour
+
+Withdrawn-account test:
+
+- `status` temporarily changed to `withdrawn`.
+- student remained authenticated;
+- session UI displayed `Locked`;
+- lesson/resource proof was blocked;
+- D1 entitlements were retained.
+
+Expired-account test:
+
+- `status` remained active;
+- `expires` temporarily set to a past date;
+- student remained authenticated;
+- account displayed `Locked`;
+- lesson/resource proof was blocked.
+
+Test student was restored to `status: active`, `expires: null` after testing.
+
+## Final clean-state proof
+
+Correct credentials were entered again after all negative tests.
+
+Observed:
+
+- authenticated `Test · test0101` state;
+- status `active`;
+- last activity recorded;
+- idle expiry exactly two hours later;
+- green `Phase 4 browser authentication, server session and authenticated lesson access are working.` banner.
+
+Phase 4 checkpoint is satisfied.
+
+# Entitlement source rule retained
 
 Effective lesson access will ultimately be the union of separate sources:
 
@@ -292,28 +371,38 @@ Effective lesson access will ultimately be the union of separate sources:
 
 One source must not silently overwrite or destroy another.
 
-## Deliberate non-actions through Phase 3
+# Deliberate non-actions through Phase 4
 
 - No live-domain switch.
-- No CNAME on V2.
+- No production `CNAME` on V2.
 - No changes to the existing live portal/Worker/KVs.
-- No real student population enabled.
-- No real catalogue import.
-- No production student authentication/session system yet.
+- No normal real-student login enabled.
+- No real production student population enabled yet.
+- No real catalogue import yet.
 - No Excel/VBA sync endpoint yet.
 - No Admin console.
-- No English/VR production implementation yet.
+- No full English/VR production implementation yet.
 
-## Manual Worker deployment rule
+# Manual Worker deployment rule
 
-Canonical Worker source is committed in GitHub at `worker/src/index.js`, but Worker deployment is currently manual through the Cloudflare code editor. Whenever Worker code changes, provide the complete latest `index.js` for copy/paste until/if Worker deployment is later automated.
+Canonical Worker source remains `worker/src/index.js` in GitHub. Worker deployment is currently manual through the Cloudflare code editor. Whenever Worker source changes, deploy the complete current file deliberately and run the relevant regression checks.
+
+The Phase 4 single-session mechanism currently relies on the applied D1 trigger in `fpt_portal_v2_db`; it does not require a new Worker deployment because the trigger executes on the existing Worker session insert.
 
 # Next incomplete phase
 
-## Phase 4 — Build Secure Student Authentication
+## Phase 5 — Build the V2 Visual Shell
 
-Purpose: replace the fixed development-student mechanism with real student username/password authentication and secure sessions before expanding the portal further.
+Purpose: turn the proven Phase 4 authentication/session model and Phase 3 lesson journey into the real student-facing V2 shell while preserving the established Future Perfect Tuitions visual identity.
 
-Phase 4 must preserve the proven Phase 3 lesson journey while introducing the agreed student-login rules, including case-insensitive fixed usernames, 4-character login passwords, no Remember Me, multi-device use, 2-hour inactivity timeout, protected-resource invalidation when the main session expires, and globally locked behaviour for expired/withdrawn accounts.
+Key Phase 5 direction from the Steps/Master:
 
-Checkpoint: a test student can authenticate securely, obtain a valid session, access only their own entitled lesson journey, and loses protected access when the session is invalid/expired. Normal real-student access must remain disabled until this phase is deliberately verified and switched on.
+- preserve FPT navy/red palette, top bar/logo treatment, airmail border, rounded cards and pill/button language;
+- responsive desktop/tablet/mobile layouts;
+- keep login visually familiar;
+- after login show first-name greeting;
+- two top-level subject choices only: Maths and English;
+- retain the secure Phase 4 session model unchanged;
+- do not enable normal student access during development.
+
+Phase 5 checkpoint: V2 visibly feels like the next version of the current FPT portal rather than a separate unrelated product, while authentication and existing lesson/resource regressions remain healthy.
