@@ -5,7 +5,10 @@ compatibility_date = "2026-08-20"
 [vars]
 ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+DEV_LOGIN_ALLOWLIST = "test0101"
 
-# Phase 1 note:
-# KV, D1 and R2 bindings are intentionally added only after the
-# corresponding V2 Cloudflare resources have been created.
+# Phase 4 development safety:
+# Normal student login remains disabled. Only usernames explicitly listed in
+# DEV_LOGIN_ALLOWLIST may authenticate while ENVIRONMENT=development.
+# Production login remains disabled unless STUDENT_LOGIN_ENABLED=true is
+# deliberately configured at cutover.
