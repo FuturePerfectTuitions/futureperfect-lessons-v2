@@ -28,7 +28,7 @@ Verified:
 
 ### Phase 3 — COMPLETE
 
-One complete real-shaped Maths lesson now works end-to-end for the development student.
+One complete real-shaped Maths lesson works end-to-end for the development student.
 
 Proof lesson:
 
@@ -43,17 +43,29 @@ Verified student journey:
 
 `Subjects → Maths → Year 5 → Y5M1 → PreLesson Sheet → embedded ScreenPal video → Homework → password-protected Answer Pack`
 
-Verified protected-answer behaviour:
+### Phase 4 — COMPLETE
 
-- wrong password is rejected;
-- show/hide eye works;
-- correct password opens the Answer Pack;
-- pages render inside a custom PDF.js viewer;
-- no normal browser PDF download/print toolbar is shown;
-- a small `Test0101 — Future Perfect Tuitions` on-screen watermark is displayed;
-- the Answer Pack password is required each time the protected resource is reopened.
+Secure student authentication/session behaviour is now proven in the isolated development environment.
 
-This is still a development proof. Production-grade login/session security is Phase 4.
+Verified:
+
+- case-insensitive username login;
+- agreed 4-character login-password format;
+- opaque `HttpOnly`/`Secure` browser session cookie;
+- SHA-256 session-token hash stored in D1 rather than the raw browser token;
+- exactly one active session per Portal User ID — latest login wins;
+- 2-hour sliding inactivity timeout;
+- server-side expiry enforcement;
+- logout revokes the D1 session;
+- non-allowlisted development users are rejected;
+- wrong password is rejected with generic messaging;
+- withdrawn/expired students can authenticate but operate in globally locked mode;
+- authenticated Phase 4 lesson access remains healthy for the active test student;
+- Phase 2 and Phase 3 regressions still pass.
+
+Single-device enforcement is implemented at D1 level by migration `0003_single_active_student_session.sql` and trigger `trg_student_sessions_single_active`, so each new session insert revokes older active sessions for the same Portal User ID.
+
+Normal real-student login remains deliberately disabled during development.
 
 ## Development URLs
 
@@ -65,6 +77,10 @@ Phase 3 lesson proof:
 
 `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase3.html`
 
+Phase 4 authentication proof:
+
+`https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase4.html`
+
 ## Worker
 
 Worker name:
@@ -75,17 +91,24 @@ Worker URL:
 
 `https://fpt-portal-v2-worker.futureperfectlessons.workers.dev`
 
-Current Worker source:
+Canonical Worker source:
 
 `worker/src/index.js`
 
-Current development routes:
+Current development routes include:
 
 - `GET /api/health`
 - `GET /api/dev/phase2`
 - `GET /api/dev/phase3`
 - `GET /api/dev/phase3/resource`
 - `POST /api/dev/phase3/answer`
+- `POST /api/v1/student/auth/login`
+- `POST /api/v1/student/auth/logout`
+- `GET /api/v1/student/session`
+- `POST /api/v1/student/session/activity`
+- `GET /api/dev/phase4`
+- `GET /api/dev/phase4/resource`
+- `POST /api/dev/phase4/answer`
 
 ## Cloudflare resources
 
@@ -96,10 +119,19 @@ Current development routes:
 | `DB` | `fpt_portal_v2_db` |
 | `MATERIALS_R2` | `fpt-materials-dev` |
 
-Environment variables:
+Environment variables include:
 
 - `ENVIRONMENT=development`
 - `ALLOWED_ORIGINS=https://futureperfecttuitions.github.io`
+- `DEV_LOGIN_ALLOWLIST=test0101`
+
+Normal student login remains disabled server-side.
+
+## D1 migrations
+
+- `worker/migrations/0001_lesson_entitlements.sql`
+- `worker/migrations/0002_student_sessions.sql`
+- `worker/migrations/0003_single_active_student_session.sql`
 
 ## Documentation
 
@@ -109,16 +141,14 @@ Environment variables:
 - `docs/data/PHASE2_SETUP.md`
 - `docs/data/PHASE2_VERIFICATION.md`
 - `docs/data/PHASE3_VERIFICATION.md`
-- `worker/migrations/0001_lesson_entitlements.sql`
+- `docs/data/PHASE4_VERIFICATION.md`
 
 ## Safety rule
 
 The existing live portal, existing live Worker and existing live KV namespaces must remain untouched while V2 is being built and tested.
 
-Normal student login remains disabled until the authentication phase is complete and deliberately switched on.
-
 ## Next phase
 
-**Phase 4 — Build Secure Student Authentication.**
+**Phase 5 — Build the V2 Visual Shell.**
 
-Replace the fixed development-student mechanism with real username/password authentication and secure sessions while preserving the Phase 3 data-driven lesson journey.
+Carry the established Future Perfect Tuitions visual identity into the real V2 student shell while keeping the Phase 4 authentication/session model and the proven Phase 3 lesson journey intact.
