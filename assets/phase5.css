@@ -117,6 +117,13 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
+/* Edge supplies its own password reveal control. Hide the native control so
+   the portal's cross-browser eye button is the only reveal control shown. */
+.phase5-password-field input::-ms-reveal,
+.phase5-password-field input::-ms-clear {
+  display: none;
+}
+
 .phase5-login-form input:focus {
   border-color: rgba(1, 33, 105, 0.55);
   background: #fff;
