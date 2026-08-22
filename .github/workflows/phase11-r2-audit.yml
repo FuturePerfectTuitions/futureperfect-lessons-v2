@@ -1,0 +1,85 @@
+name: Phase 11 R2 read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ops/phase11-r2-audit.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.head_ref == 'ops/phase11-r2-audit'
+    runs-on: ubuntu-latest
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      WORKER_NAME: fpt-portal-v2-worker
+      EXPECTED_ORIGIN: https://futureperfecttuitions.github.io
+      EXPECTED_BUCKET: fpt-materials-dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard trigger-only PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          changed="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+          test "$changed" = "ops/phase11-r2-audit.trigger" || {
+            echo 'Refusing audit: trigger PR must contain only ops/phase11-r2-audit.trigger.' >&2
+            printf '%s\n' "$changed" >&2
+            exit 1
+          }
+
+      - name: Verify isolated V2 Worker and development bucket
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e --arg origin "$EXPECTED_ORIGIN" '.result.bindings[]? | select(.name=="ALLOWED_ORIGIN") | .text==$origin' <<<"$settings" >/dev/null
+          jq -e --arg bucket "$EXPECTED_BUCKET" '.result.bindings[]? | select(.name=="MATERIALS_R2") | .bucket_name==$bucket' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="APP_ENV") | .text=="development"' <<<"$settings" >/dev/null
+          echo 'V2 development Worker guards passed.'
+
+      - name: List exact development R2 object keys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p phase11-audit
+          printf '[]' > phase11-audit/r2-objects.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${EXPECTED_BUCKET}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              url="${url}&cursor=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key, size, etag, uploaded}]' <<<"$page" > phase11-audit/page.json
+            jq -s '.[0] + .[1]' phase11-audit/r2-objects.json phase11-audit/page.json > phase11-audit/next.json
+            mv phase11-audit/next.json phase11-audit/r2-objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          jq -r '.[].key' phase11-audit/r2-objects.json | LC_ALL=C sort > phase11-audit/r2-keys.txt
+          count="$(wc -l < phase11-audit/r2-keys.txt | tr -d ' ')"
+          echo "Development R2 object count: ${count}"
+          test "$count" -gt 0
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-r2-audit
+          path: phase11-audit/
+          retention-days: 7
