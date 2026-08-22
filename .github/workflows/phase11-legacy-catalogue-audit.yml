@@ -17,7 +17,6 @@ jobs:
     env:
       CF_API: https://api.cloudflare.com/client/v4
       LEGACY_WORKER_NAME: frosty-rain-828e
-      WRANGLER_VERSION: 4.125.0
     steps:
       - name: Checkout trusted base workflow
         uses: actions/checkout@v4
@@ -59,14 +58,30 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p phase11-legacy-catalogue/buckets
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-          $W kv key list --namespace-id "$LESSONS_KV_ID" --remote > phase11-legacy-catalogue/key-list.json
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          printf '[]' > phase11-legacy-catalogue/key-list.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/keys?limit=1000"
+            if [ -n "$cursor" ]; then
+              encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded}"
+            fi
+            page="$(curl -fsS "${auth[@]}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '.result // []' <<<"$page" > phase11-legacy-catalogue/page.json
+            jq -s '.[0] + .[1]' phase11-legacy-catalogue/key-list.json phase11-legacy-catalogue/page.json > phase11-legacy-catalogue/next.json
+            mv phase11-legacy-catalogue/next.json phase11-legacy-catalogue/key-list.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
           jq -r '.[].name' phase11-legacy-catalogue/key-list.json | LC_ALL=C sort > phase11-legacy-catalogue/key-names.txt
           jq -r '.[].name | select(test("^Y[2-6](M|E)(11plus)?$|^Y[45]VR$"))' phase11-legacy-catalogue/key-list.json | LC_ALL=C sort > phase11-legacy-catalogue/export-keys.txt
           test -s phase11-legacy-catalogue/export-keys.txt
           while IFS= read -r key; do
             safe="$(printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_')"
-            $W kv key get "$key" --namespace-id "$LESSONS_KV_ID" --remote > "phase11-legacy-catalogue/buckets/${safe}.json"
+            encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/values/${encoded}" > "phase11-legacy-catalogue/buckets/${safe}.json"
             jq -e 'type == "array"' "phase11-legacy-catalogue/buckets/${safe}.json" >/dev/null
           done < phase11-legacy-catalogue/export-keys.txt
           printf 'Exported ordinary-content buckets: '
