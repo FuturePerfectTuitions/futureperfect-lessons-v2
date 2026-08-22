@@ -49,7 +49,7 @@ jobs:
           echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
           echo 'Legacy lesson catalogue binding resolved read-only. Student/user KV was not read.'
 
-      - name: Export ordinary lesson metadata only
+      - name: Export complete Lessons namespace read-only
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p phase11-legacy-catalogue/buckets
+          mkdir -p phase11-legacy-catalogue/values
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           printf '[]' > phase11-legacy-catalogue/key-list.json
           cursor=''
@@ -76,28 +76,24 @@ jobs:
             [ -z "$cursor" ] && break
           done
           jq -r '.[].name' phase11-legacy-catalogue/key-list.json | LC_ALL=C sort > phase11-legacy-catalogue/key-names.txt
-          jq -r '.[].name | select(test("^Y[2-6](M|E)(11plus)?$|^Y[45]VR$"))' phase11-legacy-catalogue/key-list.json | LC_ALL=C sort > phase11-legacy-catalogue/export-keys.txt
-          test -s phase11-legacy-catalogue/export-keys.txt
+          test -s phase11-legacy-catalogue/key-names.txt
+          : > phase11-legacy-catalogue/manifest.tsv
           while IFS= read -r key; do
-            safe="$(printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_')"
+            token="$(printf '%s' "$key" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
             encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
-            curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/values/${encoded}" > "phase11-legacy-catalogue/buckets/${safe}.json"
-            jq -e 'type == "array"' "phase11-legacy-catalogue/buckets/${safe}.json" >/dev/null
-          done < phase11-legacy-catalogue/export-keys.txt
-          printf 'Exported ordinary-content buckets: '
-          paste -sd, phase11-legacy-catalogue/export-keys.txt
+            curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/values/${encoded}" > "phase11-legacy-catalogue/values/${token}.value"
+            printf '%s\t%s\n' "$token" "$key" >> phase11-legacy-catalogue/manifest.tsv
+          done < phase11-legacy-catalogue/key-names.txt
+          echo "Lessons namespace values exported: $(wc -l < phase11-legacy-catalogue/key-names.txt | tr -d ' ')"
 
-      - name: Prove export contains content metadata, not permissions
+      - name: Prove export is lesson-content namespace only
         shell: bash
         run: |
           set -euo pipefail
-          for f in phase11-legacy-catalogue/buckets/*.json; do
-            jq -e 'all(.[]; (has("n") or has("title") or has("sp") or has("desc")))' "$f" >/dev/null
-            if grep -Eqi '"(password|expires|entitlements|mathsYears|vrBuckets|portalUserId|username|manualAccess)"[[:space:]]*:' "$f"; then
-              echo "Unexpected permission/user field in $f; refusing artifact." >&2
-              exit 1
-            fi
-          done
+          if grep -ERqi '"(password|expires|mathsYears|vrBuckets|portalUserId|username|manualAccess)"[[:space:]]*:' phase11-legacy-catalogue/values; then
+            echo 'Unexpected user/config-shaped field found; refusing artifact.' >&2
+            exit 1
+          fi
           echo 'Legacy export safety check: PASS'
 
       - name: Upload read-only catalogue artifact
