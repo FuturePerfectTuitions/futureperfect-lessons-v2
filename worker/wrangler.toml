@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase8.js"
+main = "src/index-phase9.js"
 compatibility_date = "2026-08-20"
 
 [vars]
@@ -7,10 +7,10 @@ ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
 DEV_LOGIN_ALLOWLIST = "test0101"
 
-# Phase 8 development entrypoint:
-# src/index-phase8.js layers protected Answer Pack/Answer Key authorization and
-# the controlled answer-view route over the completed Phase 7 Worker adapter.
-# Existing Phase 1-7 routes continue to delegate to their completed implementations.
+# Phase 9 development entrypoint:
+# src/index-phase9.js layers English + 11+ Verbal Reasoning and 11+-only
+# ScreenPal quiz exposure over the completed Phase 8 protected-answer Worker.
+# Existing Phase 1-8 routes continue to delegate to their completed implementations.
 #
 # Normal student login remains disabled. Only usernames explicitly listed in
 # DEV_LOGIN_ALLOWLIST may authenticate while ENVIRONMENT=development.

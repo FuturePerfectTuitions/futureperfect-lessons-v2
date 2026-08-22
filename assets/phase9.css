@@ -1,0 +1,82 @@
+.phase9-quiz-section,
+.phase9-vr-section {
+  border-top: 4px solid rgba(1, 33, 105, 0.12);
+}
+
+.phase9-vr-body {
+  display: grid;
+  gap: 22px;
+}
+
+.phase9-vr-group,
+.phase9-video-block {
+  display: grid;
+  gap: 12px;
+}
+
+.phase9-subheading {
+  margin: 0;
+  color: #012169;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.phase9-pair-card {
+  display: grid;
+  gap: 8px;
+}
+
+.phase9-pair-label {
+  color: #5b6475;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.phase9-answer-label {
+  margin-top: 4px;
+}
+
+.phase9-protected-button {
+  border-color: rgba(215, 25, 32, 0.35);
+}
+
+.phase9-video-button {
+  justify-self: start;
+}
+
+.phase9-player-frame {
+  margin-top: 4px;
+}
+
+.phase9-quiz-message {
+  margin-top: 10px;
+}
+
+#phase9-answer-overlay[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  .phase9-vr-body {
+    gap: 18px;
+  }
+
+  .phase9-video-button {
+    width: 100%;
+  }
+}
+
+.phase9-viewer-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  color: #012169;
+}
+
+.phase9-viewer-heading-row strong {
+  font-size: 1rem;
+}

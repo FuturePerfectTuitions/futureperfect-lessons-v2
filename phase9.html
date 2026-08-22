@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Future Perfect Tuitions — Student Portal</title>
+  <link rel="icon" href="assets/fpt-logo.png">
+  <link rel="stylesheet" href="assets/styles.css">
+  <link rel="stylesheet" href="assets/phase5.css">
+  <link rel="stylesheet" href="assets/phase6.css">
+  <link rel="stylesheet" href="assets/phase7.css">
+  <link rel="stylesheet" href="assets/phase8.css">
+  <link rel="stylesheet" href="assets/phase9.css">
+</head>
+<body class="phase5-page">
+  <div class="phase5-airmail-border" aria-hidden="true"></div>
+
+  <main id="login-screen" class="phase5-login-screen">
+    <section class="phase5-login-card">
+      <div class="phase5-login-logo-wrap">
+        <img src="assets/fpt-logo.png" class="phase5-login-logo" alt="Future Perfect Tuitions">
+      </div>
+      <h1 class="phase5-login-title">Student Login</h1>
+      <p class="phase5-login-intro">Please enter your username and password to access your Future Perfect Tuitions lesson resources.</p>
+      <form id="login-form" class="phase5-login-form">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" required>
+        <label for="login-password">Password</label>
+        <div class="phase5-password-field">
+          <input id="login-password" name="password" type="password" maxlength="4" autocomplete="current-password" required>
+          <button id="toggle-login-password" class="phase5-password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+            <svg id="eye-open" class="phase5-eye-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"></circle>
+            </svg>
+            <svg id="eye-closed" class="phase5-eye-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <path d="M10.6 10.7A3 3 0 0 0 12 15a3 3 0 0 0 2.3-5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.2 17.2 0 0 1-4.2 4.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M6.2 6.3A17.3 17.3 0 0 0 2 12s3.5 7 10 7a10.7 10.7 0 0 0 2.1-.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </button>
+        </div>
+        <button id="login-button" class="phase5-login-button" type="submit">Log in</button>
+        <div id="login-error" class="phase5-login-error" role="alert" hidden>Invalid login</div>
+      </form>
+      <p class="phase5-security-note">🔒 Future Perfect Tuitions lesson materials are provided for the intended student and must not be shared, copied or distributed.</p>
+    </section>
+    <footer class="phase5-footer">Future Perfect Tuitions · Student Portal</footer>
+  </main>
+
+  <div id="portal-screen" class="phase5-portal" hidden>
+    <header class="phase5-topbar">
+      <a href="https://futureperfect.education/" class="phase5-topbar-logo-link" aria-label="Future Perfect Tuitions">
+        <img src="assets/fpt-logo.png" class="phase5-topbar-logo" alt="Future Perfect Tuitions">
+      </a>
+      <div class="phase5-topbar-actions">
+        <span class="phase5-dev-badge">DEVELOPMENT</span>
+        <span id="student-greeting" class="phase5-greeting">Hi!</span>
+        <button id="logout-button" class="phase5-logout-button" type="button">Log out</button>
+      </div>
+    </header>
+
+    <main class="phase5-portal-main">
+      <section id="screen-subjects" class="phase5-subject-card phase6-screen">
+        <p class="phase5-eyebrow">Student Portal</p>
+        <h1 id="welcome-heading">Welcome</h1>
+        <p class="phase5-subject-intro">Choose a subject to continue.</p>
+        <div class="phase5-subject-grid">
+          <button id="maths-choice" class="phase5-subject-choice" type="button"><span class="phase5-subject-name">Maths</span><span class="phase5-subject-arrow" aria-hidden="true">→</span></button>
+          <button id="english-choice" class="phase5-subject-choice" type="button"><span class="phase5-subject-name">English</span><span class="phase5-subject-arrow" aria-hidden="true">→</span></button>
+        </div>
+        <div id="phase7-message" class="phase5-message" hidden></div>
+      </section>
+
+      <section id="screen-views" class="phase5-subject-card phase6-screen" hidden>
+        <button id="back-to-subjects" class="phase6-back-button" type="button">← Subjects</button>
+        <p class="phase5-eyebrow">Student Portal</p>
+        <h1 id="views-heading">Maths</h1>
+        <p class="phase5-subject-intro">Choose a year or level.</p>
+        <div id="view-grid" class="phase6-view-grid"></div>
+      </section>
+
+      <section id="screen-lessons" class="phase5-subject-card phase6-screen" hidden>
+        <button id="back-to-views" class="phase6-back-button" type="button">← Back</button>
+        <p id="lessons-eyebrow" class="phase5-eyebrow">Maths</p>
+        <h1 id="lessons-heading">Year 5</h1>
+        <p class="phase5-subject-intro">Your lessons are shown in chronological order.</p>
+        <div class="phase6-search-wrap">
+          <label for="lesson-search">Search lessons</label>
+          <input id="lesson-search" class="phase6-search" type="search" placeholder="Search by lesson ID, title or topic" autocomplete="off">
+        </div>
+        <div id="lesson-list" class="phase6-lesson-list"></div>
+        <div id="lesson-empty" class="phase6-empty-state" hidden></div>
+      </section>
+
+      <section id="screen-lesson" class="phase5-subject-card phase7-lesson-screen" hidden>
+        <button id="back-to-lessons" class="phase6-back-button" type="button">← Lessons</button>
+        <div id="lesson-loading" class="phase6-empty-state" hidden>Loading lesson…</div>
+        <div id="lesson-error" class="phase6-empty-state phase7-error" hidden></div>
+        <div id="lesson-content" hidden>
+          <div class="phase7-lesson-heading">
+            <div>
+              <span id="lesson-code" class="phase7-lesson-code"></span>
+              <h1 id="lesson-title" class="phase7-lesson-title"></h1>
+              <div id="lesson-description" class="phase7-description"></div>
+            </div>
+            <span id="lesson-state" class="phase7-state"></span>
+          </div>
+          <div id="lesson-locked-note" class="phase7-locked-note" hidden>🔒 This lesson is shown as a preview. Its resource names are visible, but the resources themselves are locked.</div>
+          <div class="phase7-resource-sections">
+            <section id="prelesson-section" class="phase7-resource-section" hidden>
+              <div class="phase7-section-heading"><span class="phase7-kicker">Before the lesson</span><h2>PreLesson Sheets</h2></div>
+              <div id="prelesson-list" class="phase7-resource-list"></div>
+            </section>
+            <section id="video-section" class="phase7-resource-section" hidden>
+              <div class="phase7-section-heading"><span class="phase7-kicker">Main lesson</span><h2>Lesson Video</h2></div>
+              <div id="video-locked-row" hidden></div>
+              <div id="video-loading" class="phase7-inline-note" hidden>Preparing video…</div>
+              <div id="video-error" class="phase7-inline-note phase7-error-text" hidden></div>
+              <div id="video-frame" class="phase7-player-frame" hidden><iframe id="lesson-player" title="Lesson video" allow="fullscreen" allowfullscreen scrolling="no"></iframe></div>
+            </section>
+            <section id="homework-section" class="phase7-resource-section" hidden>
+              <div class="phase7-section-heading"><span class="phase7-kicker">After the lesson</span><h2>Homework</h2></div>
+              <div id="homework-list" class="phase7-homework-list"></div>
+            </section>
+            <section id="other-section" class="phase7-resource-section" hidden>
+              <div class="phase7-section-heading"><span class="phase7-kicker">Extra material</span><h2>Other Resources</h2></div>
+              <div id="other-list" class="phase7-resource-list"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="phase5-footer">Future Perfect Tuitions · Student Portal</footer>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="assets/phase8.js"></script>
+  <script src="assets/phase9.js"></script>
+  <script src="assets/phase7.js"></script>
+  <script src="assets/phase7-upsell.js"></script>
+</body>
+</html>
