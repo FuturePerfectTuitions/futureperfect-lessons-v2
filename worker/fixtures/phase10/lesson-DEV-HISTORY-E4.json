@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-HISTORY-E4",
+  "order": 401,
+  "title": "Year 4 English History Proof",
+  "description": "Development-only historical English lesson used to verify independent subject history grouping.",
+  "subject": "english",
+  "active": true,
+  "testOnly": true,
+  "core": {
+    "preLessonSheets": [],
+    "homeworks": [],
+    "otherResources": []
+  }
+}
