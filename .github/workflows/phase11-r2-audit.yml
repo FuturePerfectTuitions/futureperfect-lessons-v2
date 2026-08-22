@@ -45,9 +45,9 @@ jobs:
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
           settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
           jq -e '.success == true' <<<"$settings" >/dev/null
-          jq -e --arg origin "$EXPECTED_ORIGIN" '.result.bindings[]? | select(.name=="ALLOWED_ORIGIN") | .text==$origin' <<<"$settings" >/dev/null
-          jq -e --arg bucket "$EXPECTED_BUCKET" '.result.bindings[]? | select(.name=="MATERIALS_R2") | .bucket_name==$bucket' <<<"$settings" >/dev/null
-          jq -e '.result.bindings[]? | select(.name=="APP_ENV") | .text=="development"' <<<"$settings" >/dev/null
+          jq -e --arg origin "$EXPECTED_ORIGIN" '.result.bindings[]? | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text==$origin)' <<<"$settings" >/dev/null
+          jq -e --arg bucket "$EXPECTED_BUCKET" '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$bucket)' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' <<<"$settings" >/dev/null
           echo 'V2 development Worker guards passed.'
 
       - name: List exact development R2 object keys
