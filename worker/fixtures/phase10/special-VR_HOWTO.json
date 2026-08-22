@@ -1,0 +1,12 @@
+{
+  "bucketId": "VR_HOWTO",
+  "type": "vr-howto",
+  "title": "VR How-To",
+  "description": "Verbal Reasoning technique videos for students with manually assigned VR How-To access.",
+  "active": true,
+  "testOnly": true,
+  "items": [
+    {"id":"vr-howto-1","title":"VR How-To — Technique 1","description":"Development-only VR How-To fixture.","video":{"screenpal":"DEV-P10-VR-HOWTO-1"}},
+    {"id":"vr-howto-2","title":"VR How-To — Technique 2","description":"Development-only VR How-To fixture.","video":{"screenpal":"DEV-P10-VR-HOWTO-2"}}
+  ]
+}

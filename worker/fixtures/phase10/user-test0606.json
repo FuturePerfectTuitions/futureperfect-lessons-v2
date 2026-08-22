@@ -1,0 +1,17 @@
+{
+  "firstName": "Phase10Y4",
+  "p": "Y4ok",
+  "answerPassword": "A4ns",
+  "schoolYear": 4,
+  "vrEligible": true,
+  "status": "active",
+  "expires": null,
+  "batches": ["Y4M11DEV1", "Y4E11DEV1"],
+  "fullLibraries": [],
+  "manualAccess": {
+    "coreLessons": [],
+    "vrLessons": [],
+    "specialBuckets": ["Y4MAssT1", "Y4MAssT2", "VR_HOWTO"]
+  },
+  "blockedLessons": []
+}
