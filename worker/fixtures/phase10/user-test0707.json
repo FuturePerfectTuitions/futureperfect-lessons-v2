@@ -1,0 +1,17 @@
+{
+  "firstName": "HistoryTest",
+  "p": "H7st",
+  "answerPassword": "P7ak",
+  "schoolYear": 5,
+  "vrEligible": false,
+  "status": "active",
+  "expires": null,
+  "batches": ["Y5MDEVHIST", "Y5EDEVHIST"],
+  "fullLibraries": [],
+  "manualAccess": {
+    "coreLessons": [],
+    "vrLessons": [],
+    "specialBuckets": []
+  },
+  "blockedLessons": []
+}

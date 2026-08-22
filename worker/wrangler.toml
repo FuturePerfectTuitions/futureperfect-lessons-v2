@@ -1,19 +1,19 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase10.js"
+main = "src/index-phase10-history.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
 [vars]
 ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
-DEV_LOGIN_ALLOWLIST = "test0101,test0202,test0303,test0404,test0505,test0606"
+DEV_LOGIN_ALLOWLIST = "test0101,test0202,test0303,test0404,test0505,test0606,test0707"
 
-# Phase 10 development entrypoint:
-# src/index-phase10.js layers manually assigned special areas over Phase 9:
-# 11+ Maths Assessments, Year 5 11+ MOCKS with separate daily-password gating,
-# and VR How-To under English 11+/VR.
+# Phase 10 development entrypoint with navigation regression correction:
+# src/index-phase10-history.js layers Current/Previous Year/Level grouping over
+# src/index-phase10.js, which provides manually assigned 11+ Maths Assessments,
+# Year 5 11+ MOCKS with separate daily-password gating, and VR How-To.
 # MOCK_DAILY_PASSWORDS is a Worker secret/config value and must never be committed.
 # Cloudflare binding identifiers remain generated from the audited V2 runtime by
-# the guarded deployment workflow rather than hard-coded in this repository file.
+# guarded deployment workflows rather than hard-coded in this repository file.
 # Normal student login remains disabled; only DEV_LOGIN_ALLOWLIST can authenticate
 # while ENVIRONMENT=development.
