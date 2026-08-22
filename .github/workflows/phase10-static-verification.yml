@@ -7,14 +7,17 @@ on:
       - phase10.html
       - assets/phase10.js
       - assets/phase10-counts.js
+      - assets/phase10-history.js
       - assets/phase10.css
       - worker/src/index-phase10.js
+      - worker/src/index-phase10-history.js
       - worker/wrangler.toml
       - worker/migrations/0006_mock_password_rate_limits.sql
       - worker/fixtures/phase10/**
       - tests/phase10-*.sh
       - tests/phase10-*.mjs
       - .github/workflows/phase10-cloudflare-apply.yml
+      - .github/workflows/phase10-history-cloudflare-apply.yml
       - .github/workflows/phase10-static-verification.yml
 
 permissions:
@@ -34,14 +37,19 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker/src/index-phase10.js
+          node --check worker/src/index-phase10-history.js
           node --check assets/phase10.js
           node --check assets/phase10-counts.js
+          node --check assets/phase10-history.js
           node --check tests/phase10-browser-verification.mjs
+          node --check tests/phase10-history-browser-verification.mjs
           bash -n tests/phase10-api-verification.sh
+          bash -n tests/phase10-history-api-verification.sh
           grep -Fq 'assets/phase10.css' phase10.html
           grep -Fq 'assets/phase10.js' phase10.html
           grep -Fq 'assets/phase10-counts.js' phase10.html
-          grep -Fq 'main = "src/index-phase10.js"' worker/wrangler.toml
+          grep -Fq 'assets/phase10-history.js' phase10.html
+          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
           grep -Fq 'MOCK_DAILY_PASSWORDS is a Worker secret' worker/wrangler.toml
           grep -Fq 'CREATE TABLE IF NOT EXISTS mock_password_rate_limits' worker/migrations/0006_mock_password_rate_limits.sql
           for f in worker/fixtures/phase10/*.json; do jq -e . "$f" >/dev/null; done
