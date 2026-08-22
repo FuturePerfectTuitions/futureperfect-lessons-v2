@@ -106,6 +106,49 @@ jobs:
             }
           ' /tmp/worker-settings.json
 
+      - name: Deployed Worker package inventory (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --dump-header /tmp/worker-package-headers.txt \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-package.bin
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib
+          import re
+
+          headers = open('/tmp/worker-package-headers.txt', 'rb').read().decode('latin-1', 'replace')
+          body = open('/tmp/worker-package.bin', 'rb').read()
+          match = re.search(r'(?im)^content-type:\s*([^\r\n]+)', headers)
+          content_type = match.group(1).strip() if match else 'unknown'
+          print('Content-Type:', content_type)
+          print('Package SHA256:', hashlib.sha256(body).hexdigest())
+
+          names = []
+          if content_type.lower().startswith('multipart/'):
+              message = BytesParser(policy=default).parsebytes(
+                  ('Content-Type: ' + content_type + '\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1') + body
+              )
+              for part in message.iter_parts():
+                  name = part.get_filename() or part.get_param('name', header='content-disposition') or part.get_param('name')
+                  payload = part.get_payload(decode=True) or b''
+                  names.append((name or '(unnamed)', hashlib.sha256(payload).hexdigest()))
+          else:
+              names.append(('single-script', hashlib.sha256(body).hexdigest()))
+
+          print('Modules:')
+          for name, digest in names:
+              print(f'- {name}: {digest}')
+
+          for marker in ('index-phase8.js', 'index-phase7.js', 'index.js'):
+              print(f'Contains {marker}:', marker.encode() in body)
+          PY
+
       - name: Account resource inventory (read-only)
         shell: bash
         run: |
