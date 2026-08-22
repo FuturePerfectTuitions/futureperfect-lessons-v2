@@ -1,0 +1,290 @@
+name: Phase 9 guarded Cloudflare apply
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/phase9-apply-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: Deploy and seed Phase 9 development V2
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase9-cloudflare-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: '4.125.0'
+    steps:
+      - name: Checkout Phase 9 branch
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Validate local Phase 9 source and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check worker/src/index.js
+          node --check worker/src/index-phase7.js
+          node --check worker/src/index-phase8.js
+          node --check worker/src/index-phase9.js
+          jq -e '.lessonId == "DEV-P9-ENGLISH" and .subject == "english" and .testOnly == true and .core.video.quiz == "DEV-P9-QUIZ-SENTINEL" and (.vr.preLesson | length) == 1 and (.vr.homeworks | length) == 1' worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json >/dev/null
+          jq -e '.schoolYear == 5 and .vrEligible == true and .batches == ["Y5E11DEV1"]' worker/fixtures/phase9/user-test0404.json >/dev/null
+          echo "Local Phase 9 source and fixtures passed static validation."
+
+      - name: Read and guard current V2 Worker state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-settings-before.json
+
+          jq -e '.success == true' /tmp/worker-settings-before.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/worker-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "ENVIRONMENT" and .type == "plain_text" and .text == "development")' /tmp/worker-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "ALLOWED_ORIGINS" and .type == "plain_text" and .text == "https://futureperfecttuitions.github.io")' /tmp/worker-settings-before.json >/dev/null
+
+          CURRENT_ALLOWLIST="$(jq -r '.result.bindings[] | select(.name == "DEV_LOGIN_ALLOWLIST") | .text' /tmp/worker-settings-before.json)"
+          case "$CURRENT_ALLOWLIST" in
+            "test0101,test0202,test0303") NEW_ALLOWLIST="test0101,test0202,test0303,test0404" ;;
+            "test0101,test0202,test0303,test0404") NEW_ALLOWLIST="$CURRENT_ALLOWLIST" ;;
+            *) echo "Unexpected DEV_LOGIN_ALLOWLIST; refusing to deploy." >&2; exit 1 ;;
+          esac
+
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV" and .type == "kv_namespace") | .namespace_id' /tmp/worker-settings-before.json)"
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV" and .type == "kv_namespace") | .namespace_id' /tmp/worker-settings-before.json)"
+          R2_BUCKET="$(jq -r '.result.bindings[] | select(.name == "MATERIALS_R2" and .type == "r2_bucket") | .bucket_name' /tmp/worker-settings-before.json)"
+          DB_ID="$(jq -r '.result.bindings[] | select(.name == "DB" and .type == "d1") | .id' /tmp/worker-settings-before.json)"
+
+          for value in "$STUDENTS_KV_ID" "$LESSONS_KV_ID" "$R2_BUCKET" "$DB_ID"; do
+            test -n "$value" && test "$value" != "null"
+          done
+          test "$R2_BUCKET" = "fpt-materials-dev"
+
+          {
+            echo "students_kv_id=$STUDENTS_KV_ID"
+            echo "lessons_kv_id=$LESSONS_KV_ID"
+            echo "r2_bucket=$R2_BUCKET"
+            echo "db_id=$DB_ID"
+            echo "new_allowlist=$NEW_ALLOWLIST"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Guard passed: exact V2 development Worker and expected bindings are present."
+
+      - name: Confirm deployed Phase 8 protected-answer baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-package-before.bin
+
+          for marker in 'answer_view_tokens' 'ANSWER_PASSWORD_INCORRECT'; do
+            if grep -aFq "$marker" /tmp/worker-package-before.bin; then
+              echo "Phase 8 marker present: $marker"
+            else
+              echo "Required Phase 8 marker missing: $marker" >&2
+              exit 1
+            fi
+          done
+          echo "Deployed Phase 8 protected-answer baseline is confirmed."
+
+      - name: Guard Phase 9 data preconditions
+        shell: bash
+        env:
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons_kv_id }}
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students_kv_id }}
+        run: |
+          set -euo pipefail
+          WRANGLER="npx --yes wrangler@${WRANGLER_VERSION}"
+
+          $WRANGLER kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/curriculum-before.json
+          jq -e '.lessonIds == ["DEV-P7-ENGLISH"] or .lessonIds == ["DEV-P7-ENGLISH","DEV-P9-ENGLISH"]' /tmp/curriculum-before.json >/dev/null
+
+          EXISTING_PHASE9="$($WRANGLER kv key list --namespace-id "$LESSONS_KV_ID" --prefix "lesson:DEV-P9-ENGLISH" --remote)"
+          if jq -e 'length > 1' <<<"$EXISTING_PHASE9" >/dev/null; then
+            echo "Unexpected duplicate Phase 9 lesson keys; refusing to continue." >&2
+            exit 1
+          fi
+          if jq -e 'length == 1' <<<"$EXISTING_PHASE9" >/dev/null; then
+            $WRANGLER kv key get "lesson:DEV-P9-ENGLISH" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/existing-phase9-lesson.json
+            diff -u <(jq -S . worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json) <(jq -S . /tmp/existing-phase9-lesson.json)
+          fi
+
+          EXISTING_TEST0404="$($WRANGLER kv key list --namespace-id "$STUDENTS_KV_ID" --prefix "user:test0404" --remote)"
+          if jq -e 'length > 1' <<<"$EXISTING_TEST0404" >/dev/null; then
+            echo "Unexpected duplicate Test0404 keys; refusing to continue." >&2
+            exit 1
+          fi
+          if jq -e 'length == 1' <<<"$EXISTING_TEST0404" >/dev/null; then
+            $WRANGLER kv key get "user:test0404" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/existing-test0404.json
+            diff -u <(jq -S . worker/fixtures/phase9/user-test0404.json) <(jq -S . /tmp/existing-test0404.json)
+          fi
+
+          echo "Phase 9 data preconditions passed."
+
+      - name: Generate runtime Wrangler config from audited bindings
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students_kv_id }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons_kv_id }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2_bucket }}
+          DB_ID: ${{ steps.guard.outputs.db_id }}
+          NEW_ALLOWLIST: ${{ steps.guard.outputs.new_allowlist }}
+        run: |
+          set -euo pipefail
+          cat > worker/wrangler.phase9.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase9.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${NEW_ALLOWLIST}"
+
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+          echo "Runtime config generated from the currently bound V2 development resources."
+
+      - name: Dry-run Phase 9 Worker bundle
+        shell: bash
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config wrangler.phase9.runtime.toml --dry-run --outdir /tmp/phase9-worker-build
+
+      - name: Deploy Phase 9 Worker to V2 development
+        shell: bash
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy \
+            --config wrangler.phase9.runtime.toml \
+            --keep-vars \
+            --message "Phase 9 English core + 11+ VR + 11+-only quiz gating"
+
+      - name: Seed Phase 9 KV fixtures
+        shell: bash
+        env:
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons_kv_id }}
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students_kv_id }}
+        run: |
+          set -euo pipefail
+          WRANGLER="npx --yes wrangler@${WRANGLER_VERSION}"
+
+          $WRANGLER kv key put "lesson:DEV-P9-ENGLISH" --namespace-id "$LESSONS_KV_ID" --remote --path worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json
+
+          $WRANGLER kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/curriculum-current.json
+          jq 'if (.lessonIds | index("DEV-P9-ENGLISH")) then . else .lessonIds += ["DEV-P9-ENGLISH"] end' /tmp/curriculum-current.json > /tmp/curriculum-phase9.json
+          $WRANGLER kv key put "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote --path /tmp/curriculum-phase9.json
+
+          $WRANGLER kv key put "user:test0404" --namespace-id "$STUDENTS_KV_ID" --remote --path worker/fixtures/phase9/user-test0404.json
+          echo "Phase 9 KV fixtures seeded."
+
+      - name: Seed Phase 9 D1 entitlements
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/phase9-entitlements.sql <<'SQL'
+          INSERT OR REPLACE INTO lesson_entitlements (
+            portal_user_id_norm, lesson_id, core_access, vr_access, source,
+            first_granted_at, last_confirmed_at, source_batch_code, source_lesson_date
+          ) VALUES (
+            'test0202', 'DEV-P9-ENGLISH', 1, 0, 'excel',
+            strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+            strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+            'Y5EDEV1', NULL
+          );
+
+          INSERT OR REPLACE INTO lesson_entitlements (
+            portal_user_id_norm, lesson_id, core_access, vr_access, source,
+            first_granted_at, last_confirmed_at, source_batch_code, source_lesson_date
+          ) VALUES (
+            'test0404', 'DEV-P9-ENGLISH', 1, 1, 'excel',
+            strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+            strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+            'Y5E11DEV1', NULL
+          );
+          SQL
+
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --file /tmp/phase9-entitlements.sql --yes
+
+      - name: Verify Phase 9 Cloudflare state
+        shell: bash
+        env:
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons_kv_id }}
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students_kv_id }}
+        run: |
+          set -euo pipefail
+          WRANGLER="npx --yes wrangler@${WRANGLER_VERSION}"
+
+          $WRANGLER kv key get "lesson:DEV-P9-ENGLISH" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/lesson-after.json
+          diff -u <(jq -S . worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json) <(jq -S . /tmp/lesson-after.json)
+
+          $WRANGLER kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/curriculum-after.json
+          jq -e '.lessonIds == ["DEV-P7-ENGLISH","DEV-P9-ENGLISH"]' /tmp/curriculum-after.json >/dev/null
+
+          $WRANGLER kv key get "user:test0404" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/test0404-after.json
+          diff -u <(jq -S . worker/fixtures/phase9/user-test0404.json) <(jq -S . /tmp/test0404-after.json)
+
+          $WRANGLER d1 execute fpt_portal_v2_db --remote --command \
+            "SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source_batch_code FROM lesson_entitlements WHERE lesson_id='DEV-P9-ENGLISH' AND portal_user_id_norm IN ('test0202','test0404') ORDER BY portal_user_id_norm;" \
+            --json > /tmp/phase9-entitlements-after.json
+          jq -e '.[0].results | length == 2' /tmp/phase9-entitlements-after.json >/dev/null
+          jq -e '.[0].results[] | select(.portal_user_id_norm == "test0202" and .core_access == 1 and .vr_access == 0)' /tmp/phase9-entitlements-after.json >/dev/null
+          jq -e '.[0].results[] | select(.portal_user_id_norm == "test0404" and .core_access == 1 and .vr_access == 1)' /tmp/phase9-entitlements-after.json >/dev/null
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-settings-after.json
+          jq -e '.result.bindings[] | select(.name == "ENVIRONMENT" and .text == "development")' /tmp/worker-settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "DEV_LOGIN_ALLOWLIST" and .text == "test0101,test0202,test0303,test0404")' /tmp/worker-settings-after.json >/dev/null
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-package-after.bin
+          grep -aFq 'QUIZ_NOT_AVAILABLE' /tmp/worker-package-after.bin
+          grep -aFq 'QUIZ_SHARE_URL_REQUIRED' /tmp/worker-package-after.bin
+          grep -aFq 'answer_view_tokens' /tmp/worker-package-after.bin
+
+          echo "Phase 9 deployment and development fixture verification passed."

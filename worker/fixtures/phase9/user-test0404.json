@@ -1,0 +1,17 @@
+{
+  "firstName": "English11Test",
+  "p": "E4vr",
+  "answerPassword": "V4ra",
+  "schoolYear": 5,
+  "vrEligible": true,
+  "status": "active",
+  "expires": null,
+  "batches": ["Y5E11DEV1"],
+  "fullLibraries": [],
+  "manualAccess": {
+    "coreLessons": [],
+    "vrLessons": [],
+    "specialBuckets": []
+  },
+  "blockedLessons": []
+}

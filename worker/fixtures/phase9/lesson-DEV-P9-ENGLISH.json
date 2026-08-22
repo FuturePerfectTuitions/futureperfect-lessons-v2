@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-P9-ENGLISH",
+  "order": 9002,
+  "title": "Phase 9 English + VR Proof",
+  "description": "Development-only Phase 9 fixture. The same canonical English core lesson is presented to normal and 11+ English views; only the 11+ view may receive the quiz, and only a VR-entitled 11+ view may receive the Verbal Reasoning resources.",
+  "subject": "english",
+  "active": true,
+  "testOnly": true,
+  "displayIds": {
+    "english-year5": "Y5T3E99",
+    "english-year5-11plus": "Y5T3E99"
+  },
+  "core": {
+    "preLessonSheets": [
+      {
+        "displayName": "English PreLesson Proof Sheet",
+        "r2Key": "maths/Y5/Autumn/Y5M1/PreLesson/PreLesson Sheet Y5M1 Number and Place Value I.pdf"
+      }
+    ],
+    "video": {
+      "screenpal": "cOV0omn3XVh",
+      "quiz": "DEV-P9-QUIZ-SENTINEL"
+    },
+    "homeworks": [
+      {
+        "homework": {
+          "displayName": "English Homework Proof",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Homework/Homework L2T1M01 Number and Place Value I.pdf"
+        },
+        "answerPack": {
+          "displayName": "English Answer Pack Proof",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Answers/Answer Pack Homework L2T1M01 Number and Place Value I.pdf"
+        }
+      }
+    ],
+    "otherResources": []
+  },
+  "vr": {
+    "preLesson": [
+      {
+        "displayName": "VR PreLesson Sheet Proof",
+        "r2Key": "maths/Y5/Autumn/Y5M1/PreLesson/PreLesson Sheet Y5M1 Number and Place Value I.pdf",
+        "answerKey": {
+          "displayName": "VR PreLesson Answer Key Proof",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Answers/Answer Pack Homework L2T1M01 Number and Place Value I.pdf"
+        }
+      }
+    ],
+    "preLessonVideo": {
+      "screenpal": "cOV0omn3XVh"
+    },
+    "homeworks": [
+      {
+        "displayName": "VR Homework Proof",
+        "r2Key": "maths/Y5/Autumn/Y5M1/Homework/Homework L2T1M01 Number and Place Value I.pdf",
+        "answerPack": {
+          "displayName": "VR Homework Answer Pack Proof",
+          "r2Key": "maths/Y5/Autumn/Y5M1/Answers/Answer Pack Homework L2T1M01 Number and Place Value I.pdf"
+        }
+      }
+    ],
+    "homeworkVideo": {
+      "screenpal": "cOV0omn3XVh"
+    }
+  }
+}
