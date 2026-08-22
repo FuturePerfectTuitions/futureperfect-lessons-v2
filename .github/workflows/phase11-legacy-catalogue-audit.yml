@@ -1,0 +1,93 @@
+name: Phase 11 legacy catalogue read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ops/phase11-legacy-catalogue-audit.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.head_ref == 'ops/phase11-legacy-catalogue-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      LEGACY_WORKER_NAME: frosty-rain-828e
+      WRANGLER_VERSION: 4.125.0
+    steps:
+      - name: Checkout trusted base workflow
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard trigger-only PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only '${{ github.event.pull_request.base.sha }}' '${{ github.event.pull_request.head.sha }}')"
+          test "$changed" = "ops/phase11-legacy-catalogue-audit.trigger" || {
+            echo 'Refusing audit: trigger PR must contain only the legacy-catalogue audit trigger.' >&2
+            printf '%s\n' "$changed" >&2
+            exit 1
+          }
+
+      - name: Resolve legacy Lessons KV read-only
+        id: legacy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          lessons="$(jq -r '.result.bindings[]? | select(.name=="FPT_LESSONS" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          test -n "$lessons"; test "$lessons" != null
+          echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
+          echo 'Legacy lesson catalogue binding resolved read-only. Student/user KV was not read.'
+
+      - name: Export ordinary lesson metadata only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LESSONS_KV_ID: ${{ steps.legacy.outputs.lessons }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p phase11-legacy-catalogue/buckets
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W kv key list --namespace-id "$LESSONS_KV_ID" --remote > phase11-legacy-catalogue/key-list.json
+          jq -r '.[].name' phase11-legacy-catalogue/key-list.json | LC_ALL=C sort > phase11-legacy-catalogue/key-names.txt
+          jq -r '.[].name | select(test("^Y[2-6](M|E)(11plus)?$|^Y[45]VR$"))' phase11-legacy-catalogue/key-list.json | LC_ALL=C sort > phase11-legacy-catalogue/export-keys.txt
+          test -s phase11-legacy-catalogue/export-keys.txt
+          while IFS= read -r key; do
+            safe="$(printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_')"
+            $W kv key get "$key" --namespace-id "$LESSONS_KV_ID" --remote > "phase11-legacy-catalogue/buckets/${safe}.json"
+            jq -e 'type == "array"' "phase11-legacy-catalogue/buckets/${safe}.json" >/dev/null
+          done < phase11-legacy-catalogue/export-keys.txt
+          printf 'Exported ordinary-content buckets: '
+          paste -sd, phase11-legacy-catalogue/export-keys.txt
+
+      - name: Prove export contains content metadata, not permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in phase11-legacy-catalogue/buckets/*.json; do
+            jq -e 'all(.[]; (has("n") or has("title") or has("sp") or has("desc")))' "$f" >/dev/null
+            if grep -Eqi '"(password|expires|entitlements|mathsYears|vrBuckets|portalUserId|username|manualAccess)"[[:space:]]*:' "$f"; then
+              echo "Unexpected permission/user field in $f; refusing artifact." >&2
+              exit 1
+            fi
+          done
+          echo 'Legacy export safety check: PASS'
+
+      - name: Upload read-only catalogue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-legacy-catalogue-audit
+          path: phase11-legacy-catalogue/
+          retention-days: 7
