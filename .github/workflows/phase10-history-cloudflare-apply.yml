@@ -94,7 +94,10 @@ jobs:
           set -euo pipefail
           W="npx --yes wrangler@${WRANGLER_VERSION}"
           guard_key(){
-            local ns="$1" key="$2" fixture="$3" out="/tmp/$(echo "$key" | tr ':/' '__').json"
+            local ns="$1"
+            local key="$2"
+            local fixture="$3"
+            local out="/tmp/$(echo "$key" | tr ':/' '__').json"
             local list
             list="$($W kv key list --namespace-id "$ns" --prefix "$key" --remote)"
             if jq -e --arg key "$key" 'map(select(.name==$key)) | length > 1' <<<"$list" >/dev/null; then echo "Duplicate key $key" >&2; exit 1; fi
@@ -211,7 +214,7 @@ jobs:
 
       - name: Run deployed history API acceptance
         shell: bash
-        run: tests/phase10-history-api-verification.sh
+        run: bash tests/phase10-history-api-verification.sh
 
       - name: Wait for GitHub Pages history proof
         shell: bash
