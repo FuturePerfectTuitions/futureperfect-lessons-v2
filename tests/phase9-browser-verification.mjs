@@ -141,7 +141,14 @@ async function verifyElevenPlusEnglish() {
     const quizButton = page.locator('#phase9-quiz-section').getByRole('button', { name: 'Open Quiz', exact: true });
     await quizButton.click();
     const quizMessage = page.locator('#phase9-quiz-message');
-    await quizMessage.waitFor({ state: 'visible', timeout: 10000 });
+    await page.waitForFunction(() => {
+      const message = document.getElementById('phase9-quiz-message');
+      return Boolean(
+        message &&
+        !message.hidden &&
+        /gated correctly for 11\+/i.test(message.textContent || '')
+      );
+    }, null, { timeout: 10000 });
     assert.match(
       (await quizMessage.textContent()) || '',
       /gated correctly for 11\+/i,
