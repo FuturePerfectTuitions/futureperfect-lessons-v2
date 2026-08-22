@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "DEV-HISTORY-M3",
+  "order": 301,
+  "title": "Year 3 History Proof",
+  "description": "Development-only historical Maths lesson used to verify Current and Previous navigation grouping.",
+  "subject": "maths",
+  "active": true,
+  "testOnly": true,
+  "preLessonSheets": [],
+  "homeworks": [],
+  "otherResources": []
+}
