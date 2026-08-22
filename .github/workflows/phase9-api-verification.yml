@@ -1,0 +1,344 @@
+name: Phase 9 student API verification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/phase9-api-verify-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify normal English and 11+ English contracts
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase9-api-verification' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: '4.125.0'
+      BASE_URL: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      ORIGIN: https://futureperfecttuitions.github.io
+      LESSON_ID: DEV-P9-ENGLISH
+      NORMAL_VIEW: english-year5
+      ELEVEN_VIEW: english-year5-11plus
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Confirm V2 development health
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /tmp/health.json --write-out '%{http_code}' "$BASE_URL/api/health")"
+          test "$status" = "200"
+          jq -e '.ok == true and .environment == "development" and .infrastructureHealthy == true and .developmentTestLoginEnabled == true' /tmp/health.json >/dev/null
+          echo "V2 development Worker health check passed."
+
+      - name: Verify normal English receives core only
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie-jar /tmp/normal.cookies \
+            --output /tmp/normal-login.json \
+            --write-out '%{http_code}' \
+            --data '{"username":"test0202","password":"E2ng"}' \
+            "$BASE_URL/api/v1/student/auth/login")"
+          test "$status" = "200"
+          jq -e '.ok == true and .portalUserId == "test0202"' /tmp/normal-login.json >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            "$BASE_URL/api/v1/student/home" > /tmp/normal-home.json
+          jq -e '.subjects[] | select(.subject == "english") | .views[] | select(.viewId == "english-year5")' /tmp/normal-home.json >/dev/null
+          if jq -e '.subjects[] | select(.subject == "english") | .views[] | select(.viewId == "english-year5-11plus")' /tmp/normal-home.json >/dev/null; then
+            echo "Normal English persona unexpectedly received the 11+ English view." >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            "$BASE_URL/api/v1/student/views/$NORMAL_VIEW/lessons" > /tmp/normal-list.json
+          jq -e '.ok == true and .view.presentation == "normal"' /tmp/normal-list.json >/dev/null
+          jq -e '.lessons[] | select(.lessonId == "DEV-P9-ENGLISH" and .locked == false and .displayLessonId == "Y5T3E99")' /tmp/normal-list.json >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            "$BASE_URL/api/v1/student/lessons/$LESSON_ID?viewId=$NORMAL_VIEW" > /tmp/normal-detail.json
+          jq -e '.ok == true and .lesson.lessonId == "DEV-P9-ENGLISH" and .lesson.displayLessonId == "Y5T3E99" and .lesson.presentation == "normal" and .lesson.quiz == null and .lesson.vr == null' /tmp/normal-detail.json >/dev/null
+          if grep -Fq 'DEV-P9-QUIZ-SENTINEL' /tmp/normal-detail.json; then
+            echo "Normal English detail leaked the raw quiz reference." >&2
+            exit 1
+          fi
+          if grep -Eq '~(quiz|vrpre|vrhomework|vrprevideo|vrhomeworkvideo)~' /tmp/normal-detail.json; then
+            echo "Normal English detail leaked a quiz/VR resource key." >&2
+            exit 1
+          fi
+
+          NORMAL_ANSWER_KEY="$(jq -r '.lesson.homeworks[0].answerPack.resourceKey // empty' /tmp/normal-detail.json)"
+          test "$NORMAL_ANSWER_KEY" = 'DEV-P9-ENGLISH~answer~1'
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-quiz-direct.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~quiz~1/quiz?viewId=$NORMAL_VIEW")"
+          test "$status" = "403"
+          jq -e '.error == "QUIZ_NOT_AVAILABLE"' /tmp/normal-quiz-direct.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-vr-direct.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~vrpre~1/download?viewId=$NORMAL_VIEW")"
+          test "$status" = "403"
+          jq -e '.error == "VR_NOT_AVAILABLE"' /tmp/normal-vr-direct.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-vr-answer-direct.json \
+            --write-out '%{http_code}' \
+            --data '{"password":"A4ns"}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~answer~1001/answer/authorize?viewId=$NORMAL_VIEW")"
+          test "$status" = "403"
+          jq -e '.error == "VR_NOT_AVAILABLE"' /tmp/normal-vr-answer-direct.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-answer-wrong.json \
+            --write-out '%{http_code}' \
+            --data '{"password":"X1aa"}' \
+            "$BASE_URL/api/v1/student/resources/$NORMAL_ANSWER_KEY/answer/authorize?viewId=$NORMAL_VIEW")"
+          test "$status" = "403"
+          jq -e '.error == "ANSWER_PASSWORD_INCORRECT"' /tmp/normal-answer-wrong.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-answer-ok.json \
+            --write-out '%{http_code}' \
+            --data '{"password":"A4ns"}' \
+            "$BASE_URL/api/v1/student/resources/$NORMAL_ANSWER_KEY/answer/authorize?viewId=$NORMAL_VIEW")"
+          test "$status" = "200"
+          jq -e '.ok == true and (.token | length > 20) and (.viewerPath | startswith("/api/v1/student/answer-view/"))' /tmp/normal-answer-ok.json >/dev/null
+
+          NORMAL_VIEWER_PATH="$(jq -r '.viewerPath' /tmp/normal-answer-ok.json)"
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-answer.pdf \
+            --write-out '%{http_code}' \
+            "$BASE_URL$NORMAL_VIEWER_PATH")"
+          test "$status" = "200"
+          test "$(head -c 4 /tmp/normal-answer.pdf)" = '%PDF'
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/normal.cookies \
+            --output /tmp/normal-answer-repeat.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL$NORMAL_VIEWER_PATH")"
+          test "$status" = "410"
+          jq -e '.error == "ANSWER_VIEW_ALREADY_OPENED"' /tmp/normal-answer-repeat.json >/dev/null
+
+          echo "Normal English contract passed: core available, quiz/VR absent and direct access rejected, Phase 8 answer protection intact."
+
+      - name: Verify English 11+ receives safe quiz and entitled VR
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie-jar /tmp/eleven.cookies \
+            --output /tmp/eleven-login.json \
+            --write-out '%{http_code}' \
+            --data '{"username":"test0404","password":"E4vr"}' \
+            "$BASE_URL/api/v1/student/auth/login")"
+          test "$status" = "200"
+          jq -e '.ok == true and .portalUserId == "test0404"' /tmp/eleven-login.json >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            "$BASE_URL/api/v1/student/home" > /tmp/eleven-home.json
+          jq -e '.subjects[] | select(.subject == "english") | .views[] | select(.viewId == "english-year5-11plus")' /tmp/eleven-home.json >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            "$BASE_URL/api/v1/student/views/$ELEVEN_VIEW/lessons" > /tmp/eleven-list.json
+          jq -e '.ok == true and .view.presentation == "11plus"' /tmp/eleven-list.json >/dev/null
+          jq -e '.lessons[] | select(.lessonId == "DEV-P9-ENGLISH" and .locked == false and .displayLessonId == "Y5T3E99")' /tmp/eleven-list.json >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            "$BASE_URL/api/v1/student/lessons/$LESSON_ID?viewId=$ELEVEN_VIEW" > /tmp/eleven-detail.json
+          jq -e '.ok == true and .lesson.lessonId == "DEV-P9-ENGLISH" and .lesson.displayLessonId == "Y5T3E99" and .lesson.presentation == "11plus" and .lesson.quiz.resourceKey == "DEV-P9-ENGLISH~quiz~1" and .lesson.quiz.locked == false and .lesson.vr != null' /tmp/eleven-detail.json >/dev/null
+          jq -e '.lesson.vr.preLesson[0].sheet.resourceKey == "DEV-P9-ENGLISH~vrpre~1" and .lesson.vr.preLesson[0].answerKey.resourceKey == "DEV-P9-ENGLISH~answer~1001" and .lesson.vr.homeworks[0].homework.resourceKey == "DEV-P9-ENGLISH~vrhomework~1" and .lesson.vr.homeworks[0].answerPack.resourceKey == "DEV-P9-ENGLISH~answer~2001"' /tmp/eleven-detail.json >/dev/null
+          if grep -Fq 'DEV-P9-QUIZ-SENTINEL' /tmp/eleven-detail.json; then
+            echo "11+ lesson detail leaked the raw quiz reference instead of the safe quiz model." >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/eleven-quiz.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~quiz~1/quiz?viewId=$ELEVEN_VIEW")"
+          test "$status" = "409"
+          jq -e '.error == "QUIZ_SHARE_URL_REQUIRED"' /tmp/eleven-quiz.json >/dev/null
+          if grep -Fq 'DEV-P9-QUIZ-SENTINEL' /tmp/eleven-quiz.json; then
+            echo "Quiz open response leaked the raw quiz reference." >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/vr-video.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~vrprevideo~1/video?viewId=$ELEVEN_VIEW")"
+          test "$status" = "200"
+          jq -e '.ok == true and (.embedUrl | startswith("https://go.screenpal.com/player/"))' /tmp/vr-video.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/vr-sheet.pdf \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~vrpre~1/download?viewId=$ELEVEN_VIEW")"
+          test "$status" = "200"
+          test "$(head -c 4 /tmp/vr-sheet.pdf)" = '%PDF'
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/vr-answer-wrong.json \
+            --write-out '%{http_code}' \
+            --data '{"password":"X1aa"}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~answer~1001/answer/authorize?viewId=$ELEVEN_VIEW")"
+          test "$status" = "403"
+          jq -e '.error == "ANSWER_PASSWORD_INCORRECT"' /tmp/vr-answer-wrong.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/vr-answer-ok.json \
+            --write-out '%{http_code}' \
+            --data '{"password":"V4ra"}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~answer~1001/answer/authorize?viewId=$ELEVEN_VIEW")"
+          test "$status" = "200"
+          jq -e '.ok == true and (.token | length > 20) and (.viewerPath | startswith("/api/v1/student/answer-view/"))' /tmp/vr-answer-ok.json >/dev/null
+
+          VR_VIEWER_PATH="$(jq -r '.viewerPath' /tmp/vr-answer-ok.json)"
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/vr-answer.pdf \
+            --write-out '%{http_code}' \
+            "$BASE_URL$VR_VIEWER_PATH")"
+          test "$status" = "200"
+          test "$(head -c 4 /tmp/vr-answer.pdf)" = '%PDF'
+
+          echo "11+ English contract passed: safe quiz model, VR resources, and Phase 8 protected VR answers are operational."
+
+      - name: Temporarily remove VR entitlement and verify separation
+        id: vr_negative
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --yes --command \
+            "UPDATE lesson_entitlements SET vr_access=0, last_confirmed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE portal_user_id_norm='test0404' AND lesson_id='DEV-P9-ENGLISH';"
+
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT vr_access FROM lesson_entitlements WHERE portal_user_id_norm='test0404' AND lesson_id='DEV-P9-ENGLISH';" > /tmp/vr-off.json
+          jq -e '.[0].results[0].vr_access == 0' /tmp/vr-off.json >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            "$BASE_URL/api/v1/student/lessons/$LESSON_ID?viewId=$ELEVEN_VIEW" > /tmp/eleven-vr-off-detail.json
+          jq -e '.lesson.presentation == "11plus" and .lesson.quiz.resourceKey == "DEV-P9-ENGLISH~quiz~1" and .lesson.vr == null' /tmp/eleven-vr-off-detail.json >/dev/null
+          if grep -Fq 'DEV-P9-QUIZ-SENTINEL' /tmp/eleven-vr-off-detail.json; then
+            echo "Raw quiz reference leaked during VR-off test." >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/vr-off-direct.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~vrpre~1/download?viewId=$ELEVEN_VIEW")"
+          test "$status" = "403"
+          jq -e '.error == "VR_NOT_ENTITLED"' /tmp/vr-off-direct.json >/dev/null
+
+          status="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --cookie /tmp/eleven.cookies \
+            --output /tmp/quiz-vr-off.json \
+            --write-out '%{http_code}' \
+            "$BASE_URL/api/v1/student/resources/DEV-P9-ENGLISH~quiz~1/quiz?viewId=$ELEVEN_VIEW")"
+          test "$status" = "409"
+          jq -e '.error == "QUIZ_SHARE_URL_REQUIRED"' /tmp/quiz-vr-off.json >/dev/null
+
+          echo "Negative entitlement test passed: vr_access=0 hides/rejects VR while the 11+ quiz gate remains presentation-based."
+
+      - name: Restore Phase 9 VR entitlement
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --yes --command \
+            "UPDATE lesson_entitlements SET vr_access=1, last_confirmed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE portal_user_id_norm='test0404' AND lesson_id='DEV-P9-ENGLISH';"
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT vr_access FROM lesson_entitlements WHERE portal_user_id_norm='test0404' AND lesson_id='DEV-P9-ENGLISH';" > /tmp/vr-restored.json
+          jq -e '.[0].results[0].vr_access == 1' /tmp/vr-restored.json >/dev/null
+          echo "Test0404 VR entitlement restored to 1."
+
+      - name: Log out acceptance-test sessions
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if test -f /tmp/normal.cookies; then
+            curl --silent --show-error --header "Origin: $ORIGIN" --cookie /tmp/normal.cookies --request POST "$BASE_URL/api/v1/student/auth/logout" >/dev/null
+          fi
+          if test -f /tmp/eleven.cookies; then
+            curl --silent --show-error --header "Origin: $ORIGIN" --cookie /tmp/eleven.cookies --request POST "$BASE_URL/api/v1/student/auth/logout" >/dev/null
+          fi
+          echo "Acceptance-test sessions logged out where present."
