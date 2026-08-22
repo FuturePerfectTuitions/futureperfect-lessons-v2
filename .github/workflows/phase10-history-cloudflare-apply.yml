@@ -1,0 +1,249 @@
+name: Phase 10 history navigation guarded Cloudflare apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/phase10-history-apply-trigger.txt]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  apply:
+    name: Deploy and verify Phase 10 multi-year history correction
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase10-history-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact apply branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          test "$(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD)" = ".github/phase10-history-apply-trigger.txt"
+
+      - name: Validate correction source and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check worker/src/index-phase10-history.js
+          node --check assets/phase10-history.js
+          node --check tests/phase10-history-browser-verification.mjs
+          bash -n tests/phase10-history-api-verification.sh
+          grep -Fq 'assets/phase10-history.js' phase10.html
+          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          for f in worker/fixtures/phase10/user-test0707.json worker/fixtures/phase10/lesson-DEV-HISTORY-*.json worker/fixtures/phase10/curriculum-*.json; do jq -e . "$f" >/dev/null; done
+
+      - name: Guard isolated V2 development state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings.json >/dev/null
+          CURRENT="$(jq -r '.result.bindings[] | select(.name=="DEV_LOGIN_ALLOWLIST") | .text' /tmp/settings.json)"
+          case "$CURRENT" in
+            test0101,test0202,test0303,test0404,test0505,test0606) NEW='test0101,test0202,test0303,test0404,test0505,test0606,test0707' ;;
+            test0101,test0202,test0303,test0404,test0505,test0606,test0707) NEW="$CURRENT" ;;
+            *) echo 'Unexpected development allowlist; refusing apply.' >&2; exit 1 ;;
+          esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          { echo "students=$STUDENTS"; echo "lessons=$LESSONS"; echo "r2=$R2"; echo "db=$DB"; echo "allowlist=$NEW"; } >> "$GITHUB_OUTPUT"
+
+      - name: Confirm deployed Phase 10 security baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/before.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens; do grep -aFq "$marker" /tmp/before.bin; done
+
+      - name: Guard history fixture keys before writes
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          guard_key(){
+            local ns="$1"
+            local key="$2"
+            local fixture="$3"
+            local out="/tmp/$(echo "$key" | tr ':/' '__').json"
+            local list
+            list="$($W kv key list --namespace-id "$ns" --prefix "$key" --remote)"
+            if jq -e --arg key "$key" 'map(select(.name==$key)) | length > 1' <<<"$list" >/dev/null; then echo "Duplicate key $key" >&2; exit 1; fi
+            if jq -e --arg key "$key" 'map(select(.name==$key)) | length == 1' <<<"$list" >/dev/null; then
+              $W kv key get "$key" --namespace-id "$ns" --remote > "$out"
+              diff -u <(jq -S . "$fixture") <(jq -S . "$out")
+            fi
+          }
+          guard_key "$STUDENTS_KV_ID" 'user:test0707' worker/fixtures/phase10/user-test0707.json
+          guard_key "$LESSONS_KV_ID" 'lesson:DEV-HISTORY-M3' worker/fixtures/phase10/lesson-DEV-HISTORY-M3.json
+          guard_key "$LESSONS_KV_ID" 'lesson:DEV-HISTORY-M4' worker/fixtures/phase10/lesson-DEV-HISTORY-M4.json
+          guard_key "$LESSONS_KV_ID" 'lesson:DEV-HISTORY-E4' worker/fixtures/phase10/lesson-DEV-HISTORY-E4.json
+          guard_key "$LESSONS_KV_ID" 'curriculum:MATHS_Y3' worker/fixtures/phase10/curriculum-MATHS_Y3.json
+          guard_key "$LESSONS_KV_ID" 'curriculum:MATHS_L1' worker/fixtures/phase10/curriculum-MATHS_L1.json
+          guard_key "$LESSONS_KV_ID" 'curriculum:ENGLISH_Y4' worker/fixtures/phase10/curriculum-ENGLISH_Y4.json
+          $W kv key get 'lesson:Y5M1' --namespace-id "$LESSONS_KV_ID" --remote >/tmp/y5m1.json
+          jq -e '.lessonId == "Y5M1" and .active != false' /tmp/y5m1.json >/dev/null
+          $W kv key get 'lesson:DEV-P9-ENGLISH' --namespace-id "$LESSONS_KV_ID" --remote >/tmp/p9e.json
+          jq -e '.lessonId == "DEV-P9-ENGLISH" and .active != false' /tmp/p9e.json >/dev/null
+
+      - name: Generate audited runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          NEW_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat > worker/wrangler.phase10-history.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase10-history.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${NEW_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run corrected Worker bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase10-history.runtime.toml --dry-run --outdir /tmp/phase10-history-build >/tmp/dry-run.log
+          echo 'Phase 10 history correction dry run: PASS'
+
+      - name: Deploy corrected Worker to V2 development only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase10-history.runtime.toml --keep-vars --message 'Phase 10 Current and Previous history navigation correction' >/tmp/deploy.log
+
+      - name: Seed development-only history fixtures
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W kv key put 'user:test0707' --namespace-id "$STUDENTS_KV_ID" --remote --path worker/fixtures/phase10/user-test0707.json >/dev/null
+          for id in M3 M4 E4; do $W kv key put "lesson:DEV-HISTORY-${id}" --namespace-id "$LESSONS_KV_ID" --remote --path "worker/fixtures/phase10/lesson-DEV-HISTORY-${id}.json" >/dev/null; done
+          $W kv key put 'curriculum:MATHS_Y3' --namespace-id "$LESSONS_KV_ID" --remote --path worker/fixtures/phase10/curriculum-MATHS_Y3.json >/dev/null
+          $W kv key put 'curriculum:MATHS_L1' --namespace-id "$LESSONS_KV_ID" --remote --path worker/fixtures/phase10/curriculum-MATHS_L1.json >/dev/null
+          $W kv key put 'curriculum:ENGLISH_Y4' --namespace-id "$LESSONS_KV_ID" --remote --path worker/fixtures/phase10/curriculum-ENGLISH_Y4.json >/dev/null
+
+      - name: Seed test0707 D1 history entitlements
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/history-entitlements.sql <<'SQL'
+          DELETE FROM lesson_entitlements WHERE portal_user_id_norm = 'test0707';
+          INSERT INTO lesson_entitlements (portal_user_id_norm, lesson_id, core_access, vr_access, source, first_granted_at, last_confirmed_at, source_batch_code, source_lesson_date) VALUES
+          ('test0707','DEV-HISTORY-M3',1,0,'excel','2024-09-01T12:00:00Z','2024-09-01T12:00:00Z','Y3MDEVHIST','2024-09-01'),
+          ('test0707','DEV-HISTORY-M4',1,0,'excel','2025-09-01T12:00:00Z','2025-09-01T12:00:00Z','Y4MDEVHIST','2025-09-01'),
+          ('test0707','Y5M1',1,0,'excel','2026-08-21T12:00:00Z','2026-08-21T12:00:00Z','Y5MDEVHIST','2026-08-21'),
+          ('test0707','DEV-HISTORY-E4',1,0,'excel','2025-09-01T12:00:00Z','2025-09-01T12:00:00Z','Y4EDEVHIST','2025-09-01'),
+          ('test0707','DEV-P9-ENGLISH',1,0,'excel','2026-08-21T12:00:00Z','2026-08-21T12:00:00Z','Y5EDEVHIST','2026-08-21');
+          SQL
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --file /tmp/history-entitlements.sql --yes >/tmp/d1-history.log
+
+      - name: Verify development history state
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W kv key get 'user:test0707' --namespace-id "$STUDENTS_KV_ID" --remote >/tmp/user0707.json
+          diff -u <(jq -S . worker/fixtures/phase10/user-test0707.json) <(jq -S . /tmp/user0707.json)
+          $W d1 execute fpt_portal_v2_db --remote --command "SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm='test0707' ORDER BY lesson_id;" --json >/tmp/history-d1.json
+          jq -e '.[0].results | length == 5' /tmp/history-d1.json >/dev/null
+          jq -e '[.[0].results[].lesson_id] | sort == ["DEV-HISTORY-E4","DEV-HISTORY-M3","DEV-HISTORY-M4","DEV-P9-ENGLISH","Y5M1"]' /tmp/history-d1.json >/dev/null
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/after.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens; do grep -aFq "$marker" /tmp/after.bin; done
+          grep -aFq 'previous' /tmp/after.bin
+
+      - name: Run deployed history API acceptance
+        shell: bash
+        run: bash tests/phase10-history-api-verification.sh
+
+      - name: Wait for GitHub Pages history proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase10.html'
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$URL" --output /tmp/page.html && grep -Fq 'assets/phase10-history.js' /tmp/page.html; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Install Playwright driver
+        shell: bash
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+
+      - name: Run real Chrome history acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          google-chrome --version
+          node tests/phase10-history-browser-verification.mjs
+
+      - name: Upload history browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase10-history-browser-screenshots
+          path: artifacts/phase10-history-browser
+          if-no-files-found: warn
+          retention-days: 14
