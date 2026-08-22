@@ -117,6 +117,31 @@ jobs:
           echo "=== R2 buckets ==="
           npx --yes wrangler@latest r2 bucket list
 
+      - name: Phase 9 prerequisite state (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/worker-settings.json)"
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV") | .namespace_id' /tmp/worker-settings.json)"
+          test -n "$LESSONS_KV_ID"
+          test -n "$STUDENTS_KV_ID"
+
+          echo "=== ENGLISH_Y5 curriculum ==="
+          npx --yes wrangler@latest kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote
+
+          echo "=== Existing DEV-P9 lesson keys ==="
+          npx --yes wrangler@latest kv key list --namespace-id "$LESSONS_KV_ID" --prefix "lesson:DEV-P9" --remote
+
+          echo "=== test0202 profile, passwords redacted ==="
+          npx --yes wrangler@latest kv key get "user:test0202" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/test0202.json
+          jq 'del(.p, .answerPassword)' /tmp/test0202.json
+
+          echo "=== D1 table definitions ==="
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name;"
+
+          echo "=== lesson_entitlements columns ==="
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "PRAGMA table_info('lesson_entitlements');"
+
       - name: Repository deployment config snapshot
         shell: bash
         working-directory: worker
