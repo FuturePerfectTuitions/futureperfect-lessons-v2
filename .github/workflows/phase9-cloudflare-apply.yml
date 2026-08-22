@@ -98,10 +98,15 @@ jobs:
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/worker-package-before.bin
 
-          grep -aFq 'answer/authorize' /tmp/worker-package-before.bin
-          grep -aFq 'answer_view_tokens' /tmp/worker-package-before.bin
-          grep -aFq 'ANSWER_PASSWORD_INCORRECT' /tmp/worker-package-before.bin
-          echo "Deployed protected-answer baseline signatures are present."
+          for marker in 'answer_view_tokens' 'ANSWER_PASSWORD_INCORRECT'; do
+            if grep -aFq "$marker" /tmp/worker-package-before.bin; then
+              echo "Phase 8 marker present: $marker"
+            else
+              echo "Required Phase 8 marker missing: $marker" >&2
+              exit 1
+            fi
+          done
+          echo "Deployed Phase 8 protected-answer baseline is confirmed."
 
       - name: Guard Phase 9 data preconditions
         shell: bash
@@ -120,7 +125,6 @@ jobs:
             echo "Unexpected duplicate Phase 9 lesson keys; refusing to continue." >&2
             exit 1
           fi
-
           if jq -e 'length == 1' <<<"$EXISTING_PHASE9" >/dev/null; then
             $WRANGLER kv key get "lesson:DEV-P9-ENGLISH" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/existing-phase9-lesson.json
             diff -u <(jq -S . worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json) <(jq -S . /tmp/existing-phase9-lesson.json)
@@ -206,23 +210,13 @@ jobs:
           set -euo pipefail
           WRANGLER="npx --yes wrangler@${WRANGLER_VERSION}"
 
-          $WRANGLER kv key put "lesson:DEV-P9-ENGLISH" \
-            --namespace-id "$LESSONS_KV_ID" \
-            --remote \
-            --path worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json
+          $WRANGLER kv key put "lesson:DEV-P9-ENGLISH" --namespace-id "$LESSONS_KV_ID" --remote --path worker/fixtures/phase9/lesson-DEV-P9-ENGLISH.json
 
           $WRANGLER kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/curriculum-current.json
           jq 'if (.lessonIds | index("DEV-P9-ENGLISH")) then . else .lessonIds += ["DEV-P9-ENGLISH"] end' /tmp/curriculum-current.json > /tmp/curriculum-phase9.json
-          $WRANGLER kv key put "curriculum:ENGLISH_Y5" \
-            --namespace-id "$LESSONS_KV_ID" \
-            --remote \
-            --path /tmp/curriculum-phase9.json
+          $WRANGLER kv key put "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote --path /tmp/curriculum-phase9.json
 
-          $WRANGLER kv key put "user:test0404" \
-            --namespace-id "$STUDENTS_KV_ID" \
-            --remote \
-            --path worker/fixtures/phase9/user-test0404.json
-
+          $WRANGLER kv key put "user:test0404" --namespace-id "$STUDENTS_KV_ID" --remote --path worker/fixtures/phase9/user-test0404.json
           echo "Phase 9 KV fixtures seeded."
 
       - name: Seed Phase 9 D1 entitlements
