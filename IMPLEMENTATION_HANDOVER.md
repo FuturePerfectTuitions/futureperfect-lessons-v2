@@ -1,8 +1,8 @@
 # FPT Portal V2 — Implementation Handover
 
-**Cumulative version:** 3.8  
+**Cumulative version:** 3.9  
 **Updated:** 22 August 2026  
-**Completed through:** Phase 10 — Existing Special Content Areas
+**Completed through:** Phase 10 — Existing Special Content Areas + final navigation/count corrections
 
 **STATUS: PHASES 1–10 COMPLETE · PHASE 11 MUST START IN A NEW CHAT**
 
@@ -10,30 +10,22 @@
 
 Use this file together with:
 
-1. **Master Authoritative Specification v2.6 (22 August 2026)** — business/workflow authority;
-2. **Steps to Progression v1.6 (22 August 2026)** — phase sequence/checkpoint authority;
-3. **this cumulative handover v3.8** — actual implementation state completed through Phase 10;
+1. **Master Authoritative Specification v2.7 (22 August 2026)** — business/workflow authority;
+2. **Steps to Progression v1.7 (22 August 2026)** — build-sequence/checkpoint authority;
+3. **this cumulative handover v3.9** — actual implementation state completed through Phase 10;
 4. the actual current GitHub and deployed Cloudflare V2 state whenever exact code/deployment state matters.
 
 The existing live portal remains separate and must not be changed to solve V2 problems.
 
 ## 2. Permanent working rules
 
-### 2.1 Phase boundary
-
-- Finish and verify the current phase completely.
-- Update the cumulative handover after the tested implementation is complete.
-- Stop after the handover.
+- Finish and verify the current phase completely before starting the next.
+- Update the cumulative handover after verified implementation changes.
 - Every new phase starts in a new chat.
-- At the start of that chat: read Master + Steps + Handover, reconnect to GitHub, inspect the current implementation and deployed V2 development state, then begin work.
-
-### 2.2 Cloudflare / GitHub operations
-
-- Sej is a beginner with Cloudflare/KV/D1 operations; any remaining manual dashboard step must be small and explicit.
-- Prefer the established GitHub Actions → Cloudflare guarded path for V2 audit/apply work where practical.
-- Cloudflare credential values must never be pasted into chat or committed to GitHub.
-- The repository secrets remain `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; their values are not recorded here.
-- The Phase 10 daily mock password is stored only through Worker secret/config `MOCK_DAILY_PASSWORDS`; its value is not recorded here.
+- At the start of a new phase: read Master + Steps + Handover, reconnect to GitHub, inspect the current implementation and deployed V2 development state, then begin work.
+- Prefer the established guarded GitHub Actions → Cloudflare path where practical.
+- Never expose Cloudflare credential values, Worker secrets or operational mock passwords in chat/source control.
+- Normal production student login remains disabled during development.
 - Never target the existing live portal from a V2 workflow.
 
 ## 3. Cumulative build status
@@ -45,48 +37,42 @@ The existing live portal remains separate and must not be changed to solve V2 pr
 | 3 | COMPLETE | One complete real-shaped Maths lesson through protected Answer Pack proof. |
 | 4 | COMPLETE | Secure opaque sessions, 2-hour inactivity, logout and single-device login. |
 | 5 | COMPLETE | FPT visual shell and Maths/English student entry. |
-| 6 | COMPLETE | Worker-authoritative Year/Level navigation, locked previews and 11+ start-point behaviour. |
-| 7 | COMPLETE | Reusable ordinary lesson-page renderer and Worker-gated resources. |
+| 6 | COMPLETE | Worker-authoritative Year/Level navigation, Current/Previous grouping per subject, independent Maths/English history, locked previews and 11+ start-point behaviour. |
+| 7 | COMPLETE | Reusable complete ordinary lesson-page renderer and Worker-gated resources. |
 | 8 | COMPLETE | Per-open Answer Pack/Answer Key protection and controlled PDF.js viewer. |
 | 9 | COMPLETE | Shared English core + English 11+ VR + 11+-only ScreenPal quiz gate. |
-| 10 | COMPLETE | 11+ Maths Assessments + Y5 11+ MOCKS/daily password + VR How-To through manual special access. |
+| 10 | COMPLETE | 11+ Maths Assessments + Y5 11+ MOCKS/daily-password protection + VR How-To through manual special access, corrected special-area counts and verified multi-year Current/Previous navigation. |
 | 11 | NEXT | Load the real lesson catalogue. Do not begin inside the Phase 10 chat. |
 
-## 4. Core architecture carried forward through Phase 9
+## 4. Core architecture carried forward
 
-### 4.1 Authentication / navigation
+### Authentication / navigation
 
 - Username comparison is case-insensitive.
-- Browser receives an opaque secure session rather than retaining the student's raw password.
+- Browser receives an opaque secure session; raw student password is not replayed on every request.
 - Two-hour inactivity timeout remains enforced.
-- Exactly one active session per Portal User ID remains enforced; the latest successful login wins.
-- Normal production student login remains disabled during development.
+- Exactly one active session per Portal User ID remains enforced; latest successful login wins.
 - Top-level student subjects remain exactly **Maths** and **English**.
 - Maths uses Year terminology for normal streams and Level terminology for 11+ views.
 - English normal and English 11+ share canonical core content by school year.
+- Within each subject, Year/Level views are grouped into **Current** and **Previous**.
+- Current derives from active subject configuration; Previous derives from retained historical Year/Level/Full-Library access.
+- Maths and English histories are independent; a past year in one subject must not create a mirrored year in the other subject.
+- Current/Previous grouping is presentation only and creates no entitlement.
 
-### 4.2 Ordinary lesson renderer
+### Ordinary lesson renderer
 
-The completed ordinary lesson renderer remains:
+Phase 7 remains the reusable ordinary lesson renderer:
 
 - `phase7.html`
 - `assets/phase7.js`
 - `assets/phase7.css`
 - `assets/phase7-upsell.js`
+- Worker adapter `worker/src/index-phase7.js`
 
-It supports:
+It supports student-facing Lesson IDs, descriptions, zero/one/many PreLesson Sheets, optional main ScreenPal video, zero/one/many Homework items, explicit Homework→Answer Pack pairing, optional Other Resources, hidden empty sections and safe locked cross-subject previews.
 
-- student-facing Lesson ID + title + description/topics;
-- zero/one/many PreLesson Sheets;
-- zero/one main ScreenPal lesson video;
-- zero/one/many Homework items;
-- explicit Homework → Answer Pack pairing;
-- optional Other Resources;
-- hidden empty sections;
-- Worker-authorised resource delivery;
-- safe cross-subject locked previews.
-
-### 4.3 Protected answers
+### Protected answers
 
 Phase 8 remains composed underneath later phases:
 
@@ -95,313 +81,157 @@ Phase 8 remains composed underneath later phases:
 - `assets/phase8.js`
 - `assets/phase8.css`
 
-Protected Answer Packs and Answer Keys:
+Protected Answer Packs/Keys prompt for the current personal Answer Pack password on every open, use short-lived single-use capabilities, render through the controlled PDF.js/canvas viewer, do not expose raw R2 answer URLs, and are invalidated by session revocation/password change.
 
-- prompt for the current personal Answer Pack password on every open;
-- use the controlled PDF.js/canvas viewer;
-- do not expose a raw R2 answer URL;
-- display the student/FPT watermark/header;
-- use short-lived single-use answer-view capabilities;
-- are invalidated by session revocation or Answer Pack password change.
-
-D1 Phase 8 security tables remain:
+D1 security tables include:
 
 - `answer_view_tokens`
 - `answer_password_rate_limits`
 
-### 4.4 Phase 9 English / VR / quiz model
-
-Phase 9 remains:
+### Phase 9 English / VR / quiz model
 
 - `worker/src/index-phase9.js`
 - `phase9.html`
 - `assets/phase9.js`
 - `assets/phase9.css`
 
-Authoritative behaviour retained:
+Normal English and English 11+ share one canonical core lesson. English 11+ may add nested VR resources. ScreenPal quiz metadata/routes are exposed only in authorised 11+ presentation context; normal Maths/English presentations receive no quiz. A bare ScreenPal quiz ID is never guessed into a URL; an openable quiz requires an approved explicit HTTPS ScreenPal share/embed URL.
 
-- normal English and English 11+ use one canonical core lesson;
-- 11+ English may add nested Verbal Reasoning resources;
-- VR protected Answer Keys/Packs reuse the Phase 8 current personal Answer Pack password;
-- ScreenPal quiz metadata is exposed only in an authorised 11+ presentation;
-- normal Maths/English views receive no quiz model/metadata/usable route even if the canonical lesson carries quiz metadata;
-- quiz eligibility comes from the current 11+ presentation context, not `vrEligible` alone;
-- a bare quiz ID is never guessed into a URL; an openable quiz requires an approved explicit HTTPS ScreenPal share/embed URL.
+## 5. Phase 10 special-content implementation
 
-## 5. Phase 10 — Completed implementation
+### Manual special-access model
 
-### 5.1 Purpose and separation from ordinary lessons
+Control point:
 
-Phase 10 adds only the three special-content families that sit outside ordinary Maths/English lesson packages:
+- `manualAccess.specialBuckets`
 
-- 11+ Maths Assessments;
-- Year 5 11+ Mock Tests / answer videos;
-- VR How-To.
+Recognised codes:
 
-They are implemented as a separate special-content layer rather than adding page-specific branches to the ordinary lesson renderer.
-
-Phase 10 Worker:
-
-- `worker/src/index-phase10.js`
-
-Phase 10 proof frontend:
-
-- `phase10.html`
-- `assets/phase10.js`
-- `assets/phase10.css`
-
-The Worker composition is now:
-
-`Phase 10 → Phase 9 → Phase 8 → Phase 7 → base V2 Worker`
-
-### 5.2 Authoritative special-access model
-
-The student KV control point is:
-
-`manualAccess.specialBuckets`
-
-Recognised Phase 10 codes:
-
-- `Y4MAssT1`
-- `Y4MAssT2`
-- `Y5MAssT1`
-- `Y5MAssT2`
+- `Y4MAssT1`, `Y4MAssT2`
+- `Y5MAssT1`, `Y5MAssT2`
 - `VR_HOWTO`
 - `MOCKS`
 
-Ordinary Excel/D1 `lesson_entitlements` do **not** grant these special areas.
+Ordinary Excel/D1 `lesson_entitlements` do **not** grant these areas.
 
-Special catalogue key family:
+Student placement:
 
-- `special:<SPECIAL_BUCKET_CODE>`
-
-This preserves the useful business-facing special codes while avoiding the legacy ordinary KV range/bucket entitlement architecture.
-
-### 5.3 Navigation mapping
-
-| Special code | V2 student location |
+| Special code | V2 location |
 |---|---|
 | `Y4MAssT1`, `Y4MAssT2` | Maths → Level 2 |
 | `Y5MAssT1`, `Y5MAssT2` | Maths → Level 3 |
 | `VR_HOWTO` | English → Year 4 11+ / Year 5 11+ |
 | `MOCKS` | Maths → Level 3 and English → Year 5 11+ |
 
-- VR How-To is not a third top-level subject.
-- Special areas are not surfaced through cross-subject locked previews.
-- Server-side special routes re-check the current session, manual special bucket and permitted open V2 view.
+Special catalogue key family remains `special:<SPECIAL_BUCKET_CODE>`.
 
-### 5.4 Student API routes
-
-Phase 10 adds:
+Student routes include:
 
 - `GET /api/v1/student/special-areas?viewId={viewId}`
 - `GET /api/v1/student/special-areas/{bucketId}?viewId={viewId}`
 - `GET /api/v1/student/special-resources/{resourceKey}/video?viewId={viewId}`
 - `POST /api/v1/student/special-areas/MOCKS/mock-days/{day}/unlock?viewId={viewId}`
 
-### 5.5 Year 5 11+ MOCKS daily-password model
+### MOCKS daily-password protection
 
-MOCKS remains a manually assigned Year 5 11+ special area containing both Maths and VR answer videos.
+- MOCKS is a manually assigned Year 5 11+ special area.
+- One mock-day password unlocks both that day’s Maths and VR answer videos.
+- Daily mock password is separate from the student’s personal Answer Pack password.
+- Locked payloads expose safe display metadata only; no usable ScreenPal ID/URL/embed/resource key is returned before successful verification.
+- Daily passwords are read from Worker secret/config `MOCK_DAILY_PASSWORDS`; value is deliberately not recorded.
+- D1 `mock_password_rate_limits` provides short-lived guessing protection; migration `worker/migrations/0006_mock_password_rate_limits.sql`.
 
-Operational rule retained:
+### Student-facing available-lesson total
 
-- one password for a mock day unlocks both that day's Maths answer video and VR answer video;
-- daily mock password is separate from the student's personal Answer Pack password;
-- browser-session unlock is retained only for already-authorised returned videos;
-- logout clears the Phase 10 browser-session mock unlock state.
+Final Phase 10 rule:
 
-Security improvement over the legacy reference:
+`available lessons = open ordinary lessons + visible manually assigned special-area cards in that view`.
 
-- the locked mock payload exposes safe display metadata only;
-- no locked ScreenPal ID, ScreenPal URL, embed URL or usable video resource key is sent before successful daily-password verification;
-- successful verification returns only authorised approved ScreenPal player URLs for that day.
+This is a **presentation-count rule only**. Special areas continue to derive from `manualAccess.specialBuckets` and are not converted into ordinary Excel/D1 lesson entitlements.
 
-Daily passwords are read from Worker secret/config:
+Frontend helper:
 
-- `MOCK_DAILY_PASSWORDS`
+- `assets/phase10-counts.js`
 
-The value must never be committed to GitHub or written into handover documents.
+### Current / Previous multi-year correction
 
-Short-lived guessing protection uses new D1 table:
+Final Phase 10 deployed Worker entrypoint:
 
-- `mock_password_rate_limits`
+- `worker/src/index-phase10-history.js`
 
-Migration:
+It composes:
 
-- `worker/migrations/0006_mock_password_rate_limits.sql`
+`Phase 10 history/navigation layer → Phase 10 special-content layer → Phase 9 → Phase 8 → Phase 7 → base Worker`.
 
-This table is security/ephemeral state only; it creates no access entitlement.
+Frontend grouping helper:
 
-### 5.6 Phase 10 test-only fixtures
+- `assets/phase10-history.js`
 
-Test-only special records are stored in:
+Development regression persona `test0707` proves independent subject history:
 
-- `worker/fixtures/phase10/`
+- Maths Current: Year 5;
+- Maths Previous: Year 3, Year 4;
+- English Current: Year 5;
+- English Previous: Year 4 only;
+- deliberately no Year 3 English history.
 
-They use development sentinel ScreenPal IDs, not real legacy production special-content IDs/passwords.
+Sej manually logged into the V2 development portal and accepted this presentation before Phase 10 closure.
 
-Phase 10 personas:
+## 6. Phase 10 final verification / GitHub history
 
-- `test0505` — Year 5 11+ Maths + English with `Y5MAssT1`, `Y5MAssT2`, `VR_HOWTO`, `MOCKS`;
-- `test0606` — Year 4 11+ Maths + English with `Y4MAssT1`, `Y4MAssT2`, `VR_HOWTO`.
+Original Phase 10 implementation and guarded deployment were completed before manual review. Final corrections were then merged:
 
-Post-deploy D1 verification confirmed both personas have **zero** ordinary `lesson_entitlements` rows. Their special access therefore proves the manual special-access path rather than accidental Excel lesson entitlement.
+- PR #11 — special-area available-lesson count correction;
+- PR #12 — multi-year Current/Previous regression persona/navigation;
+- PR #14 — verification workflow plumbing fix;
+- PR #15 — successful guarded final rerun.
 
-Existing `test0404` is the Phase 10 negative-control persona: English 11+ without a Phase 10 special bucket; special access is absent/rejected.
+Latest Phase 10 code/operations merge recorded before closure:
 
-## 6. Phase 10 GitHub / Cloudflare implementation
+- `a72453f93f6ae6d5a586d8354fefe536a05bfa5d`
 
-### 6.1 Static verification and implementation merge
+Final guarded run:
 
-Workflow:
+- GitHub Actions run `32569205163` — **PASS**.
 
-- `.github/workflows/phase10-static-verification.yml`
+Final verification proved:
 
-Result: **PASS**.
+- exact isolated V2 Worker/environment/origin/bindings before writes;
+- Phase 8/9/10 security baseline retained;
+- Worker dry run + development-only deployment passed;
+- test0707 Students KV and five D1 history entitlements were re-read/verified;
+- Phase 10 multi-year history API acceptance: **PASS**;
+- real Google Chrome 151 browser acceptance: **PASS**;
+- browser proof matched the independent Maths/English Current/Previous groups above;
+- three screenshots retained in artifact `phase10-history-browser-screenshots`.
 
-Implementation PR:
+Final closure record:
 
-- PR #8 — `Phase 10: add manual special content areas`
+- `docs/data/PHASE10_FINAL_CLOSURE.md`
 
-Implementation merge commit:
-
-- `a83743f08d7516649b4dba336a6385fc019095b0`
-
-### 6.2 Guarded V2 Cloudflare apply
-
-Workflow:
-
-- `.github/workflows/phase10-cloudflare-apply.yml`
-
-The workflow verifies the exact V2 development Worker/environment/origin/bindings and the Phase 9 security baseline before any write, then performs a Wrangler dry run.
-
-Guarded apply / acceptance run:
-
-- GitHub Actions run `32567604924`
-
-Result: **PASS**.
-
-The workflow successfully:
-
-- applied migration `0006_mock_password_rate_limits.sql`;
-- deployed the Phase 10 Worker to `fpt-portal-v2-worker`;
-- generated a random development-only mock password inside GitHub Actions, masked it and stored it in `MOCK_DAILY_PASSWORDS` without disclosing it;
-- seeded the test-only Phase 10 special catalogues and test personas;
-- re-read and compared the written KV fixtures;
-- verified the D1 throttle table;
-- verified zero ordinary lesson entitlement rows for `test0505`/`test0606`;
-- retained Phase 8 answer-protection and Phase 9 quiz-gating markers;
-- ran deployed API acceptance;
-- ran real Google Chrome acceptance against the GitHub Pages Phase 10 portal.
-
-Trigger-only operations PR:
-
-- PR #9 — `Phase 10: guarded V2 Cloudflare apply`
-
-Operations merge commit:
-
-- `a5e00ccf3d972d8b072db0b77281597500114fca`
-
-No existing live portal target was permitted by this workflow.
-
-## 7. Phase 10 verification results
-
-Detailed record:
+Detailed original Phase 10 verification remains:
 
 - `docs/data/PHASE10_VERIFICATION.md`
 
-### 7.1 Deployed API acceptance
-
-**PASS**
-
-Verified:
-
-- Year 5 Level 3 receives only manually assigned Y5 assessment/MOCKS areas;
-- Year 5 11+ English receives manually assigned VR How-To/MOCKS areas;
-- Year 4 Level 2 receives manually assigned Y4 assessments;
-- Year 4 11+ English receives manually assigned VR How-To;
-- special-list response records manual special-bucket access and no Excel entitlement use;
-- locked MOCKS response contains names/day/subject but no usable ScreenPal/video references;
-- wrong daily password is rejected;
-- correct daily password returns both Maths + VR answer videos for the same day;
-- assessment and VR How-To video routes enforce their permitted view + manual special access;
-- a 11+ student without the special bucket receives no special area/direct access.
-
-### 7.2 Real Chrome acceptance
-
-**PASS**
-
-Verified against:
-
-`https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase10.html`
-
-Chrome proof covered:
-
-- Level 3 assessment/MOCKS cards;
-- locked Mock 1 with Maths + VR answer-video display names;
-- incorrect password message;
-- successful same-day Maths + VR unlock;
-- ScreenPal player access only after unlock;
-- Year 5 11+ English VR How-To/MOCKS placement;
-- VR How-To resource rendering.
-
-Four screenshots were saved as the GitHub Actions artifact `phase10-browser-screenshots` for the successful verification run.
-
-## 8. Current GitHub / development state
+## 7. Current development state
 
 Repository:
 
 - `FuturePerfectTuitions/futureperfect-lessons-v2`
 - branch: `main`
 
-Development proof URLs:
+Development portal:
 
-- Phase 7: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase7.html`
-- Phase 8: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase8.html`
-- Phase 9: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase9.html`
 - Phase 10: `https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase10.html`
 - Worker: `https://fpt-portal-v2-worker.futureperfectlessons.workers.dev`
 
-No production `CNAME` is configured for V2 development.
+Development login allowlist now includes:
 
-## 9. Current Cloudflare / storage state
+- `test0101,test0202,test0303,test0404,test0505,test0606,test0707`
 
-### 9.1 Worker
+Normal production login remains disabled. No production CNAME is configured for V2 development.
 
-- Worker: `fpt-portal-v2-worker`
-- Environment: `development`
-- Allowed portal origin: `https://futureperfecttuitions.github.io`
-- Development login allowlist: `test0101,test0202,test0303,test0404,test0505,test0606`
-- Normal production student login: disabled
-- Existing binding names remain: `STUDENTS_KV`, `LESSONS_KV`, `MATERIALS_R2`, `DB`
-- Phase 10 Worker secret/config name: `MOCK_DAILY_PASSWORDS` — value deliberately not recorded.
-
-### 9.2 Lessons KV
-
-Existing ordinary key families remain:
-
-- `lesson:<LESSON_ID>`
-- `curriculum:<CURRICULUM_CODE>`
-- legacy/proof `view:<VIEW_ID>` fallbacks retained during incremental development.
-
-Phase 10 adds the V2 special family:
-
-- `special:<SPECIAL_BUCKET_CODE>`
-
-Current Phase 10 development special codes:
-
-- `Y4MAssT1`
-- `Y4MAssT2`
-- `Y5MAssT1`
-- `Y5MAssT2`
-- `VR_HOWTO`
-- `MOCKS`
-
-### 9.3 D1
-
-Database remains `fpt_portal_v2_db`.
-
-Tables now include:
+D1 tables now include:
 
 - `lesson_entitlements`
 - `student_sessions`
@@ -410,51 +240,29 @@ Tables now include:
 - `answer_password_rate_limits`
 - `mock_password_rate_limits`
 
-Single-active-session trigger remains:
+Existing single-active-session trigger remains `trg_student_sessions_single_active`.
 
-- `trg_student_sessions_single_active`
+## 8. Safety / deliberate non-actions
 
-Phase 10 did not alter the permanent ordinary lesson entitlement schema.
-
-## 10. Governing business / implementation rules carried forward
-
-- The Master remains v2.6; Steps remains v1.6. Phase 10 implementation required no business-rule or phase-sequence revision.
-- Cross-subject upsell content remains locked at access-control level; first explicit lock indication remains on the individual ordinary lesson page.
-- ScreenPal quizzes remain 11+-only and presentation-gated.
-- Protected ordinary/VR answers continue to use the student's current personal Answer Pack password and Phase 8 viewer.
-- Special assessment/MOCKS/VR How-To access is manual through `manualAccess.specialBuckets`.
-- Ordinary Excel Student + Lesson sync must not grant Phase 10 special areas.
-- The mock daily password remains separate from the personal Answer Pack password.
-- Locked mock metadata must never expose usable ScreenPal references before daily-password verification.
-- Cloudflare V2 changes should continue to use audited/guarded GitHub Actions where practical.
-- Secrets stay outside source control and chat.
-
-## 11. Deliberate non-actions through Phase 10
-
-- No changes to the existing live portal repository, Worker or live KV data.
+- Existing live portal repository/Worker/KVs remained untouched.
 - No live-domain switch.
-- No production `CNAME` on V2.
-- No normal production-student login enablement.
-- No production lesson catalogue load.
-- No real production Phase 10 special catalogue/password migration by guessing or inventing values.
-- No Excel/VBA sync build yet.
-- No Admin console.
-- No Phase 11 work.
+- No production CNAME on V2.
+- Normal real-student V2 login remains disabled.
+- No production catalogue import has begun.
+- No Excel/VBA sync endpoint has begun.
+- Phase 10 special-content architecture is proven with test-only V2 fixtures; real operational mock passwords or production special-content IDs were not copied, guessed or committed.
+- **No Phase 11 work has started.**
 
-## 12. Phase 10 checkpoint
+## 9. Phase 10 closure
 
-**PASS — Phase 10 is complete.**
+**PASS — PHASE 10 CLOSED.**
 
-The existing special-content use cases are reproducible in the isolated V2 development portal without depending on legacy ordinary KV range/bucket entitlement logic. Manual special access is separated from Excel lesson entitlement, Year 5 daily mock-password protection is preserved with stricter reference gating, and the deployed experience has passed API and real Chrome acceptance.
+Phase 10 is complete for 11+ Maths Assessments, Year 5 11+ MOCKS/daily-password protection and VR How-To through the V2 manual special-access model, including the corrected available-lesson total and per-subject Current/Previous multi-year history navigation.
 
-## 13. Next incomplete phase
+## 10. Next phase — Phase 11
 
-### Phase 11 — Load the Real Lesson Catalogue
+Purpose: load the real lesson catalogue into the already-proven V2 architecture. Phase 11 must begin in a new chat and must not be started as part of the Phase 10 handover.
 
-Do **not** start Phase 11 in the Phase 10 chat.
+### Exact new-chat prompt
 
-Phase 11 must begin in a new chat. Before changing anything, read Master v2.6, Steps v1.6 and this cumulative Implementation Handover v3.8; reconnect to GitHub and inspect the current implementation and deployed V2 development state.
-
-## 14. New-chat start prompt
-
-Continue FPT Portal V2. Start Phase 11 only. Read the latest Master Authoritative Specification v2.6, Steps to Progression v1.6 and Implementation Handover v3.8 first. Reconnect to the GitHub repository FuturePerfectTuitions/futureperfect-lessons-v2 and inspect the actual current implementation and deployed V2 development state before changing anything. Phase 10 is complete. Load the real lesson catalogue only, preserving the canonical curriculum, student-facing Lesson ID aliases, explicit resource pairings, 11+-only ScreenPal quiz rule, Phase 8 protected-answer model, Phase 9 English/VR model and Phase 10 manual special-access architecture. Use exact R2 object paths and explicit approved ScreenPal share/embed URLs; never guess URLs from bare IDs. Use the established guarded GitHub Actions → Cloudflare path where practical, never expose Cloudflare secrets, and for any remaining manual Cloudflare/KV/D1 step guide me as a beginner in small explicit steps. Do not change the existing live portal. Work on GitHub yourself. Complete and verify Phase 11 only; do not start Phase 12.
+> Continue FPT Portal V2. Start Phase 11 only. Read the latest Master Authoritative Specification v2.7, Steps to Progression v1.7 and Implementation Handover v3.9 first. Reconnect to the GitHub repository FuturePerfectTuitions/futureperfect-lessons-v2 and inspect the actual current implementation and deployed V2 development state before changing anything. Phase 10 is complete. Load the real lesson catalogue only, preserving the canonical curriculum, student-facing Lesson ID aliases, Current/Previous Year/Level grouping per subject with independent Maths/English history, the student-facing available-lesson count rule (open ordinary lessons plus visible manually assigned special-area cards), explicit resource pairings, the 11+-only ScreenPal quiz rule, Phase 8 protected-answer model, Phase 9 English/VR model and Phase 10 manual special-access architecture. Use exact R2 object paths and explicit approved ScreenPal share/embed URLs; never guess URLs from bare IDs. Do not copy legacy KV permission logic into V2. Use the established guarded GitHub Actions → Cloudflare path where practical, never expose Cloudflare secrets, and for any remaining manual Cloudflare/KV/D1 step guide me as a beginner in small explicit steps. Do not change the existing live portal. Work on GitHub yourself. Complete and verify Phase 11 only; do not start Phase 12. At the end of Phase 11, include a practical ‘What you can now see on the portal’ summary and give me a test login/checklist before closing the phase.
