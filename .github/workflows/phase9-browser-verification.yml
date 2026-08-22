@@ -1,0 +1,54 @@
+name: Phase 9 browser verification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/phase9-browser-verify-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    name: Verify rendered Phase 9 student experience
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase9-browser-verification' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install Playwright driver only
+        shell: bash
+        run: npm install --no-save --no-package-lock playwright@latest
+
+      - name: Verify Chrome is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          google-chrome --version
+
+      - name: Run Phase 9 browser acceptance test
+        shell: bash
+        run: node tests/phase9-browser-verification.mjs
+
+      - name: Upload Phase 9 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase9-browser-screenshots
+          path: artifacts/phase9-browser
+          if-no-files-found: warn
+          retention-days: 14
