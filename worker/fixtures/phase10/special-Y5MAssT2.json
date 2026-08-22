@@ -1,0 +1,12 @@
+{
+  "bucketId": "Y5MAssT2",
+  "type": "assessment",
+  "title": "11+ Maths Assessments — Year 5 Term 2",
+  "description": "Phase 10 development fixture for the manually assigned 11+ Maths assessment area.",
+  "active": true,
+  "testOnly": true,
+  "items": [
+    {"id":"heading-1","type":"separator","title":"Assessment answer videos"},
+    {"id":"assessment-1","title":"Assessment 1 — Answer Video","description":"Development-only special-area video fixture.","video":{"screenpal":"DEV-P10-Y5-T2-A1"}}
+  ]
+}

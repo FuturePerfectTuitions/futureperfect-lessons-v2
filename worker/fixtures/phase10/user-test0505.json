@@ -1,0 +1,17 @@
+{
+  "firstName": "Phase10Y5",
+  "p": "M5ok",
+  "answerPassword": "A5ns",
+  "schoolYear": 5,
+  "vrEligible": true,
+  "status": "active",
+  "expires": null,
+  "batches": ["Y5M11DEV1", "Y5E11DEV1"],
+  "fullLibraries": [],
+  "manualAccess": {
+    "coreLessons": [],
+    "vrLessons": [],
+    "specialBuckets": ["Y5MAssT1", "Y5MAssT2", "VR_HOWTO", "MOCKS"]
+  },
+  "blockedLessons": []
+}

@@ -1,0 +1,46 @@
+name: Phase 10 static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - phase10.html
+      - assets/phase10.js
+      - assets/phase10.css
+      - worker/src/index-phase10.js
+      - worker/wrangler.toml
+      - worker/migrations/0006_mock_password_rate_limits.sql
+      - worker/fixtures/phase10/**
+      - tests/phase10-*.sh
+      - tests/phase10-*.mjs
+      - .github/workflows/phase10-cloudflare-apply.yml
+      - .github/workflows/phase10-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Validate Phase 10 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase10.js
+          node --check assets/phase10.js
+          node --check tests/phase10-browser-verification.mjs
+          bash -n tests/phase10-api-verification.sh
+          grep -Fq 'assets/phase10.css' phase10.html
+          grep -Fq 'assets/phase10.js' phase10.html
+          grep -Fq 'main = "src/index-phase10.js"' worker/wrangler.toml
+          grep -Fq 'MOCK_DAILY_PASSWORDS is a Worker secret' worker/wrangler.toml
+          grep -Fq 'CREATE TABLE IF NOT EXISTS mock_password_rate_limits' worker/migrations/0006_mock_password_rate_limits.sql
+          for f in worker/fixtures/phase10/*.json; do jq -e . "$f" >/dev/null; done
+          ! grep -R -E '"password"[[:space:]]*:[[:space:]]*".+"' worker/fixtures/phase10/special-MOCKS.json
+          echo 'Phase 10 static verification: PASS'

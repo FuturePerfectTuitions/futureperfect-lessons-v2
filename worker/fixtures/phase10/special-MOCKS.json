@@ -1,0 +1,19 @@
+{
+  "bucketId": "MOCKS",
+  "type": "mocks",
+  "title": "Year 5 11+ Mock Tests",
+  "description": "Maths and VR mock answer videos. Each mock day uses one separate daily password for both subjects.",
+  "active": true,
+  "testOnly": true,
+  "days": [
+    {
+      "day": 1,
+      "title": "Mock 1",
+      "description": "One daily password unlocks both answer videos for this mock day.",
+      "videos": [
+        {"id":"maths-1","subject":"maths","title":"Maths Mock 1 — Answer Video","screenpal":"DEV-P10-MOCK1-MATHS"},
+        {"id":"vr-1","subject":"vr","title":"VR Mock 1 — Answer Video","screenpal":"DEV-P10-MOCK1-VR"}
+      ]
+    }
+  ]
+}

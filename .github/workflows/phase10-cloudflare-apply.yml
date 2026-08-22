@@ -1,0 +1,223 @@
+name: Phase 10 guarded Cloudflare apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/phase10-apply-trigger.txt]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  apply:
+    name: Deploy and verify Phase 10 development V2
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase10-cloudflare-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact apply branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          test "$(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD)" = ".github/phase10-apply-trigger.txt"
+
+      - name: Validate source and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check worker/src/index-phase10.js
+          node --check assets/phase10.js
+          node --check tests/phase10-browser-verification.mjs
+          bash -n tests/phase10-api-verification.sh
+          grep -Fq 'assets/phase10.js' phase10.html
+          grep -Fq 'main = "src/index-phase10.js"' worker/wrangler.toml
+          grep -Fq 'CREATE TABLE IF NOT EXISTS mock_password_rate_limits' worker/migrations/0006_mock_password_rate_limits.sql
+          for f in worker/fixtures/phase10/*.json; do jq -e . "$f" >/dev/null; done
+          jq -e '.manualAccess.specialBuckets == ["Y5MAssT1","Y5MAssT2","VR_HOWTO","MOCKS"]' worker/fixtures/phase10/user-test0505.json >/dev/null
+          jq -e '.manualAccess.specialBuckets == ["Y4MAssT1","Y4MAssT2","VR_HOWTO"]' worker/fixtures/phase10/user-test0606.json >/dev/null
+
+      - name: Guard current isolated V2 state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings.json >/dev/null
+          CURRENT="$(jq -r '.result.bindings[] | select(.name=="DEV_LOGIN_ALLOWLIST") | .text' /tmp/settings.json)"
+          case "$CURRENT" in
+            test0101,test0202,test0303,test0404) NEW='test0101,test0202,test0303,test0404,test0505,test0606' ;;
+            test0101,test0202,test0303,test0404,test0505,test0606) NEW="$CURRENT" ;;
+            *) echo 'Unexpected development allowlist; refusing apply.' >&2; exit 1 ;;
+          esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          { echo "students=$STUDENTS"; echo "lessons=$LESSONS"; echo "r2=$R2"; echo "db=$DB"; echo "allowlist=$NEW"; } >> "$GITHUB_OUTPUT"
+
+      - name: Confirm deployed Phase 9 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/before.bin
+          for marker in QUIZ_NOT_AVAILABLE QUIZ_SHARE_URL_REQUIRED answer_view_tokens; do grep -aFq "$marker" /tmp/before.bin; done
+
+      - name: Generate audited runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          NEW_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat > worker/wrangler.phase10.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase10.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${NEW_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run Worker bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase10.runtime.toml --dry-run --outdir /tmp/phase10-build >/tmp/dry-run.log
+          echo 'Phase 10 dry run: PASS'
+
+      - name: Apply mock-password throttle schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --file worker/migrations/0006_mock_password_rate_limits.sql --yes >/tmp/d1.log
+
+      - name: Deploy Phase 10 Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase10.runtime.toml --keep-vars --message 'Phase 10 manual special areas and mock daily-password protection' >/tmp/deploy.log
+
+      - name: Configure masked development mock secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_MOCK_PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::$TEST_MOCK_PASSWORD"
+          jq -cn --arg p "$TEST_MOCK_PASSWORD" '{"1":$p}' | npx --yes wrangler@${WRANGLER_VERSION} secret put MOCK_DAILY_PASSWORDS --config worker/wrangler.phase10.runtime.toml >/tmp/secret.log
+          echo "PHASE10_TEST_MOCK_PASSWORD=$TEST_MOCK_PASSWORD" >> "$GITHUB_ENV"
+          echo 'Development-only mock password stored as masked Worker secret.'
+
+      - name: Seed Phase 10 development fixtures
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          for bucket in Y4MAssT1 Y4MAssT2 Y5MAssT1 Y5MAssT2 VR_HOWTO MOCKS; do
+            $W kv key put "special:${bucket}" --namespace-id "$LESSONS_KV_ID" --remote --path "worker/fixtures/phase10/special-${bucket}.json" >/dev/null
+          done
+          for user in test0505 test0606; do
+            $W kv key put "user:${user}" --namespace-id "$STUDENTS_KV_ID" --remote --path "worker/fixtures/phase10/user-${user}.json" >/dev/null
+          done
+
+      - name: Verify deployed Phase 10 state
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          for bucket in Y4MAssT1 Y4MAssT2 Y5MAssT1 Y5MAssT2 VR_HOWTO MOCKS; do
+            $W kv key get "special:${bucket}" --namespace-id "$LESSONS_KV_ID" --remote > "/tmp/$bucket.json"
+            diff -u <(jq -S . "worker/fixtures/phase10/special-${bucket}.json") <(jq -S . "/tmp/$bucket.json")
+          done
+          $W d1 execute fpt_portal_v2_db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='mock_password_rate_limits';" --json > /tmp/table.json
+          jq -e '.[0].results[0].name == "mock_password_rate_limits"' /tmp/table.json >/dev/null
+          $W d1 execute fpt_portal_v2_db --remote --command "SELECT COUNT(*) AS count FROM lesson_entitlements WHERE portal_user_id_norm IN ('test0505','test0606');" --json > /tmp/entitlements.json
+          jq -e '.[0].results[0].count == 0' /tmp/entitlements.json >/dev/null
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/after.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens; do grep -aFq "$marker" /tmp/after.bin; done
+
+      - name: Run deployed API acceptance
+        shell: bash
+        run: tests/phase10-api-verification.sh
+
+      - name: Wait for Phase 10 GitHub Pages proof page
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase10.html'
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$URL" --output /tmp/page.html && grep -Fq 'assets/phase10.js' /tmp/page.html; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Install Playwright driver
+        shell: bash
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+
+      - name: Run real Chrome acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          google-chrome --version
+          node tests/phase10-browser-verification.mjs
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase10-browser-screenshots
+          path: artifacts/phase10-browser
+          if-no-files-found: warn
+          retention-days: 14

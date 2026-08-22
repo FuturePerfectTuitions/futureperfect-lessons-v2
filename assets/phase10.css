@@ -1,0 +1,18 @@
+.phase10-special-section{margin:20px 0 4px;padding-top:18px;border-top:1px solid rgba(1,33,105,.12)}
+.phase10-special-heading h3,.phase10-area-header h2{margin:2px 0 6px;color:#012169}
+.phase10-eyebrow{margin:0 0 4px;color:#d71920;font-size:.78rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+.phase10-special-intro,.phase10-area-description,.phase10-mock-header p,.phase10-resource-copy span{color:#5f6673;line-height:1.5}
+.phase10-special-list{display:grid;gap:12px;margin-top:14px}
+.phase10-special-card{width:100%;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;border:1px solid rgba(1,33,105,.12);border-radius:16px;background:#fff;box-shadow:0 10px 24px rgba(1,33,105,.06);color:#012169;cursor:pointer;text-align:left}
+.phase10-special-card:hover{transform:translateY(-1px)}
+.phase10-special-card-copy{display:grid;gap:4px}.phase10-special-card-copy strong{font-size:1rem}.phase10-special-card-copy span{color:#5f6673;font-size:.88rem}.phase10-special-arrow{color:#d71920;font-size:1.25rem;font-weight:900}
+.phase10-special-screen{max-width:980px;margin-inline:auto}.phase10-area-header{margin:10px 0 20px}
+.phase10-resource-row,.phase10-mock-video-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;margin:10px 0;border:1px solid rgba(0,0,0,.08);border-radius:14px;background:#fff}
+.phase10-resource-copy{display:grid;gap:4px}.phase10-separator{margin:22px 0 8px;color:#012169}.phase10-empty{color:#5f6673}
+.phase10-video-wrap{margin-top:20px;overflow:hidden;border:1px solid rgba(0,0,0,.1);border-radius:18px;background:#fff;box-shadow:0 14px 30px rgba(0,0,0,.08)}
+.phase10-video-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.08)}
+.phase10-video-frame{position:relative;width:100%;padding-top:56.25%;background:#000}.phase10-video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.phase10-mock-card{margin:14px 0;padding:18px;border:1px solid rgba(1,33,105,.12);border-radius:18px;background:#fff}.phase10-mock-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.phase10-mock-header h3{margin:0 0 4px;color:#012169}.phase10-mock-header p{margin:0}
+.phase10-password-badge{flex:0 0 auto;padding:6px 10px;border-radius:999px;background:rgba(215,25,32,.08);color:#d71920;font-size:.78rem;font-weight:900}
+.phase10-locked-video-names{display:grid;gap:8px;margin:14px 0;color:#5f6673;font-weight:700}.phase10-mock-form{display:grid;gap:10px;margin-top:14px}.phase10-mock-form label{display:grid;gap:6px;font-weight:800;color:#012169}.phase10-password-field{display:flex;align-items:stretch;gap:8px}.phase10-password-field input{min-width:0;flex:1 1 auto;padding:12px 13px;border:1px solid rgba(0,0,0,.18);border-radius:12px;font:inherit}.phase10-eye{border:1px solid rgba(1,33,105,.18);border-radius:12px;background:#fff;color:#012169;font-weight:800;cursor:pointer;padding:0 14px}.phase10-mock-status{min-height:1.2em;margin:0;color:#d71920;font-weight:800}.phase10-mock-video-row span{display:grid;gap:3px}.phase10-mock-video-row small{color:#5f6673;font-weight:800}
+@media(max-width:640px){.phase10-special-card,.phase10-resource-row,.phase10-mock-video-row,.phase10-mock-header{align-items:stretch;flex-direction:column}.phase10-password-badge{align-self:flex-start}.phase10-password-field{flex-direction:column}.phase10-eye{min-height:42px}}
