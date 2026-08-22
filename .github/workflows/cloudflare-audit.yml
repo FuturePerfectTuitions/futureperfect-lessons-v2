@@ -71,27 +71,40 @@ jobs:
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/worker-settings.json
 
-          jq '{
-            success,
-            errors,
-            messages,
-            result: {
-              compatibility_date: .result.compatibility_date,
-              compatibility_flags: .result.compatibility_flags,
-              usage_model: .result.usage_model,
-              placement: .result.placement,
-              bindings: [
-                (.result.bindings // [])[] |
-                if .type == "plain_text" and (["ENVIRONMENT","ALLOWED_ORIGINS","DEV_LOGIN_ALLOWLIST","STUDENT_LOGIN_ENABLED"] | index(.name)) then
-                  {name, type, text}
-                elif ((.type // "") | test("secret"; "i")) then
-                  {name, type}
-                else
-                  {name, type, namespace_id, bucket_name, database_name, database_id, id, service, environment}
-                end
-              ]
+          jq '
+            .result as $r |
+            {
+              success,
+              errors,
+              messages,
+              result: {
+                compatibility_date: $r.compatibility_date,
+                compatibility_flags: $r.compatibility_flags,
+                usage_model: $r.usage_model,
+                placement: $r.placement,
+                bindings: [
+                  ($r.bindings // [])[] as $b |
+                  if ($b.type == "plain_text" and ((["ENVIRONMENT","ALLOWED_ORIGINS","DEV_LOGIN_ALLOWLIST","STUDENT_LOGIN_ENABLED"] | index($b.name)) != null)) then
+                    {name: $b.name, type: $b.type, text: $b.text}
+                  elif (($b.type // "") | test("secret"; "i")) then
+                    {name: $b.name, type: $b.type}
+                  else
+                    {
+                      name: $b.name,
+                      type: $b.type,
+                      namespace_id: $b.namespace_id,
+                      bucket_name: $b.bucket_name,
+                      database_name: $b.database_name,
+                      database_id: $b.database_id,
+                      id: $b.id,
+                      service: $b.service,
+                      environment: $b.environment
+                    }
+                  end
+                ]
+              }
             }
-          }' /tmp/worker-settings.json
+          ' /tmp/worker-settings.json
 
       - name: Account resource inventory (read-only)
         shell: bash
