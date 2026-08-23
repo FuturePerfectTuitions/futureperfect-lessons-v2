@@ -7,6 +7,7 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 ## What is locked in this staging set
 
 - 369 canonical ordinary lessons across 11 canonical curriculum keys.
+- The canonical/internal Lesson ID set is now locked for Phase 11 migration: 369 unique IDs, with no duplicate normal or 11+ presentation aliases in the reconciled staging catalogue.
 - Shared Maths is deduplicated: Year 4/Level 1, Year 5/Level 2 and Year 6 core/Level 3 use one canonical lesson record per underlying lesson.
 - English Year 4 and Year 5 normal/11+ use one core canonical lesson identity; 11+ supplementary/VR resources remain components, not duplicate core entitlements.
 - Current source-folder codes are retained separately from canonical/internal Lesson IDs.
@@ -15,14 +16,15 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 - Five Year 5 English 11+ supplementary folders have confirmed chronological component anchors in ENGLISH_Y5; none creates a new core entitlement.
 - The resource-pairing gate is resolved across all 852 active resource families after seven reviewed exclusions and one classifier correction.
 
-## Important staging decisions
+## Canonical ID lock
 
-- Year 4 Maths migration exceptions reserve Y4M36-Y4M39 for the unnumbered transition and Money 1-3 collision cases; Estimate, Compare & Calculate Money retains Y4M1.
-- The second Year 3 Y3M14 occurrence (Fractions 4) is staged as Y3M40.
-- Five Year 6-only duplicate Ratio and Proportion occurrences are staged as Y6M46-Y6M50.
-- Nineteen Year 6 SATs lessons are staged as canonical Y6M51-Y6M69 while retaining the existing student-facing Y6M1-Y6M19 aliases.
-- The second distinct Year 6 English Y6E14 occurrence is staged as Y6E33.
-- Year 5 English 11+ supplementary anchors are confirmed as: Y5T3EE28 -> Y5E31, Y5T3EE30 -> Y5E34, Y5T3EE32/Y5T3EE33 -> Y5E37, and Y5T3EE35 -> Y5E39.
+- Year 3 Fractions 4: Y3M40.
+- Year 4 / Level 1 transition: Y4M36.
+- Year 4 / Level 1 Money 1-3 collision set: Y4M37-Y4M39.
+- Additional normal Year 6 Ratio and Proportion 1-5: Y6M46-Y6M50.
+- Year 6 SATs sequence: canonical Y6M51-Y6M69 while retaining student aliases Y6M1-Y6M19.
+- Year 6 English SATs Preparation Grammatical Terms & Word Classes: Y6E33; the distinct Subjunctive and Modal lesson retains Y6E14.
+- Year 5 English supplementary resources remain presentation/resource components of existing canonical anchors rather than new entitlement IDs.
 
 ## Resource-pairing status
 
@@ -48,6 +50,7 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 
 ## Files
 
+- `CANONICAL_ID_LOCK.md` — locked Phase 11 collision/new-ID decisions and validation boundary.
 - `canonical_lessons_staging.csv` — canonical lesson identities, presentation aliases and metadata status.
 - `catalogue_metadata_staging.json` — source-grounded descriptions and ScreenPal provenance where present.
 - `resource_manifest_staging.csv` — selected student-facing PDF resources and exact proposed R2 keys.
@@ -56,7 +59,7 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 - `resource_pairing_resolution_summary.json` — machine-readable resolved pairing gate.
 - `resource_exclusions_staging.csv` — the seven reviewed PDFs excluded from Phase 11 R2.
 - `resource_reclassifications_staging.csv` — the Y4E36 VR PreLesson classifier correction.
-- `migration_exceptions_staging.csv` — collision/new-ID decisions and unresolved migration cases.
+- `migration_exceptions_staging.csv` — locked collision/new-ID decisions and confirmed component anchors.
 - `english_y5_supplements_staging.csv` — Year 5 English 11+ supplementary source folders and confirmed component anchors.
 - `vr_video_provenance_staging.csv` — legacy VR video short-code provenance.
 - `shared_math_shadow_sources.csv` — duplicate Year 6 physical copies not selected as the canonical Level 3 R2 source.
@@ -65,4 +68,4 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 
 ## Current gate
 
-This set is intentionally **not deployable yet**. ScreenPal URL handling, Phase 11 explicit-URL Worker source, Year 5 English supplementary anchors, and resource pairing are resolved. Remaining gates are the canonical-ID lock, Phase 11 modelling of protected core PreLesson answers and 11+-specific extra resources, final R2 manifest validation/upload, guarded LESSONS_KV population, activation of the Phase 11 Worker only after those gates pass, and end-to-end Phase 11 verification.
+This set is intentionally **not deployable yet**. ScreenPal URL handling, Phase 11 explicit-URL Worker source, Year 5 English supplementary anchors, resource pairing, and the canonical-ID lock are resolved. Remaining gates are Phase 11 modelling of protected core PreLesson answers and 11+-specific extra resources, final R2 manifest validation/upload, guarded LESSONS_KV population, activation of the Phase 11 Worker only after those gates pass, and end-to-end Phase 11 verification.
