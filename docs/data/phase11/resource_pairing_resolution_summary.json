@@ -1,0 +1,17 @@
+{
+  "phase": 11,
+  "status": "PAIRING_GATE_RESOLVED",
+  "active_manifest_rows_after_exclusions": 1646,
+  "excluded_r2_rows": 7,
+  "resource_family_count": 852,
+  "resolved_resource_family_count": 852,
+  "relation_counts": {
+    "PRIMARY_PAIR": 660,
+    "SHEET_ONLY": 241,
+    "SUPPLEMENTARY_PROTECTED_ANSWER": 77
+  },
+  "protected_answer_relations": 737,
+  "unprotected_answer_relations": 0,
+  "classifier_corrections": 1,
+  "fabricated_answer_packs": 0
+}
