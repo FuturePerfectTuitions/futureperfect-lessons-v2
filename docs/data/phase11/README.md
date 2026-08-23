@@ -27,6 +27,7 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 - 123 trusted standard-video short codes can now be materialised to explicit ScreenPal content/watch/embed URLs.
 - 2 trusted 11+ video override short codes can now be materialised to explicit ScreenPal content/watch/embed URLs.
 - 79 trusted quiz short codes can now be materialised to explicit ScreenPal quiz URLs and explicit quiz embed URLs using the corresponding legacy standard video short code as the player ID.
+- 10 mapped VR video short codes can now be materialised to explicit ScreenPal embed URLs; one legacy VR reference belongs to an excluded/unmapped game lesson and remains outside the ordinary Phase 11 catalogue.
 - Runtime Worker code must consume the stored explicit URL. It must not reconstruct provider URLs from bare IDs at request time.
 - The existing 11+ presentation gate remains unchanged: normal views receive no quiz URL/model; 11+ views may receive the approved quiz model.
 
