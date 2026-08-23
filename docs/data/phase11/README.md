@@ -11,7 +11,7 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 - English Year 4 and Year 5 normal/11+ use one core canonical lesson identity; 11+ supplementary/VR resources remain components, not duplicate core entitlements.
 - Current source-folder codes are retained separately from canonical/internal Lesson IDs.
 - Proposed R2 target keys use canonical roots and canonical Lesson IDs. No R2 writes are performed by this staging data.
-- Bare ScreenPal short codes are retained only as provenance. No player/share/quiz URL is generated from them.
+- User-confirmed ScreenPal URL templates are now authoritative for trusted legacy short codes. Explicit video content/watch/embed URLs and quiz direct/embed URLs may be materialised in Phase 11 staging. The supplied quiz example confirms the quiz player ID is the lesson's legacy standard video ID.
 
 ## Important staging decisions
 
@@ -22,6 +22,14 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 - The second distinct Year 6 English Y6E14 occurrence is staged as Y6E33.
 - Five Year 5 English 11+ supplementary folders are not new core lessons. Their chronological anchors are proposals and remain explicitly flagged.
 
+## ScreenPal status
+
+- 123 trusted standard-video short codes can now be materialised to explicit ScreenPal content/watch/embed URLs.
+- 2 trusted 11+ video override short codes can now be materialised to explicit ScreenPal content/watch/embed URLs.
+- 79 trusted quiz short codes can now be materialised to explicit ScreenPal quiz URLs and explicit quiz embed URLs using the corresponding legacy standard video short code as the player ID.
+- Runtime Worker code must consume the stored explicit URL. It must not reconstruct provider URLs from bare IDs at request time.
+- The existing 11+ presentation gate remains unchanged: normal views receive no quiz URL/model; 11+ views may receive the approved quiz model.
+
 ## Files
 
 - `canonical_lessons_staging.csv` — canonical lesson identities, presentation aliases and metadata status.
@@ -30,11 +38,11 @@ This directory reconciles the cleaned Phase 11 resource inventory with the curre
 - `resource_pairings_staging.csv` — pairing status by lesson and resource family.
 - `migration_exceptions_staging.csv` — collision/new-ID decisions and unresolved migration cases.
 - `english_y5_supplements_staging.csv` — Year 5 English 11+ supplementary source folders and proposed anchors.
-- `screenpal_url_status_staging.csv` — main video/quiz URL completeness audit.
-- `vr_video_provenance_staging.csv` — legacy VR video short-code provenance; no guessed URLs.
+- `vr_video_provenance_staging.csv` — legacy VR video short-code provenance.
 - `shared_math_shadow_sources.csv` — duplicate Year 6 physical copies not selected as the canonical Level 3 R2 source.
 - `validation_summary.json` — machine-readable staging validation.
+- `../PHASE11_SCREENPAL_URL_RULES.md` — owner-confirmed ScreenPal URL/embed templates and quiz-player pairing rule.
 
 ## Current gate
 
-This set is intentionally **not deployable yet**. The resource-path structure is deterministic and collision-free, but the remaining ScreenPal URL, multi-resource pairing and English Year 5 supplementary-anchor issues must be resolved before a guarded KV/R2 apply is allowed.
+This set is intentionally **not deployable yet**. The ScreenPal URL-shape blocker is now resolved for the trusted legacy video/quiz metadata. Remaining gates are multi-resource pairing, English Year 5 supplementary anchors, canonical-ID lock, migration of the Worker to consume stored explicit ScreenPal URLs, and the guarded R2/KV apply.
