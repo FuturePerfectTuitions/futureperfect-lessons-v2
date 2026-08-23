@@ -1,0 +1,48 @@
+name: Phase 11 ScreenPal explicit URL static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/index-phase11.js
+      - worker/src/phase11-screenpal.js
+      - tests/phase11-screenpal-static-verification.mjs
+      - docs/data/PHASE11_SCREENPAL_URL_RULES.md
+      - .github/workflows/phase11-screenpal-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify explicit ScreenPal URL handling
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11.js
+          node --check worker/src/phase11-screenpal.js
+          node --experimental-default-type=module tests/phase11-screenpal-static-verification.mjs
+
+          # Phase 11 source exists for review, but this PR must not deploy it.
+          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          grep -Fq "import phase10HistoryWorker from './index-phase10-history.js';" worker/src/index-phase11.js
+
+          # Runtime Phase 11 code must read stored explicit URLs rather than construct
+          # ScreenPal provider URLs from bare short codes.
+          if grep -Eq 'go\.screenpal\.com/(player|watch)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js; then
+            echo 'Phase 11 runtime code contains a synthesized ScreenPal URL.' >&2
+            exit 1
+          fi
+          if grep -Eq 'screenpal\.com/content/(video|quizzes)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js; then
+            echo 'Phase 11 runtime code contains a synthesized ScreenPal content URL.' >&2
+            exit 1
+          fi
+
+          echo 'Phase 11 ScreenPal explicit URL static verification: PASS'
