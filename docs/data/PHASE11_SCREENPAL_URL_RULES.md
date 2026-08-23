@@ -26,7 +26,9 @@ A website embed is a player URL containing both a **player/video ID** and the **
 
 The quiz short code alone is sufficient to materialise the direct quiz URL.
 
-The quiz short code alone is **not** sufficient to materialise the embed URL because the embed also requires `{PLAYER_ID}`. V2 must not infer that player ID unless its provenance is explicit. Where no confirmed player ID exists, the 11+ quiz can safely use the explicit direct quiz URL.
+For the legacy Phase 11 catalogue, `{PLAYER_ID}` is the lesson's legacy **standard video short code**. This is explicitly validated by the user-supplied example: player `cO1b1nnupar` + quiz `cOivb222Z`, which corresponds to the same catalogue lesson (`Y5M37 Properties of Shapes 3`).
+
+Therefore, when a trusted legacy lesson has both a standard video short code and quiz short code, Phase 11 may materialise the quiz embed URL using those two stored values. It must still store the resulting explicit URL; the runtime Worker must not synthesize it from bare IDs.
 
 ## Presentation gate
 
