@@ -1,0 +1,49 @@
+{
+  "canonical_lesson_count": 369,
+  "curriculum_counts": {
+    "ENGLISH_Y2": 29,
+    "ENGLISH_Y3": 32,
+    "ENGLISH_Y4": 34,
+    "ENGLISH_Y5": 32,
+    "ENGLISH_Y6": 31,
+    "MATHS_L1": 36,
+    "MATHS_L2": 38,
+    "MATHS_L3": 43,
+    "MATHS_Y2": 36,
+    "MATHS_Y3": 34,
+    "MATHS_Y6_EXTRA": 24
+  },
+  "unique_canonical_ids": 369,
+  "duplicate_canonical_ids": [],
+  "duplicate_normal_aliases": [],
+  "duplicate_11plus_aliases": [],
+  "selected_resource_rows": 1624,
+  "proposed_supplement_resource_rows": 29,
+  "resource_r2_key_duplicates": [],
+  "blocked_unresolved_resource_rows": 0,
+  "shadow_year6_resource_rows_not_selected": 194,
+  "pairing_status_counts": {
+    "CONFIRMED_SINGLE_PAIR": 530,
+    "MULTIPLE_PAIRING_REVIEW_REQUIRED": 99,
+    "ORPHAN_ANSWER_REVIEW_REQUIRED": 1,
+    "SHEETS_ONLY_OPTIONAL_NO_ANSWER": 223
+  },
+  "lessons_with_legacy_video_shortcode": 123,
+  "lessons_with_explicit_video_url": 0,
+  "lessons_with_legacy_quiz_shortcode": 79,
+  "lessons_with_explicit_quiz_url": 0,
+  "description_present": 123,
+  "description_missing": 246,
+  "migration_exception_rows": 33,
+  "supplement_source_rows": 5,
+  "r2_resource_integrity_gate_source": "PASS (v8 source audit)",
+  "production_apply_safe": false,
+  "production_apply_blockers": [
+    "Approved explicit ScreenPal URLs are not yet present; bare short codes remain provenance only.",
+    "99 multi-resource pair families require explicit pairing review.",
+    "1 orphan 11+ PreLesson answer requires review.",
+    "Five Year 5 English 11+ supplementary anchors remain proposals, not production-approved.",
+    "New canonical IDs for collisions/SATs are staged proposals and must be locked before Excel/cutover use.",
+    "R2 corpus has not been uploaded to the V2 development bucket."
+  ]
+}
