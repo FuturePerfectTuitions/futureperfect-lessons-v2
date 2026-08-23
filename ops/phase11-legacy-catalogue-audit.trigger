@@ -1,2 +1,2 @@
 Phase 11 read-only legacy lesson-content catalogue audit.
-Rerun using direct Cloudflare KV REST reads.
+Rerun after full Lessons-namespace export workflow correction.
