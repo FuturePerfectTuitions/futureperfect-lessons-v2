@@ -1,0 +1,13 @@
+{
+  "firstName": "TestY5E",
+  "p": "Te12",
+  "answerPassword": "Te12",
+  "schoolYear": 5,
+  "vrEligible": false,
+  "status": "active",
+  "expires": null,
+  "batches": ["Y5EDEV1"],
+  "fullLibraries": [],
+  "manualAccess": { "coreLessons": [], "vrLessons": [], "specialBuckets": [] },
+  "blockedLessons": []
+}
