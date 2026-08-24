@@ -1,0 +1,266 @@
+name: Phase 11 quota-safe Worker recovery deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/phase11-quota-safe-worker-trigger.txt]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  ROLLBACK_REF: 2b7c81f709bed63a7350168b1c41d7894e3bf902
+
+jobs:
+  deploy:
+    name: Deploy quota-safe Phase 11 Worker pending acceptance
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase11-quota-safe-worker-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact trigger branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only quota recovery branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          test "$(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD)" = ".github/phase11-quota-safe-worker-trigger.txt"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Validate immutable Phase 11 package and zero-KV navigation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/phase11-navigation-manifest.mjs
+          node --check scripts/phase11-apply-package.mjs
+          node --check worker/src/index-phase11-final.js
+          node --check worker/src/phase11-navigation-cache.js
+          node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
+          rm -rf /tmp/phase11-quota-safe
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-quota-safe >/tmp/phase11-quota-safe-package.log
+          jq -e '.phase == 11 and .catalogueLessons == 369 and .catalogueCurricula == 11 and .navigationManifestSha256 == "d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083" and .navigationManifestLessons == 369 and .navigationManifestCurricula == 11 and .navigationManifestBytes < 70000' /tmp/phase11-quota-safe/phase11-apply-summary.json >/dev/null
+          grep -Fq 'Navigation manifest SHA-256: d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' worker/src/phase11-navigation-manifest.generated.js
+          grep -Fq 'Home navigation must use zero LESSONS_KV gets.' tests/phase11-navigation-cache-static-verification.mjs
+
+      - name: Guard isolated V2 development bindings and login state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings.json >/dev/null
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          CURRENT="$(jq -r '.result.bindings[] | select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text") | .text' /tmp/settings.json)"
+          TARGET="$(cat /tmp/phase11-quota-safe/phase11-dev-allowlist.txt)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          test "$CURRENT" = "$TARGET"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login appears enabled; refusing quota recovery deploy.' >&2; exit 1;; esac
+          { echo "students=$STUDENTS"; echo "lessons=$LESSONS"; echo "r2=$R2"; echo "db=$DB"; echo "allowlist=$CURRENT"; } >> "$GITHUB_OUTPUT"
+
+      - name: Snapshot currently deployed Worker only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/phase11-quota-safe-backup
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/phase11-quota-safe-backup/worker-before.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother; do
+            grep -aFq "$marker" /tmp/phase11-quota-safe-backup/worker-before.bin
+          done
+
+      - name: Upload Worker rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-quota-safe-worker-before
+          path: /tmp/phase11-quota-safe-backup
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Prove current failure is specifically exhausted KV daily reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          : >/tmp/phase11-quota-preflight-tail.log
+          : >/tmp/phase11-quota-preflight-response.txt
+          (
+            timeout 30s npx --yes wrangler@${WRANGLER_VERSION} tail "$WORKER_NAME" \
+              --format json --status error \
+              > /tmp/phase11-quota-preflight-tail.log 2>&1
+          ) &
+          TAIL_PID=$!
+          sleep 6
+          set +e
+          HTTP_CODE="$(curl --silent --show-error \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"username":"testy411m","password":"Te12"}' \
+            --output /tmp/phase11-quota-preflight-response.txt \
+            --write-out '%{http_code}' \
+            'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/student/auth/login')"
+          CURL_RC=$?
+          set -e
+          sleep 6
+          kill "$TAIL_PID" 2>/dev/null || true
+          wait "$TAIL_PID" 2>/dev/null || true
+          echo "Quota preflight curl_rc=$CURL_RC http=$HTTP_CODE"
+          test "$CURL_RC" -eq 0
+          test "$HTTP_CODE" = '500'
+          grep -Fq 'KV get() limit exceeded for the day.' /tmp/phase11-quota-preflight-tail.log
+          grep -Fq 'loadPhase4User' /tmp/phase11-quota-preflight-tail.log
+          echo 'Confirmed: current pre-deployment failure is exhausted KV daily read quota.'
+
+      - name: Generate isolated Phase 11 Worker runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.quota-safe.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-final.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run quota-safe Phase 11 Worker bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.quota-safe.toml --dry-run --outdir /tmp/phase11-quota-safe-build >/tmp/phase11-quota-safe-dry-run.log
+          grep -R -aFq 'VIDEO_URL_REQUIRED' /tmp/phase11-quota-safe-build
+          grep -R -aFq 'p11elevenother' /tmp/phase11-quota-safe-build
+          grep -R -aFq 'd82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' /tmp/phase11-quota-safe-build
+          grep -R -aFq 'BUNDLED_MANIFEST_VALID' /tmp/phase11-quota-safe-build
+
+      - name: Deploy quota-safe Phase 11 Worker to V2 development
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.quota-safe.toml --keep-vars --message 'Phase 11 quota-safe bundled navigation pending acceptance' >/tmp/phase11-quota-safe-deploy.log
+
+      - name: Verify deployed quota-safe Worker markers
+        id: markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/phase11-quota-safe-worker-after.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother BUNDLED_MANIFEST_VALID d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083; do
+            grep -aFq "$marker" /tmp/phase11-quota-safe-worker-after.bin
+          done
+          echo 'Quota-safe Worker bundle is deployed. Student/API/Chrome acceptance remains pending KV quota availability.'
+
+      - name: Roll back if quota-safe Worker deployment or marker verification fails
+        if: always() && steps.deploy.outcome == 'success' && steps.markers.outcome == 'failure'
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$ROLLBACK_REF"
+          git checkout --detach "$ROLLBACK_REF"
+          cat >worker/wrangler.phase11.quota-rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-final.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.quota-rollback.toml --keep-vars --message 'Rollback Phase 11 quota-safe Worker deploy' >/tmp/phase11-quota-safe-rollback.log
+
+      - name: Collect quota recovery evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/phase11-quota-safe
+          for f in /tmp/phase11-quota-safe-package.log /tmp/phase11-quota-preflight-tail.log /tmp/phase11-quota-preflight-response.txt /tmp/phase11-quota-safe-dry-run.log /tmp/phase11-quota-safe-deploy.log /tmp/phase11-quota-safe-rollback.log; do
+            if [ -f "$f" ]; then cp "$f" artifacts/phase11-quota-safe/; fi
+          done
+          cp /tmp/phase11-quota-safe/phase11-apply-summary.json artifacts/phase11-quota-safe/ 2>/dev/null || true
+
+      - name: Upload quota recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-quota-safe-worker-deploy
+          path: artifacts/phase11-quota-safe
+          if-no-files-found: warn
+          retention-days: 30
