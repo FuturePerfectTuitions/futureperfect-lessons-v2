@@ -52,6 +52,7 @@ jobs:
           node --check worker/src/phase11-navigation-cache.js
           node --check tests/phase11-browser-verification.mjs
           bash -n tests/phase11-api-verification.sh
+          bash -n tests/phase11-home-performance.sh
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
           grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
@@ -105,6 +106,10 @@ jobs:
           path: /tmp/phase11-worker-backup
           if-no-files-found: error
           retention-days: 30
+
+      - name: Measure deployed home latency before change
+        shell: bash
+        run: bash tests/phase11-home-performance.sh /tmp/phase11-home-before.json
 
       - name: Generate isolated Phase 11 Worker runtime config
         shell: bash
@@ -167,6 +172,25 @@ jobs:
           for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother HOME_ORDER_SENSITIVE_CURRICULA; do
             grep -aFq "$marker" /tmp/worker-after-performance.bin
           done
+
+      - name: Measure deployed home latency after change
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-home-performance.sh /tmp/phase11-home-after.json
+          node <<'NODE'
+          const fs = require('fs');
+          const before = JSON.parse(fs.readFileSync('/tmp/phase11-home-before.json', 'utf8')).measurements;
+          const after = JSON.parse(fs.readFileSync('/tmp/phase11-home-after.json', 'utf8')).measurements;
+          const b = new Map(before.map(x => [x.persona, x.homeMs]));
+          const rows = after.map(x => ({
+            persona: x.persona,
+            beforeMs: b.get(x.persona),
+            afterMs: x.homeMs,
+            improvementPct: Number((((b.get(x.persona) - x.homeMs) / b.get(x.persona)) * 100).toFixed(1))
+          }));
+          console.log('Phase 11 /home before-after:', JSON.stringify(rows));
+          NODE
 
       - name: Run deployed Phase 11 API acceptance
         shell: bash
@@ -240,7 +264,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/phase11-worker-performance
-          for f in /tmp/phase11-worker-package.log /tmp/phase11-worker-dry-run.log /tmp/phase11-worker-deploy.log /tmp/phase11-worker-rollback.log; do
+          for f in /tmp/phase11-worker-package.log /tmp/phase11-worker-dry-run.log /tmp/phase11-worker-deploy.log /tmp/phase11-worker-rollback.log /tmp/phase11-home-before.json /tmp/phase11-home-after.json; do
             if [ -f "$f" ]; then cp "$f" artifacts/phase11-worker-performance/; fi
           done
 
