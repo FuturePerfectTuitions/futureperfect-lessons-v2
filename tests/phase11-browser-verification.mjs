@@ -26,6 +26,28 @@ function waitForStudentGet(pathname, timeout = 30000) {
   }, { timeout });
 }
 
+function waitForLessonDetail(timeout = 60000) {
+  return page.waitForResponse(response => {
+    try {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === 'GET' &&
+        /^\/api\/v1\/student\/lessons\/[^/]+$/.test(url.pathname)
+      );
+    } catch (_) {
+      return false;
+    }
+  }, { timeout });
+}
+
+async function responseDiagnostic(response) {
+  let body = '';
+  try {
+    body = await response.text();
+  } catch (_) {}
+  return `HTTP ${response.status()} ${response.url()}${body ? ` body=${body.slice(0, 1200)}` : ''}`;
+}
+
 async function waitForLoginCycleToFinish(username) {
   // The login handler disables the button before authentication and re-enables it
   // only in its finally block, after readSession() has completed its home load.
@@ -84,14 +106,23 @@ async function lessonCount(expected) {
   if (count !== expected) throw new Error(`Expected ${expected} visible lessons; found ${count}`);
 }
 
+async function openLessonRow(row) {
+  await row.waitFor({ state: 'visible', timeout: 30000 });
+  const detailPromise = waitForLessonDetail();
+  await row.click();
+  await page.locator('#screen-lesson').waitFor({ state: 'visible', timeout: 30000 });
+  const response = await detailPromise;
+  if (!response.ok()) {
+    throw new Error(`Phase 11 lesson-detail request failed: ${await responseDiagnostic(response)}`);
+  }
+  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
+}
+
 async function openLessonCode(code) {
   const row = page.locator('#lesson-list .phase6-lesson-row').filter({
     has: page.locator('.phase6-lesson-code', { hasText: code })
   }).first();
-  await row.waitFor({ state: 'visible', timeout: 30000 });
-  await row.click();
-  await page.locator('#screen-lesson').waitFor({ state: 'visible', timeout: 30000 });
-  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
+  await openLessonRow(row);
 }
 
 try {
@@ -100,8 +131,7 @@ try {
   await openSubject('#english-choice');
   await openView('Year 2');
   await lessonCount(29);
-  await page.locator('#lesson-list .phase6-lesson-row').first().click();
-  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
+  await openLessonRow(page.locator('#lesson-list .phase6-lesson-row').first());
   await shot('01-TestY2EM-English-real-catalogue');
 
   // Normal Year 5 Maths uses Year-style aliases and must not expose the 11+ quiz.
@@ -133,8 +163,7 @@ try {
   await openSubject('#english-choice');
   await openView('Year 5 11+');
   await lessonCount(32);
-  await page.locator('#lesson-list .phase6-lesson-row').first().click();
-  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
+  await openLessonRow(page.locator('#lesson-list .phase6-lesson-row').first());
   await page.locator('#phase9-vr-section').waitFor({ state: 'visible', timeout: 30000 });
   await page.getByRole('heading', { name: 'Verbal Reasoning' }).waitFor({ state: 'visible', timeout: 10000 });
   await shot('04-TestY511E-English11-VR');
