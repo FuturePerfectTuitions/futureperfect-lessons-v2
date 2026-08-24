@@ -6,13 +6,18 @@ on:
     paths:
       - scripts/phase11-apply-package.mjs
       - scripts/phase11-catalogue.mjs
+      - scripts/phase11-navigation-manifest.mjs
       - scripts/phase11-test-personas.mjs
       - scripts/phase11-kv-snapshot.mjs
+      - worker/src/phase11-navigation-manifest.generated.js
+      - worker/src/phase11-navigation-cache.js
       - docs/data/phase11/catalogue_payload/**
       - docs/data/phase11/test_personas.json
       - tests/phase11-apply-package-static-verification.mjs
+      - tests/phase11-navigation-cache-static-verification.mjs
       - tests/phase11-browser-verification.mjs
       - .github/workflows/phase11-cloudflare-apply.yml
+      - .github/workflows/phase11-worker-performance-deploy.yml
       - .github/workflows/phase11-apply-package-static-verification.yml
 
 permissions:
@@ -32,11 +37,15 @@ jobs:
         run: |
           set -euo pipefail
           node --check scripts/phase11-apply-package.mjs
+          node --check scripts/phase11-navigation-manifest.mjs
           node --check scripts/phase11-kv-snapshot.mjs
+          node --check worker/src/phase11-navigation-cache.js
           node --check tests/phase11-apply-package-static-verification.mjs
+          node --check tests/phase11-navigation-cache-static-verification.mjs
           node --check tests/phase11-browser-verification.mjs
           node --experimental-default-type=module tests/phase11-apply-package-static-verification.mjs
-          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/phase11-cloudflare-apply.yml')"
+          node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/phase11-cloudflare-apply.yml'); YAML.load_file('.github/workflows/phase11-worker-performance-deploy.yml')"
           grep -Fq 'Remote LESSONS_KV already exactly matches the canonical Phase 11 package; skipping redundant bulk write.' .github/workflows/phase11-cloudflare-apply.yml
           grep -Fq 'Remote STUDENTS_KV TestY* records already exactly match the canonical Phase 11 package; skipping redundant bulk write.' .github/workflows/phase11-cloudflare-apply.yml
           grep -Fq "planned.every(item => snap.values[item.key] === item.value)" .github/workflows/phase11-cloudflare-apply.yml
@@ -46,6 +55,9 @@ jobs:
           node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-apply-package >/tmp/phase11-apply-package.log
           jq -e 'length == 380' /tmp/phase11-apply-package/phase11-lessons-kv-bulk.json >/dev/null
           jq -e 'length == 9' /tmp/phase11-apply-package/phase11-test-students-kv-bulk.json >/dev/null
-          jq -e '.phase == 11 and .catalogueLessons == 369 and .lessonsKvWrites == 380 and .testPersonas == 9 and .developmentAllowlistCount == 16' /tmp/phase11-apply-package/phase11-apply-summary.json >/dev/null
+          jq -e '.phase == 11 and .catalogueLessons == 369 and .lessonsKvWrites == 380 and .testPersonas == 9 and .developmentAllowlistCount == 16 and .navigationManifestSha256 == "d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083" and .navigationManifestLessons == 369 and .navigationManifestCurricula == 11 and .navigationManifestBytes < 70000' /tmp/phase11-apply-package/phase11-apply-summary.json >/dev/null
+          grep -Fq 'Source catalogue SHA-256: 7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' worker/src/phase11-navigation-manifest.generated.js
+          grep -Fq 'Navigation manifest SHA-256: d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' worker/src/phase11-navigation-manifest.generated.js
+          grep -Fq 'const PHASE11_NAVIGATION_MANIFEST = {' worker/src/phase11-navigation-manifest.generated.js
           test "$(awk -F',' 'NF { print NF }' /tmp/phase11-apply-package/phase11-dev-allowlist.txt)" -eq 16
           echo 'Phase 11 apply package static verification: PASS'
