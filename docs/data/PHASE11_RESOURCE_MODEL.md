@@ -64,7 +64,7 @@ A pair may legitimately contain only its sheet/primary side or only its answer s
 
 ## Protected-answer reuse
 
-`worker/src/index-phase11-resources.js` reuses Phase 8 rather than implementing a second password/viewer system.
+`worker/src/index-phase11-resources.js` reuses Phase 8 rather than implementing a second server-side password/viewer system.
 
 Phase 11 reserves sparse protected-answer index ranges above the completed Phase 9 VR bridge ranges:
 
@@ -79,7 +79,7 @@ Phase 11 reserves sparse protected-answer index ranges above the completed Phase
 
 The Phase 11 adapter performs its own presentation/VR entitlement gate first, then bridges the approved resource into the existing Phase 8 `homeworks[index].answerPack` resolver for password authorisation, short-lived token creation, controlled PDF.js viewing, watermarking, single-use content opening, lease validation and password-change/session invalidation.
 
-This means the Phase 8 security behaviour remains one system rather than being duplicated.
+This means the Phase 8 security behaviour remains one server-side system rather than being duplicated.
 
 ## Download resources
 
@@ -95,10 +95,30 @@ The extension resource-key kinds are:
 
 The 11+ kinds are rejected outside an 11+ presentation.
 
+## Browser renderer
+
+`assets/phase11-resources.js` consumes only the safe `lesson.phase11Resources` model emitted by the Worker. It never reads or exposes an R2 object key.
+
+The renderer provides dedicated student-facing surfaces for:
+
+- core PreLesson Answer Packs, suppressing a duplicate primary PreLesson Sheet when Phase 7 already displays the same sheet;
+- core Cumulative Homework + protected Answer Pack pairs;
+- 11+ PreLesson pairs;
+- 11+ Homework pairs;
+- 11+ Cumulative Homework pairs;
+- core and 11+ supplementary protected answers;
+- supplementary VR protected answers inside the existing Verbal Reasoning area.
+
+Non-answer files are downloaded through the authenticated Worker resource endpoint. Protected resources use `assets/phase11-protected-bridge.js`, which follows the existing Phase 8 authorise/viewer-path/lease contract and the same PDF.js/canvas/watermark/no-download presentation pattern. It does not create a new password or token model.
+
+Both browser files are deliberately dormant during this staging gate: `phase10.html` does not load them. They will be wired into the development page only when the Phase 11 Worker/catalogue/R2 verification gate is ready for an integrated browser checkpoint.
+
 ## Deployment boundary
 
-The composition is:
+The Worker composition is:
 
 `index-phase11-resources.js -> index-phase11.js -> index-phase10-history.js -> Phase 10 -> Phase 9 -> Phase 8 -> Phase 7 -> base`
 
-The normal `worker/wrangler.toml` still points at `src/index-phase10-history.js`. Therefore the Phase 11 resource layer is source-only until the production catalogue, R2 and verification gates are complete.
+The normal `worker/wrangler.toml` still points at `src/index-phase10-history.js`. Therefore the Phase 11 Worker resource layer is source-only until the production catalogue, R2 and verification gates are complete.
+
+The normal Phase 10 HTML also remains unchanged and does not load the dormant Phase 11 browser renderer yet.
