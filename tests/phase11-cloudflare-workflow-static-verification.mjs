@@ -26,6 +26,29 @@ assert.ok(!workflow.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Phase 11 workfl
 assert.ok(!workflow.includes('kv key delete'), 'Phase 11 apply workflow must not delete KV keys.');
 assert.ok(!workflow.includes('r2 object delete'), 'Phase 11 apply workflow must not delete R2 objects.');
 
+const workerOnly = fs.readFileSync('.github/workflows/phase11-worker-performance-deploy.yml', 'utf8');
+for (const required of [
+  "github.event.pull_request.head.ref == 'ops/phase11-worker-performance-apply'",
+  '.github/phase11-worker-performance-trigger.txt',
+  'fpt-materials-dev',
+  'STUDENT_LOGIN_ENABLED',
+  'src/index-phase11-final.js',
+  'phase11-worker-before-performance',
+  'ROLLBACK_REF',
+  'HOME_ORDER_SENSITIVE_CURRICULA',
+  'tests/phase11-home-performance.sh',
+  'tests/phase11-api-verification.sh',
+  'tests/phase11-browser-verification.mjs',
+  'Roll back to previous known-good Phase 11 Worker on acceptance failure'
+]) {
+  assert.ok(workerOnly.includes(required), `Phase 11 Worker-only workflow missing guard/step: ${required}`);
+}
+assert.ok(!workerOnly.includes('phase11-kv-snapshot.mjs'), 'Worker-only deploy must not require or mutate KV snapshot state.');
+assert.ok(!workerOnly.includes('kv bulk put'), 'Worker-only deploy must not write KV catalogue data.');
+assert.ok(!workerOnly.includes('d1 execute'), 'Worker-only deploy must not directly write or alter D1 catalogue/entitlement data.');
+assert.ok(!workerOnly.includes('r2 object'), 'Worker-only deploy must not mutate R2 objects.');
+assert.ok(!workerOnly.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Worker-only deploy must not enable production student login.');
+
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 assert.ok(wrangler.includes('main = "src/index-phase10-history.js"'), 'Implementation PR must not switch the checked-in Worker entrypoint before guarded apply.');
 
