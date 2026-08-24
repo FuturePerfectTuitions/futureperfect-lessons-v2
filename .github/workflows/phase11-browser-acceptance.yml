@@ -1,0 +1,41 @@
+name: Phase 11 browser acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tests/phase11-browser-verification.mjs
+      - .github/workflows/phase11-browser-acceptance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Syntax-check Phase 11 Chrome acceptance
+        run: node --check tests/phase11-browser-verification.mjs
+      - name: Install Playwright driver only
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+      - name: Run non-destructive Phase 11 Chrome acceptance against V2 development
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-browser-acceptance
+          path: artifacts/phase11-browser
+          if-no-files-found: warn
+          retention-days: 30
