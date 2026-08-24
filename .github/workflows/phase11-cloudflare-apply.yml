@@ -209,7 +209,18 @@ jobs:
           LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@${WRANGLER_VERSION} kv bulk put /tmp/phase11-apply/phase11-lessons-kv-bulk.json --namespace-id "$LESSONS_KV_ID" --remote >/tmp/phase11-lessons-kv-put.log
+          if node <<'NODE'
+          const fs = require('fs');
+          const snap = JSON.parse(fs.readFileSync('/tmp/phase11-backup/lessons-write-targets-before.json', 'utf8'));
+          const planned = JSON.parse(fs.readFileSync('/tmp/phase11-apply/phase11-lessons-kv-bulk.json', 'utf8'));
+          const exact = snap.keys.length === planned.length && planned.every(item => snap.values[item.key] === item.value);
+          process.exit(exact ? 0 : 1);
+          NODE
+          then
+            echo 'Remote LESSONS_KV already exactly matches the canonical Phase 11 package; skipping redundant bulk write.' | tee /tmp/phase11-lessons-kv-put.log
+          else
+            npx --yes wrangler@${WRANGLER_VERSION} kv bulk put /tmp/phase11-apply/phase11-lessons-kv-bulk.json --namespace-id "$LESSONS_KV_ID" --remote >/tmp/phase11-lessons-kv-put.log
+          fi
 
       - name: Seed owner-requested development test users
         shell: bash
@@ -217,7 +228,18 @@ jobs:
           STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@${WRANGLER_VERSION} kv bulk put /tmp/phase11-apply/phase11-test-students-kv-bulk.json --namespace-id "$STUDENTS_KV_ID" --remote >/tmp/phase11-students-kv-put.log
+          if node <<'NODE'
+          const fs = require('fs');
+          const snap = JSON.parse(fs.readFileSync('/tmp/phase11-backup/test-users-before.json', 'utf8'));
+          const planned = JSON.parse(fs.readFileSync('/tmp/phase11-apply/phase11-test-students-kv-bulk.json', 'utf8'));
+          const exact = snap.keys.length === planned.length && planned.every(item => snap.values[item.key] === item.value);
+          process.exit(exact ? 0 : 1);
+          NODE
+          then
+            echo 'Remote STUDENTS_KV TestY* records already exactly match the canonical Phase 11 package; skipping redundant bulk write.' | tee /tmp/phase11-students-kv-put.log
+          else
+            npx --yes wrangler@${WRANGLER_VERSION} kv bulk put /tmp/phase11-apply/phase11-test-students-kv-bulk.json --namespace-id "$STUDENTS_KV_ID" --remote >/tmp/phase11-students-kv-put.log
+          fi
 
       - name: Seed owner test entitlements and real-catalogue history regression
         shell: bash
