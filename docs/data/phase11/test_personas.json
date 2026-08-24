@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "phase": 11,
+  "sharedLoginPassword": "Te12",
+  "sharedAnswerPassword": "Te12",
+  "normalisationNote": "Portal User IDs are case-insensitive. 'Test Y511E' from the owner request is normalised to 'TestY511E' to match the no-space pattern used by the other requested test IDs.",
+  "personas": [
+    {
+      "portalUserId": "TestY2E",
+      "portalUserIdNorm": "testy2e",
+      "purpose": "Year 2 English only",
+      "user": {"firstName":"TestY2E","p":"Te12","answerPassword":"Te12","schoolYear":2,"vrEligible":false,"status":"active","expires":null,"batches":["Y2EDEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y2"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 29,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY2M",
+      "portalUserIdNorm": "testy2m",
+      "purpose": "Year 2 Maths only",
+      "user": {"firstName":"TestY2M","p":"Te12","answerPassword":"Te12","schoolYear":2,"vrEligible":false,"status":"active","expires":null,"batches":["Y2MDEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["MATHS_Y2"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 36,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY2EM",
+      "portalUserIdNorm": "testy2em",
+      "purpose": "Year 2 English + Maths",
+      "user": {"firstName":"TestY2EM","p":"Te12","answerPassword":"Te12","schoolYear":2,"vrEligible":false,"status":"active","expires":null,"batches":["Y2EDEV","Y2MDEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y2","MATHS_Y2"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 65,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY4EM",
+      "portalUserIdNorm": "testy4em",
+      "purpose": "Year 4 normal English + Maths",
+      "user": {"firstName":"TestY4EM","p":"Te12","answerPassword":"Te12","schoolYear":4,"vrEligible":false,"status":"active","expires":null,"batches":["Y4EDEV","Y4MDEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y4","MATHS_L1"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 70,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY411M",
+      "portalUserIdNorm": "testy411m",
+      "purpose": "Year 4 11+ Maths only (current Level 2)",
+      "user": {"firstName":"TestY411M","p":"Te12","answerPassword":"Te12","schoolYear":4,"vrEligible":false,"status":"active","expires":null,"batches":["Y4M11DEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["MATHS_L2"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 38,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY511E",
+      "portalUserIdNorm": "testy511e",
+      "purpose": "Year 5 11+ English only with VR",
+      "user": {"firstName":"TestY511E","p":"Te12","answerPassword":"Te12","schoolYear":5,"vrEligible":true,"status":"active","expires":null,"batches":["Y5E11DEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y5"],
+      "vrCurricula": ["ENGLISH_Y5"],
+      "expectedCoreEntitlementCount": 32,
+      "expectedVrEntitlementCount": 32
+    },
+    {
+      "portalUserId": "TestY5EM",
+      "portalUserIdNorm": "testy5em",
+      "purpose": "Year 5 normal English + Maths",
+      "user": {"firstName":"TestY5EM","p":"Te12","answerPassword":"Te12","schoolYear":5,"vrEligible":false,"status":"active","expires":null,"batches":["Y5EDEV","Y5MDEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y5","MATHS_L2"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 70,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY5E",
+      "portalUserIdNorm": "testy5e",
+      "purpose": "Year 5 normal English only",
+      "user": {"firstName":"TestY5E","p":"Te12","answerPassword":"Te12","schoolYear":5,"vrEligible":false,"status":"active","expires":null,"batches":["Y5EDEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y5"],
+      "vrCurricula": [],
+      "expectedCoreEntitlementCount": 32,
+      "expectedVrEntitlementCount": 0
+    },
+    {
+      "portalUserId": "TestY511EM",
+      "portalUserIdNorm": "testy511em",
+      "purpose": "Year 5 11+ English + Maths (Maths current Level 3; English with VR)",
+      "user": {"firstName":"TestY511EM","p":"Te12","answerPassword":"Te12","schoolYear":5,"vrEligible":true,"status":"active","expires":null,"batches":["Y5E11DEV","Y5M11DEV"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]},
+      "coreCurricula": ["ENGLISH_Y5","MATHS_L3"],
+      "vrCurricula": ["ENGLISH_Y5"],
+      "expectedCoreEntitlementCount": 75,
+      "expectedVrEntitlementCount": 32
+    }
+  ]
+}
