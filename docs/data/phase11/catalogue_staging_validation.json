@@ -1,0 +1,19 @@
+{
+  "phase": 11,
+  "status": "CATALOGUE_STRUCTURALLY_COMPLETE_METADATA_GATE_OPEN",
+  "canonicalLessonCount": 369,
+  "canonicalCurriculumCount": 11,
+  "r2ReferencedObjectCount": 1669,
+  "uniqueR2References": 1669,
+  "r2MissingFromCatalogue": 0,
+  "r2ExtraInCatalogue": 0,
+  "lessonsWithSourceGroundedDescription": 123,
+  "lessonsWithExplicitApprovedMainVideo": 123,
+  "lessonsMissingDescriptionAndMainVideo": 246,
+  "screenpalQuizCount": 79,
+  "elevenPlusOtherResourceCount": 9,
+  "vrLessonCount": 66,
+  "catalogueSha256": "7933cd22ca4760a293b9bcceaf1f9ef6d45fed4ddc3d99515791b270f11a83e2",
+  "applyReady": false,
+  "applyBlocker": "246 canonical lessons have no audited description or main ScreenPal video metadata. These values were not fabricated."
+}
