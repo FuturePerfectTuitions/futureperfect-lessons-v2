@@ -15,7 +15,6 @@ const EXPECTED = Object.freeze({
   quizzes: 79,
   vrLessons: 66,
   elevenPlusOther: 9,
-  combinedBase64Sha256: 'eaab7168caae92ca70a4bc245a56faf35695046787699a10e376f5f16bc6c959',
   catalogueSha256: '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663',
   kvBulkSha256: 'e3a07b4fcac37604bcb321a66f3049051449bb6f3c94fb8a7e2c8a70368ee5b9'
 });
@@ -64,8 +63,8 @@ export function loadPhase11Catalogue(root = repoRoot()) {
   const combined = manifest.partFiles
     .map(name => fs.readFileSync(path.join(base, name), 'utf8').replace(/\s+/g, ''))
     .join('');
-  if (sha256(combined) !== EXPECTED.combinedBase64Sha256 || manifest.combinedBase64Sha256 !== EXPECTED.combinedBase64Sha256) {
-    throw new Error('Phase 11 combined catalogue payload hash mismatch.');
+  if (!combined || !/^[A-Za-z0-9+/=]+$/.test(combined)) {
+    throw new Error('Phase 11 catalogue base64 transport is invalid.');
   }
   const decoded = zlib.gunzipSync(Buffer.from(combined, 'base64'));
   if (sha256(decoded) !== EXPECTED.catalogueSha256 || manifest.decodedJsonSha256 !== EXPECTED.catalogueSha256) {
