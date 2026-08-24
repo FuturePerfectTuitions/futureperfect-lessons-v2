@@ -69,13 +69,42 @@ async function readJsonInBatches(namespace, keys, batchSize = PREFETCH_CONCURREN
   return values;
 }
 
-function cacheNamespace(namespace, cache) {
+function validBundledManifest(manifest = PHASE11_NAVIGATION_MANIFEST) {
+  if (!manifest || typeof manifest !== 'object') return false;
+  if (manifest.catalogueSha256 !== PHASE11_CATALOGUE_SHA256) return false;
+  if (!manifest.curricula || !manifest.lessons) return false;
+  if (Object.keys(manifest.curricula).length !== 11) return false;
+  if (Object.keys(manifest.lessons).length !== 369) return false;
+  return PHASE11_CURRICULUM_CODES.every(code => {
+    const curriculum = manifest.curricula[code];
+    return curriculum?.curriculumCode === code && Array.isArray(curriculum.lessonIds);
+  });
+}
+
+const BUNDLED_MANIFEST_VALID = validBundledManifest();
+
+function bundledJsonValue(key) {
+  if (!BUNDLED_MANIFEST_VALID || typeof key !== 'string') return undefined;
+  if (key.startsWith('curriculum:')) {
+    return PHASE11_NAVIGATION_MANIFEST.curricula[key.slice('curriculum:'.length)];
+  }
+  if (key.startsWith('lesson:')) {
+    return PHASE11_NAVIGATION_MANIFEST.lessons[key.slice('lesson:'.length)];
+  }
+  return undefined;
+}
+
+function cacheNamespace(namespace, overrides = new Map(), bundled = false) {
   return new Proxy(namespace, {
     get(target, prop) {
       if (prop === 'get') {
         return async (key, options) => {
           const wantsJson = options?.type === 'json';
-          if (wantsJson && cache.has(key)) return structuredClone(cache.get(key));
+          if (wantsJson && overrides.has(key)) return structuredClone(overrides.get(key));
+          if (wantsJson && bundled) {
+            const value = bundledJsonValue(key);
+            if (value !== undefined) return structuredClone(value);
+          }
           return target.get(key, options);
         };
       }
@@ -85,8 +114,8 @@ function cacheNamespace(namespace, cache) {
   });
 }
 
-function cacheEnv(env, cache) {
-  const lessonsKv = cacheNamespace(env.LESSONS_KV, cache);
+function cacheEnv(env, overrides = new Map(), bundled = false) {
+  const lessonsKv = cacheNamespace(env.LESSONS_KV, overrides, bundled);
   return new Proxy(env, {
     get(target, prop) {
       if (prop === 'LESSONS_KV') return lessonsKv;
@@ -117,29 +146,6 @@ function lessonIdFromRequest(request) {
   try { resourceKey = decodeURIComponent(resourceMatch[1]); } catch { return ''; }
   const encodedLessonId = String(resourceKey.split('~')[0] || '');
   try { return decodeURIComponent(encodedLessonId); } catch { return encodedLessonId; }
-}
-
-function validBundledManifest(manifest = PHASE11_NAVIGATION_MANIFEST) {
-  if (!manifest || typeof manifest !== 'object') return false;
-  if (manifest.catalogueSha256 !== PHASE11_CATALOGUE_SHA256) return false;
-  if (!manifest.curricula || !manifest.lessons) return false;
-  if (Object.keys(manifest.curricula).length !== 11) return false;
-  if (Object.keys(manifest.lessons).length !== 369) return false;
-  return PHASE11_CURRICULUM_CODES.every(code => {
-    const curriculum = manifest.curricula[code];
-    return curriculum?.curriculumCode === code && Array.isArray(curriculum.lessonIds);
-  });
-}
-
-function cacheFromBundledManifest(manifest = PHASE11_NAVIGATION_MANIFEST) {
-  const cache = new Map();
-  for (const code of PHASE11_CURRICULUM_CODES) {
-    cache.set(`curriculum:${code}`, structuredClone(manifest.curricula[code]));
-  }
-  for (const [lessonId, record] of Object.entries(manifest.lessons)) {
-    cache.set(`lesson:${lessonId}`, structuredClone(record));
-  }
-  return cache;
 }
 
 function realCurriculaForRequest(request) {
@@ -191,23 +197,24 @@ async function legacyTargetedNavigationEnv(env, request) {
     [...realLessonIds].map(id => `lesson:${id}`)
   );
   for (const [key, value] of realValues) cache.set(key, value);
-  return cacheEnv(env, cache);
+  return cacheEnv(env, cache, false);
 }
 
 async function phase11NavigationEnv(env, request) {
   if (!env?.LESSONS_KV || !request) return env;
 
-  // Normal Phase 11 path: all navigation identity/order/title/display metadata
-  // comes from the deterministic Worker-bundled canonical manifest. Home and
-  // catalogue-list requests therefore consume zero LESSONS_KV reads.
-  if (validBundledManifest()) {
-    const cache = cacheFromBundledManifest();
+  // Normal Phase 11 path: identity/order/title/display metadata remains
+  // module-resident in the deterministic canonical manifest. The proxy clones
+  // only the records downstream code actually requests; it does not rebuild or
+  // clone the complete 380-record navigation catalogue per invocation.
+  if (BUNDLED_MANIFEST_VALID) {
+    const overrides = new Map();
     const targetLessonId = lessonIdFromRequest(request);
     if (targetLessonId) {
       const real = await env.LESSONS_KV.get(`lesson:${targetLessonId}`, { type: 'json' });
-      if (real != null) cache.set(`lesson:${targetLessonId}`, real);
+      if (real != null) overrides.set(`lesson:${targetLessonId}`, real);
     }
-    return cacheEnv(env, cache);
+    return cacheEnv(env, overrides, true);
   }
 
   // Fail-safe only: an accidental/manual build that did not generate the
