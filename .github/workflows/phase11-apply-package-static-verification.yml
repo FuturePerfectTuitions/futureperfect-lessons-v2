@@ -1,0 +1,40 @@
+name: Phase 11 apply package static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/phase11-apply-package.mjs
+      - scripts/phase11-catalogue.mjs
+      - scripts/phase11-test-personas.mjs
+      - docs/data/phase11/catalogue_payload/**
+      - docs/data/phase11/test_personas.json
+      - tests/phase11-apply-package-static-verification.mjs
+      - .github/workflows/phase11-apply-package-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify deterministic Phase 11 apply package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/phase11-apply-package.mjs
+          node --check tests/phase11-apply-package-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-apply-package-static-verification.mjs
+          rm -rf /tmp/phase11-apply-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-apply-package >/tmp/phase11-apply-package.log
+          jq -e 'length == 380' /tmp/phase11-apply-package/phase11-lessons-kv-bulk.json >/dev/null
+          jq -e 'length == 9' /tmp/phase11-apply-package/phase11-test-students-kv-bulk.json >/dev/null
+          jq -e '.phase == 11 and .catalogueLessons == 369 and .lessonsKvWrites == 380 and .testPersonas == 9 and .developmentAllowlistCount == 16' /tmp/phase11-apply-package/phase11-apply-summary.json >/dev/null
+          test "$(awk -F',' 'NF { print NF }' /tmp/phase11-apply-package/phase11-dev-allowlist.txt)" -eq 16
+          echo 'Phase 11 apply package static verification: PASS'

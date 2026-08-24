@@ -1,0 +1,38 @@
+name: Phase 11 owner test personas static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - docs/data/phase11/test_personas.json
+      - scripts/phase11-test-personas.mjs
+      - tests/phase11-test-personas-static-verification.mjs
+      - docs/data/phase11/catalogue_payload/**
+      - scripts/phase11-catalogue.mjs
+      - .github/workflows/phase11-test-personas-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify owner-requested Phase 11 entitlement personas
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/phase11-test-personas.mjs
+          node --check tests/phase11-test-personas-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-test-personas-static-verification.mjs
+          rm -rf /tmp/phase11-test-seed
+          node --experimental-default-type=module scripts/phase11-test-personas.mjs --write-dir /tmp/phase11-test-seed >/tmp/phase11-test-seed.log
+          jq -e 'length == 9' /tmp/phase11-test-seed/phase11-test-students-kv-bulk.json >/dev/null
+          jq -e '.personas == 9 and .entitlementRows == 447 and .vrRows == 64' /tmp/phase11-test-seed/phase11-test-seed-summary.json >/dev/null
+          grep -Fq "DELETE FROM lesson_entitlements WHERE portal_user_id_norm = 'testy511em';" /tmp/phase11-test-seed/phase11-test-entitlements.sql
+          echo 'Phase 11 owner test personas static verification: PASS'

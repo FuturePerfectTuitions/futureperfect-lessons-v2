@@ -1,0 +1,27 @@
+name: Phase 11 guarded Cloudflare workflow static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase11-cloudflare-apply.yml
+      - tests/phase11-cloudflare-workflow-static-verification.mjs
+      - worker/wrangler.toml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify guarded Phase 11 Cloudflare apply workflow
+        run: |
+          set -euo pipefail
+          node --check tests/phase11-cloudflare-workflow-static-verification.mjs
+          node tests/phase11-cloudflare-workflow-static-verification.mjs
