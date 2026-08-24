@@ -30,6 +30,9 @@ async function freshPage(username) {
   page.on('console', message => {
     if (message.type() === 'error') console.error(`[${activePersona}] browser console: ${message.text()}`);
   });
+  page.on('pageerror', error => {
+    console.error(`[${activePersona}] PAGE ERROR: ${error?.stack || error?.message || error}`);
+  });
 }
 
 const shot = name => page?.screenshot({ path: path.join(outputDir, `${name}.png`), fullPage: true });
@@ -56,18 +59,23 @@ function waitForLessonDetail(timeout = 60000) {
   }, { timeout });
 }
 
-async function responseDiagnostic(response) {
-  let body = '';
-  try { body = await response.text(); } catch (_) {}
-  return `HTTP ${response.status()} ${response.url()}${body ? ` body=${body.slice(0, 1200)}` : ''}`;
+async function lessonDomState() {
+  return page.evaluate(() => {
+    const state = {};
+    for (const id of ['screen-lesson', 'lesson-loading', 'lesson-error', 'lesson-content', 'phase9-vr-section']) {
+      const node = document.getElementById(id);
+      state[id] = node ? {
+        hidden: Boolean(node.hidden),
+        text: String(node.textContent || '').trim().slice(0, 500)
+      } : null;
+    }
+    return state;
+  });
 }
 
 async function login(username) {
   await freshPage(username);
 
-  // Each persona gets a completely fresh browser context. This prevents test-only
-  // cookie/session/navigation state from one TestY* account leaking into another,
-  // and mirrors the portal's single-device/session model more accurately.
   const startupSessionPromise = waitForStudentGet('/api/v1/student/session');
   await page.goto(portalUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const startupSession = await startupSessionPromise;
@@ -113,16 +121,53 @@ async function openLessonRow(row) {
   await page.locator('#screen-lesson').waitFor({ state: 'visible', timeout: 30000 });
 
   const response = await detailPromise;
-  if (!response.ok()) {
-    throw new Error(`Phase 11 lesson-detail request failed: ${await responseDiagnostic(response)}`);
+  await response.finished().catch(() => {});
+  let responseText = '';
+  try { responseText = await response.text(); } catch (_) {}
+  let responseJson = null;
+  try { responseJson = JSON.parse(responseText); } catch (_) {}
+
+  const summary = {
+    persona: activePersona,
+    status: response.status(),
+    url: response.url(),
+    bodyOk: responseJson?.ok ?? null,
+    lessonId: responseJson?.lesson?.lessonId || responseJson?.lesson?.id || null,
+    presentation: responseJson?.lesson?.presentation || responseJson?.view?.presentation || null,
+    hasVr: Boolean(responseJson?.lesson?.vr),
+    hasPhase11Resources: Boolean(responseJson?.lesson?.phase11Resources),
+    hasPhase11OtherResources: Boolean(responseJson?.lesson?.phase11OtherResources),
+    topLevelKeys: responseJson && typeof responseJson === 'object' ? Object.keys(responseJson) : []
+  };
+  console.log(`[${activePersona}] lesson detail ${JSON.stringify(summary)}`);
+
+  if (activePersona === 'TestY511E') {
+    await fs.writeFile(path.join(outputDir, 'TestY511E-lesson-detail.json'), responseText || '');
   }
 
-  await Promise.race([
-    page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 }),
-    page.locator('#lesson-error').waitFor({ state: 'visible', timeout: 60000 }).then(async () => {
-      throw new Error(`Lesson detail returned HTTP ${response.status()} but the portal rendered an error: ${await page.locator('#lesson-error').innerText()}`);
-    })
-  ]);
+  if (!response.ok() || !responseJson?.ok || !responseJson?.lesson) {
+    throw new Error(`Phase 11 lesson-detail response rejected by base renderer: ${JSON.stringify(summary)} body=${responseText.slice(0, 1200)}`);
+  }
+
+  try {
+    await page.waitForFunction(() => {
+      const content = document.getElementById('lesson-content');
+      const error = document.getElementById('lesson-error');
+      return Boolean((content && !content.hidden) || (error && !error.hidden));
+    }, null, { timeout: 10000 });
+  } catch (_) {
+    const dom = await lessonDomState();
+    await fs.writeFile(path.join(outputDir, `${activePersona}-lesson-dom-state.json`), JSON.stringify(dom, null, 2));
+    throw new Error(`Lesson-detail HTTP payload was valid but base lesson rendering never completed for ${activePersona}. DOM=${JSON.stringify(dom)}`);
+  }
+
+  const dom = await lessonDomState();
+  if (dom['lesson-error'] && !dom['lesson-error'].hidden) {
+    throw new Error(`Portal rendered lesson error for ${activePersona}: ${dom['lesson-error'].text}`);
+  }
+  if (!dom['lesson-content'] || dom['lesson-content'].hidden) {
+    throw new Error(`Portal did not reveal lesson content for ${activePersona}. DOM=${JSON.stringify(dom)}`);
+  }
 }
 
 async function openLessonCode(code) {
@@ -133,7 +178,16 @@ async function openLessonCode(code) {
 }
 
 try {
-  // Combined Year 2 account: both current subjects are open and the real catalogue renders.
+  // Run the remaining blocker first so diagnostics are immediate and independent.
+  await login('TestY511E');
+  await openSubject('#english-choice');
+  await openView('Year 5 11+');
+  await lessonCount(32);
+  await openLessonRow(page.locator('#lesson-list .phase6-lesson-row').first());
+  await page.locator('#phase9-vr-section').waitFor({ state: 'visible', timeout: 30000 });
+  await page.getByRole('heading', { name: 'Verbal Reasoning' }).waitFor({ state: 'visible', timeout: 10000 });
+  await shot('04-TestY511E-English11-VR');
+
   await login('TestY2EM');
   await openSubject('#english-choice');
   await openView('Year 2');
@@ -141,7 +195,6 @@ try {
   await openLessonRow(page.locator('#lesson-list .phase6-lesson-row').first());
   await shot('01-TestY2EM-English-real-catalogue');
 
-  // Normal Year 5 Maths uses Year-style aliases and must not expose the 11+ quiz.
   await login('TestY5EM');
   await openSubject('#maths-choice');
   await openView('Year 5');
@@ -154,7 +207,6 @@ try {
   }
   await shot('02-TestY5EM-normal-Maths-no-quiz');
 
-  // Year 4 11+ Maths sees the same canonical Y5M1 as Level 2 and gets the quiz.
   await login('TestY411M');
   await openSubject('#maths-choice');
   await openView('Level 2');
@@ -165,17 +217,6 @@ try {
   await page.getByRole('button', { name: 'Open Quiz' }).waitFor({ state: 'visible', timeout: 10000 });
   await shot('03-TestY411M-Level2-quiz');
 
-  // Year 5 11+ English gets shared core plus nested VR on the same canonical lesson.
-  await login('TestY511E');
-  await openSubject('#english-choice');
-  await openView('Year 5 11+');
-  await lessonCount(32);
-  await openLessonRow(page.locator('#lesson-list .phase6-lesson-row').first());
-  await page.locator('#phase9-vr-section').waitFor({ state: 'visible', timeout: 30000 });
-  await page.getByRole('heading', { name: 'Verbal Reasoning' }).waitFor({ state: 'visible', timeout: 10000 });
-  await shot('04-TestY511E-English11-VR');
-
-  // Combined Year 5 11+ account exposes both English 11+ and Level 3 Maths as current.
   await login('TestY511EM');
   await openSubject('#maths-choice');
   await page.getByRole('button', { name: /Level 3/ }).waitFor({ state: 'visible', timeout: 30000 });
