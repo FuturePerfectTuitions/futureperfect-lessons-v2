@@ -1,6 +1,6 @@
 # Phase 11 — canonical catalogue metadata gate
 
-Status: **STRUCTURALLY COMPLETE; METADATA GATE OPEN**
+Status: **PASS — owner-confirmed pending video production is intentional**
 
 After the verified 1,669-object R2 upload, the complete Phase 11 canonical catalogue was rebuilt against the locked canonical IDs, reviewed resource pairings, confirmed Year 5 English 11+ supplement anchors, explicit ScreenPal URL rules and the final 11+ additional-resource model.
 
@@ -18,15 +18,24 @@ After the verified 1,669-object R2 upload, the complete Phase 11 canonical catal
 
 The nine 11+-only additional resources are the eight reviewed Y5E2 creative-writing tasks plus the Y5E19 Display Posters PDF. They use the dormant Phase 11 final adapter and are not exposed in normal presentation views.
 
-## Metadata source coverage
+## Metadata source coverage and owner decision
 
 The read-only audited legacy `FPT_LESSONS` source provides a source-grounded description and trusted standard ScreenPal video reference for **123 of the 369 canonical lessons**.
 
-The remaining **246 lessons** have neither a description nor a main ScreenPal video reference in the audited legacy catalogue source. Phase 11 deliberately leaves those values absent rather than inventing text or deriving unconfirmed provider IDs.
+The remaining **246 lessons** have neither a description nor a main ScreenPal video reference in the audited legacy catalogue source. On **24 August 2026**, Sej confirmed that the remaining videos are **still being produced**. This means those absent video records are an intentional current content state rather than a Phase 11 migration error.
 
-Coverage by canonical curriculum:
+Authoritative handling from this point:
 
-| Curriculum | Lessons | Description + video present | Metadata gaps | R2 references |
+- the lesson record may exist and its R2 resources may be available while the main video is still in production;
+- `core.video` remains `null` until an explicit approved ScreenPal URL is supplied;
+- a missing description may remain blank until source-grounded lesson copy is available;
+- the student frontend hides absent video/empty metadata rather than inventing content;
+- no ScreenPal URL may be guessed or derived from Lesson ID;
+- adding a later video changes only lesson metadata; it does not change the canonical Lesson ID, student entitlement or R2 resource mapping.
+
+## Coverage by canonical curriculum
+
+| Curriculum | Lessons | Description + video present | Intentionally pending | R2 references |
 |---|---:|---:|---:|---:|
 | ENGLISH_Y2 | 29 | 0 | 29 | 72 |
 | ENGLISH_Y3 | 32 | 0 | 32 | 83 |
@@ -42,9 +51,4 @@ Coverage by canonical curriculum:
 
 ## Apply boundary
 
-The guarded production-data LESSONS_KV apply is **not permitted yet** because the authoritative Phase 11 population rule requires source-grounded lesson metadata. The catalogue generator is structurally ready, but `applyReady` remains false until one of the following is established for the 246 gaps:
-
-1. another authoritative source supplies the real description and ScreenPal reference; or
-2. the FPT owner confirms that those lessons intentionally have no description/video at present and that the canonical record should store those fields as absent.
-
-No existing live portal, student permission, D1 entitlement, or production Worker state is changed by this gate record.
+The metadata gate is now **closed successfully**. The guarded Phase 11 development `LESSONS_KV` apply may proceed with the 246 unfinished-video lessons explicitly marked as pending. This approval does not permit guessed URLs, activate normal production student login, alter real student permissions, or touch the existing live portal.
