@@ -1,0 +1,20 @@
+{
+  "phase": 11,
+  "developmentOnly": true,
+  "sharedLoginPassword": "Te12",
+  "sharedAnswerPassword": "Te12",
+  "personaCount": 9,
+  "entitlementRows": 447,
+  "vrRows": 64,
+  "personas": [
+    "TestY2E",
+    "TestY2M",
+    "TestY2EM",
+    "TestY4EM",
+    "TestY411M",
+    "TestY511E",
+    "TestY5EM",
+    "TestY5E",
+    "TestY511EM"
+  ]
+}
