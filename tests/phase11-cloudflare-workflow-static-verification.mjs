@@ -59,12 +59,13 @@ for (const required of [
   'sqlite_master',
   'trg_student_sessions_single_active',
   'wrangler@${WRANGLER_VERSION} tail',
-  '--status error',
+  '--format json --status error',
   'testy411m',
   'phase11-login-diagnostic'
 ]) {
   assert.ok(diagnostic.includes(required), `Phase 11 login diagnostic missing guard/evidence rule: ${required}`);
 }
+assert.ok(!diagnostic.includes('--sampling-rate 1'), 'Login diagnostic must not use Wrangler-invalid sampling rate 1.');
 assert.ok(!diagnostic.includes('wrangler@${WRANGLER_VERSION} deploy'), 'Login diagnostic must never deploy a Worker.');
 assert.ok(!diagnostic.includes('kv bulk put'), 'Login diagnostic must not write KV.');
 assert.ok(!diagnostic.includes('r2 object'), 'Login diagnostic must not mutate R2.');
