@@ -7,6 +7,7 @@ on:
       - scripts/phase11-apply-package.mjs
       - scripts/phase11-catalogue.mjs
       - scripts/phase11-test-personas.mjs
+      - scripts/phase11-kv-snapshot.mjs
       - docs/data/phase11/catalogue_payload/**
       - docs/data/phase11/test_personas.json
       - tests/phase11-apply-package-static-verification.mjs
@@ -31,6 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check scripts/phase11-apply-package.mjs
+          node --check scripts/phase11-kv-snapshot.mjs
           node --check tests/phase11-apply-package-static-verification.mjs
           node --check tests/phase11-browser-verification.mjs
           node --experimental-default-type=module tests/phase11-apply-package-static-verification.mjs
@@ -38,6 +40,8 @@ jobs:
           grep -Fq 'Remote LESSONS_KV already exactly matches the canonical Phase 11 package; skipping redundant bulk write.' .github/workflows/phase11-cloudflare-apply.yml
           grep -Fq 'Remote STUDENTS_KV TestY* records already exactly match the canonical Phase 11 package; skipping redundant bulk write.' .github/workflows/phase11-cloudflare-apply.yml
           grep -Fq "planned.every(item => snap.values[item.key] === item.value)" .github/workflows/phase11-cloudflare-apply.yml
+          grep -Fq 'response.status === 429 || response.status >= 500' scripts/phase11-kv-snapshot.mjs
+          grep -Fq 'MAX_ATTEMPTS = 8' scripts/phase11-kv-snapshot.mjs
           rm -rf /tmp/phase11-apply-package
           node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-apply-package >/tmp/phase11-apply-package.log
           jq -e 'length == 380' /tmp/phase11-apply-package/phase11-lessons-kv-bulk.json >/dev/null
