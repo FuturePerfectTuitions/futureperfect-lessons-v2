@@ -237,7 +237,7 @@ async function handleElevenPlusOtherDownload(request, env, parsed) {
 async function requestEnv(request, env) {
   if (!shouldPrefetchPhase11Navigation(request)) return env;
   try {
-    return await phase11NavigationEnv(env);
+    return await phase11NavigationEnv(env, request);
   } catch {
     // Performance acceleration must never weaken correctness. If the parallel
     // prefetch encounters a transient KV failure, preserve the established
