@@ -6,7 +6,13 @@ on:
     paths:
       - .github/workflows/phase11-cloudflare-apply.yml
       - .github/workflows/phase11-worker-performance-deploy.yml
+      - .github/workflows/phase11-quota-safe-worker-deploy.yml
       - .github/workflows/phase11-login-diagnostic.yml
+      - scripts/phase11-navigation-manifest.mjs
+      - scripts/phase11-apply-package.mjs
+      - worker/src/phase11-navigation-cache.js
+      - worker/src/phase11-navigation-manifest.generated.js
+      - tests/phase11-navigation-cache-static-verification.mjs
       - tests/phase11-cloudflare-workflow-static-verification.mjs
       - tests/phase11-home-performance.sh
       - worker/wrangler.toml
@@ -27,6 +33,8 @@ jobs:
         run: |
           set -euo pipefail
           node --check tests/phase11-cloudflare-workflow-static-verification.mjs
+          node --check scripts/phase11-navigation-manifest.mjs
+          node --check worker/src/phase11-navigation-cache.js
           bash -n tests/phase11-home-performance.sh
-          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/phase11-login-diagnostic.yml')"
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/phase11-login-diagnostic.yml'); YAML.load_file('.github/workflows/phase11-quota-safe-worker-deploy.yml')"
           node tests/phase11-cloudflare-workflow-static-verification.mjs
