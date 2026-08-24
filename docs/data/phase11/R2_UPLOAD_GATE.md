@@ -1,47 +1,68 @@
 # Phase 11 — guarded R2 upload gate
 
-Status: **manifest locked; upload not yet performed**
+Status: **PASS — development R2 corpus uploaded and verified**
 
-The cleaned Phase 11 resource corpus is now frozen into an exact local upload manifest for the isolated V2 development R2 bucket.
+The cleaned Phase 11 production lesson-resource corpus has been uploaded to the isolated V2 development R2 bucket using the guarded local uploader. The original locked manifest was followed by one reviewed incremental correction discovered during catalogue cross-checking.
 
-## Locked upload set
+## Verified R2 corpus
 
 - Target bucket: `fpt-materials-dev`
-- Upload objects: **1,646 PDFs**
-- Unique destination R2 keys: **1,646**
-- Protected answer objects: **737**
-- Non-answer objects: **909**
+- Original locked upload: **1,646 PDFs**
+- Reviewed incremental correction: **23 PDFs**
+- Total verified Phase 11 objects: **1,669 PDFs**
+- Unique destination R2 keys: **1,669**
+- Protected answer objects: **742**
+- Non-answer objects: **927**
 - Explicit reviewed exclusions: **7**
-- Manifest filename: `Phase11_R2_Upload_Manifest_FINAL.csv`
-- Manifest SHA-256: `d2659de60318c957dee1c0e765af5221e190d73be968e859a42cef20f6e94f15`
+- Remote collisions across both runs: **0**
+- Upload failures across both runs: **0**
 
-The manifest contains no Office/source answer files and no Games/Mysteries resources. All student-facing Answer Packs represented in the upload set are PDFs and remain marked protected.
+The original manifest SHA-256 remains:
 
-## Guarded local uploader
+`d2659de60318c957dee1c0e765af5221e190d73be968e859a42cef20f6e94f15`
 
-The FPT owner receives `Phase11_Guarded_R2_Upload_Package_FINAL.zip`. Its uploader is intentionally local because the production lesson PDFs live in the owner's Windows `Lessons` tree and are not stored in GitHub.
+The incremental correction manifest SHA-256 is:
 
-The uploader:
+`c02dc0bfb80563b4bcb2b350a320bceebc5e2f5d79f2e90cfd76a5a2dbc52244`
 
-1. selects the local root `Lessons` folder;
-2. verifies all 1,646 source paths and requires `.pdf` for every row;
-3. hashes every local PDF before any R2 access;
-4. connects only after local preflight passes;
-5. HEAD-checks **every destination object before any PUT**;
-6. aborts the whole write if a different object already exists at any destination;
-7. skips an exact existing object;
-8. asks for a final explicit upload confirmation;
-9. writes `x-amz-meta-sha256` to uploaded objects and verifies every successful upload by HEAD;
-10. writes a local run report for Phase 11 verification.
+The incremental correction contains the 23 genuine PDFs discovered during the final catalogue cross-check: five VR question/answer pairs, nine Year 2 EOS question sheets, two additional 11+ English student resources, one Year 5 11+ Display Posters resource, and one Year 6 Revision Notes resource.
 
-The uploader contains **no delete operation** and does not persist the R2 secret credentials.
+The corpus contains no Office/source answer files and no Games/Mysteries resources. Every student-facing answer PDF represented in the Phase 11 R2 corpus remains classified as protected.
+
+## Guarded uploader verification
+
+Both upload runs used the same safety model:
+
+1. every local source path was verified before any network write;
+2. every source file was required to be a PDF;
+3. every local PDF was hashed before R2 access;
+4. every destination was HEAD-checked before any PUT;
+5. a different existing object would abort the run;
+6. exact existing objects would be skipped;
+7. an explicit final write confirmation was required;
+8. uploaded objects were tagged with SHA-256 metadata and verified after PUT;
+9. the uploader contained no delete operation and did not persist R2 credentials.
+
+## Returned run evidence
+
+Original run:
+
+- manifest rows: **1,646**
+- uploaded: **1,646**
+- skipped exact existing: **0**
+- failed: **0**
+- completed: `2026-08-24T06:39:17.944389+00:00`
+
+Incremental correction run:
+
+- manifest rows: **23**
+- uploaded: **23**
+- skipped exact existing: **0**
+- failed: **0**
+- completed: `2026-08-24T06:50:36.624696+00:00`
 
 ## Phase 11 gate
 
-No catalogue/KV apply may be treated as complete until a returned uploader report confirms:
+The R2 population gate is now closed successfully. Catalogue/KV work may proceed against the exact 1,669-object development corpus.
 
-- zero remote collisions;
-- zero upload failures;
-- all 1,646 manifest objects either uploaded and verified or skipped as exact existing objects.
-
-Until that report exists, `r2WritePerformed` remains false and the normal V2 Worker entrypoint remains unchanged.
+This does **not** activate Phase 11 by itself. The normal V2 Worker entrypoint remains unchanged until the catalogue metadata, guarded LESSONS_KV apply and browser/API verification gates are complete.
