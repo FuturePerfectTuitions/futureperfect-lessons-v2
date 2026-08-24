@@ -40,6 +40,8 @@ assert.deepEqual(explicitMainVideo(mainRecord, 'maths-year5'), {
   watchUrl: VIDEO_WATCH
 });
 
+// An 11+ presentation must never fall back to the normal video or to a legacy
+// elevenPlus override. Without an explicit quiz embed there is no 11+ lesson video.
 const overrideEmbed = 'https://go.screenpal.com/player/cOverride11?ff=1&ahc=1&dcc=1&tl=1&bg=transparent';
 const overrideRecord = {
   core: {
@@ -51,12 +53,15 @@ const overrideRecord = {
   }
 };
 assert.equal(explicitMainVideo(overrideRecord, 'maths-year5').embedUrl, VIDEO_EMBED);
-assert.equal(explicitMainVideo(overrideRecord, 'maths-level2').embedUrl, overrideEmbed);
+assert.equal(explicitMainVideo(overrideRecord, 'maths-level2'), null);
 
 const quizRecord = {
   core: {
     video: {
-      screenpal: 'cO1b1nnupar',
+      screenpal: VIDEO_ID,
+      embedUrl: VIDEO_EMBED,
+      contentUrl: VIDEO_CONTENT,
+      watchUrl: VIDEO_WATCH,
       quiz: {
         id: QUIZ_ID,
         shareUrl: QUIZ_DIRECT,
@@ -71,9 +76,17 @@ assert.equal(quiz.mode, 'embed');
 assert.equal(quiz.url, QUIZ_EMBED);
 assert.equal(quiz.shareUrl, QUIZ_DIRECT);
 
+// Normal and 11+ students see the same frontend concept, Lesson Video, but the
+// resolved ScreenPal embed is presentation-specific.
+assert.equal(explicitMainVideo(quizRecord, 'maths-year5').embedUrl, VIDEO_EMBED);
+assert.equal(explicitMainVideo(quizRecord, 'maths-level2').embedUrl, QUIZ_EMBED);
+assert.ok(!explicitMainVideo(quizRecord, 'maths-year5').embedUrl.includes('quiz_id='));
+assert.ok(explicitMainVideo(quizRecord, 'maths-level2').embedUrl.includes('quiz_id='));
+
 const directOnlyQuiz = explicitQuiz({ video: { quiz: { id: QUIZ_ID, shareUrl: QUIZ_DIRECT } } });
 assert.equal(directOnlyQuiz.mode, 'link');
 assert.equal(directOnlyQuiz.url, QUIZ_DIRECT);
+assert.equal(explicitMainVideo({ video: { embedUrl: VIDEO_EMBED, quiz: { id: QUIZ_ID, shareUrl: QUIZ_DIRECT } } }, 'maths-level2'), null);
 
 const vrRecord = {
   vr: {
@@ -90,4 +103,4 @@ assert.equal(
   'https://go.screenpal.com/player/cHomework?ff=1&ahc=1&dcc=1&tl=1&bg=transparent'
 );
 
-console.log('Phase 11 ScreenPal explicit-URL static verification: PASS');
+console.log('Phase 11 ScreenPal explicit-URL and lesson-video variant verification: PASS');

@@ -38,7 +38,6 @@ assert_locked_view(){
   ' "$TMP/${user}.home.json" >/dev/null
 }
 
-# Owner-requested entitlement personas.
 for user in testy2e testy2m testy2em testy4em testy411m testy511e testy5em testy5e testy511em; do
   login "$user"
   home "$user"
@@ -46,32 +45,23 @@ done
 
 assert_open_view testy2e english english-year2 29
 assert_locked_view testy2e maths maths-year2
-
 assert_open_view testy2m maths maths-year2 36
 assert_locked_view testy2m english english-year2
-
 assert_open_view testy2em english english-year2 29
 assert_open_view testy2em maths maths-year2 36
-
 assert_open_view testy4em english english-year4 34
 assert_open_view testy4em maths maths-year4 36
-
 assert_open_view testy411m maths maths-level2 38
 assert_locked_view testy411m english english-year4-11plus
-
 assert_open_view testy511e english english-year5-11plus 32
 assert_locked_view testy511e maths maths-year5
-
 assert_open_view testy5em english english-year5 32
 assert_open_view testy5em maths maths-year5 38
-
 assert_open_view testy5e english english-year5 32
 assert_locked_view testy5e maths maths-year5
-
 assert_open_view testy511em english english-year5-11plus 32
 assert_open_view testy511em maths maths-level3 43
 
-# Same canonical Maths lesson must use the correct student-facing alias by view.
 curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
   --header "Origin: $ORIGIN" "$WORKER_BASE/api/v1/student/views/maths-year5/lessons" >"$TMP/y5normal.json"
 curl --fail-with-body --silent --show-error --cookie "$TMP/testy411m.cookies" \
@@ -79,32 +69,43 @@ curl --fail-with-body --silent --show-error --cookie "$TMP/testy411m.cookies" \
 jq -e '.lessons[] | select(.lessonId=="Y5M1") | .displayLessonId == "Y5T1M01" and .locked == false' "$TMP/y5normal.json" >/dev/null
 jq -e '.lessons[] | select(.lessonId=="Y5M1") | .displayLessonId == "L2T1M01" and .locked == false' "$TMP/y4eleven.json" >/dev/null
 
-# Quiz is hidden in a normal Year 5 presentation and openable in the shared 11+ Level 2 presentation.
+# Owner rule: quiz is the interactive 11+ variant of Lesson Video, never a second frontend resource.
+curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
+  --header "Origin: $ORIGIN" \
+  "$WORKER_BASE/api/v1/student/lessons/Y5M1?viewId=maths-year5" >"$TMP/normal-detail.json"
+curl --fail-with-body --silent --show-error --cookie "$TMP/testy411m.cookies" \
+  --header "Origin: $ORIGIN" \
+  "$WORKER_BASE/api/v1/student/lessons/Y5M1?viewId=maths-level2" >"$TMP/eleven-detail.json"
+jq -e '.ok == true and .lesson.presentation == "normal" and .lesson.video != null and .lesson.quiz == null' "$TMP/normal-detail.json" >/dev/null
+jq -e '.ok == true and .lesson.presentation == "11plus" and .lesson.video.resourceKey == "Y5M1~video~1" and .lesson.quiz == null' "$TMP/eleven-detail.json" >/dev/null
+
+# The internal quiz route stays gated, but it is no longer presented as a separate frontend section.
 normal_status="$(curl --silent --show-error --output "$TMP/normal-quiz.json" --write-out '%{http_code}' \
   --cookie "$TMP/testy5em.cookies" --header "Origin: $ORIGIN" \
   "$WORKER_BASE/api/v1/student/resources/Y5M1~quiz~1/quiz?viewId=maths-year5")"
 test "$normal_status" = '403'
 jq -e '.error == "QUIZ_NOT_AVAILABLE"' "$TMP/normal-quiz.json" >/dev/null
-
 curl --fail-with-body --silent --show-error --cookie "$TMP/testy411m.cookies" \
   --header "Origin: $ORIGIN" \
   "$WORKER_BASE/api/v1/student/resources/Y5M1~quiz~1/quiz?viewId=maths-level2" >"$TMP/eleven-quiz.json"
-jq -e '.ok == true and (.url|startswith("https://")) and (.url|contains("screenpal.com"))' "$TMP/eleven-quiz.json" >/dev/null
+jq -e '.ok == true and (.url|contains("quiz_id="))' "$TMP/eleven-quiz.json" >/dev/null
 
-# Pending videos remain intentionally absent rather than being guessed from an ID.
 pending_status="$(curl --silent --show-error --output "$TMP/pending-video.json" --write-out '%{http_code}' \
   --cookie "$TMP/testy2e.cookies" --header "Origin: $ORIGIN" \
   "$WORKER_BASE/api/v1/student/resources/Y2E1~video~1/video?viewId=english-year2")"
 test "$pending_status" = '409'
 jq -e '.error == "VIDEO_URL_REQUIRED"' "$TMP/pending-video.json" >/dev/null
 
-# Completed videos use an explicit stored ScreenPal embed URL.
+# The same /video frontend concept resolves differently by presentation.
 curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
   --header "Origin: $ORIGIN" \
-  "$WORKER_BASE/api/v1/student/resources/Y5M1~video~1/video?viewId=maths-year5" >"$TMP/video.json"
-jq -e '.ok == true and (.embedUrl|startswith("https://go.screenpal.com/player/"))' "$TMP/video.json" >/dev/null
+  "$WORKER_BASE/api/v1/student/resources/Y5M1~video~1/video?viewId=maths-year5" >"$TMP/normal-video.json"
+curl --fail-with-body --silent --show-error --cookie "$TMP/testy411m.cookies" \
+  --header "Origin: $ORIGIN" \
+  "$WORKER_BASE/api/v1/student/resources/Y5M1~video~1/video?viewId=maths-level2" >"$TMP/eleven-video.json"
+jq -e '.ok == true and (.embedUrl|startswith("https://go.screenpal.com/player/")) and ((.embedUrl|contains("quiz_id="))|not)' "$TMP/normal-video.json" >/dev/null
+jq -e '.ok == true and (.embedUrl|startswith("https://go.screenpal.com/player/")) and (.embedUrl|contains("quiz_id="))' "$TMP/eleven-video.json" >/dev/null
 
-# Phase 10 Current/Previous regression remains intact after replacing fixture curricula with the real catalogue.
 HIST_JAR="$TMP/test0707.cookies"
 curl --fail-with-body --silent --show-error --cookie-jar "$HIST_JAR" \
   --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \

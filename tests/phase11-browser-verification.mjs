@@ -23,9 +23,6 @@ async function freshPage(username) {
   page = await context.newPage();
   activePersona = username;
 
-  // Keep the browser on the real GitHub Pages origin (so Worker CORS and cookies
-  // are exercised exactly as deployed) while substituting the PR branch's local
-  // Phase 11 Other renderer before page scripts execute.
   await page.route(/\/assets\/phase11-other\.js(?:\?.*)?$/, route => route.fulfill({
     status: 200,
     contentType: 'application/javascript; charset=utf-8',
@@ -72,7 +69,7 @@ function waitForLessonDetail(timeout = 60000) {
 async function lessonDomState() {
   return page.evaluate(() => {
     const state = {};
-    for (const id of ['screen-lesson', 'lesson-loading', 'lesson-error', 'lesson-content', 'phase9-vr-section']) {
+    for (const id of ['screen-lesson', 'lesson-loading', 'lesson-error', 'lesson-content', 'video-section', 'phase9-quiz-section', 'phase9-vr-section']) {
       const node = document.getElementById(id);
       state[id] = node ? {
         hidden: Boolean(node.hidden),
@@ -85,19 +82,15 @@ async function lessonDomState() {
 
 async function login(username) {
   await freshPage(username);
-
   const startupSessionPromise = waitForStudentGet('/api/v1/student/session');
   await page.goto(portalUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const startupSession = await startupSessionPromise;
-  if (startupSession.ok()) {
-    throw new Error(`Fresh Phase 11 browser context unexpectedly had an existing session for ${username}.`);
-  }
+  if (startupSession.ok()) throw new Error(`Fresh Phase 11 browser context unexpectedly had an existing session for ${username}.`);
 
   await page.locator('#login-screen').waitFor({ state: 'visible', timeout: 10000 });
   await page.locator('#username').fill(username);
   await page.locator('#login-password').fill('Te12');
   await page.locator('#login-button').click();
-
   await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 60000 });
   await page.waitForFunction(() => {
     const button = document.getElementById('login-button');
@@ -144,6 +137,8 @@ async function openLessonRow(row) {
     bodyOk: responseJson?.ok ?? null,
     lessonId: responseJson?.lesson?.lessonId || responseJson?.lesson?.id || null,
     presentation: responseJson?.lesson?.presentation || responseJson?.view?.presentation || null,
+    hasVideo: Boolean(responseJson?.lesson?.video),
+    hasQuiz: Boolean(responseJson?.lesson?.quiz),
     hasVr: Boolean(responseJson?.lesson?.vr),
     hasPhase11Resources: Boolean(responseJson?.lesson?.phase11Resources),
     hasPhase11OtherResources: Boolean(responseJson?.lesson?.phase11OtherResources),
@@ -172,12 +167,8 @@ async function openLessonRow(row) {
   }
 
   const dom = await lessonDomState();
-  if (dom['lesson-error'] && !dom['lesson-error'].hidden) {
-    throw new Error(`Portal rendered lesson error for ${activePersona}: ${dom['lesson-error'].text}`);
-  }
-  if (!dom['lesson-content'] || dom['lesson-content'].hidden) {
-    throw new Error(`Portal did not reveal lesson content for ${activePersona}. DOM=${JSON.stringify(dom)}`);
-  }
+  if (dom['lesson-error'] && !dom['lesson-error'].hidden) throw new Error(`Portal rendered lesson error for ${activePersona}: ${dom['lesson-error'].text}`);
+  if (!dom['lesson-content'] || dom['lesson-content'].hidden) throw new Error(`Portal did not reveal lesson content for ${activePersona}. DOM=${JSON.stringify(dom)}`);
 }
 
 async function openLessonCode(code) {
@@ -185,6 +176,17 @@ async function openLessonCode(code) {
     has: page.locator('.phase6-lesson-code', { hasText: code })
   }).first();
   await openLessonRow(row);
+}
+
+async function assertQuizSectionHidden() {
+  const quizSection = page.locator('#phase9-quiz-section');
+  await quizSection.waitFor({ state: 'attached', timeout: 10000 });
+  if (!(await quizSection.evaluate(el => el.hidden))) throw new Error('A separate ScreenPal Quiz section is visible; quiz must be presented only as Lesson Video in 11+ views.');
+}
+
+async function lessonPlayerSrc() {
+  await page.locator('#video-frame').waitFor({ state: 'visible', timeout: 30000 });
+  return page.locator('#lesson-player').getAttribute('src');
 }
 
 try {
@@ -195,6 +197,7 @@ try {
   await openLessonRow(page.locator('#lesson-list .phase6-lesson-row').first());
   await page.locator('#phase9-vr-section').waitFor({ state: 'visible', timeout: 30000 });
   await page.getByRole('heading', { name: 'Verbal Reasoning' }).waitFor({ state: 'visible', timeout: 10000 });
+  await assertQuizSectionHidden();
   await shot('04-TestY511E-English11-VR');
 
   await login('TestY2EM');
@@ -210,11 +213,10 @@ try {
   await lessonCount(38);
   await page.locator('.phase6-lesson-code', { hasText: 'Y5T1M01' }).first().waitFor({ state: 'visible', timeout: 30000 });
   await openLessonCode('Y5T1M01');
-  await page.locator('#phase9-quiz-section').waitFor({ state: 'attached', timeout: 10000 });
-  if (!(await page.locator('#phase9-quiz-section').evaluate(el => el.hidden))) {
-    throw new Error('Normal Year 5 Maths incorrectly exposes the 11+ quiz section.');
-  }
-  await shot('02-TestY5EM-normal-Maths-no-quiz');
+  await assertQuizSectionHidden();
+  const normalSrc = await lessonPlayerSrc();
+  if (!normalSrc || normalSrc.includes('quiz_id=')) throw new Error(`Normal Year 5 Maths must receive the ordinary Lesson Video, got ${normalSrc}`);
+  await shot('02-TestY5EM-normal-Maths-video');
 
   await login('TestY411M');
   await openSubject('#maths-choice');
@@ -222,9 +224,11 @@ try {
   await lessonCount(38);
   await page.locator('.phase6-lesson-code', { hasText: 'L2T1M01' }).first().waitFor({ state: 'visible', timeout: 30000 });
   await openLessonCode('L2T1M01');
-  await page.locator('#phase9-quiz-section').waitFor({ state: 'visible', timeout: 30000 });
-  await page.getByRole('button', { name: 'Open Quiz' }).waitFor({ state: 'visible', timeout: 10000 });
-  await shot('03-TestY411M-Level2-quiz');
+  await assertQuizSectionHidden();
+  await page.getByRole('heading', { name: 'Lesson Video' }).waitFor({ state: 'visible', timeout: 10000 });
+  const elevenSrc = await lessonPlayerSrc();
+  if (!elevenSrc || !elevenSrc.includes('quiz_id=')) throw new Error(`11+ Level 2 must receive the interactive quiz variant in Lesson Video, got ${elevenSrc}`);
+  await shot('03-TestY411M-Level2-interactive-video');
 
   await login('TestY511EM');
   await openSubject('#maths-choice');

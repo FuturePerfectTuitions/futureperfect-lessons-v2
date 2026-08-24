@@ -64,6 +64,10 @@ function makeResourceKey(lessonId, index) {
   return `${encodeURIComponent(String(lessonId))}~p11elevenother~${index}`;
 }
 
+function makeLessonVideoKey(lessonId) {
+  return `${encodeURIComponent(String(lessonId))}~video~1`;
+}
+
 function safeFilename(value, fallback = 'resource.pdf') {
   const cleaned = String(value || '')
     .replace(/[\\/:*?"<>|]+/g, '-')
@@ -101,6 +105,38 @@ async function r2Available(env, r2Key) {
   }
 }
 
+function applyLessonVideoPresentation(body, lessonId, presentation) {
+  const lesson = body?.lesson;
+  if (!lesson) return;
+
+  if (presentation !== '11plus') {
+    // Normal streams receive only the ordinary lesson video. Phase 9's quiz
+    // model is an internal implementation detail and must never be presented
+    // as a separate student-facing resource.
+    lesson.quiz = null;
+    return;
+  }
+
+  // Owner rule: the ScreenPal quiz is the interactive 11+ variant of the
+  // lesson video. It occupies the same Lesson Video slot; it is not an extra
+  // section. If no quiz variant exists, an 11+ view must not fall back to the
+  // normal-stream video.
+  const hasInteractiveVideo = Boolean(lesson.quiz);
+  lesson.quiz = null;
+  if (!hasInteractiveVideo) {
+    lesson.video = null;
+    return;
+  }
+
+  lesson.video = lesson.locked
+    ? { displayName: 'Video', locked: true }
+    : {
+        displayName: 'Video',
+        resourceKey: makeLessonVideoKey(lessonId),
+        locked: false
+      };
+}
+
 async function augmentLessonDetail(request, env, lessonId) {
   const response = await phase11ResourcesWorker.fetch(request, env);
   const body = await response.clone().json().catch(() => null);
@@ -108,7 +144,10 @@ async function augmentLessonDetail(request, env, lessonId) {
 
   const url = new URL(request.url);
   const viewId = String(url.searchParams.get('viewId') || '').trim();
-  if (presentationForView(viewId) !== '11plus') {
+  const presentation = presentationForView(viewId);
+  applyLessonVideoPresentation(body, lessonId, presentation);
+
+  if (presentation !== '11plus') {
     body.lesson.phase11OtherResources = null;
     return jsonLike(response, body);
   }
