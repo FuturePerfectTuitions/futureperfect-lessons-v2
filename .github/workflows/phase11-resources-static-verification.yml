@@ -1,0 +1,50 @@
+name: Phase 11 extra-resource static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/index-phase11-resources.js
+      - worker/src/phase11-resources.js
+      - assets/phase11-resources.js
+      - assets/phase11-protected-bridge.js
+      - tests/phase11-resources-static-verification.mjs
+      - tests/phase11-resources-browser-static-verification.mjs
+      - docs/data/PHASE11_RESOURCE_MODEL.md
+      - .github/workflows/phase11-resources-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify Phase 11 resource-extension model and browser renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11-resources.js
+          node --check worker/src/phase11-resources.js
+          node --check assets/phase11-resources.js
+          node --check assets/phase11-protected-bridge.js
+          node --experimental-default-type=module tests/phase11-resources-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-resources-browser-static-verification.mjs
+
+          # Phase 11 remains inactive until the catalogue/R2 gates are complete.
+          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          ! grep -Fq 'assets/phase11-resources.js' phase10.html
+          ! grep -Fq 'assets/phase11-protected-bridge.js' phase10.html
+          grep -Fq "import phase11ScreenPalWorker from './index-phase11.js';" worker/src/index-phase11-resources.js
+          grep -Fq "import phase8Worker from './index-phase8.js';" worker/src/index-phase11-resources.js
+
+          # Phase 11 answer index ranges must remain above the completed Phase 9 VR bridges.
+          grep -Fq 'CORE_PRELESSON: 3000' worker/src/phase11-resources.js
+          grep -Fq 'VR_SUPPLEMENTARY: 10000' worker/src/phase11-resources.js
+
+          echo 'Phase 11 extra-resource static verification: PASS'
