@@ -1,0 +1,280 @@
+name: Phase 11 worker-only performance deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/phase11-worker-performance-trigger.txt]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  ROLLBACK_REF: 2b7c81f709bed63a7350168b1c41d7894e3bf902
+
+jobs:
+  deploy:
+    name: Deploy and verify Phase 11 Worker performance only
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase11-worker-performance-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact trigger branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only Worker branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          test "$(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD)" = ".github/phase11-worker-performance-trigger.txt"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Validate Phase 11 Worker-only package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11-final.js
+          node --check worker/src/phase11-navigation-cache.js
+          node --check tests/phase11-browser-verification.mjs
+          bash -n tests/phase11-api-verification.sh
+          bash -n tests/phase11-home-performance.sh
+          node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
+          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          rm -rf /tmp/phase11-worker-apply
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-worker-apply >/tmp/phase11-worker-package.log
+          jq -e '.phase==11 and .catalogueLessons==369 and .catalogueCurricula==11 and .lessonsKvWrites==380 and .r2References==1669 and .developmentAllowlistCount==16' /tmp/phase11-worker-apply/phase11-apply-summary.json >/dev/null
+
+      - name: Guard isolated V2 development bindings and login state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings.json >/dev/null
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          CURRENT="$(jq -r '.result.bindings[] | select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text") | .text' /tmp/settings.json)"
+          TARGET="$(cat /tmp/phase11-worker-apply/phase11-dev-allowlist.txt)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          test "$CURRENT" = "$TARGET"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login appears enabled; refusing Worker-only Phase 11 deploy.' >&2; exit 1;; esac
+          { echo "students=$STUDENTS"; echo "lessons=$LESSONS"; echo "r2=$R2"; echo "db=$DB"; echo "allowlist=$CURRENT"; } >> "$GITHUB_OUTPUT"
+
+      - name: Snapshot currently deployed Worker only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/phase11-worker-backup
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/phase11-worker-backup/worker-before.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother; do
+            grep -aFq "$marker" /tmp/phase11-worker-backup/worker-before.bin
+          done
+
+      - name: Upload Worker rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-worker-before-performance
+          path: /tmp/phase11-worker-backup
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Measure deployed home latency before change
+        shell: bash
+        run: bash tests/phase11-home-performance.sh /tmp/phase11-home-before.json
+
+      - name: Generate isolated Phase 11 Worker runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.worker-only.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-final.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run Phase 11 Worker-only bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.worker-only.toml --dry-run --outdir /tmp/phase11-worker-only-build >/tmp/phase11-worker-dry-run.log
+          grep -R -aFq 'VIDEO_URL_REQUIRED' /tmp/phase11-worker-only-build
+          grep -R -aFq 'p11elevenother' /tmp/phase11-worker-only-build
+
+      - name: Deploy targeted Phase 11 Worker to V2 development
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.worker-only.toml --keep-vars --message 'Phase 11 targeted navigation performance' >/tmp/phase11-worker-deploy.log
+
+      - name: Verify deployed Phase 11 Worker markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-after-performance.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother HOME_ORDER_SENSITIVE_CURRICULA; do
+            grep -aFq "$marker" /tmp/worker-after-performance.bin
+          done
+
+      - name: Measure deployed home latency after change
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-home-performance.sh /tmp/phase11-home-after.json
+          node <<'NODE'
+          const fs = require('fs');
+          const before = JSON.parse(fs.readFileSync('/tmp/phase11-home-before.json', 'utf8')).measurements;
+          const after = JSON.parse(fs.readFileSync('/tmp/phase11-home-after.json', 'utf8')).measurements;
+          const b = new Map(before.map(x => [x.persona, x.homeMs]));
+          const rows = after.map(x => ({
+            persona: x.persona,
+            beforeMs: b.get(x.persona),
+            afterMs: x.homeMs,
+            improvementPct: Number((((b.get(x.persona) - x.homeMs) / b.get(x.persona)) * 100).toFixed(1))
+          }));
+          console.log('Phase 11 /home before-after:', JSON.stringify(rows));
+          NODE
+
+      - name: Run deployed Phase 11 API acceptance
+        shell: bash
+        run: bash tests/phase11-api-verification.sh
+
+      - name: Wait for Phase 11 GitHub Pages proof page
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase11.html'
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error "$URL" --output /tmp/phase11-page.html && grep -Fq 'assets/phase11-resources.js' /tmp/phase11-page.html && grep -Fq 'assets/phase11-other.js' /tmp/phase11-page.html; then exit 0; fi
+            sleep 5
+          done
+          echo 'Phase 11 GitHub Pages proof page did not become available in time.' >&2
+          exit 1
+
+      - name: Install Playwright driver
+        shell: bash
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+
+      - name: Run real Chrome Phase 11 acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+
+      - name: Roll back to previous known-good Phase 11 Worker on acceptance failure
+        if: failure() && steps.deploy.outcome == 'success'
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$ROLLBACK_REF"
+          git checkout --detach "$ROLLBACK_REF"
+          cat >worker/wrangler.phase11.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-final.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.rollback.toml --keep-vars --message 'Rollback Phase 11 targeted navigation performance' >/tmp/phase11-worker-rollback.log
+
+      - name: Collect Worker-only verification evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/phase11-worker-performance
+          for f in /tmp/phase11-worker-package.log /tmp/phase11-worker-dry-run.log /tmp/phase11-worker-deploy.log /tmp/phase11-worker-rollback.log /tmp/phase11-home-before.json /tmp/phase11-home-after.json; do
+            if [ -f "$f" ]; then cp "$f" artifacts/phase11-worker-performance/; fi
+          done
+
+      - name: Upload Worker-only acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-worker-performance-acceptance
+          path: |
+            artifacts/phase11-worker-performance
+            artifacts/phase11-browser
+          if-no-files-found: warn
+          retention-days: 30
