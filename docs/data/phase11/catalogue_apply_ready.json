@@ -1,0 +1,20 @@
+{
+  "phase": 11,
+  "status": "IMPLEMENTATION_READY_FOR_CI",
+  "canonicalLessons": 369,
+  "canonicalCurricula": 11,
+  "lessonsKvWrites": 380,
+  "verifiedR2References": 1669,
+  "completedMainVideos": 123,
+  "ownerConfirmedPendingVideos": 246,
+  "quizzes": 79,
+  "vrLessons": 66,
+  "elevenPlusOtherResources": 9,
+  "ownerTestPersonas": 9,
+  "ownerTestEntitlementRows": 447,
+  "ownerTestVrRows": 64,
+  "developmentAllowlistAfterApply": 16,
+  "normalStudentLoginEnabled": false,
+  "livePortalTargeted": false,
+  "phase12Started": false
+}
