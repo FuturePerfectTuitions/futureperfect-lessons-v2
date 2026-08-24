@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadPhase11Catalogue, validatePhase11Catalogue, buildPhase11KvBulk } from './phase11-catalogue.mjs';
 import { loadPhase11TestPersonas, buildPhase11TestSeed } from './phase11-test-personas.mjs';
-import { writePhase11NavigationManifest } from './phase11-navigation-manifest.mjs';
+import {
+  buildPhase11NavigationManifest,
+  writePhase11NavigationManifest
+} from './phase11-navigation-manifest.mjs';
 
 const BASE_ALLOWLIST = ['test0101','test0202','test0303','test0404','test0505','test0606','test0707'];
 const HISTORY_ROWS = [
@@ -31,6 +34,7 @@ function historySql(catalogue) {
 export function buildPhase11ApplyPackage() {
   const catalogue = loadPhase11Catalogue();
   const catalogueValidation = validatePhase11Catalogue(catalogue);
+  const navigation = buildPhase11NavigationManifest(catalogue);
   const personas = loadPhase11TestPersonas();
   const testSeed = buildPhase11TestSeed(catalogue, personas);
   const allowlist = [...BASE_ALLOWLIST, ...personas.personas.map(item => item.portalUserIdNorm)];
@@ -53,7 +57,11 @@ export function buildPhase11ApplyPackage() {
       testPersonaEntitlementRows: testSeed.validation.entitlementRows,
       testPersonaVrRows: testSeed.validation.vrRows,
       historyRegressionRows: HISTORY_ROWS.length,
-      developmentAllowlistCount: allowlist.length
+      developmentAllowlistCount: allowlist.length,
+      navigationManifestSha256: navigation.navigationSha256,
+      navigationManifestLessons: Object.keys(navigation.manifest.lessons).length,
+      navigationManifestCurricula: Object.keys(navigation.manifest.curricula).length,
+      navigationManifestJsonBytes: Buffer.byteLength(navigation.json)
     }
   };
 }
@@ -68,12 +76,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // bundling the Worker. Generate the navigation-only manifest here from the
   // same immutable catalogue, so the checked-in fail-safe placeholder can
   // never reach a guarded deployment bundle.
-  const navigation = writePhase11NavigationManifest();
+  const writtenNavigation = writePhase11NavigationManifest();
   const pkg = buildPhase11ApplyPackage();
-  pkg.summary.navigationManifestSha256 = navigation.navigationSha256;
-  pkg.summary.navigationManifestLessons = navigation.lessons;
-  pkg.summary.navigationManifestCurricula = navigation.curricula;
-  pkg.summary.navigationManifestBytes = navigation.bytes;
+  if (pkg.summary.navigationManifestSha256 !== writtenNavigation.navigationSha256) {
+    throw new Error('Generated Phase 11 navigation manifest disagrees with apply-package summary.');
+  }
+  pkg.summary.navigationManifestBytes = writtenNavigation.bytes;
 
   fs.writeFileSync(path.join(out, 'phase11-lessons-kv-bulk.json'), JSON.stringify(pkg.catalogueKvRows), 'utf8');
   fs.writeFileSync(path.join(out, 'phase11-test-students-kv-bulk.json'), JSON.stringify(pkg.testStudentKvRows), 'utf8');
