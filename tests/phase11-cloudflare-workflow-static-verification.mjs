@@ -49,6 +49,30 @@ assert.ok(!workerOnly.includes('d1 execute'), 'Worker-only deploy must not direc
 assert.ok(!workerOnly.includes('r2 object'), 'Worker-only deploy must not mutate R2 objects.');
 assert.ok(!workerOnly.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Worker-only deploy must not enable production student login.');
 
+const diagnostic = fs.readFileSync('.github/workflows/phase11-login-diagnostic.yml', 'utf8');
+for (const required of [
+  "github.event.pull_request.head.ref == 'ops/phase11-login-diagnostic'",
+  '.github/phase11-login-diagnostic-trigger.txt',
+  'ENVIRONMENT',
+  'STUDENT_LOGIN_ENABLED',
+  'PRAGMA quick_check',
+  'sqlite_master',
+  'trg_student_sessions_single_active',
+  'wrangler@${WRANGLER_VERSION} tail',
+  '--status error',
+  'testy411m',
+  'phase11-login-diagnostic'
+]) {
+  assert.ok(diagnostic.includes(required), `Phase 11 login diagnostic missing guard/evidence rule: ${required}`);
+}
+assert.ok(!diagnostic.includes('wrangler@${WRANGLER_VERSION} deploy'), 'Login diagnostic must never deploy a Worker.');
+assert.ok(!diagnostic.includes('kv bulk put'), 'Login diagnostic must not write KV.');
+assert.ok(!diagnostic.includes('r2 object'), 'Login diagnostic must not mutate R2.');
+assert.ok(!diagnostic.includes('INSERT INTO'), 'Login diagnostic D1 command must not insert rows directly.');
+assert.ok(!diagnostic.includes('UPDATE student_sessions'), 'Login diagnostic D1 command must not update session rows directly.');
+assert.ok(!diagnostic.includes('DELETE FROM'), 'Login diagnostic D1 command must not delete rows directly.');
+assert.ok(!diagnostic.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Login diagnostic must not enable production student login.');
+
 const homePerformance = fs.readFileSync('tests/phase11-home-performance.sh', 'utf8');
 for (const required of [
   'login_with_transient_retry',
