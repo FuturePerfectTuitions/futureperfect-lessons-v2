@@ -1,0 +1,20 @@
+{
+  "phase": 11,
+  "status": "FINAL_R2_UPLOAD_MANIFEST_LOCKED",
+  "bucketName": "fpt-materials-dev",
+  "uploadObjectCount": 1646,
+  "excludedObjectCount": 7,
+  "uniqueDestinationKeys": 1646,
+  "protectedAnswerObjects": 737,
+  "nonAnswerObjects": 909,
+  "manifestFilename": "Phase11_R2_Upload_Manifest_FINAL.csv",
+  "manifestSha256": "d2659de60318c957dee1c0e765af5221e190d73be968e859a42cef20f6e94f15",
+  "r2WritePerformed": false,
+  "safety": {
+    "pdfOnly": true,
+    "allAnswerObjectsProtected": true,
+    "conflictingOverwriteForbidden": true,
+    "deleteOperationIncluded": false,
+    "targetIsV2DevelopmentBucket": true
+  }
+}
