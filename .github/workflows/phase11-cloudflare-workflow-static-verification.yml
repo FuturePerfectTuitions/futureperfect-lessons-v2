@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/phase11-cloudflare-apply.yml
       - .github/workflows/phase11-worker-performance-deploy.yml
+      - .github/workflows/phase11-login-diagnostic.yml
       - tests/phase11-cloudflare-workflow-static-verification.mjs
       - tests/phase11-home-performance.sh
       - worker/wrangler.toml
@@ -27,4 +28,5 @@ jobs:
           set -euo pipefail
           node --check tests/phase11-cloudflare-workflow-static-verification.mjs
           bash -n tests/phase11-home-performance.sh
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/phase11-login-diagnostic.yml')"
           node tests/phase11-cloudflare-workflow-static-verification.mjs
