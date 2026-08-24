@@ -1,0 +1,37 @@
+name: Phase 11 final adapter static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/index-phase11-final.js
+      - worker/src/phase11-other-resources.js
+      - assets/phase11-other.js
+      - tests/phase11-other-static-verification.mjs
+      - .github/workflows/phase11-final-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify Phase 11 final adapter remains dormant and safe
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11-final.js
+          node --check worker/src/phase11-other-resources.js
+          node --check assets/phase11-other.js
+          node --experimental-default-type=module tests/phase11-other-static-verification.mjs
+          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          ! grep -Fq 'assets/phase11-other.js' phase10.html
+          grep -Fq "import phase11ResourcesWorker from './index-phase11-resources.js';" worker/src/index-phase11-final.js
+          grep -Fq "p11elevenother" worker/src/index-phase11-final.js
+          echo 'Phase 11 final adapter static verification: PASS'
