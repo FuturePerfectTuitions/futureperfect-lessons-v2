@@ -278,8 +278,11 @@ async function buildExtensionModel(request, env, lessonId, record, lessonModel, 
   const locked = Boolean(lessonModel?.locked);
   const presentation = lessonModel?.presentation || presentationForView(viewId);
 
-  const model = {
-    corePreLessonPairs: await safePairList(
+  // R2 existence checks are independent. Run all Phase 11 resource groups in
+  // parallel so lesson rendering is bounded by the slowest R2 head request,
+  // rather than the sum of several sequential availability-check waves.
+  const corePromise = Promise.all([
+    safePairList(
       env,
       lessonId,
       source.core.preLessonPairs,
@@ -287,7 +290,7 @@ async function buildExtensionModel(request, env, lessonId, record, lessonModel, 
       'corePreLesson',
       locked
     ),
-    coreCumulativeHomeworks: await safePairList(
+    safePairList(
       env,
       lessonId,
       source.core.cumulativeHomeworks,
@@ -295,20 +298,18 @@ async function buildExtensionModel(request, env, lessonId, record, lessonModel, 
       'coreCumulative',
       locked
     ),
-    coreSupplementaryAnswers: await safeAnswerList(
+    safeAnswerList(
       env,
       lessonId,
       source.core.supplementaryAnswers,
       'coreSupplementary',
       locked
-    ),
-    elevenPlus: null,
-    vrSupplementaryAnswers: []
-  };
+    )
+  ]);
 
-  if (presentation === '11plus') {
-    model.elevenPlus = {
-      preLessonPairs: await safePairList(
+  const elevenPlusPromise = presentation === '11plus'
+    ? Promise.all([
+      safePairList(
         env,
         lessonId,
         source.elevenPlus.preLessonPairs,
@@ -316,7 +317,7 @@ async function buildExtensionModel(request, env, lessonId, record, lessonModel, 
         'elevenPlusPreLesson',
         locked
       ),
-      homeworks: await safePairList(
+      safePairList(
         env,
         lessonId,
         source.elevenPlus.homeworks,
@@ -324,7 +325,7 @@ async function buildExtensionModel(request, env, lessonId, record, lessonModel, 
         'elevenPlusHomework',
         locked
       ),
-      cumulativeHomeworks: await safePairList(
+      safePairList(
         env,
         lessonId,
         source.elevenPlus.cumulativeHomeworks,
@@ -332,33 +333,60 @@ async function buildExtensionModel(request, env, lessonId, record, lessonModel, 
         'elevenPlusCumulative',
         locked
       ),
-      supplementaryAnswers: await safeAnswerList(
+      safeAnswerList(
         env,
         lessonId,
         source.elevenPlus.supplementaryAnswers,
         'elevenPlusSupplementary',
         locked
       )
-    };
-  }
+    ])
+    : Promise.resolve(null);
 
   // Phase 9 has already applied the authoritative VR entitlement check. Only
   // expose supplementary VR answers when the downstream safe VR model exists.
-  if (lessonModel?.vr) {
-    model.vrSupplementaryAnswers = await safeAnswerList(
+  const vrPromise = lessonModel?.vr
+    ? safeAnswerList(
       env,
       lessonId,
       source.vr.supplementaryAnswers,
       'vrSupplementary',
       locked
-    );
-  }
+    )
+    : Promise.resolve([]);
+
+  const [core, elevenPlus, vrSupplementaryAnswers] = await Promise.all([
+    corePromise,
+    elevenPlusPromise,
+    vrPromise
+  ]);
+
+  const model = {
+    corePreLessonPairs: core[0],
+    coreCumulativeHomeworks: core[1],
+    coreSupplementaryAnswers: core[2],
+    elevenPlus: elevenPlus
+      ? {
+        preLessonPairs: elevenPlus[0],
+        homeworks: elevenPlus[1],
+        cumulativeHomeworks: elevenPlus[2],
+        supplementaryAnswers: elevenPlus[3]
+      }
+      : null,
+    vrSupplementaryAnswers
+  };
 
   return extensionModelHasContent(model) ? model : null;
 }
 
 async function augmentLessonDetail(request, env, lessonId) {
-  const response = await phase11ScreenPalWorker.fetch(request, env);
+  // The canonical record lookup is independent of the downstream Phase 9/ScreenPal
+  // lesson-detail request, so start both together and avoid another serial KV wait.
+  const [response, record] = await Promise.all([
+    phase11ScreenPalWorker.fetch(request, env),
+    loadLessonRecord(env, lessonId)
+  ]);
+
   let body = null;
   try {
     body = await response.clone().json();
@@ -366,11 +394,10 @@ async function augmentLessonDetail(request, env, lessonId) {
     return response;
   }
   if (!response.ok || !body?.ok || !body.lesson) return response;
+  if (!record) return response;
 
   const url = new URL(request.url);
   const viewId = String(url.searchParams.get('viewId') || '').trim();
-  const record = await loadLessonRecord(env, lessonId);
-  if (!record) return response;
 
   body.lesson.phase11Resources = await buildExtensionModel(
     request,
