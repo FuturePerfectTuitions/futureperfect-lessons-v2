@@ -42,22 +42,43 @@ function coreVideo(record) {
   return record?.video || record?.core?.video || null;
 }
 
-function chooseVideoObject(record, viewId) {
+function explicitQuiz(record) {
   const video = coreVideo(record);
   if (!video || typeof video !== 'object') return null;
 
-  if (presentationForView(viewId) === '11plus') {
-    const override = video.elevenPlus || video['11plus'] || video.elevenPlusVideo || null;
-    if (override && typeof override === 'object' && safeEmbedUrl(override.embedUrl || override.playerUrl)) {
-      return override;
-    }
-  }
+  const quiz = video.quiz;
+  const source = quiz && typeof quiz === 'object' ? quiz : {};
+  const embedUrl = safeEmbedUrl(source.embedUrl || video.quizEmbedUrl);
+  const shareUrl = safeScreenPalUrl(
+    source.shareUrl || source.directUrl || source.url || video.quizShareUrl || video.quizDirectUrl
+  );
 
-  return video;
+  if (!embedUrl && !shareUrl) return null;
+
+  return {
+    mode: embedUrl ? 'embed' : 'link',
+    url: embedUrl || shareUrl,
+    embedUrl,
+    shareUrl,
+    displayName: String(source.displayName || source.name || video.quizDisplayName || 'ScreenPal Quiz').trim() || 'ScreenPal Quiz'
+  };
 }
 
 function explicitMainVideo(record, viewId) {
-  const video = chooseVideoObject(record, viewId);
+  if (presentationForView(viewId) === '11plus') {
+    // Owner rule: the ScreenPal quiz is the interactive 11+ version of the
+    // lesson video, not an additional resource. Never fall back to the normal
+    // lesson video in an 11+ presentation.
+    const quiz = explicitQuiz(record);
+    if (!quiz?.embedUrl) return null;
+    return {
+      embedUrl: quiz.embedUrl,
+      contentUrl: quiz.shareUrl,
+      watchUrl: quiz.shareUrl
+    };
+  }
+
+  const video = coreVideo(record);
   if (!video || typeof video !== 'object') return null;
 
   const embedUrl = safeEmbedUrl(video.embedUrl || video.playerUrl);
@@ -91,28 +112,6 @@ function explicitVrVideo(record, kind) {
     embedUrl,
     contentUrl: safeScreenPalUrl(source.contentUrl),
     watchUrl: safeScreenPalUrl(source.watchUrl)
-  };
-}
-
-function explicitQuiz(record) {
-  const video = coreVideo(record);
-  if (!video || typeof video !== 'object') return null;
-
-  const quiz = video.quiz;
-  const source = quiz && typeof quiz === 'object' ? quiz : {};
-  const embedUrl = safeEmbedUrl(source.embedUrl || video.quizEmbedUrl);
-  const shareUrl = safeScreenPalUrl(
-    source.shareUrl || source.directUrl || source.url || video.quizShareUrl || video.quizDirectUrl
-  );
-
-  if (!embedUrl && !shareUrl) return null;
-
-  return {
-    mode: embedUrl ? 'embed' : 'link',
-    url: embedUrl || shareUrl,
-    embedUrl,
-    shareUrl,
-    displayName: String(source.displayName || source.name || video.quizDisplayName || 'ScreenPal Quiz').trim() || 'ScreenPal Quiz'
   };
 }
 
