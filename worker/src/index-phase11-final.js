@@ -4,6 +4,10 @@ import {
   normaliseElevenPlusOther,
   elevenPlusOtherAt
 } from './phase11-other-resources.js';
+import {
+  phase11NavigationEnv,
+  shouldPrefetchPhase11Navigation
+} from './phase11-navigation-cache.js';
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -230,23 +234,36 @@ async function handleElevenPlusOtherDownload(request, env, parsed) {
   return new Response(object.body, { status: 200, headers });
 }
 
+async function requestEnv(request, env) {
+  if (!shouldPrefetchPhase11Navigation(request)) return env;
+  try {
+    return await phase11NavigationEnv(env);
+  } catch {
+    // Performance acceleration must never weaken correctness. If the parallel
+    // prefetch encounters a transient KV failure, preserve the established
+    // downstream behavior and let the original Worker path resolve normally.
+    return env;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
+    const runtimeEnv = await requestEnv(request, env);
     const url = new URL(request.url);
 
     const lessonMatch = url.pathname.match(/^\/api\/v1\/student\/lessons\/([^/]+)$/);
     if (lessonMatch && request.method === 'GET') {
-      return augmentLessonDetail(request, env, decodeURIComponent(lessonMatch[1]));
+      return augmentLessonDetail(request, runtimeEnv, decodeURIComponent(lessonMatch[1]));
     }
 
     const resourceMatch = url.pathname.match(/^\/api\/v1\/student\/resources\/([^/]+)$/);
     if (resourceMatch && request.method === 'GET') {
       const parsed = parseResourceKey(decodeURIComponent(resourceMatch[1]));
       if (parsed?.kind === 'p11elevenother') {
-        return handleElevenPlusOtherDownload(request, env, parsed);
+        return handleElevenPlusOtherDownload(request, runtimeEnv, parsed);
       }
     }
 
-    return phase11ResourcesWorker.fetch(request, env, ctx);
+    return phase11ResourcesWorker.fetch(request, runtimeEnv, ctx);
   }
 };
