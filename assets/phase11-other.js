@@ -3,6 +3,7 @@
   const base = String(config.workerBaseUrl || '').replace(/\/$/, '');
   const upstreamFetch = window.fetch.bind(window);
   const captured = { viewId: '', resources: [] };
+  let renderTimer = null;
 
   function requestUrl(input) {
     try {
@@ -18,6 +19,16 @@
     return 'GET';
   }
 
+  function scheduleRender() {
+    if (renderTimer) window.clearTimeout(renderTimer);
+    // Use a macrotask so the base Phase 7 lesson renderer can finish consuming
+    // the successful lesson-detail response before this extension touches the DOM.
+    renderTimer = window.setTimeout(() => {
+      renderTimer = null;
+      render();
+    }, 0);
+  }
+
   async function capture(response, url) {
     try {
       const body = await response.clone().json();
@@ -26,9 +37,10 @@
       captured.resources = Array.isArray(body.lesson?.phase11OtherResources?.elevenPlus)
         ? body.lesson.phase11OtherResources.elevenPlus
         : [];
-      queueMicrotask(render);
+      scheduleRender();
     } catch (_) {
       captured.resources = [];
+      scheduleRender();
     }
   }
 
@@ -37,7 +49,9 @@
     const method = methodOf(input, init);
     const response = await upstreamFetch(input, init);
     if (url && method === 'GET' && /\/api\/v1\/student\/lessons\/[^/]+$/.test(url.pathname)) {
-      await capture(response, url);
+      // Do not block the base lesson fetch on extension rendering. response.clone()
+      // is created inside capture before any body read can affect this response.
+      capture(response, url);
     }
     return response;
   };
@@ -104,14 +118,30 @@
     const section = document.getElementById('other-section');
     const list = document.getElementById('other-list');
     if (!section || !list) return;
+
     list.querySelectorAll('.phase11-eleven-other-row').forEach(node => node.remove());
     if (!captured.resources.length) return;
+
     captured.resources.forEach(resource => list.appendChild(rowFor(resource)));
     section.hidden = false;
   }
 
-  const lessonContent = document.getElementById('lesson-content');
-  if (lessonContent) {
-    new MutationObserver(render).observe(lessonContent, { childList: true, subtree: true, attributes: true });
+  const otherList = document.getElementById('other-list');
+  if (otherList) {
+    new MutationObserver(records => {
+      // The previous Phase 11 observer watched all of #lesson-content, including
+      // its own rows and the `hidden` attribute it changed. A non-empty 11+ Other
+      // resource list could therefore trigger render -> mutation -> render forever,
+      // starving the base lesson-detail promise. Observe only the base list and
+      // ignore records made exclusively from our own extension rows.
+      const baseChanged = records.some(record => {
+        const changedNodes = [...record.addedNodes, ...record.removedNodes];
+        return changedNodes.some(node => !(
+          node.nodeType === Node.ELEMENT_NODE &&
+          node.classList?.contains('phase11-eleven-other-row')
+        ));
+      });
+      if (baseChanged) scheduleRender();
+    }).observe(otherList, { childList: true });
   }
 })();
