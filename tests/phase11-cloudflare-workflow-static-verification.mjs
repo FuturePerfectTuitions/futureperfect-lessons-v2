@@ -49,6 +49,18 @@ assert.ok(!workerOnly.includes('d1 execute'), 'Worker-only deploy must not direc
 assert.ok(!workerOnly.includes('r2 object'), 'Worker-only deploy must not mutate R2 objects.');
 assert.ok(!workerOnly.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Worker-only deploy must not enable production student login.');
 
+const homePerformance = fs.readFileSync('tests/phase11-home-performance.sh', 'utf8');
+for (const required of [
+  'login_with_transient_retry',
+  'for attempt in 1 2 3 4 5 6',
+  "[[ \"$http_code\" =~ ^5[0-9][0-9]$ ]]",
+  'Deliberately single-shot',
+  '/api/v1/student/home'
+]) {
+  assert.ok(homePerformance.includes(required), `Phase 11 home performance probe missing safety/measurement rule: ${required}`);
+}
+assert.equal((homePerformance.match(/\/api\/v1\/student\/home/g) || []).length, 1, 'Home performance probe must keep exactly one single-shot /home request in its measurement path.');
+
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 assert.ok(wrangler.includes('main = "src/index-phase10-history.js"'), 'Implementation PR must not switch the checked-in Worker entrypoint before guarded apply.');
 
