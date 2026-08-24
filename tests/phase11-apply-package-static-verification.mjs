@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildPhase11ApplyPackage } from '../scripts/phase11-apply-package.mjs';
+import { EXPECTED_NAVIGATION_SHA256 } from '../scripts/phase11-navigation-manifest.mjs';
 
 const pkg = buildPhase11ApplyPackage();
 assert.equal(pkg.summary.phase, 11);
@@ -12,6 +13,10 @@ assert.equal(pkg.summary.testPersonaEntitlementRows, 447);
 assert.equal(pkg.summary.testPersonaVrRows, 64);
 assert.equal(pkg.summary.historyRegressionRows, 5);
 assert.equal(pkg.summary.developmentAllowlistCount, 16);
+assert.equal(pkg.summary.navigationManifestSha256, EXPECTED_NAVIGATION_SHA256);
+assert.equal(pkg.summary.navigationManifestLessons, 369);
+assert.equal(pkg.summary.navigationManifestCurricula, 11);
+assert.ok(pkg.summary.navigationManifestJsonBytes > 0 && pkg.summary.navigationManifestJsonBytes < 70000);
 assert.equal(pkg.catalogueKvRows.length, 380);
 assert.equal(pkg.testStudentKvRows.length, 9);
 assert.equal(new Set(pkg.catalogueKvRows.map(row => row.key)).size, 380);
