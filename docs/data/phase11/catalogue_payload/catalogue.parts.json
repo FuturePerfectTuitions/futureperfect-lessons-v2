@@ -1,0 +1,19 @@
+{
+  "phase": 11,
+  "encoding": "gzip+base64",
+  "parts": 10,
+  "partFiles": [
+    "catalogue.part01.b64",
+    "catalogue.part02.b64",
+    "catalogue.part03.b64",
+    "catalogue.part04.b64",
+    "catalogue.part05.b64",
+    "catalogue.part06.b64",
+    "catalogue.part07.b64",
+    "catalogue.part08.b64",
+    "catalogue.part09.b64",
+    "catalogue.part10.b64"
+  ],
+  "combinedBase64Sha256": "eaab7168caae92ca70a4bc245a56faf35695046787699a10e376f5f16bc6c959",
+  "decodedJsonSha256": "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663"
+}
