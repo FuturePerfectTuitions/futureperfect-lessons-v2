@@ -54,10 +54,10 @@ function collectR2Keys(value, out = []) {
 export function loadPhase11Catalogue(root = repoRoot()) {
   const base = path.join(root, 'docs', 'data', 'phase11', 'catalogue_payload');
   const manifest = JSON.parse(fs.readFileSync(path.join(base, 'catalogue.parts.json'), 'utf8'));
-  if (manifest.phase !== EXPECTED.phase || manifest.encoding !== 'gzip+base64' || manifest.parts !== 10) {
+  if (manifest.phase !== EXPECTED.phase || manifest.encoding !== 'gzip+base64') {
     throw new Error('Unexpected Phase 11 catalogue payload manifest.');
   }
-  if (!Array.isArray(manifest.partFiles) || manifest.partFiles.length !== manifest.parts) {
+  if (!Number.isInteger(manifest.parts) || manifest.parts < 1 || !Array.isArray(manifest.partFiles) || manifest.partFiles.length !== manifest.parts) {
     throw new Error('Phase 11 catalogue payload part list is invalid.');
   }
   const combined = manifest.partFiles
