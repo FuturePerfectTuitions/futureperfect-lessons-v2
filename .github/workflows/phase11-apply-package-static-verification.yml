@@ -36,5 +36,5 @@ jobs:
           jq -e 'length == 380' /tmp/phase11-apply-package/phase11-lessons-kv-bulk.json >/dev/null
           jq -e 'length == 9' /tmp/phase11-apply-package/phase11-test-students-kv-bulk.json >/dev/null
           jq -e '.phase == 11 and .catalogueLessons == 369 and .lessonsKvWrites == 380 and .testPersonas == 9 and .developmentAllowlistCount == 16' /tmp/phase11-apply-package/phase11-apply-summary.json >/dev/null
-          test "$(tr ',' '\n' </tmp/phase11-apply-package/phase11-dev-allowlist.txt | wc -l)" -eq 16
+          test "$(awk -F',' 'NF { print NF }' /tmp/phase11-apply-package/phase11-dev-allowlist.txt)" -eq 16
           echo 'Phase 11 apply package static verification: PASS'
