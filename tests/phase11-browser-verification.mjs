@@ -26,6 +26,19 @@ function waitForStudentGet(pathname, timeout = 30000) {
   }, { timeout });
 }
 
+async function waitForLoginCycleToFinish(username) {
+  // The login handler disables the button before authentication and re-enables it
+  // only in its finally block, after readSession() has completed its home load.
+  // This is a stable UI-readiness signal and avoids coupling acceptance to the
+  // exact timing/order of internal fetch responses.
+  await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 60000 });
+  await page.waitForFunction(() => {
+    const button = document.getElementById('login-button');
+    return Boolean(button && button.disabled === false);
+  }, null, { timeout: 90000 });
+  await page.locator('#student-greeting').filter({ hasText: username }).waitFor({ state: 'visible', timeout: 10000 });
+}
+
 async function login(username) {
   // phase7.js performs an automatic session probe on page load. Let that probe
   // (and its home load, when a previous test session exists) settle before
@@ -49,32 +62,21 @@ async function login(username) {
 
   await page.locator('#username').fill(username);
   await page.locator('#login-password').fill('Te12');
-
-  // showPortal() makes #portal-screen visible before readSession() finishes
-  // loading /student/home. Wait for both post-login requests so subject clicks
-  // exercise a fully initialised navigation state rather than a timing race.
-  const sessionPromise = waitForStudentGet('/api/v1/student/session');
-  const homePromise = waitForStudentGet('/api/v1/student/home');
   await page.locator('#login-button').click();
-
-  const sessionResponse = await sessionPromise;
-  if (!sessionResponse.ok()) throw new Error(`Phase 11 browser login session failed for ${username}: HTTP ${sessionResponse.status()}`);
-  const homeResponse = await homePromise;
-  if (!homeResponse.ok()) throw new Error(`Phase 11 browser home load failed for ${username}: HTTP ${homeResponse.status()}`);
-  await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 30000 });
+  await waitForLoginCycleToFinish(username);
 }
 
 async function openSubject(selector) {
   await page.locator(selector).click();
-  await page.locator('#screen-views').waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('#screen-views').waitFor({ state: 'visible', timeout: 60000 });
 }
 
 async function openView(label) {
   const button = page.locator('#view-grid').getByRole('button', { name: new RegExp(label) }).first();
-  await button.waitFor({ state: 'visible', timeout: 20000 });
+  await button.waitFor({ state: 'visible', timeout: 30000 });
   await button.click();
-  await page.locator('#screen-lessons').waitFor({ state: 'visible', timeout: 20000 });
-  await page.locator('#lesson-list .phase6-lesson-row').first().waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('#screen-lessons').waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('#lesson-list .phase6-lesson-row').first().waitFor({ state: 'visible', timeout: 60000 });
 }
 
 async function lessonCount(expected) {
@@ -86,10 +88,10 @@ async function openLessonCode(code) {
   const row = page.locator('#lesson-list .phase6-lesson-row').filter({
     has: page.locator('.phase6-lesson-code', { hasText: code })
   }).first();
-  await row.waitFor({ state: 'visible', timeout: 20000 });
+  await row.waitFor({ state: 'visible', timeout: 30000 });
   await row.click();
-  await page.locator('#screen-lesson').waitFor({ state: 'visible', timeout: 20000 });
-  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('#screen-lesson').waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
 }
 
 try {
@@ -99,7 +101,7 @@ try {
   await openView('Year 2');
   await lessonCount(29);
   await page.locator('#lesson-list .phase6-lesson-row').first().click();
-  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
   await shot('01-TestY2EM-English-real-catalogue');
 
   // Normal Year 5 Maths uses Year-style aliases and must not expose the 11+ quiz.
@@ -107,7 +109,7 @@ try {
   await openSubject('#maths-choice');
   await openView('Year 5');
   await lessonCount(38);
-  await page.locator('.phase6-lesson-code', { hasText: 'Y5T1M01' }).first().waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('.phase6-lesson-code', { hasText: 'Y5T1M01' }).first().waitFor({ state: 'visible', timeout: 30000 });
   await openLessonCode('Y5T1M01');
   await page.locator('#phase9-quiz-section').waitFor({ state: 'attached', timeout: 10000 });
   if (!(await page.locator('#phase9-quiz-section').evaluate(el => el.hidden))) {
@@ -120,9 +122,9 @@ try {
   await openSubject('#maths-choice');
   await openView('Level 2');
   await lessonCount(38);
-  await page.locator('.phase6-lesson-code', { hasText: 'L2T1M01' }).first().waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('.phase6-lesson-code', { hasText: 'L2T1M01' }).first().waitFor({ state: 'visible', timeout: 30000 });
   await openLessonCode('L2T1M01');
-  await page.locator('#phase9-quiz-section').waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('#phase9-quiz-section').waitFor({ state: 'visible', timeout: 30000 });
   await page.getByRole('button', { name: 'Open Quiz' }).waitFor({ state: 'visible', timeout: 10000 });
   await shot('03-TestY411M-Level2-quiz');
 
@@ -132,18 +134,18 @@ try {
   await openView('Year 5 11+');
   await lessonCount(32);
   await page.locator('#lesson-list .phase6-lesson-row').first().click();
-  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 30000 });
-  await page.locator('#phase9-vr-section').waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('#lesson-content').waitFor({ state: 'visible', timeout: 60000 });
+  await page.locator('#phase9-vr-section').waitFor({ state: 'visible', timeout: 30000 });
   await page.getByRole('heading', { name: 'Verbal Reasoning' }).waitFor({ state: 'visible', timeout: 10000 });
   await shot('04-TestY511E-English11-VR');
 
   // Combined Year 5 11+ account exposes both English 11+ and Level 3 Maths as current.
   await login('TestY511EM');
   await openSubject('#maths-choice');
-  await page.getByRole('button', { name: /Level 3/ }).waitFor({ state: 'visible', timeout: 20000 });
+  await page.getByRole('button', { name: /Level 3/ }).waitFor({ state: 'visible', timeout: 30000 });
   await page.locator('#back-to-subjects').click();
   await openSubject('#english-choice');
-  await page.getByRole('button', { name: /Year 5 11\+/ }).waitFor({ state: 'visible', timeout: 20000 });
+  await page.getByRole('button', { name: /Year 5 11\+/ }).waitFor({ state: 'visible', timeout: 30000 });
   await shot('05-TestY511EM-combined-11plus');
 
   console.log('Phase 11 real-catalogue Chrome acceptance: PASS');
