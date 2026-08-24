@@ -15,15 +15,52 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 1100
 const page = await context.newPage();
 const shot = name => page.screenshot({ path: path.join(outputDir, `${name}.png`), fullPage: true });
 
+function waitForStudentGet(pathname, timeout = 30000) {
+  return page.waitForResponse(response => {
+    try {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.pathname.endsWith(pathname);
+    } catch (_) {
+      return false;
+    }
+  }, { timeout });
+}
+
 async function login(username) {
+  // phase7.js performs an automatic session probe on page load. Let that probe
+  // (and its home load, when a previous test session exists) settle before
+  // starting another login, otherwise the two navigation initialisations can race.
+  const startupSessionPromise = waitForStudentGet('/api/v1/student/session');
+  const startupHomePromise = waitForStudentGet('/api/v1/student/home').catch(() => null);
   await page.goto(portalUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  const startupSession = await startupSessionPromise;
+
+  if (startupSession.ok()) {
+    const startupHome = await startupHomePromise;
+    if (!startupHome?.ok()) throw new Error('Existing Phase 11 browser session could not load student home data.');
+  } else {
+    await page.locator('#login-screen').waitFor({ state: 'visible', timeout: 10000 });
+  }
+
   if (await page.locator('#portal-screen').isVisible().catch(() => false)) {
     await page.locator('#logout-button').click();
     await page.locator('#login-screen').waitFor({ state: 'visible', timeout: 10000 });
   }
+
   await page.locator('#username').fill(username);
   await page.locator('#login-password').fill('Te12');
+
+  // showPortal() makes #portal-screen visible before readSession() finishes
+  // loading /student/home. Wait for both post-login requests so subject clicks
+  // exercise a fully initialised navigation state rather than a timing race.
+  const sessionPromise = waitForStudentGet('/api/v1/student/session');
+  const homePromise = waitForStudentGet('/api/v1/student/home');
   await page.locator('#login-button').click();
+
+  const sessionResponse = await sessionPromise;
+  if (!sessionResponse.ok()) throw new Error(`Phase 11 browser login session failed for ${username}: HTTP ${sessionResponse.status()}`);
+  const homeResponse = await homePromise;
+  if (!homeResponse.ok()) throw new Error(`Phase 11 browser home load failed for ${username}: HTTP ${homeResponse.status()}`);
   await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 30000 });
 }
 
@@ -110,6 +147,9 @@ try {
   await shot('05-TestY511EM-combined-11plus');
 
   console.log('Phase 11 real-catalogue Chrome acceptance: PASS');
+} catch (error) {
+  await shot('00-phase11-browser-failure').catch(() => {});
+  throw error;
 } finally {
   await browser.close();
 }
