@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const portalUrl = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase11.html';
 const outputDir = path.resolve('artifacts/phase11-browser');
+const localPhase11Other = await fs.readFile(path.resolve('assets/phase11-other.js'), 'utf8');
 await fs.mkdir(outputDir, { recursive: true });
 
 const browser = await chromium.launch({
@@ -21,6 +22,15 @@ async function freshPage(username) {
   context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
   page = await context.newPage();
   activePersona = username;
+
+  // Keep the browser on the real GitHub Pages origin (so Worker CORS and cookies
+  // are exercised exactly as deployed) while substituting the PR branch's local
+  // Phase 11 Other renderer before page scripts execute.
+  await page.route(/\/assets\/phase11-other\.js(?:\?.*)?$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript; charset=utf-8',
+    body: localPhase11Other
+  }));
 
   page.on('requestfailed', request => {
     if (request.url().includes('/api/v1/student/')) {
@@ -178,7 +188,6 @@ async function openLessonCode(code) {
 }
 
 try {
-  // Run the remaining blocker first so diagnostics are immediate and independent.
   await login('TestY511E');
   await openSubject('#english-choice');
   await openView('Year 5 11+');
