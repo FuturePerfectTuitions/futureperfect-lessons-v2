@@ -77,9 +77,16 @@ const level2Env = await prepareYear5AnswerPdfEnv(level2Request, authorizeEnv);
 await level2Env.MATERIALS_R2.head(SHARED_LEVEL2_R2_KEY);
 assert.deepEqual(r2Calls.pop(), ['head', SHARED_LEVEL2_R2_KEY]);
 
+const tokenHashBytes = new Uint8Array(
+  await crypto.subtle.digest('SHA-256', new TextEncoder().encode('test-token'))
+);
+const testTokenHash = [...tokenHashBytes]
+  .map(byte => byte.toString(16).padStart(2, '0'))
+  .join('');
+
 let remoteFirstReads = 0;
 const tokenRow = {
-  token_hash: 'cached-token-hash',
+  token_hash: testTokenHash,
   session_token_hash: 'session-hash',
   portal_user_id_norm: 'testy5em',
   lesson_id: 'Y5M1',
@@ -92,7 +99,7 @@ const tokenRow = {
   used_at: null
 };
 const sourceDb = {
-  prepare(sql) {
+  prepare() {
     return {
       bind() {
         return {
