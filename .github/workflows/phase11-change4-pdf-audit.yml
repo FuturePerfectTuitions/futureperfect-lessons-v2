@@ -63,17 +63,7 @@ jobs:
             --file=artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf --remote >/tmp/r2-get.log
           test -s artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf
           sha256sum artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf | tee artifacts/change4-pdf-audit/sha256.txt
-          file artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf
-
-      - name: Extract searchable text evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          pdftotext -layout artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf artifacts/change4-pdf-audit/text.txt
-          echo '=== Legacy-code matches ==='
-          grep -n -i 'L2T1M01' artifacts/change4-pdf-audit/text.txt | tee artifacts/change4-pdf-audit/legacy-code-matches.txt || true
-          echo '=== Year5-code matches ==='
-          grep -n -i 'Y5T1M01' artifacts/change4-pdf-audit/text.txt | tee artifacts/change4-pdf-audit/year5-code-matches.txt || true
+          file artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf | tee artifacts/change4-pdf-audit/file-info.txt
 
       - name: Upload exact source PDF and audit evidence
         uses: actions/upload-artifact@v4
