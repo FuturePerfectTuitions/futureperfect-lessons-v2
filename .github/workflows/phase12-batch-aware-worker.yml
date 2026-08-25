@@ -1,0 +1,290 @@
+name: Phase 12 batch-aware Worker
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/index-phase12.js
+      - worker/src/index-phase11-final.js
+      - worker/src/phase11-screenpal.js
+      - worker/src/phase11-session-profile.js
+      - worker/wrangler.toml
+      - tests/phase11-screenpal-static-verification.mjs
+      - tests/phase12-batch-aware-worker-verification.mjs
+      - .github/workflows/phase12-batch-aware-worker.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  TEST_ORIGIN: https://futureperfecttuitions.github.io
+
+jobs:
+  static:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase12-batch-aware-deploy' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify batch-aware source and locked catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.sha }}" = 'f1d731651498fb09b972bf4655ccf5a639da23ea'
+          node --check worker/src/index-phase12.js
+          node --check worker/src/index-phase11-final.js
+          node --check worker/src/phase11-screenpal.js
+          node --check worker/src/phase11-session-profile.js
+          node tests/phase11-screenpal-static-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue.log
+          grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml
+          ! grep -Fq 'lesson.video = null' worker/src/index-phase11-final.js
+          ! grep -Fq 'INSERT INTO lesson_entitlements' worker/src/index-phase12.js
+          ! grep -Fq 'UPDATE lesson_entitlements' worker/src/index-phase12.js
+          ! grep -Fq 'DELETE FROM lesson_entitlements' worker/src/index-phase12.js
+
+  deploy-development:
+    needs: static
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase12-batch-aware-deploy' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard isolated V2 development state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings-before.json >/dev/null
+
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-before.json)"
+          for VALUE in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$VALUE"; test "$VALUE" != null; done
+
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login enabled; refusing Phase 12 Worker deployment.' >&2; exit 1;; esac
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-before.bin
+          for MARKER in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens X-FPT-Students-KV-Read-Ops BUNDLED_MANIFEST_VALID; do
+            grep -aFq "$MARKER" /tmp/worker-before.bin
+          done
+
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/d1-before.json 2>/tmp/d1-before.err
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-before.json
+          grep -Fq '"ok"' /tmp/d1-before.json
+          ENTITLEMENTS="$(jq -r '.[0].results[0].entitlement_count' /tmp/d1-before.json)"
+          BATCHES="$(jq -r '.[1].results[0].batch_count' /tmp/d1-before.json)"
+          ASSIGNMENTS="$(jq -r '.[2].results[0].assignment_count' /tmp/d1-before.json)"
+          RELEASES="$(jq -r '.[3].results[0].release_count' /tmp/d1-before.json)"
+          test "$ENTITLEMENTS" -ge 1
+          test "$BATCHES" = '0'
+          test "$ASSIGNMENTS" = '0'
+          test "$RELEASES" = '0'
+          printf '%s' "$ENTITLEMENTS" >/tmp/entitlement-count-before.txt
+          printf '%s' "$STUDENTS" >/tmp/students-kv-id.txt
+          printf '%s' "$LESSONS" >/tmp/lessons-kv-id.txt
+          printf '%s' "$DB" >/tmp/d1-id.txt
+
+      - name: Deploy, acceptance-test and fail-closed rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          STUDENTS="$(cat /tmp/students-kv-id.txt)"
+          LESSONS="$(cat /tmp/lessons-kv-id.txt)"
+          DB="$(cat /tmp/d1-id.txt)"
+          ENTITLEMENTS_BEFORE="$(cat /tmp/entitlement-count-before.txt)"
+
+          make_config() {
+            local ENTRYPOINT="$1"
+            local OUT="$2"
+            cat >"$OUT" <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "${ENTRYPOINT}"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "fpt-materials-dev"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          }
+
+          cleanup_acceptance_rows() {
+            set +e
+            $W d1 execute fpt_portal_v2_db --remote --command \
+              "DELETE FROM student_batch_assignments WHERE batch_key IN ('__P12_ACCEPT_E5__','__P12_ACCEPT_M4__','__P12_ACCEPT_ML2__'); DELETE FROM batch_lesson_releases WHERE batch_key IN ('__P12_ACCEPT_E5__','__P12_ACCEPT_M4__','__P12_ACCEPT_ML2__'); DELETE FROM batch_definitions WHERE batch_key IN ('__P12_ACCEPT_E5__','__P12_ACCEPT_M4__','__P12_ACCEPT_ML2__');" \
+              --yes >/tmp/cleanup.log 2>&1
+            set -e
+          }
+
+          rollback_worker() {
+            set +e
+            make_config 'src/index-phase11-efficient.js' /tmp/wrangler.rollback.toml
+            $W deploy --config /tmp/wrangler.rollback.toml --keep-vars \
+              --message 'Rollback Phase 12 batch-aware Worker acceptance failure' >/tmp/rollback.log 2>&1
+            set -e
+          }
+
+          failure() {
+            local STATUS=$?
+            cleanup_acceptance_rows
+            rollback_worker
+            exit "$STATUS"
+          }
+          trap failure ERR
+
+          make_config 'src/index-phase12.js' /tmp/wrangler.phase12.toml
+          $W deploy --config /tmp/wrangler.phase12.toml --keep-vars \
+            --message 'Phase 12 batch-aware development Worker' >/tmp/deploy.log 2>&1
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings-after-deploy.json
+          jq -e '.success == true' /tmp/settings-after-deploy.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-after-deploy.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings-after-deploy.json >/dev/null
+          LOGIN_AFTER="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-after-deploy.json)"
+          case "${LOGIN_AFTER,,}" in ''|'false') ;; *) false;; esac
+          BEFORE_ALLOWLIST="$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          AFTER_ALLOWLIST="$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings-after-deploy.json)"
+          test "$BEFORE_ALLOWLIST" = "$AFTER_ALLOWLIST"
+          BEFORE_ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          AFTER_ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // ""' /tmp/settings-after-deploy.json)"
+          test "$BEFORE_ORIGINS" = "$AFTER_ORIGINS"
+
+          # Controlled TestY acceptance fixtures only. These rows are temporary,
+          # are never Student + Lesson entitlements, and are deleted before the
+          # job can succeed.
+          cleanup_acceptance_rows
+          $W d1 execute fpt_portal_v2_db --remote --command \
+            "INSERT INTO batch_definitions(batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to,created_at,updated_at) VALUES ('__P12_ACCEPT_E5__','TEST','english',5,'normal',NULL,'2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP), ('__P12_ACCEPT_M4__','TEST','maths',4,'normal',NULL,'2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP), ('__P12_ACCEPT_ML2__','TEST','maths',4,'11plus',2,'2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP); INSERT INTO student_batch_assignments(portal_user_id_norm,batch_key,effective_from,effective_to,source,created_at,updated_at) VALUES ('testy2e','__P12_ACCEPT_E5__','2000-01-01',NULL,'acceptance-fixture',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP), ('testy2m','__P12_ACCEPT_M4__','2000-01-01',NULL,'acceptance-fixture',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP), ('testy2m','__P12_ACCEPT_ML2__','2000-01-01',NULL,'acceptance-fixture',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);" \
+            --yes >/tmp/acceptance-seed.log 2>&1
+
+          login_and_home() {
+            local USERNAME="$1"
+            local COOKIE="$2"
+            local BODY="$3"
+            local HEADERS="$4"
+            curl --fail-with-body --silent --show-error --cookie-jar "$COOKIE" \
+              --header "Origin: $TEST_ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data "{\"username\":\"${USERNAME}\",\"password\":\"Te12\"}" \
+              "$WORKER_BASE/api/v1/student/auth/login" >/tmp/login.json
+            jq -e '.ok == true' /tmp/login.json >/dev/null
+            curl --fail-with-body --silent --show-error --cookie "$COOKIE" \
+              --dump-header "$HEADERS" --header "Origin: $TEST_ORIGIN" \
+              "$WORKER_BASE/api/v1/student/home" >"$BODY"
+            jq -e '.ok == true' "$BODY" >/dev/null
+            grep -iq '^x-fpt-students-kv-read-ops:' "$HEADERS"
+          }
+
+          login_and_home 'testy2e' /tmp/e.cookies /tmp/e.home.json /tmp/e.headers
+          jq -e '[.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year5" and .current==true and .group=="current")]|length == 1' /tmp/e.home.json >/dev/null
+          jq -e '[.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year2" and .current==false and .group=="previous")]|length == 1' /tmp/e.home.json >/dev/null
+          curl --silent --show-error --cookie /tmp/e.cookies --header "Origin: $TEST_ORIGIN" --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null
+
+          login_and_home 'testy2m' /tmp/m.cookies /tmp/m.home.json /tmp/m.headers
+          jq -e '[.subjects[]|select(.subject=="maths")|.views[]|select(.viewId=="maths-level2" and .current==true and .group=="current")]|length == 1' /tmp/m.home.json >/dev/null
+          jq -e '[.subjects[]|select(.subject=="maths")|.views[]|select(.viewId=="maths-year4" and .current==false and .group=="previous")]|length == 1' /tmp/m.home.json >/dev/null
+          curl --silent --show-error --cookie /tmp/m.cookies --header "Origin: $TEST_ORIGIN" --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null
+
+          # Re-run the owner-approved shared-English ordinary-video rule through
+          # the deployed Phase 12 entrypoint.
+          node --experimental-default-type=module <<'NODE' >/tmp/english-candidate.json
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c = loadPhase11Catalogue();
+          const rows = c.curricula.ENGLISH_Y5.lessonIds.map(id => c.lessons[id]).filter(x => x?.core?.video?.embedUrl && !x?.core?.video?.quiz);
+          if (!rows.length) throw new Error('No Y5 English ordinary-video/no-quiz candidate');
+          console.log(JSON.stringify({ lessonId: rows[0].lessonId }));
+          NODE
+          ENGLISH_ID="$(jq -r '.lessonId' /tmp/english-candidate.json)"
+          curl --fail-with-body --silent --show-error --cookie-jar /tmp/e11.cookies \
+            --header "Origin: $TEST_ORIGIN" --header 'Content-Type: application/json' \
+            --request POST --data '{"username":"testy511e","password":"Te12"}' \
+            "$WORKER_BASE/api/v1/student/auth/login" >/tmp/e11.login.json
+          jq -e '.ok == true' /tmp/e11.login.json >/dev/null
+          curl --fail-with-body --silent --show-error --cookie /tmp/e11.cookies --header "Origin: $TEST_ORIGIN" \
+            "$WORKER_BASE/api/v1/student/lessons/$ENGLISH_ID?viewId=english-year5-11plus" >/tmp/e11.detail.json
+          jq -e '.ok == true and .lesson.presentation == "11plus" and .lesson.video.resourceKey != null and .lesson.quiz == null' /tmp/e11.detail.json >/dev/null
+          VIDEO_KEY="$(jq -r '.lesson.video.resourceKey' /tmp/e11.detail.json)"
+          curl --fail-with-body --silent --show-error --cookie /tmp/e11.cookies --header "Origin: $TEST_ORIGIN" \
+            "$WORKER_BASE/api/v1/student/resources/$VIDEO_KEY/video?viewId=english-year5-11plus" >/tmp/e11.video.json
+          jq -e '.ok == true and (.embedUrl|startswith("https://go.screenpal.com/player/")) and ((.embedUrl|contains("quiz_id="))|not)' /tmp/e11.video.json >/dev/null
+          curl --fail-with-body --silent --show-error --cookie /tmp/e11.cookies --header "Origin: $TEST_ORIGIN" \
+            "$WORKER_BASE/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus" >/tmp/vr-howto.json
+          jq -e '.ok == true and .area.bucketId == "VR_HOWTO"' /tmp/vr-howto.json >/dev/null
+          curl --silent --show-error --cookie /tmp/e11.cookies --header "Origin: $TEST_ORIGIN" --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null
+
+          cleanup_acceptance_rows
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/d1-after.json 2>/tmp/d1-after.err
+          ENTITLEMENTS_AFTER="$(jq -r '.[0].results[0].entitlement_count' /tmp/d1-after.json)"
+          test "$ENTITLEMENTS_AFTER" = "$ENTITLEMENTS_BEFORE"
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/d1-after.json)" = '0'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/d1-after.json)" = '0'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/d1-after.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-after.json
+          grep -Fq '"ok"' /tmp/d1-after.json
+
+          node tests/phase11-screenpal-static-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue-after.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue-after.log
+
+          trap - ERR
+          echo 'Phase 12 batch-aware Worker deployment and guarded acceptance: PASS'
