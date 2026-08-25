@@ -95,6 +95,7 @@ curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
   --request POST --data '{"password":"Te12"}' \
   "$WORKER_BASE/api/v1/student/resources/$ANSWER_KEY/answer/authorize?viewId=maths-year5" >"$TMP/normal-answer-authorize.json"
 jq -e '.ok == true and (.displayName | contains("Y5T1M01")) and ((.displayName | contains("L2T1M01")) | not)' "$TMP/normal-answer-authorize.json" >/dev/null
+jq -e '.watermark == "Check your answers, Testy5em - Future Perfect Tuitions"' "$TMP/normal-answer-authorize.json" >/dev/null
 
 # Regression: one homework has one Answer Pack. Y5T1M11 historically also exposed
 # a semantically duplicate supplementary Answer Pack; only the homework-paired copy
