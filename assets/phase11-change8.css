@@ -1,0 +1,478 @@
+/* Phase 11 Change 8 — visual redesign/refinement.
+   Presentation only. Every rule is scoped to the Change 8 preview page so the
+   approved Phase 11 portal remains unchanged until owner sign-off. */
+
+body.phase11-change8 {
+  --c8-navy: #012169;
+  --c8-navy-deep: #001747;
+  --c8-red: #d71920;
+  --c8-ink: #14213d;
+  --c8-muted: #667085;
+  --c8-line: #e2e8f0;
+  --c8-soft: #f6f8fc;
+  --c8-white: #ffffff;
+  --c8-shadow: 0 22px 60px rgba(1, 33, 105, 0.10);
+  --c8-shadow-soft: 0 10px 28px rgba(1, 33, 105, 0.075);
+  background:
+    radial-gradient(circle at 8% 4%, rgba(1, 33, 105, 0.07), transparent 29rem),
+    radial-gradient(circle at 96% 12%, rgba(215, 25, 32, 0.055), transparent 24rem),
+    #f5f7fb;
+}
+
+body.phase11-change8 .phase5-airmail-border {
+  padding: 6px;
+  opacity: 0.92;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--c8-red) 0 9px,
+    #fff 9px 18px,
+    var(--c8-navy) 18px 27px,
+    #fff 27px 36px
+  );
+}
+
+body.phase11-change8 .phase5-login-screen {
+  padding: 54px 24px 30px;
+}
+
+body.phase11-change8 .phase5-login-card {
+  position: relative;
+  overflow: hidden;
+  width: min(570px, 100%);
+  padding: 44px 44px 38px;
+  border: 1px solid rgba(1, 33, 105, 0.10);
+  border-radius: 28px;
+  box-shadow: var(--c8-shadow);
+}
+
+body.phase11-change8 .phase5-login-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: linear-gradient(90deg, var(--c8-navy) 0 72%, var(--c8-red) 72% 100%);
+}
+
+body.phase11-change8 .phase5-login-logo {
+  max-width: min(320px, 86%);
+  max-height: 98px;
+}
+
+body.phase11-change8 .phase5-login-title {
+  margin-top: 18px;
+  color: var(--c8-navy-deep);
+  letter-spacing: -0.025em;
+}
+
+body.phase11-change8 .phase5-login-intro {
+  max-width: 455px;
+  color: var(--c8-muted);
+}
+
+body.phase11-change8 .phase5-login-form input {
+  min-height: 52px;
+  border: 1px solid #d9e0ea;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+
+body.phase11-change8 .phase5-login-form input:focus {
+  border-color: rgba(1, 33, 105, 0.60);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(1, 33, 105, 0.09);
+}
+
+body.phase11-change8 .phase5-login-button {
+  min-height: 52px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, var(--c8-navy) 0%, var(--c8-navy-deep) 100%);
+  box-shadow: 0 8px 20px rgba(1, 33, 105, 0.18);
+}
+
+body.phase11-change8 .phase5-security-note {
+  padding-top: 18px;
+  border-top: 1px solid #edf0f4;
+}
+
+body.phase11-change8 .phase5-topbar {
+  min-height: 82px;
+  padding: 0 42px;
+  border-bottom: 1px solid rgba(1, 33, 105, 0.11);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 30px rgba(1, 33, 105, 0.055);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+body.phase11-change8 .phase5-topbar-logo {
+  height: 50px;
+}
+
+body.phase11-change8 .phase5-dev-badge {
+  border-color: rgba(215, 25, 32, 0.18);
+  background: #fff7f7;
+  letter-spacing: 0.07em;
+}
+
+body.phase11-change8 .phase5-greeting {
+  color: var(--c8-ink);
+}
+
+body.phase11-change8 .phase5-logout-button {
+  min-height: 42px;
+  padding: 0 20px;
+  border: 1px solid rgba(1, 33, 105, 0.16);
+  background: #fff;
+  color: var(--c8-navy);
+}
+
+body.phase11-change8 .phase5-logout-button:hover,
+body.phase11-change8 .phase5-logout-button:focus-visible {
+  background: var(--c8-navy);
+  color: #fff;
+  outline: none;
+}
+
+body.phase11-change8 .phase5-portal-main {
+  width: min(1180px, calc(100% - 48px));
+  padding: 38px 0 48px;
+}
+
+body.phase11-change8 .phase5-subject-card {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(30px, 4.6vw, 52px);
+  border: 1px solid rgba(1, 33, 105, 0.09);
+  border-radius: 25px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: var(--c8-shadow);
+}
+
+body.phase11-change8 .phase5-subject-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, var(--c8-navy) 0 78%, var(--c8-red) 78% 100%);
+}
+
+body.phase11-change8 .phase5-eyebrow,
+body.phase11-change8 .phase7-kicker,
+body.phase11-change8 .phase8-answer-eyebrow {
+  color: var(--c8-red);
+  letter-spacing: 0.095em;
+}
+
+body.phase11-change8 .phase5-subject-card h1,
+body.phase11-change8 .phase7-lesson-title,
+body.phase11-change8 .phase7-section-heading h2,
+body.phase11-change8 .phase8-answer-header h2 {
+  color: var(--c8-navy-deep);
+  letter-spacing: -0.025em;
+}
+
+body.phase11-change8 .phase5-subject-intro {
+  max-width: 720px;
+  color: var(--c8-muted);
+}
+
+body.phase11-change8 .phase5-subject-grid {
+  gap: 18px;
+  margin-top: 30px;
+}
+
+body.phase11-change8 .phase5-subject-choice {
+  position: relative;
+  overflow: hidden;
+  min-height: 148px;
+  padding: 27px 28px;
+  border: 1px solid rgba(1, 33, 105, 0.11);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: var(--c8-shadow-soft);
+}
+
+body.phase11-change8 .phase5-subject-choice::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--c8-navy);
+}
+
+body.phase11-change8 #english-choice::before {
+  background: var(--c8-red);
+}
+
+body.phase11-change8 .phase5-subject-choice:hover,
+body.phase11-change8 .phase5-subject-choice:focus-visible {
+  transform: translateY(-3px);
+  border-color: rgba(1, 33, 105, 0.28);
+  box-shadow: 0 18px 38px rgba(1, 33, 105, 0.13);
+  outline: none;
+}
+
+body.phase11-change8 .phase5-subject-name {
+  color: var(--c8-navy-deep);
+  letter-spacing: -0.025em;
+}
+
+body.phase11-change8 .phase5-subject-arrow,
+body.phase11-change8 .phase6-view-card-arrow {
+  background: var(--c8-navy);
+  box-shadow: 0 7px 18px rgba(1, 33, 105, 0.20);
+}
+
+body.phase11-change8 #english-choice .phase5-subject-arrow {
+  background: var(--c8-red);
+  box-shadow: 0 7px 18px rgba(215, 25, 32, 0.17);
+}
+
+body.phase11-change8 .phase6-back-button {
+  border-color: rgba(1, 33, 105, 0.15);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.13);
+}
+
+body.phase11-change8 .phase6-view-grid {
+  gap: 14px;
+  margin-top: 28px;
+}
+
+body.phase11-change8 .phase6-view-card {
+  min-height: 124px;
+  padding: 22px 24px;
+  border: 1px solid var(--c8-line);
+  border-radius: 17px;
+  background: linear-gradient(145deg, #fff 0%, #f8faff 100%);
+  box-shadow: 0 6px 18px rgba(1, 33, 105, 0.05);
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+body.phase11-change8 .phase6-view-card:hover,
+body.phase11-change8 .phase6-view-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(1, 33, 105, 0.25);
+  box-shadow: var(--c8-shadow-soft);
+}
+
+body.phase11-change8 .phase6-view-card-title {
+  color: var(--c8-navy-deep);
+  letter-spacing: -0.02em;
+}
+
+body.phase11-change8 .phase6-view-card-meta {
+  color: var(--c8-muted);
+}
+
+body.phase11-change8 .phase6-search-wrap {
+  margin-top: 26px;
+  padding: 16px;
+  border: 1px solid #e7ebf1;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+body.phase11-change8 .phase6-search {
+  min-height: 50px;
+  border-color: #d7dee8;
+  border-radius: 12px;
+}
+
+body.phase11-change8 .phase6-lesson-list {
+  gap: 10px;
+  margin-top: 18px;
+}
+
+body.phase11-change8 .phase6-lesson-row {
+  position: relative;
+  overflow: hidden;
+  padding: 17px 18px 17px 22px;
+  border: 1px solid #e4e8ef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(1, 33, 105, 0.035);
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+body.phase11-change8 .phase6-lesson-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: rgba(1, 33, 105, 0.72);
+}
+
+body.phase11-change8 button.phase6-lesson-row:hover,
+body.phase11-change8 button.phase6-lesson-row:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(1, 33, 105, 0.24);
+  box-shadow: 0 9px 24px rgba(1, 33, 105, 0.08);
+}
+
+body.phase11-change8 .phase6-lesson-code,
+body.phase11-change8 .phase7-lesson-code {
+  background: #eef3ff;
+  color: var(--c8-navy);
+}
+
+body.phase11-change8 .phase6-lesson-title {
+  color: var(--c8-ink);
+}
+
+body.phase11-change8 .phase7-lesson-heading {
+  padding-bottom: 26px;
+  border-bottom-color: #e7ebf1;
+}
+
+body.phase11-change8 .phase7-description {
+  max-width: 900px;
+  color: #475467;
+  line-height: 1.72;
+}
+
+body.phase11-change8 .phase7-resource-sections {
+  gap: 16px;
+  margin-top: 24px;
+}
+
+body.phase11-change8 .phase7-resource-section {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 22px 22px 25px;
+  border: 1px solid #e4e8ef;
+  border-radius: 17px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(1, 33, 105, 0.045);
+}
+
+body.phase11-change8 .phase7-resource-section::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--c8-navy);
+}
+
+body.phase11-change8 #video-section::before,
+body.phase11-change8 #other-section::before {
+  background: var(--c8-red);
+}
+
+body.phase11-change8 .phase7-resource-row {
+  min-height: 66px;
+  border-color: #e5e9f0;
+  border-radius: 12px;
+  background: #f9fafc;
+}
+
+body.phase11-change8 .phase7-resource-action {
+  min-height: 39px;
+  padding: 8px 15px;
+  background: var(--c8-navy);
+  box-shadow: 0 5px 13px rgba(1, 33, 105, 0.14);
+}
+
+body.phase11-change8 .phase7-homework-card {
+  border-color: #e3e7ee;
+  border-radius: 14px;
+  background: #fafbfe;
+}
+
+body.phase11-change8 .phase7-player-frame {
+  border: 1px solid rgba(1, 33, 105, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(1, 33, 105, 0.13);
+}
+
+body.phase11-change8 .phase8-answer-backdrop {
+  background: rgba(0, 20, 61, 0.76);
+  backdrop-filter: blur(7px);
+}
+
+body.phase11-change8 .phase8-answer-card {
+  border-radius: 20px;
+  border-color: rgba(1, 33, 105, 0.10);
+  box-shadow: 0 30px 85px rgba(0, 20, 61, 0.30);
+}
+
+body.phase11-change8 .phase8-answer-header {
+  padding: 21px 24px 17px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcff 100%);
+}
+
+body.phase11-change8 .phase8-answer-open {
+  background: var(--c8-red);
+  box-shadow: 0 6px 16px rgba(215, 25, 32, 0.17);
+}
+
+body.phase11-change8 .phase8-answer-close {
+  border-color: #d9e0ea;
+}
+
+body.phase11-change8 .phase8-answer-viewer {
+  background: #edf1f7;
+}
+
+body.phase11-change8 .phase5-footer {
+  color: #7b8494;
+}
+
+@media (max-width: 760px) {
+  body.phase11-change8 .phase5-topbar {
+    min-height: 74px;
+    padding: 0 22px;
+  }
+
+  body.phase11-change8 .phase5-topbar-logo {
+    height: 43px;
+    max-width: 42vw;
+  }
+
+  body.phase11-change8 .phase5-portal-main {
+    width: min(100% - 28px, 1180px);
+    padding-top: 22px;
+  }
+
+  body.phase11-change8 .phase5-subject-card {
+    border-radius: 20px;
+  }
+
+  body.phase11-change8 .phase5-subject-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.phase11-change8 .phase5-subject-choice {
+    min-height: 118px;
+  }
+
+  body.phase11-change8 .phase5-login-card {
+    padding: 38px 24px 30px;
+    border-radius: 22px;
+  }
+
+  body.phase11-change8 .phase6-search-wrap {
+    padding: 13px;
+  }
+}
+
+@media (max-width: 520px) {
+  body.phase11-change8 .phase5-dev-badge {
+    display: none;
+  }
+
+  body.phase11-change8 .phase5-greeting {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.phase11-change8 .phase5-subject-choice,
+  body.phase11-change8 .phase6-view-card,
+  body.phase11-change8 .phase6-lesson-row {
+    transition: none;
+  }
+}

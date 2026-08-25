@@ -1,0 +1,25 @@
+name: Phase 11 Change 8 visual static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - phase11-change8.html
+      - assets/phase11-change8.css
+      - tests/phase11-change8-visual-static-verification.mjs
+      - .github/workflows/phase11-change8-visual-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  visual-only-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify Change 8 is presentation-only
+        run: node tests/phase11-change8-visual-static-verification.mjs
