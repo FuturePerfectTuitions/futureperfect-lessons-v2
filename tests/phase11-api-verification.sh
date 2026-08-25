@@ -79,6 +79,23 @@ curl --fail-with-body --silent --show-error --cookie "$TMP/testy411m.cookies" \
 jq -e '.ok == true and .lesson.presentation == "normal" and .lesson.video != null and .lesson.quiz == null' "$TMP/normal-detail.json" >/dev/null
 jq -e '.ok == true and .lesson.presentation == "11plus" and .lesson.video.resourceKey == "Y5M1~video~1" and .lesson.quiz == null' "$TMP/eleven-detail.json" >/dev/null
 
+# Normal Year 5 Maths must present the Year 5 code on every visible resource name,
+# while the shared 11+ Level 2 view must retain its L2 code.
+jq -e '[.. | objects | .displayName? // empty | strings | select(test("L2T[0-9]+M[0-9]+"))] | length == 0' "$TMP/normal-detail.json" >/dev/null
+jq -e '.lesson.preLessonSheets[0].displayName | contains("Y5T1M01")' "$TMP/normal-detail.json" >/dev/null
+jq -e '.lesson.homeworks[0].homework.displayName | contains("Y5T1M01")' "$TMP/normal-detail.json" >/dev/null
+jq -e '.lesson.homeworks[0].answerPack.displayName | contains("Y5T1M01")' "$TMP/normal-detail.json" >/dev/null
+jq -e '.lesson.preLessonSheets[0].displayName | contains("L2T1M01")' "$TMP/eleven-detail.json" >/dev/null
+jq -e '.lesson.homeworks[0].homework.displayName | contains("L2T1M01")' "$TMP/eleven-detail.json" >/dev/null
+
+ANSWER_KEY="$(jq -r '.lesson.homeworks[0].answerPack.resourceKey // empty' "$TMP/normal-detail.json")"
+test -n "$ANSWER_KEY"
+curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
+  --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+  --request POST --data '{"password":"Te12"}' \
+  "$WORKER_BASE/api/v1/student/resources/$ANSWER_KEY/answer/authorize?viewId=maths-year5" >"$TMP/normal-answer-authorize.json"
+jq -e '.ok == true and (.displayName | contains("Y5T1M01")) and ((.displayName | contains("L2T1M01")) | not)' "$TMP/normal-answer-authorize.json" >/dev/null
+
 # The internal quiz route stays gated, but it is no longer presented as a separate frontend section.
 normal_status="$(curl --silent --show-error --output "$TMP/normal-quiz.json" --write-out '%{http_code}' \
   --cookie "$TMP/testy5em.cookies" --header "Origin: $ORIGIN" \
