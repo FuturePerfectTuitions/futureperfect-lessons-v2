@@ -1,8 +1,8 @@
 # Phase 11 Change 7 - Owner Homework Review (Lessons 12-15)
 
-Status: IN PROGRESS - owner review one lesson at a time.
+Status: COMPLETE - all 15 owner decisions collected.
 
-This continuation records owner decisions for the final four lessons from the Change 7 missing-Homework review. Uploaded files remain staged persistently outside the repository until the complete owner review is finished. R2/catalogue application will be performed as one guarded V2-development-only batch.
+This continuation records owner decisions for the final four lessons from the Change 7 missing-Homework review. Uploaded files remain staged persistently outside the repository until the guarded V2-development-only R2/catalogue application is completed.
 
 ## 12. Y5E15 - Riddles and Puzzles (display Y5T2E12)
 
@@ -31,6 +31,19 @@ Owner decision: **NO normal/core Homework**.
 - This is intentional.
 - No Homework or Answer Pack should be added for this lesson.
 
-## Remaining owner decision
+## 15. Y6M68 - SATs Reasoning Focus (display Y6M18)
 
-15. Y6M68 - SATs Reasoning Focus (display Y6M18)
+Owner decision: **NO normal/core Homework**.
+
+- This is intentional.
+- No Homework or Answer Pack should be added for this lesson.
+
+## Review completion summary
+
+All 15 lessons have now been reviewed individually with the owner.
+
+- Lessons confirmed to receive normal/core Homework files: 11
+- Lessons confirmed intentionally to have no normal/core Homework: 4
+- Open-ended Homework items intentionally without an Answer Pack are preserved as such.
+- The earlier accidental `Y5E14 Verbal Reasoning` upload remains explicitly excluded from deployment.
+- Next step: one guarded V2-development-only R2 + catalogue application for the confirmed uploaded files, followed by API/Chrome/security verification and owner manual approval.
