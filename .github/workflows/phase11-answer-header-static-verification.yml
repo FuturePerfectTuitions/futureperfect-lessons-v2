@@ -1,0 +1,31 @@
+name: Phase 11 protected answer header static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/src/index-phase8.js'
+      - 'tests/phase11-answer-header-static-verification.mjs'
+      - 'tests/phase11-api-verification.sh'
+      - 'docs/data/phase11/test_personas.json'
+      - '.github/workflows/phase11-answer-header-static-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify protected Answer Pack first-name header
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase8.js
+          bash -n tests/phase11-api-verification.sh
+          node tests/phase11-answer-header-static-verification.mjs
