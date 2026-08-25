@@ -80,9 +80,23 @@ Owner decision: **NO normal/core Homework**.
 - This is intentional.
 - No Homework or Answer Pack should be added for this lesson.
 
+## 6. Y5E3 - Figures of Speech and comprehension (display Y5T1E02)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source: `Homework Y5E3 Figures of Speech and comprehension.pdf`
+- Homework SHA-256: `e8ba797fd3245e08d2386a911fb9e0557d4a370e9ca1f4d45587c56b5d495d1f`
+- Homework pages: 8
+- Intended R2 key: `english/year5/Y5E3/homework/sheets/Homework Y5E3 Figures of Speech and comprehension.pdf`
+- Answer Pack source: `Answer Pack Y5E3 Figures of Speech and comprehension.pdf`
+- Answer Pack SHA-256: `a1fcf901a0afab0cf1927e5079cb6ea4943c50544c6e12b03200ac054671749b`
+- Answer Pack pages: 3
+- Intended R2 key: `english/year5/Y5E3/homework/answers/Answer Pack Y5E3 Figures of Speech and comprehension.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E3/`.
+
 ## Remaining owner decisions
 
-6. Y5E3 - Figures of Speech and comprehension (display Y5T1E02)
 7. Y5E4 - Non Chronological Report Writing (display Y5T1E03)
 8. Y5E6 - Instructional reports (display Y5T1E05)
 9. Y5E7 - Verbal Reasoning (display Y5T1E06)
