@@ -102,6 +102,19 @@ function normalisePortalUserId(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function displayFirstName(value) {
+  const firstName = String(value || '').trim();
+  if (!firstName) return 'Student';
+
+  // Real student names are stored with their intended casing and must be preserved.
+  // Development persona first names contain digits (for example TestY5EM), so make
+  // those synthetic labels read like a normal first name in the student-facing UI.
+  if (/\d/.test(firstName)) {
+    return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+  }
+  return firstName;
+}
+
 function londonToday() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/London',
@@ -427,7 +440,7 @@ async function handleAuthorize(request, env, resourceKey) {
       viewerPath: `/api/v1/student/answer-view/${encodeURIComponent(token)}`,
       contentExpiresAt: contentExpiresAt.toISOString(),
       leaseExpiresAt: leaseExpiresAt.toISOString(),
-      watermark: `${session.portalUserIdNorm} — Future Perfect Tuitions`,
+      watermark: `Check your answers, ${displayFirstName(session.firstName)} - Future Perfect Tuitions`,
       displayName: resource.displayName
     },
     { status: 200, headers: cors }
