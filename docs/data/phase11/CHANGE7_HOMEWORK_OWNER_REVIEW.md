@@ -160,9 +160,26 @@ Owner decision: **1 normal/core Homework and NO Answer Pack**.
 
 Owner file staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E11/`.
 
+## 11. Y5E12 - Diary Writing (display Y5T1E09)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source upload: `Homework Y5E12 Diary Writing(1).pdf`
+- Staged canonical filename: `Homework Y5E12 Diary Writing.pdf`
+- Homework SHA-256: `81a3ab96430a25045a7b9d4c961cfee55721ef71f86feb661aa0f3bb67893859`
+- Homework pages: 9
+- Content note: pages 1-2 are open-ended diary planning/writing; later pages include diary-feature analysis and the `Life on the Front: Second World War Diaries` comprehension.
+- Intended R2 key: `english/year5/Y5E12/homework/sheets/Homework Y5E12 Diary Writing.pdf`
+- Answer Pack source: `Answer Pack Homework Y5E12 Diary Writing.pdf`
+- Answer Pack SHA-256: `afbb1a605d7ed6d671449fee18d7986679423b46dd727d784943f9da341ca7c8`
+- Answer Pack pages: 2
+- Content note: the Answer Pack explicitly excludes source pages 1-2 because they are open-ended, and supplies answers for diary features plus source pages 8-9 comprehension.
+- Intended R2 key: `english/year5/Y5E12/homework/answers/Answer Pack Homework Y5E12 Diary Writing.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E12/`.
+
 ## Remaining owner decisions
 
-11. Y5E12 - Diary Writing (display Y5T1E09)
 12. Y5E15 - Riddles and Puzzles (display Y5T2E12)
 13. Y5E31 - Creative Writing Writing the Dilemma (display Y5T3E28)
 14. Y5E39 - Comprehension (display Y5T3E32)
