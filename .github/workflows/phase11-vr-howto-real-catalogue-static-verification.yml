@@ -1,0 +1,27 @@
+name: Phase 11 real VR How To catalogue static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/fixtures/phase11/special-VR_HOWTO.json'
+      - 'tests/phase11-vr-howto-real-catalogue-static-verification.mjs'
+      - '.github/workflows/phase11-vr-howto-real-catalogue-static-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify real VR How To catalogue
+        run: |
+          set -euo pipefail
+          jq -e . worker/fixtures/phase11/special-VR_HOWTO.json >/dev/null
+          node tests/phase11-vr-howto-real-catalogue-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
