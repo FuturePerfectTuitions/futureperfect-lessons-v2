@@ -1,0 +1,228 @@
+name: Phase 11 Change 7 Homework read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-change7-homework-audit.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_BUCKET: fpt-materials-dev
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-change7-homework-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact diagnostic branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard read-only diagnostic and V2 development bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          test "$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)" = '.github/workflows/phase11-change7-homework-audit.yml'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e --arg b "$EXPECTED_BUCKET" '.result.bindings[] | select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$b)' /tmp/settings.json >/dev/null
+          echo 'Read-only V2 development guard: PASS'
+
+      - name: List V2 development R2 objects read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '[]' >/tmp/r2-objects.json
+          cursor=''
+          while :; do
+            url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${EXPECTED_BUCKET}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded}"
+            fi
+            page="$(curl --fail --silent --show-error --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | .key]' <<<"$page" >/tmp/r2-page.json
+            jq -s '.[0]+.[1]' /tmp/r2-objects.json /tmp/r2-page.json >/tmp/r2-next.json
+            mv /tmp/r2-next.json /tmp/r2-objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          echo "R2 objects listed: $(jq length /tmp/r2-objects.json)"
+
+      - name: Compare catalogue Homework mappings with actual R2 inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change7
+          node --experimental-default-type=module <<'NODE' | tee /tmp/change7/homework-audit.txt
+          import fs from 'node:fs';
+          import { loadPhase11Catalogue, validatePhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+
+          const catalogue = loadPhase11Catalogue();
+          const validation = validatePhase11Catalogue(catalogue);
+          const r2Objects = JSON.parse(fs.readFileSync('/tmp/r2-objects.json', 'utf8'));
+          const allR2 = new Set(r2Objects);
+
+          function collectR2(value, path = '', out = []) {
+            if (!value || typeof value !== 'object') return out;
+            if (typeof value.r2Key === 'string' && value.r2Key.trim()) {
+              out.push({ path, key: value.r2Key.trim(), displayName: String(value.displayName || value.name || '') });
+            }
+            if (Array.isArray(value)) {
+              value.forEach((item, i) => collectR2(item, `${path}[${i}]`, out));
+            } else {
+              for (const [name, item] of Object.entries(value)) {
+                if (name === 'r2Key') continue;
+                collectR2(item, path ? `${path}.${name}` : name, out);
+              }
+            }
+            return out;
+          }
+
+          function isHomeworkDocument(ref) {
+            const key = ref.key.toLowerCase();
+            const path = ref.path.toLowerCase();
+            const name = ref.displayName.toLowerCase();
+            if (key.includes('/answers/') || /answer\s*pack|\banswers?\b/.test(name)) return false;
+            return key.includes('/homework/') || path.includes('homework') || /\bhomework\b/.test(name);
+          }
+
+          function isCoreHomeworkDocument(ref) {
+            return isHomeworkDocument(ref) && ref.path.startsWith('core');
+          }
+
+          function isVrHomeworkDocument(ref) {
+            return isHomeworkDocument(ref) && ref.path.startsWith('vr');
+          }
+
+          const lessonToCurriculum = new Map();
+          for (const [curriculumCode, curriculum] of Object.entries(catalogue.curricula)) {
+            for (const lessonId of curriculum.lessonIds) lessonToCurriculum.set(lessonId, curriculumCode);
+          }
+
+          const referencedKeys = new Set();
+          const rows = [];
+          for (const [lessonId, lesson] of Object.entries(catalogue.lessons)) {
+            const refs = collectR2(lesson);
+            refs.forEach(ref => referencedKeys.add(ref.key));
+            const coreHw = refs.filter(isCoreHomeworkDocument);
+            const vrHw = refs.filter(isVrHomeworkDocument);
+            const anyHw = refs.filter(isHomeworkDocument);
+            const storageHomework = r2Objects.filter(key => {
+              const lower = key.toLowerCase();
+              return key.includes(`/${lessonId}/`) && lower.includes('homework') && !lower.includes('/answers/');
+            });
+            rows.push({
+              curriculum: lessonToCurriculum.get(lessonId),
+              lessonId,
+              order: lesson.order,
+              title: lesson.title,
+              displayIds: lesson.displayIds,
+              coreHw: coreHw.map(x => x.key),
+              vrHw: vrHw.map(x => x.key),
+              anyHw: anyHw.map(x => x.key),
+              storageHomework
+            });
+          }
+
+          const missingMapping = rows.filter(row =>
+            row.anyHw.length === 0 && row.storageHomework.some(key => !referencedKeys.has(key))
+          );
+          const noHomeworkAnywhere = rows.filter(row => row.anyHw.length === 0 && row.storageHomework.length === 0);
+          const coreMissingButStorage = rows.filter(row =>
+            row.coreHw.length === 0 && row.storageHomework.some(key => !referencedKeys.has(key))
+          );
+          const unreferencedHomeworkObjects = r2Objects.filter(key => {
+            const lower = key.toLowerCase();
+            return lower.includes('homework') && !lower.includes('/answers/') && !referencedKeys.has(key);
+          });
+
+          const byCurriculum = new Map();
+          for (const row of rows) {
+            const item = byCurriculum.get(row.curriculum) || { lessons: 0, noCore: 0, noAny: 0, storageCandidates: 0 };
+            item.lessons += 1;
+            if (!row.coreHw.length) item.noCore += 1;
+            if (!row.anyHw.length) item.noAny += 1;
+            if (row.storageHomework.some(key => !referencedKeys.has(key))) item.storageCandidates += 1;
+            byCurriculum.set(row.curriculum, item);
+          }
+
+          console.log('PHASE11_HOMEWORK_AUDIT');
+          console.log(JSON.stringify({ catalogue: validation, r2ObjectCount: r2Objects.length }, null, 2));
+          console.log('\nCURRICULUM_SUMMARY');
+          for (const [code, counts] of [...byCurriculum].sort()) console.log(code, JSON.stringify(counts));
+
+          console.log(`\nMISSING_MAPPING_CANDIDATES count=${missingMapping.length}`);
+          for (const row of missingMapping) {
+            console.log(JSON.stringify({
+              curriculum: row.curriculum,
+              lessonId: row.lessonId,
+              order: row.order,
+              title: row.title,
+              displayIds: row.displayIds,
+              storageHomework: row.storageHomework.filter(key => !referencedKeys.has(key))
+            }));
+          }
+
+          console.log(`\nCORE_MISSING_WITH_UNREFERENCED_STORAGE_HOMEWORK count=${coreMissingButStorage.length}`);
+          for (const row of coreMissingButStorage) {
+            console.log(JSON.stringify({
+              curriculum: row.curriculum,
+              lessonId: row.lessonId,
+              order: row.order,
+              title: row.title,
+              coreHw: row.coreHw,
+              vrHw: row.vrHw,
+              candidates: row.storageHomework.filter(key => !referencedKeys.has(key))
+            }));
+          }
+
+          console.log(`\nNO_HOMEWORK_IN_CATALOGUE_OR_LESSON_STORAGE count=${noHomeworkAnywhere.length}`);
+          for (const row of noHomeworkAnywhere) {
+            console.log(JSON.stringify({ curriculum: row.curriculum, lessonId: row.lessonId, order: row.order, title: row.title, displayIds: row.displayIds }));
+          }
+
+          console.log(`\nUNREFERENCED_HOMEWORK_OBJECTS_ALL count=${unreferencedHomeworkObjects.length}`);
+          for (const key of unreferencedHomeworkObjects) console.log(key);
+
+          fs.writeFileSync('/tmp/change7/report.json', JSON.stringify({
+            validation,
+            r2ObjectCount: r2Objects.length,
+            curriculumSummary: Object.fromEntries(byCurriculum),
+            missingMapping,
+            coreMissingButStorage,
+            noHomeworkAnywhere,
+            unreferencedHomeworkObjects
+          }, null, 2));
+          NODE
+
+      - name: Upload read-only audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change7-homework-audit
+          path: /tmp/change7/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm no mutation
+        run: echo 'Change 7 audit complete. No R2, KV, D1, Worker or live-portal write/deploy command was executed.'
