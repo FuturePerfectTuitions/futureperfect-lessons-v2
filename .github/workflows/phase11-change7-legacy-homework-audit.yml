@@ -1,0 +1,151 @@
+name: Phase 11 Change 7 legacy English Homework comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-change7-legacy-homework-audit.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER_NAME: frosty-rain-828e
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-change7-legacy-homework-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard one-file read-only diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          test "$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)" = '.github/workflows/phase11-change7-legacy-homework-audit.yml'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Identify the 14 V2 English lessons with no core Homework
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change7legacy
+          node --experimental-default-type=module <<'NODE' | tee /tmp/change7legacy/coreless-v2.txt
+          import fs from 'node:fs';
+          import { loadPhase11Catalogue, validatePhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const catalogue = loadPhase11Catalogue();
+          validatePhase11Catalogue(catalogue);
+
+          function collectR2(value, path = '', out = []) {
+            if (!value || typeof value !== 'object') return out;
+            if (typeof value.r2Key === 'string' && value.r2Key.trim()) {
+              out.push({ path, key: value.r2Key.trim(), displayName: String(value.displayName || value.name || '') });
+            }
+            if (Array.isArray(value)) value.forEach((item, i) => collectR2(item, `${path}[${i}]`, out));
+            else for (const [name, item] of Object.entries(value)) if (name !== 'r2Key') collectR2(item, path ? `${path}.${name}` : name, out);
+            return out;
+          }
+          function homework(ref) {
+            const key = ref.key.toLowerCase(), path = ref.path.toLowerCase(), name = ref.displayName.toLowerCase();
+            if (key.includes('/answers/') || /answer\s*pack|\banswers?\b/.test(name)) return false;
+            return key.includes('/homework/') || path.includes('homework') || /\bhomework\b/.test(name);
+          }
+
+          const lessonToCurriculum = new Map();
+          for (const [code, record] of Object.entries(catalogue.curricula)) for (const id of record.lessonIds) lessonToCurriculum.set(id, code);
+          const rows = [];
+          for (const [lessonId, lesson] of Object.entries(catalogue.lessons)) {
+            const curriculum = lessonToCurriculum.get(lessonId);
+            if (!['ENGLISH_Y4','ENGLISH_Y5'].includes(curriculum)) continue;
+            const refs = collectR2(lesson);
+            const core = refs.filter(ref => homework(ref) && ref.path.startsWith('core'));
+            if (core.length) continue;
+            const vr = refs.filter(ref => homework(ref) && ref.path.startsWith('vr'));
+            rows.push({ curriculum, lessonId, order: lesson.order, title: lesson.title, displayIds: lesson.displayIds, vrHomework: vr });
+          }
+          rows.sort((a,b) => a.curriculum.localeCompare(b.curriculum) || a.order-b.order);
+          console.log(`CORELESS_ENGLISH_COUNT=${rows.length}`);
+          for (const row of rows) console.log(JSON.stringify(row));
+          fs.writeFileSync('/tmp/change7legacy/coreless-v2.json', JSON.stringify(rows, null, 2));
+          NODE
+
+      - name: Discover legacy lesson KV namespace read-only
+        id: legacy
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change7legacy/legacy-worker-settings.json
+          jq -e '.success == true' /tmp/change7legacy/legacy-worker-settings.json >/dev/null
+          LESSONS_NS="$(jq -r '[.result.bindings[] | select(.name=="FPT_LESSONS" and .type=="kv_namespace") | .namespace_id][0] // empty' /tmp/change7legacy/legacy-worker-settings.json)"
+          test -n "$LESSONS_NS"
+          echo "lessons_ns=$LESSONS_NS" >> "$GITHUB_OUTPUT"
+          echo 'Legacy FPT_LESSONS binding discovered: PASS'
+
+      - name: List legacy lesson keys and fetch Year 4/5 English catalogue values read-only
+        shell: bash
+        env:
+          LESSONS_NS: ${{ steps.legacy.outputs.lessons_ns }}
+        run: |
+          set -euo pipefail
+          printf '[]' >/tmp/change7legacy/legacy-keys.json
+          cursor=''
+          while :; do
+            url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}/keys?limit=1000"
+            if [ -n "$cursor" ]; then
+              encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded}"
+            fi
+            page="$(curl --fail --silent --show-error --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]?.name]' <<<"$page" >/tmp/change7legacy/key-page.json
+            jq -s '.[0]+.[1]' /tmp/change7legacy/legacy-keys.json /tmp/change7legacy/key-page.json >/tmp/change7legacy/key-next.json
+            mv /tmp/change7legacy/key-next.json /tmp/change7legacy/legacy-keys.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          echo 'LEGACY_KEYS_RELEVANT'
+          jq -r '.[] | select(test("Y[45].*(E|English)|English.*Y[45]|Y[45]E"; "i"))' /tmp/change7legacy/legacy-keys.json | tee /tmp/change7legacy/relevant-keys.txt
+
+          : >/tmp/change7legacy/legacy-values.txt
+          while IFS= read -r key; do
+            [ -z "$key" ] && continue
+            encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            echo "===== KEY: $key =====" | tee -a /tmp/change7legacy/legacy-values.txt
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}/values/${encoded}" \
+              | tee -a /tmp/change7legacy/legacy-values.txt
+            echo | tee -a /tmp/change7legacy/legacy-values.txt
+          done </tmp/change7legacy/relevant-keys.txt
+
+      - name: Print legacy English evidence lines around Homework fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'LEGACY_HOMEWORK_EVIDENCE'
+          grep -Ein -C 1 'homework|\bhw\b|answer|Y4E|Y5E' /tmp/change7legacy/legacy-values.txt | head -n 500 || true
+
+      - name: Upload comparison evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change7-legacy-homework-audit
+          path: /tmp/change7legacy/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm no mutation
+        run: echo 'Legacy comparison complete. No KV/R2/D1/Worker/GitHub Pages write or deployment occurred.'
