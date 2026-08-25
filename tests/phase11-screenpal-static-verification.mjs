@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   safeScreenPalUrl,
   safeEmbedUrl,
@@ -39,9 +40,14 @@ assert.deepEqual(explicitMainVideo(mainRecord, 'maths-year5'), {
   contentUrl: VIDEO_CONTENT,
   watchUrl: VIDEO_WATCH
 });
+assert.equal(explicitMainVideo(mainRecord, 'english-year4-11plus').embedUrl, VIDEO_EMBED);
+assert.equal(explicitMainVideo(mainRecord, 'english-year5-11plus').embedUrl, VIDEO_EMBED);
+assert.equal(explicitMainVideo(mainRecord, 'maths-level1').embedUrl, VIDEO_EMBED);
+assert.equal(explicitMainVideo(mainRecord, 'maths-level2').embedUrl, VIDEO_EMBED);
+assert.equal(explicitMainVideo(mainRecord, 'maths-level3').embedUrl, VIDEO_EMBED);
 
-// An 11+ presentation must never fall back to the normal video or to a legacy
-// elevenPlus override. Without an explicit quiz embed there is no 11+ lesson video.
+// Legacy elevenPlus overrides remain ignored. With no interactive quiz, Maths
+// 11+ now falls back to the same ordinary lesson video rather than hiding it.
 const overrideEmbed = 'https://go.screenpal.com/player/cOverride11?ff=1&ahc=1&dcc=1&tl=1&bg=transparent';
 const overrideRecord = {
   core: {
@@ -53,7 +59,7 @@ const overrideRecord = {
   }
 };
 assert.equal(explicitMainVideo(overrideRecord, 'maths-year5').embedUrl, VIDEO_EMBED);
-assert.equal(explicitMainVideo(overrideRecord, 'maths-level2'), null);
+assert.equal(explicitMainVideo(overrideRecord, 'maths-level2').embedUrl, VIDEO_EMBED);
 
 const quizRecord = {
   core: {
@@ -76,17 +82,27 @@ assert.equal(quiz.mode, 'embed');
 assert.equal(quiz.url, QUIZ_EMBED);
 assert.equal(quiz.shareUrl, QUIZ_DIRECT);
 
-// Normal and 11+ students see the same frontend concept, Lesson Video, but the
-// resolved ScreenPal embed is presentation-specific.
+// Maths 11+ uses the interactive quiz in the Lesson Video slot when present.
 assert.equal(explicitMainVideo(quizRecord, 'maths-year5').embedUrl, VIDEO_EMBED);
 assert.equal(explicitMainVideo(quizRecord, 'maths-level2').embedUrl, QUIZ_EMBED);
 assert.ok(!explicitMainVideo(quizRecord, 'maths-year5').embedUrl.includes('quiz_id='));
 assert.ok(explicitMainVideo(quizRecord, 'maths-level2').embedUrl.includes('quiz_id='));
 
+// English has no interactive-quiz presentation: normal and 11+ English use
+// the same ordinary video even if quiz metadata exists on a shared record.
+assert.equal(explicitMainVideo(quizRecord, 'english-year4-11plus').embedUrl, VIDEO_EMBED);
+assert.equal(explicitMainVideo(quizRecord, 'english-year5-11plus').embedUrl, VIDEO_EMBED);
+assert.ok(!explicitMainVideo(quizRecord, 'english-year4-11plus').embedUrl.includes('quiz_id='));
+
+// A Maths 11+ quiz with no embeddable interactive URL falls back to the normal
+// lesson video, matching the owner-approved rule.
 const directOnlyQuiz = explicitQuiz({ video: { quiz: { id: QUIZ_ID, shareUrl: QUIZ_DIRECT } } });
 assert.equal(directOnlyQuiz.mode, 'link');
 assert.equal(directOnlyQuiz.url, QUIZ_DIRECT);
-assert.equal(explicitMainVideo({ video: { embedUrl: VIDEO_EMBED, quiz: { id: QUIZ_ID, shareUrl: QUIZ_DIRECT } } }, 'maths-level2'), null);
+assert.equal(
+  explicitMainVideo({ video: { embedUrl: VIDEO_EMBED, quiz: { id: QUIZ_ID, shareUrl: QUIZ_DIRECT } } }, 'maths-level2').embedUrl,
+  VIDEO_EMBED
+);
 
 const vrRecord = {
   vr: {
@@ -103,4 +119,9 @@ assert.equal(
   'https://go.screenpal.com/player/cHomework?ff=1&ahc=1&dcc=1&tl=1&bg=transparent'
 );
 
-console.log('Phase 11 ScreenPal explicit-URL and lesson-video variant verification: PASS');
+const finalWorkerSource = fs.readFileSync(new URL('../worker/src/index-phase11-final.js', import.meta.url), 'utf8');
+assert.ok(finalWorkerSource.includes('English normal and English 11+ share the same ordinary lesson video.'));
+assert.ok(finalWorkerSource.includes('If no quiz exists, retain the ordinary video.'));
+assert.ok(!finalWorkerSource.includes('lesson.video = null'));
+
+console.log('Phase 12 ScreenPal shared-English and 11+ video-fallback verification: PASS');
