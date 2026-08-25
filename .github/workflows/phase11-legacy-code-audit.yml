@@ -1,0 +1,42 @@
+name: Phase 11 legacy resource code audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/phase11-legacy-code-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Audit L2-labelled resources exposed in Year 5 Maths
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const catalogue = loadPhase11Catalogue();
+          const rows = [];
+          function walk(value, path = []) {
+            if (!value || typeof value !== 'object') return;
+            if (!Array.isArray(value) && typeof value.displayName === 'string' && /\bL2T\dM\d+/i.test(value.displayName)) {
+              rows.push({ path: path.join('.'), displayName: value.displayName, r2Key: value.r2Key || null });
+            }
+            if (Array.isArray(value)) value.forEach((v,i)=>walk(v,[...path,String(i)]));
+            else Object.entries(value).forEach(([k,v])=>walk(v,[...path,k]));
+          }
+          const affected = [];
+          for (const [lessonId, lesson] of Object.entries(catalogue.lessons || {})) {
+            if (!lesson?.displayIds?.['maths-year5']) continue;
+            rows.length = 0;
+            walk(lesson);
+            if (rows.length) affected.push({ lessonId, year5DisplayId: lesson.displayIds['maths-year5'], level2DisplayId: lesson.displayIds['maths-level2'] || null, resources: structuredClone(rows) });
+          }
+          console.log(JSON.stringify({ affectedLessons: affected.length, affected }, null, 2));
+          NODE
