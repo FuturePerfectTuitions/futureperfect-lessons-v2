@@ -3,6 +3,7 @@
 
   const downstreamFetch = window.fetch.bind(window);
   const HOME_TTL_MS = 5000;
+  const holder = document.getElementById('phase7-message');
   let homePromise = null;
   let homeExpiresAt = 0;
 
@@ -17,6 +18,13 @@
     }
   }
 
+  function clearLoadingNotice() {
+    if (!holder) return;
+    if (holder.textContent.trim() !== 'Loading your curriculum…') return;
+    holder.textContent = '';
+    holder.hidden = true;
+  }
+
   function clearHomeCache() {
     homePromise = null;
     homeExpiresAt = 0;
@@ -26,7 +34,11 @@
     homePromise = promise;
     homeExpiresAt = Date.now() + HOME_TTL_MS;
     promise.then(response => {
-      if (!response?.ok && homePromise === promise) clearHomeCache();
+      if (response?.ok) {
+        clearLoadingNotice();
+      } else if (homePromise === promise) {
+        clearHomeCache();
+      }
     }).catch(() => {
       if (homePromise === promise) clearHomeCache();
     });
@@ -69,17 +81,22 @@
     const isLogin = info.method === 'POST' && info.url.pathname === '/api/v1/student/auth/login';
     const isLogout = info.method === 'POST' && info.url.pathname === '/api/v1/student/auth/logout';
 
-    if (isLogout) clearHomeCache();
+    if (isLogout) {
+      clearHomeCache();
+      clearLoadingNotice();
+    }
 
     if (isHome) {
       const cached = freshHomePromise();
       if (cached) {
         const response = await cached;
+        if (response.ok) clearLoadingNotice();
         return response.clone();
       }
 
       const promise = rememberHomeRequest(downstreamFetch(input, init));
       const response = await promise;
+      if (response.ok) clearLoadingNotice();
       return response.clone();
     }
 
@@ -88,7 +105,6 @@
     return response;
   };
 
-  const holder = document.getElementById('phase7-message');
   if (holder) {
     holder.setAttribute('aria-live', 'polite');
     const normaliseLoadingMessage = () => {

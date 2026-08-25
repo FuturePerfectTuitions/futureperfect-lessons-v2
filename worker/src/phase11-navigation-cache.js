@@ -94,16 +94,28 @@ function bundledJsonValue(key) {
   return undefined;
 }
 
+function shallowBundledClone(value) {
+  if (Array.isArray(value)) return value.slice();
+  if (value && typeof value === 'object') return { ...value };
+  return value;
+}
+
 function cacheNamespace(namespace, overrides = new Map(), bundled = false) {
   return new Proxy(namespace, {
     get(target, prop) {
       if (prop === 'get') {
         return async (key, options) => {
           const wantsJson = options?.type === 'json';
+          // A real target lesson is request-local and infrequent, so retain the
+          // deep-clone isolation used by the protected/detail paths.
           if (wantsJson && overrides.has(key)) return structuredClone(overrides.get(key));
           if (wantsJson && bundled) {
             const value = bundledJsonValue(key);
-            if (value !== undefined) return structuredClone(value);
+            // Bundled navigation records are immutable canonical metadata. The
+            // downstream navigation builder only reads nested metadata, so a
+            // shallow top-level clone preserves mutation isolation while avoiding
+            // hundreds of expensive deep structuredClone operations on /home.
+            if (value !== undefined) return shallowBundledClone(value);
           }
           return target.get(key, options);
         };
