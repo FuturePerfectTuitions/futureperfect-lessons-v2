@@ -23,4 +23,5 @@ jobs:
         run: |
           node --check worker/src/index-phase11-efficient.js
           node --check worker/src/phase11-view-display-names.js
+          node --experimental-default-type=module scripts/phase11-navigation-manifest.mjs >/tmp/phase11-navigation-manifest.json
           node --experimental-default-type=module tests/phase11-view-display-names-static-verification.mjs
