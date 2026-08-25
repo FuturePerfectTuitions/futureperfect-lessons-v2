@@ -1,0 +1,25 @@
+name: Phase 11 floating Back button static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - phase11.html
+      - assets/phase6.css
+      - assets/phase8.css
+      - tests/phase11-floating-back-button-static-verification.mjs
+      - .github/workflows/phase11-floating-back-button-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify floating Back control invariants
+        run: node tests/phase11-floating-back-button-static-verification.mjs
