@@ -38,6 +38,14 @@ function presentationForView(viewId) {
   return 'normal';
 }
 
+function isEnglishElevenPlusView(viewId) {
+  return /^english-year[45]-11plus$/.test(String(viewId || '').trim().toLowerCase());
+}
+
+function isMathsElevenPlusView(viewId) {
+  return /^maths-level[123]$/.test(String(viewId || '').trim().toLowerCase());
+}
+
 function coreVideo(record) {
   return record?.video || record?.core?.video || null;
 }
@@ -64,20 +72,7 @@ function explicitQuiz(record) {
   };
 }
 
-function explicitMainVideo(record, viewId) {
-  if (presentationForView(viewId) === '11plus') {
-    // Owner rule: the ScreenPal quiz is the interactive 11+ version of the
-    // lesson video, not an additional resource. Never fall back to the normal
-    // lesson video in an 11+ presentation.
-    const quiz = explicitQuiz(record);
-    if (!quiz?.embedUrl) return null;
-    return {
-      embedUrl: quiz.embedUrl,
-      contentUrl: quiz.shareUrl,
-      watchUrl: quiz.shareUrl
-    };
-  }
-
+function normalMainVideo(record) {
   const video = coreVideo(record);
   if (!video || typeof video !== 'object') return null;
 
@@ -89,6 +84,28 @@ function explicitMainVideo(record, viewId) {
     contentUrl: safeScreenPalUrl(video.contentUrl),
     watchUrl: safeScreenPalUrl(video.watchUrl)
   };
+}
+
+function explicitMainVideo(record, viewId) {
+  // English has one ordinary lesson video shared by normal and 11+ streams.
+  // English does not use the ScreenPal interactive-quiz variant.
+  if (isEnglishElevenPlusView(viewId)) return normalMainVideo(record);
+
+  // Maths 11+ uses the interactive quiz in the Lesson Video slot when one is
+  // explicitly available. If no quiz exists, fall back to the ordinary lesson
+  // video rather than hiding the video altogether.
+  if (isMathsElevenPlusView(viewId)) {
+    const quiz = explicitQuiz(record);
+    if (quiz?.embedUrl) {
+      return {
+        embedUrl: quiz.embedUrl,
+        contentUrl: quiz.shareUrl,
+        watchUrl: quiz.shareUrl
+      };
+    }
+  }
+
+  return normalMainVideo(record);
 }
 
 function rawVr(record) {
