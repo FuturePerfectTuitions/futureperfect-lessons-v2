@@ -58,9 +58,23 @@ Owner decision: **1 normal/core Homework with 1 Answer Pack**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y4E26/`.
 
+## 4. Y4E27 - Inverted Commas and Speech Punctuations 1 (display Y4T2E22)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source: `Homework Y4E27 Inverted Commas and Speech Punctuations.pdf`
+- Homework SHA-256: `63c513e24da94a8cc5345731f918f968de1256978ce2dcd0d15682005a648d69`
+- Homework pages: 7
+- Intended R2 key: `english/year4/Y4E27/homework/sheets/Homework Y4E27 Inverted Commas and Speech Punctuations.pdf`
+- Answer Pack source: `Answer Pack Homework Y4E27 Inverted Commas and Speech Punctuations.pdf`
+- Answer Pack SHA-256: `75ccfb31ac4e059d113f5e88a62b042ecf09c2c7849ececcb87f768009f924a2`
+- Answer Pack pages: 2
+- Intended R2 key: `english/year4/Y4E27/homework/answers/Answer Pack Homework Y4E27 Inverted Commas and Speech Punctuations.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y4E27/`.
+
 ## Remaining owner decisions
 
-4. Y4E27 - Inverted Commas and Speech Punctuations 1 (display Y4T2E22)
 5. Y4E38 - Revision 4 (display Y4T3E33)
 6. Y5E3 - Figures of Speech and comprehension (display Y5T1E02)
 7. Y5E4 - Non Chronological Report Writing (display Y5T1E03)
