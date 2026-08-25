@@ -116,28 +116,32 @@ async function r2Available(env, r2Key) {
   }
 }
 
-function applyLessonVideoPresentation(body, lessonId, presentation) {
+function applyLessonVideoPresentation(body, lessonId, presentation, viewId) {
   const lesson = body?.lesson;
   if (!lesson) return;
 
   if (presentation !== '11plus') {
-    // Normal streams receive only the ordinary lesson video. Phase 9's quiz
-    // model is an internal implementation detail and must never be presented
-    // as a separate student-facing resource.
+    // Normal streams receive only the ordinary lesson video. Any quiz metadata
+    // is an internal implementation detail and is never a separate section.
     lesson.quiz = null;
     return;
   }
 
-  // Owner rule: the ScreenPal quiz is the interactive 11+ variant of the
-  // lesson video. It occupies the same Lesson Video slot; it is not an extra
-  // section. If no quiz variant exists, an 11+ view must not fall back to the
-  // normal-stream video.
-  const hasInteractiveVideo = Boolean(lesson.quiz);
-  lesson.quiz = null;
-  if (!hasInteractiveVideo) {
-    lesson.video = null;
+  const englishElevenPlus = /^english-year[45]-11plus$/
+    .test(String(viewId || '').trim().toLowerCase());
+
+  // English normal and English 11+ share the same ordinary lesson video.
+  // English does not use ScreenPal interactive quizzes.
+  if (englishElevenPlus) {
+    lesson.quiz = null;
     return;
   }
+
+  // Maths 11+: an explicit ScreenPal quiz replaces the ordinary video in the
+  // existing Lesson Video slot. If no quiz exists, retain the ordinary video.
+  const hasInteractiveVideo = Boolean(lesson.quiz);
+  lesson.quiz = null;
+  if (!hasInteractiveVideo) return;
 
   lesson.video = lesson.locked
     ? { displayName: 'Video', locked: true }
@@ -156,7 +160,7 @@ async function augmentLessonDetail(request, env, lessonId) {
   const url = new URL(request.url);
   const viewId = String(url.searchParams.get('viewId') || '').trim();
   const presentation = presentationForView(viewId);
-  applyLessonVideoPresentation(body, lessonId, presentation);
+  applyLessonVideoPresentation(body, lessonId, presentation, viewId);
 
   if (presentation !== '11plus') {
     body.lesson.phase11OtherResources = null;
