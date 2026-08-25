@@ -1,0 +1,410 @@
+name: Phase 11 shared Maths PDF guarded apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-shared-maths-pdf-apply.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  WORKER_NAME: fpt-portal-v2-worker
+  BUCKET: fpt-materials-dev
+  PRIOR_GOOD_MAIN: 044cdef260066d824dfc81d3a5a67cad01510e63
+
+jobs:
+  apply:
+    if: github.head_ref == 'ops/phase11-shared-maths-pdf-apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout exact operational branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard one-file operational PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          changed="$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)"
+          test "$changed" = '.github/workflows/phase11-shared-maths-pdf-apply.yml'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Verify merged source and canonical Phase 11 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module scripts/phase11-navigation-manifest.mjs >/tmp/nav.json
+          node --check worker/src/phase11-shared-maths-answer-pdf-overrides.js
+          node --check worker/src/phase11-shared-maths-answer-pdf.js
+          node --check worker/src/index-phase11-change4.js
+          node tests/phase11-shared-maths-answer-pdf-static-verification.mjs
+          node tests/phase11-view-display-names-static-verification.mjs
+          python -m py_compile scripts/phase11-build-shared-maths-answer-pdf.py
+          rm -rf /tmp/p11-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/p11-package >/tmp/package.log
+          jq -e '.phase==11 and .catalogueLessons==369 and .catalogueCurricula==11 and .lessonsKvWrites==380 and .r2References==1669 and .developmentAllowlistCount==16' /tmp/p11-package/phase11-apply-summary.json >/dev/null
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { SHARED_MATHS_ANSWER_PDF_OVERRIDES as rows } from './worker/src/phase11-shared-maths-answer-pdf-overrides.js';
+          if (rows.length !== 31) throw new Error(`Expected 31 audited overrides, got ${rows.length}`);
+          const counts = Object.fromEntries(['maths-year4','maths-year5','maths-year6'].map(v => [v, rows.filter(x => x.viewId===v).length]));
+          if (counts['maths-year4'] !== 10 || counts['maths-year5'] !== 6 || counts['maths-year6'] !== 15) throw new Error(JSON.stringify(counts));
+          fs.writeFileSync('/tmp/overrides.tsv', rows.map((r,i) => [i+1,r.viewId,r.lessonId,r.answerIndex,r.yearCode,r.levelCode,r.sourceLevelTextCount,r.sourceSha256,r.sourceR2Key,r.overrideR2Key].join('\t')).join('\n')+'\n');
+          console.log(JSON.stringify({overrides: rows.length, counts}, null, 2));
+          NODE
+
+      - name: Guard isolated V2 development bindings and disabled production login
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          ALLOWLIST="$(jq -r '.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text' /tmp/settings.json)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings.json)"
+          test "$R2" = "$BUCKET"
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          test "$ALLOWLIST" = "$(cat /tmp/p11-package/phase11-dev-allowlist.txt)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login is enabled; refusing.' >&2; exit 1;; esac
+          {
+            echo "students=$STUDENTS"
+            echo "lessons=$LESSONS"
+            echo "r2=$R2"
+            echo "db=$DB"
+            echo "allowlist=$ALLOWLIST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Snapshot current Worker and all pre-existing override targets
+        id: snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/shared-maths-backup/targets
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/shared-maths-backup/worker-before.bin
+          for marker in student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO; do grep -aFq "$marker" /tmp/shared-maths-backup/worker-before.bin; done
+          : >/tmp/shared-maths-backup/target-status.tsv
+          while IFS=$'\t' read -r n view lesson answer year level count sourceSha sourceKey targetKey; do
+            backup="/tmp/shared-maths-backup/targets/${n}.pdf"
+            if npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${BUCKET}/${targetKey}" --file="$backup" --remote >/tmp/target-get.log 2>&1; then
+              printf '%s\texists\t%s\t%s\n' "$n" "$(sha256sum "$backup" | awk '{print $1}')" "$targetKey" >>/tmp/shared-maths-backup/target-status.tsv
+            else
+              rm -f "$backup"
+              printf '%s\tabsent\t-\t%s\n' "$n" "$targetKey" >>/tmp/shared-maths-backup/target-status.tsv
+            fi
+          done </tmp/overrides.tsv
+          echo 'snapshot_complete=true' >> "$GITHUB_OUTPUT"
+
+      - name: Upload pre-write rollback snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-shared-maths-prewrite-snapshot
+          path: /tmp/shared-maths-backup/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build and render-verify all 31 corrected PDFs before any write
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'PyMuPDF==1.26.7' 'Pillow==11.3.0'
+          mkdir -p /tmp/shared-maths-build/source /tmp/shared-maths-build/output
+          : >/tmp/shared-maths-build/output-sha.tsv
+          while IFS=$'\t' read -r n view lesson answer year level count sourceSha sourceKey targetKey; do
+            source="/tmp/shared-maths-build/source/${n}.pdf"
+            output="/tmp/shared-maths-build/output/${n}.pdf"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${BUCKET}/${sourceKey}" --file="$source" --remote >/tmp/source-get.log
+            actual="$(sha256sum "$source" | awk '{print $1}')"
+            test "$actual" = "$sourceSha"
+            python scripts/phase11-build-shared-maths-answer-pdf.py "$source" "$output" "$level" "$year" >/tmp/build-${n}.log
+            python - "$source" "$output" "$level" "$year" "$count" <<'PY'
+          import fitz, sys
+          from PIL import Image, ImageChops
+          source, output, old, new, expected_count = sys.argv[1:]
+          expected_count = int(expected_count)
+          a, b = fitz.open(source), fitz.open(output)
+          assert a.page_count == b.page_count and a.page_count > 0
+          src_text='\n'.join(p.get_text('text') for p in a)
+          out_text='\n'.join(p.get_text('text') for p in b)
+          assert src_text.count(old) == expected_count, (source, old, src_text.count(old), expected_count)
+          assert old not in out_text, (output, old)
+          assert out_text.count(new) == expected_count, (output, new, out_text.count(new), expected_count)
+          total_pixels=0
+          changed_pixels=0
+          for pa,pb in zip(a,b):
+              assert pa.rect == pb.rect
+              pix_a=pa.get_pixmap(matrix=fitz.Matrix(1.5,1.5), alpha=False)
+              pix_b=pb.get_pixmap(matrix=fitz.Matrix(1.5,1.5), alpha=False)
+              assert (pix_a.width,pix_a.height,pix_a.n)==(pix_b.width,pix_b.height,pix_b.n)
+              ia=Image.frombytes('RGB',[pix_a.width,pix_a.height],pix_a.samples)
+              ib=Image.frombytes('RGB',[pix_b.width,pix_b.height],pix_b.samples)
+              diff=ImageChops.difference(ia,ib).convert('L')
+              hist=diff.histogram()
+              changed=sum(hist[1:])
+              pixels=pix_a.width*pix_a.height
+              total_pixels += pixels
+              changed_pixels += changed
+              assert changed / pixels < 0.05, (source, changed / pixels)
+          assert changed_pixels > 0
+          assert changed_pixels / total_pixels < 0.02, (source, changed_pixels / total_pixels)
+          print(f'render_diff_ratio={changed_pixels/total_pixels:.8f}')
+          PY
+            printf '%s\t%s\t%s\n' "$n" "$(sha256sum "$output" | awk '{print $1}')" "$targetKey" >>/tmp/shared-maths-build/output-sha.tsv
+          done </tmp/overrides.tsv
+          test "$(wc -l </tmp/shared-maths-build/output-sha.tsv)" -eq 31
+          echo 'All 31 corrected PDFs built and render-verified before write: PASS'
+
+      - name: Write only the 31 isolated Year-view override objects
+        id: r2write
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r n view lesson answer year level count sourceSha sourceKey targetKey; do
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${BUCKET}/${targetKey}" \
+              --file="/tmp/shared-maths-build/output/${n}.pdf" --content-type=application/pdf --remote >/tmp/put-${n}.log
+          done </tmp/overrides.tsv
+          echo 'write_complete=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify every deployed override object byte-for-byte and by PDF text
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/shared-maths-verify
+          while IFS=$'\t' read -r n view lesson answer year level count sourceSha sourceKey targetKey; do
+            out="/tmp/shared-maths-verify/${n}.pdf"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${BUCKET}/${targetKey}" --file="$out" --remote >/tmp/verify-get.log
+            expected="$(awk -F $'\t' -v n="$n" '$1==n{print $2}' /tmp/shared-maths-build/output-sha.tsv)"
+            test "$(sha256sum "$out" | awk '{print $1}')" = "$expected"
+            python - "$out" "$level" "$year" "$count" <<'PY'
+          import fitz, sys
+          path, old, new, count = sys.argv[1:]
+          count=int(count)
+          d=fitz.open(path)
+          text='\n'.join(p.get_text('text') for p in d)
+          assert old not in text
+          assert text.count(new) == count
+          PY
+          done </tmp/overrides.tsv
+          echo 'All 31 R2 overrides verified: PASS'
+
+      - name: Build V2 development Worker config
+        shell: bash
+        env:
+          STUDENTS: ${{ steps.guard.outputs.students }}
+          LESSONS: ${{ steps.guard.outputs.lessons }}
+          R2: ${{ steps.guard.outputs.r2 }}
+          DB: ${{ steps.guard.outputs.db }}
+          ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.shared-maths.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-change4.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.shared-maths.toml --dry-run --outdir /tmp/shared-maths-worker >/tmp/dry-run.log
+          for marker in 'phase11/view-overrides/maths-year4' 'phase11/view-overrides/maths-year5' 'phase11/view-overrides/maths-year6' X-FPT-Students-KV-Read-Ops VR_HOWTO; do
+            grep -R -aFq "$marker" /tmp/shared-maths-worker
+          done
+
+      - name: Deploy shared Maths identity Worker to V2 development only
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.shared-maths.toml \
+            --keep-vars --message 'Phase 11 shared Maths Year identities Y4 Y5 Y6' >/tmp/deploy.log
+
+      - name: Run full deployed Phase 11 API acceptance
+        shell: bash
+        run: bash tests/phase11-api-verification.sh
+
+      - name: Prove normal Year 4 PDF and Level 3 PDF behavior through protected-answer API
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+          mkdir -p /tmp/api-proof
+          get_answer_pdf() {
+            user="$1"; lesson="$2"; view="$3"; answer_index="$4"; outfile="$5"
+            jar="/tmp/api-proof/${user}-${view}.cookies"
+            curl --fail-with-body --silent --show-error --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data "{\"username\":\"$user\",\"password\":\"Te12\"}" \
+              "$BASE/api/v1/student/auth/login" >/tmp/api-proof/login.json
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" "$BASE/api/v1/student/lessons/$lesson?viewId=$view" >/tmp/api-proof/detail.json
+            key="$(jq -r --argjson i "$answer_index" '.lesson.homeworks[($i - 1)].answerPack.resourceKey // empty' /tmp/api-proof/detail.json)"
+            test -n "$key"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST \
+              --data '{"password":"Te12"}' "$BASE/api/v1/student/resources/$key/answer/authorize?viewId=$view" >/tmp/api-proof/auth.json
+            path="$(jq -r '.viewerPath // empty' /tmp/api-proof/auth.json)"
+            test -n "$path"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" "$BASE$path" --output "$outfile"
+          }
+          get_answer_pdf testy4em Y4M10 maths-year4 1 /tmp/api-proof/year4.pdf
+          get_answer_pdf testy511em Y6M2.1 maths-level3 1 /tmp/api-proof/level3.pdf
+          python - <<'PY'
+          import fitz
+          checks=[
+              ('/tmp/api-proof/year4.pdf','Y4T1M09','L1T1M09'),
+              ('/tmp/api-proof/level3.pdf','L3T1M01','Y6T1M01')
+          ]
+          for path,wanted,forbidden in checks:
+              d=fitz.open(path); text='\n'.join(p.get_text('text') for p in d)
+              assert wanted in text, (path,wanted)
+              assert forbidden not in text, (path,forbidden)
+              print(path,wanted,'PASS')
+          PY
+
+      - name: Prove representative shared source PDFs remain unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          for selector in 'maths-year4|Y4M10|1' 'maths-year5|Y5M1|1' 'maths-year6|Y6M2.1|1'; do
+            row="$(awk -F $'\t' -v sel="$selector" '{k=$2"|"$3"|"$4; if(k==sel) print}' /tmp/overrides.tsv)"
+            IFS=$'\t' read -r n view lesson answer year level count sourceSha sourceKey targetKey <<<"$row"
+            out="/tmp/source-proof-${n}.pdf"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${BUCKET}/${sourceKey}" --file="$out" --remote >/tmp/source-proof.log
+            test "$(sha256sum "$out" | awk '{print $1}')" = "$sourceSha"
+          done
+          echo 'Representative L1/L2/L3 source objects remain byte-identical: PASS'
+
+      - name: Run real Chrome Phase 11 acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock playwright@latest >/dev/null
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+
+      - name: Re-measure representative pupil KV journey
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-kv-journey.sh /tmp/shared-maths-kv.json
+          jq -e '.totals.studentsKvReadOps <= 6 and .totals.lessonsKvReadOps <= 5 and .totals.totalKvReadOps <= 11' /tmp/shared-maths-kv.json >/dev/null
+          jq '.totals' /tmp/shared-maths-kv.json
+
+      - name: Final security and isolation verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-final.json
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-final.json >/dev/null
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings-final.json)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) exit 1;; esac
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/d1-final.json
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-final.json
+          grep -Fq '"ok"' /tmp/d1-final.json
+
+      - name: Roll back Worker to exact prior approved main on failure
+        if: failure() && steps.deploy.outcome == 'success'
+        shell: bash
+        env:
+          STUDENTS: ${{ steps.guard.outputs.students }}
+          LESSONS: ${{ steps.guard.outputs.lessons }}
+          R2: ${{ steps.guard.outputs.r2 }}
+          DB: ${{ steps.guard.outputs.db }}
+          ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$PRIOR_GOOD_MAIN"
+          git worktree add --detach /tmp/prior-good "$PRIOR_GOOD_MAIN"
+          cd /tmp/prior-good
+          node --experimental-default-type=module scripts/phase11-navigation-manifest.mjs >/tmp/prior-nav.json
+          cat >worker/wrangler.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-change4.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.rollback.toml \
+            --keep-vars --message 'Rollback shared Maths identities to prior approved Change 4' >/tmp/worker-rollback.log
+
+      - name: Roll back all 31 override targets on failure
+        if: failure() && steps.r2write.outcome == 'success' && steps.snapshot.outputs.snapshot_complete == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r n status oldSha targetKey; do
+            if [ "$status" = 'exists' ]; then
+              backup="/tmp/shared-maths-backup/targets/${n}.pdf"
+              test "$(sha256sum "$backup" | awk '{print $1}')" = "$oldSha"
+              npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${BUCKET}/${targetKey}" \
+                --file="$backup" --content-type=application/pdf --remote >/tmp/r2-rollback-${n}.log
+            else
+              npx --yes wrangler@${WRANGLER_VERSION} r2 object delete "${BUCKET}/${targetKey}" --remote >/tmp/r2-rollback-${n}.log 2>&1 || true
+            fi
+          done </tmp/shared-maths-backup/target-status.tsv
+
+      - name: Completion
+        if: success()
+        run: "echo 'Phase 11 shared Maths Year 4/5/6 identity guarded apply: PASS'"
