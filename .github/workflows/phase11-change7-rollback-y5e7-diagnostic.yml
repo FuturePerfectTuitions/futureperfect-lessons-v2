@@ -1,0 +1,134 @@
+name: Phase 11 Change 7 rollback and Y5E7 diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase11-change7-rollback-y5e7-diagnostic.yml
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GITHUB_TOKEN: ${{ github.token }}
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_BUCKET: fpt-materials-dev
+  BACKUP_ARTIFACT_ID: '9576592596'
+  WRANGLER_VERSION: '4.125.0'
+
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'diag/phase11-change7-rollback-y5e7' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - name: Guard exact read-only diagnostic branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          mapfile -t changed < <(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = '.github/workflows/phase11-change7-rollback-y5e7-diagnostic.yml'
+          test '${{ github.event.pull_request.base.sha }}' = '93c9070c4b88833e4e3bee1478e8006f68c8ed0c'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Fetch pre-write snapshot and current Worker settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/change7-prewrite
+          mkdir -p /tmp/change7-prewrite
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${BACKUP_ARTIFACT_ID}/zip" \
+            --output /tmp/change7-prewrite.zip
+          unzip -q /tmp/change7-prewrite.zip -d /tmp/change7-prewrite
+          test -f /tmp/change7-prewrite/r2-state.tsv
+          test -f /tmp/change7-prewrite/worker-before.bin
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -o /tmp/current-settings.json
+          jq -e '.success==true' /tmp/current-settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/current-settings.json >/dev/null
+          jq -e --arg b "$EXPECTED_BUCKET" '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$b)' /tmp/current-settings.json >/dev/null
+          login_flag="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0]//""' /tmp/current-settings.json)"
+          case "${login_flag,,}" in ''|'false') ;; *) echo 'Student login unexpectedly enabled' >&2; exit 1;; esac
+
+      - name: Verify live Worker is rolled back to approved Change 4 behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -o /tmp/current-worker.bin
+          for marker in phase11/view-overrides student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO; do
+            grep -aFq "$marker" /tmp/current-worker.bin
+          done
+          if grep -aFq 'Homework Y4E23 Editing.pdf' /tmp/current-worker.bin; then
+            echo 'Change 7 marker still present in live Worker after rollback' >&2
+            exit 1
+          fi
+          echo 'WORKER ROLLBACK PASS: approved Phase 11 markers present; Change 7 marker absent.'
+
+      - name: Compare all 21 live R2 targets with pre-write snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          wr(){ npx --yes "wrangler@${WRANGLER_VERSION}" "$@"; }
+          count=0
+          while IFS=$'\t' read -r key existed backup sha; do
+            count=$((count+1))
+            tmp="$(mktemp)"
+            if wr r2 object get "${EXPECTED_BUCKET}/${key}" --file="$tmp" --remote >/tmp/change7-r2-live.log 2>&1; then
+              test "$existed" = '1' || { echo "R2 rollback mismatch: object should be absent: $key" >&2; exit 1; }
+              live_sha="$(sha256sum "$tmp" | awk '{print $1}')"
+              test "$live_sha" = "$sha" || { echo "R2 rollback SHA mismatch: $key" >&2; exit 1; }
+            else
+              test "$existed" = '0' || { echo "R2 rollback mismatch: object should exist: $key" >&2; exit 1; }
+            fi
+            rm -f "$tmp"
+          done </tmp/change7-prewrite/r2-state.tsv
+          test "$count" -eq 21
+          echo 'R2 ROLLBACK PASS: all 21 targets exactly match the pre-write snapshot.'
+
+      - name: Inspect raw LESSONS_KV record shapes for Y4E23 and Y5E7
+        shell: bash
+        run: |
+          set -euo pipefail
+          lessons_kv_id="$(jq -r '[.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id][0]//""' /tmp/current-settings.json)"
+          test -n "$lessons_kv_id"
+          for lesson in Y4E23 Y5E7; do
+            encoded="lesson%3A${lesson}"
+            curl --fail --silent --show-error \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${lessons_kv_id}/values/${encoded}" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -o "/tmp/${lesson}-kv.json"
+            echo "${lesson} raw KV summary:"
+            jq -c '
+              if type=="array" then
+                {type:"array",length:length,lessonIds:[.[]?.lessonId//null],elementTypes:[.[]?|type]}
+              elif type=="object" then
+                {type:"object",lessonId:(.lessonId//null),homeworksType:(if has("homeworks") then (.homeworks|type) else "missing" end),homeworksCount:(if (.homeworks|type)=="array" then (.homeworks|length) else null end),keys:(keys|sort)}
+              else
+                {type:type}
+              end' "/tmp/${lesson}-kv.json"
+          done
+
+      - name: Diagnostic completion
+        run: echo 'READ-ONLY DIAGNOSTIC PASS'
