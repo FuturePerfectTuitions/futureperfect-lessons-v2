@@ -78,3 +78,62 @@
   backToSubjects?.addEventListener('click', () => setPreviewActive(false), true);
   logoutButton?.addEventListener('click', () => setPreviewActive(false), true);
 })();
+
+(() => {
+  'use strict';
+
+  const lessonContent = document.getElementById('lesson-content');
+
+  function protectedButtonText(displayName) {
+    return /answer\s*key/i.test(displayName || '') ? 'Open Answer Key' : 'Open Answer Pack';
+  }
+
+  function enhanceProtectedAnswerRow(button) {
+    const row = button?.closest('.phase7-resource-row');
+    if (!row || row.dataset.phase12ProtectedSignage === '1') return;
+
+    const name = row.querySelector('.phase7-resource-name');
+    if (!name) return;
+
+    let copy = row.querySelector('.phase7-resource-copy');
+    if (!copy) {
+      copy = document.createElement('div');
+      copy.className = 'phase7-resource-copy';
+      row.insertBefore(copy, row.firstChild);
+      copy.appendChild(name);
+    }
+
+    let meta = copy.querySelector('.phase7-resource-meta');
+    if (!meta) {
+      meta = document.createElement('span');
+      meta.className = 'phase7-resource-meta';
+      copy.appendChild(meta);
+    }
+    meta.textContent = 'Password required every time';
+
+    let chip = copy.querySelector('.phase7-protected-chip');
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.className = 'phase7-protected-chip';
+      copy.appendChild(chip);
+    }
+    chip.textContent = '🔒 Password protected';
+
+    if (!button.disabled) button.textContent = protectedButtonText(name.textContent);
+    row.dataset.phase12ProtectedSignage = '1';
+  }
+
+  function enhanceProtectedAnswerRows() {
+    const root = lessonContent || document;
+    root.querySelectorAll('.phase9-protected-button, .phase11-protected-button')
+      .forEach(enhanceProtectedAnswerRow);
+  }
+
+  if (lessonContent) {
+    new MutationObserver(enhanceProtectedAnswerRows).observe(lessonContent, {
+      childList: true,
+      subtree: true
+    });
+  }
+  enhanceProtectedAnswerRows();
+})();
