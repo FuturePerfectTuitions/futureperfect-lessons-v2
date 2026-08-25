@@ -1,8 +1,4 @@
-import {
-  displayLessonIdForLesson,
-  pairedLevelDisplayIdForLesson,
-  isNormalMathsYearView
-} from './phase11-view-display-names.js';
+import { sharedMathsAnswerPdfOverride } from './phase11-shared-maths-answer-pdf-overrides.js';
 
 function decodeSegment(value) {
   try {
@@ -23,23 +19,18 @@ function parseAnswerResourceKey(value) {
 }
 
 function answerOverrideTarget({ viewId, lessonId, answerIndex }) {
-  const cleanViewId = String(viewId || '').trim();
-  const cleanLessonId = String(lessonId || '').trim();
-  const cleanAnswerIndex = Number(answerIndex);
-  if (!isNormalMathsYearView(cleanViewId)) return null;
-  if (!cleanLessonId || !Number.isInteger(cleanAnswerIndex) || cleanAnswerIndex < 1) return null;
-
-  const yearCode = displayLessonIdForLesson(cleanLessonId, cleanViewId);
-  const levelCode = pairedLevelDisplayIdForLesson(cleanLessonId, cleanViewId);
-  if (!yearCode || !levelCode || yearCode === levelCode) return null;
-
+  const audited = sharedMathsAnswerPdfOverride(viewId, lessonId, answerIndex);
+  if (!audited) return null;
   return {
-    viewId: cleanViewId,
-    lessonId: cleanLessonId,
-    answerIndex: cleanAnswerIndex,
-    yearCode,
-    levelCode,
-    r2Key: `phase11/view-overrides/${cleanViewId}/${cleanLessonId}/homework/answers/${String(cleanAnswerIndex).padStart(2, '0')}-${yearCode}.pdf`
+    viewId: audited.viewId,
+    lessonId: audited.lessonId,
+    answerIndex: audited.answerIndex,
+    yearCode: audited.yearCode,
+    levelCode: audited.levelCode,
+    sourceR2Key: audited.sourceR2Key,
+    sourceSha256: audited.sourceSha256,
+    sourceLevelTextCount: audited.sourceLevelTextCount,
+    r2Key: audited.overrideR2Key
   };
 }
 
