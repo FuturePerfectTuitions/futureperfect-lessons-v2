@@ -58,7 +58,6 @@
   const state = {
     session: null,
     home: null,
-    homePromise: null,
     subjectKey: null,
     subjectLabel: null,
     view: null,
@@ -133,7 +132,6 @@
 
   function resetNavigation() {
     state.home = null;
-    state.homePromise = null;
     state.subjectKey = null;
     state.subjectLabel = null;
     state.view = null;
@@ -174,52 +172,28 @@
     }
   }
 
-  async function consumeHomeResponse(response, sessionAtStart) {
-    let body = null;
-    try { body = await response.json(); } catch (_) {}
+  async function loadHome() {
+    if (!base || !state.session) return null;
+    try {
+      const response = await api('/api/v1/student/home', { method: 'GET' });
+      let body = null;
+      try { body = await response.json(); } catch (_) {}
 
-    if (state.session !== sessionAtStart) return null;
-    if (response.status === 401) {
-      showLogin();
-      return null;
-    }
-    if (!response.ok || !body?.ok) {
+      if (response.status === 401) {
+        showLogin();
+        return null;
+      }
+      if (!response.ok || !body?.ok) {
+        state.home = null;
+        setSubjectsMessage('Curriculum navigation is temporarily unavailable. Please try again.');
+        return null;
+      }
+      state.home = body;
+      return body;
+    } catch (_) {
       state.home = null;
       setSubjectsMessage('Curriculum navigation is temporarily unavailable. Please try again.');
       return null;
-    }
-
-    state.home = body;
-    if (!state.session?.accountLocked) setSubjectsMessage();
-    return body;
-  }
-
-  async function loadHome(prefetchedResponsePromise = null) {
-    if (!base || !state.session) return null;
-    if (state.home) return state.home;
-    if (state.homePromise) return state.homePromise;
-
-    const sessionAtStart = state.session;
-    const requestPromise = (async () => {
-      try {
-        const response = prefetchedResponsePromise
-          ? await prefetchedResponsePromise
-          : await api('/api/v1/student/home', { method: 'GET' });
-        return await consumeHomeResponse(response, sessionAtStart);
-      } catch (_) {
-        if (state.session === sessionAtStart) {
-          state.home = null;
-          setSubjectsMessage('Curriculum navigation is temporarily unavailable. Please try again.');
-        }
-        return null;
-      }
-    })();
-
-    state.homePromise = requestPromise;
-    try {
-      return await requestPromise;
-    } finally {
-      if (state.homePromise === requestPromise) state.homePromise = null;
     }
   }
 
@@ -230,14 +204,8 @@
       return null;
     }
 
-    // Returning sessions can validate identity and prepare curriculum navigation
-    // in parallel. The portal therefore becomes useful after the slower of the
-    // two calls rather than paying both round trips sequentially.
-    const sessionResponsePromise = api('/api/v1/student/session', { method: 'GET' });
-    const homeResponsePromise = api('/api/v1/student/home', { method: 'GET' });
-
     try {
-      const response = await sessionResponsePromise;
+      const response = await api('/api/v1/student/session', { method: 'GET' });
       let body = null;
       try { body = await response.json(); } catch (_) {}
       if (!response.ok || !body?.ok) {
@@ -247,7 +215,7 @@
 
       resetNavigation();
       showPortal(body);
-      void loadHome(homeResponsePromise);
+      await loadHome();
       return body;
     } catch (_) {
       showLogin();
@@ -274,14 +242,6 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
-
-      // A successful login response already contains the same safe session
-      // summary used by /session. Start /home immediately and do not add an
-      // unnecessary second session round trip before preparing navigation.
-      const homeResponsePromise = response.ok
-        ? api('/api/v1/student/home', { method: 'GET' })
-        : null;
-
       let body = null;
       try { body = await response.json(); } catch (_) {}
 
@@ -292,9 +252,8 @@
         return;
       }
 
-      resetNavigation();
-      showPortal(body);
-      void loadHome(homeResponsePromise);
+      const session = await readSession();
+      if (!session) setLoginError('The login could not be completed in this browser. Please try again.');
     } catch (_) {
       els.password.value = '';
       resetPasswordVisibility();
@@ -402,8 +361,7 @@
   async function chooseSubject(subjectKey, subjectLabel) {
     recordActivity();
     if (!state.home) {
-      // Reuse the one in-flight home request rather than starting a duplicate.
-      // The click continues automatically as soon as navigation is ready.
+      setSubjectsMessage('Curriculum navigation is still loading. Please try again in a moment.');
       const home = await loadHome();
       if (!home) return;
     }
