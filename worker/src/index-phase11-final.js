@@ -81,6 +81,13 @@ function safeFilename(value, fallback = 'resource.pdf') {
   return /\.[a-z0-9]{1,8}$/i.test(cleaned) ? cleaned : `${cleaned}.pdf`;
 }
 
+async function sha256Hex(value) {
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)))
+  );
+  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function loadLessonRecord(env, lessonId) {
   const record = await env.LESSONS_KV.get(`lesson:${lessonId}`, { type: 'json' });
   if (!record || record.active === false) return null;
@@ -234,14 +241,76 @@ async function handleElevenPlusOtherDownload(request, env, parsed) {
   return new Response(object.body, { status: 200, headers });
 }
 
+function syntheticLessonRequest(request, lessonId) {
+  const url = new URL(request.url);
+  url.pathname = `/api/v1/student/lessons/${encodeURIComponent(String(lessonId))}`;
+  url.search = '';
+  return new Request(url.toString(), {
+    method: 'GET',
+    headers: request.headers
+  });
+}
+
+async function protectedAnswerNavigationEnv(request, env) {
+  const url = new URL(request.url);
+
+  const authorizeMatch = url.pathname.match(
+    /^\/api\/v1\/student\/resources\/([^/]+)\/answer\/authorize$/
+  );
+  if (authorizeMatch && request.method === 'POST') {
+    let resourceKey = '';
+    try {
+      resourceKey = decodeURIComponent(authorizeMatch[1]);
+    } catch {
+      return null;
+    }
+    const parsed = parseResourceKey(resourceKey);
+    if (!parsed?.lessonId) return null;
+    return phase11NavigationEnv(env, syntheticLessonRequest(request, parsed.lessonId));
+  }
+
+  const answerViewMatch = url.pathname.match(/^\/api\/v1\/student\/answer-view\/([^/]+)$/);
+  if (answerViewMatch && request.method === 'GET' && env?.DB) {
+    let token = '';
+    try {
+      token = decodeURIComponent(answerViewMatch[1]);
+    } catch {
+      return null;
+    }
+    if (!token) return null;
+    const tokenHash = await sha256Hex(token);
+    const row = await env.DB.prepare(
+      `SELECT lesson_id
+       FROM answer_view_tokens
+       WHERE token_hash = ?`
+    )
+      .bind(tokenHash)
+      .first();
+    const lessonId = String(row?.lesson_id || '').trim();
+    if (!lessonId) return null;
+    return phase11NavigationEnv(env, syntheticLessonRequest(request, lessonId));
+  }
+
+  return null;
+}
+
 async function requestEnv(request, env) {
-  if (!shouldPrefetchPhase11Navigation(request)) return env;
   try {
-    return await phase11NavigationEnv(env, request);
+    if (shouldPrefetchPhase11Navigation(request)) {
+      return await phase11NavigationEnv(env, request);
+    }
+
+    // Phase 8 protected-answer routes internally re-check lesson visibility.
+    // Give those checks the same request-local bundled navigation view used by
+    // ordinary navigation, while retaining one authoritative full-record read
+    // for the exact target lesson. This removes the historical full-catalogue
+    // KV fan-out without weakening password, entitlement or single-device checks.
+    const protectedEnv = await protectedAnswerNavigationEnv(request, env);
+    return protectedEnv || env;
   } catch {
-    // Performance acceleration must never weaken correctness. If the parallel
-    // prefetch encounters a transient KV failure, preserve the established
-    // downstream behavior and let the original Worker path resolve normally.
+    // Performance acceleration must never weaken correctness. If prefetch or
+    // the read-only answer-token lookup fails transiently, preserve the
+    // established downstream behavior and let the original Worker resolve it.
     return env;
   }
 }
