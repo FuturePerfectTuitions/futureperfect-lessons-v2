@@ -1,0 +1,35 @@
+name: Phase 11 Change 7 owner Homework static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/phase11-owner-homeworks.js
+      - worker/src/index-phase11-change7.js
+      - docs/data/phase11/change7-owner-homeworks.json
+      - tests/phase11-change7-owner-homeworks-static-verification.mjs
+      - .github/workflows/phase11-change7-owner-homeworks-static-verification.yml
+      - .github/workflows/phase11-change7-owner-homeworks-apply.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify Change 7 overlay and locked canonical catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/phase11-owner-homeworks.js
+          node --check worker/src/index-phase11-change7.js
+          node --check tests/phase11-change7-owner-homeworks-static-verification.mjs
+          node tests/phase11-change7-owner-homeworks-static-verification.mjs
+          jq -e '.totals.lessonsWithHomework == 11 and .totals.homeworkPairs == 12 and .totals.answerPacks == 9 and .totals.r2Files == 21' docs/data/phase11/change7-owner-homeworks.json >/dev/null
+          test "$(jq -r '.confirmedNoHomeworkLessons | sort | join(",")' docs/data/phase11/change7-owner-homeworks.json)" = 'Y4E38,Y5E15,Y5E39,Y6M68'
+          ! grep -R -Fq 'Y5E14 Verbal Reasoning.pdf' worker/src/phase11-owner-homeworks.js
