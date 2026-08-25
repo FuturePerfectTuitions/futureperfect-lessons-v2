@@ -96,6 +96,26 @@ curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
   "$WORKER_BASE/api/v1/student/resources/$ANSWER_KEY/answer/authorize?viewId=maths-year5" >"$TMP/normal-answer-authorize.json"
 jq -e '.ok == true and (.displayName | contains("Y5T1M01")) and ((.displayName | contains("L2T1M01")) | not)' "$TMP/normal-answer-authorize.json" >/dev/null
 
+# Regression: one homework has one Answer Pack. Y5T1M11 historically also exposed
+# a semantically duplicate supplementary Answer Pack; only the homework-paired copy
+# may remain visible/addressable.
+curl --fail-with-body --silent --show-error --cookie "$TMP/testy5em.cookies" \
+  --header "Origin: $ORIGIN" \
+  "$WORKER_BASE/api/v1/student/lessons/Y5M26?viewId=maths-year5" >"$TMP/y5m26-detail.json"
+jq -e '
+  .ok == true and
+  .lesson.lessonId == "Y5M26" and
+  .lesson.homeworks[0].answerPack != null and
+  (.lesson.homeworks[0].answerPack.displayName | contains("Y5T1M11")) and
+  ((.lesson.phase11Resources.coreSupplementaryAnswers // []) | map(select(. != null)) | length == 0)
+' "$TMP/y5m26-detail.json" >/dev/null
+DUPLICATE_STATUS="$(curl --silent --show-error --output "$TMP/y5m26-duplicate.json" --write-out '%{http_code}' \
+  --cookie "$TMP/testy5em.cookies" --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+  --request POST --data '{"password":"Te12"}' \
+  "$WORKER_BASE/api/v1/student/resources/Y5M26~answer~8001/answer/authorize?viewId=maths-year5")"
+test "$DUPLICATE_STATUS" = '404'
+jq -e '.error == "RESOURCE_NOT_FOUND"' "$TMP/y5m26-duplicate.json" >/dev/null
+
 # The internal quiz route stays gated, but it is no longer presented as a separate frontend section.
 normal_status="$(curl --silent --show-error --output "$TMP/normal-quiz.json" --write-out '%{http_code}' \
   --cookie "$TMP/testy5em.cookies" --header "Origin: $ORIGIN" \
