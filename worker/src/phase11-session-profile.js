@@ -140,6 +140,14 @@ async function prepareSessionProfileEnv(request, env) {
     return { env, state };
   }
 
+  // Phase 12 can supply a request-local, D1-backed batch projection through the
+  // STUDENTS_KV binding. In that narrow case, use the projected authoritative
+  // read rather than a pre-existing session profile, and do not persist the
+  // synthetic projection back into the session-profile cache.
+  if (env?.PHASE12_BYPASS_SESSION_PROFILE === true) {
+    return { env, state };
+  }
+
   const rawToken = parseCookies(request)[SESSION_COOKIE] || '';
   if (!rawToken) return { env, state };
   state.tokenHash = await sha256Hex(rawToken);
