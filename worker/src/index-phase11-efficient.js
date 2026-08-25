@@ -51,32 +51,33 @@ function responseWithHeaders(response, headers) {
   });
 }
 
-async function suppressVrSolutionVideoResponse(request, response) {
+async function suppressVrVideoResponse(request, response) {
   const url = new URL(request.url);
 
   const lessonMatch = url.pathname.match(/^\/api\/v1\/student\/lessons\/([^/]+)$/);
   if (lessonMatch && request.method === 'GET' && response.ok) {
     const body = await response.clone().json().catch(() => null);
-    if (!body?.ok || !body.lesson?.vr || body.lesson.vr.homeworkVideo == null) return response;
+    if (!body?.ok || !body.lesson?.vr) return response;
+    const changed = body.lesson.vr.preLessonVideo != null || body.lesson.vr.homeworkVideo != null;
+    if (!changed) return response;
+    body.lesson.vr.preLessonVideo = null;
     body.lesson.vr.homeworkVideo = null;
     return responseLikeJson(response, body);
   }
 
   const videoMatch = url.pathname.match(/^\/api\/v1\/student\/resources\/([^/]+)\/video$/);
-  if (
-    videoMatch &&
-    request.method === 'GET' &&
-    response.ok &&
-    resourceKind(videoMatch[1]) === 'vrhomeworkvideo'
-  ) {
-    const headers = new Headers(response.headers);
-    headers.set('content-type', 'application/json; charset=utf-8');
-    headers.set('cache-control', 'no-store');
-    headers.delete('content-length');
-    return new Response(JSON.stringify({ error: 'RESOURCE_NOT_FOUND' }), {
-      status: 404,
-      headers
-    });
+  if (videoMatch && request.method === 'GET' && response.ok) {
+    const kind = resourceKind(videoMatch[1]);
+    if (kind === 'vrprevideo' || kind === 'vrhomeworkvideo') {
+      const headers = new Headers(response.headers);
+      headers.set('content-type', 'application/json; charset=utf-8');
+      headers.set('cache-control', 'no-store');
+      headers.delete('content-length');
+      return new Response(JSON.stringify({ error: 'RESOURCE_NOT_FOUND' }), {
+        status: 404,
+        headers
+      });
+    }
   }
 
   return response;
@@ -140,7 +141,7 @@ export default {
     const response = await phase11Worker.fetch(request, prepared.env, ctx);
     await persistSessionProfile(request, response, measuredEnv, prepared.state);
     const displayResponse = await normaliseYear5MathsResponse(request, response);
-    const presentedResponse = await suppressVrSolutionVideoResponse(request, displayResponse);
+    const presentedResponse = await suppressVrVideoResponse(request, displayResponse);
     return appendKvAuditHeaders(presentedResponse, env, audit);
   }
 };
