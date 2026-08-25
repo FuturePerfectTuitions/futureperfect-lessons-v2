@@ -120,7 +120,6 @@
     }
 
     if (!button.disabled && button.textContent !== 'Open') button.textContent = 'Open';
-    row.dataset.phase12ProtectedSignage = '1';
   }
 
   function enhanceProtectedAnswerRows() {
@@ -148,95 +147,34 @@
   const videoError = document.getElementById('video-error');
   const videoFrame = document.getElementById('video-frame');
   const player = document.getElementById('lesson-player');
-  const downstreamFetch = window.fetch.bind(window);
 
-  let pendingMainVideo = null;
-  let mainVideoExpanded = false;
-
-  function requestInfo(input, init) {
-    try {
-      const raw = typeof input === 'string' || input instanceof URL
-        ? String(input)
-        : input?.url;
-      const url = new URL(raw, location.href);
-      const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-      return { url, method };
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function cancelPendingMainVideo() {
-    const pending = pendingMainVideo;
-    pendingMainVideo = null;
-    if (!pending) return;
-    pending.resolve(new Response(JSON.stringify({
-      ok: false,
-      error: 'VIDEO_DEFERRED_CANCELLED'
-    }), {
-      status: 409,
-      headers: { 'content-type': 'application/json; charset=utf-8' }
-    }));
-  }
-
-  function releasePendingMainVideo() {
-    const pending = pendingMainVideo;
-    pendingMainVideo = null;
-    if (!pending) return;
-    downstreamFetch(pending.input, pending.init).then(pending.resolve, pending.reject);
-  }
-
-  window.fetch = (input, init) => {
-    const info = requestInfo(input, init);
-    if (!info) return downstreamFetch(input, init);
-
-    if (
-      info.method === 'GET' &&
-      /^\/api\/v1\/student\/lessons\/[^/]+$/.test(info.url.pathname)
-    ) {
-      cancelPendingMainVideo();
-      mainVideoExpanded = false;
-      return downstreamFetch(input, init);
-    }
-
-    const isVideoRequest =
-      info.method === 'GET' &&
-      /^\/api\/v1\/student\/resources\/[^/]+\/video$/.test(info.url.pathname);
-
-    if (
-      isVideoRequest &&
-      videoSection &&
-      !videoSection.hidden &&
-      !mainVideoExpanded &&
-      !pendingMainVideo
-    ) {
-      return new Promise((resolve, reject) => {
-        pendingMainVideo = { input, init, resolve, reject };
-        queueMicrotask(syncCompactLessonUi);
-      });
-    }
-
-    return downstreamFetch(input, init);
-  };
+  let expanded = false;
 
   function normalizeResourceButtons() {
     if (!lessonContent) return;
     for (const button of lessonContent.querySelectorAll('button')) {
       const text = String(button.textContent || '').trim();
-      if (/^Download\s+Homework$/i.test(text) && button.textContent !== 'Download') {
+      if (/^Download\s+Homework$/i.test(text) && text !== 'Download') {
         button.textContent = 'Download';
-      } else if (/^Open\s+(?:Answer Pack|Answer Key)$/i.test(text) && button.textContent !== 'Open') {
+      } else if (/^Open\s+(?:Answer Pack|Answer Key)$/i.test(text) && text !== 'Open') {
         button.textContent = 'Open';
       }
     }
   }
 
-  function videoToggleButton() {
+  function toggleButton() {
     return videoRowHost?.querySelector('.phase12-video-toggle');
   }
 
-  function createVideoToggleRow() {
-    if (!videoRowHost || videoRowHost.querySelector('.phase12-video-toggle-row')) return;
+  function hasLockedVideoRow() {
+    return Boolean(videoRowHost?.querySelector(
+      '.phase7-resource-row:not(.phase12-video-toggle-row) .phase7-resource-action[disabled]'
+    ));
+  }
+
+  function ensureVideoToggle() {
+    if (!videoSection || !videoRowHost || videoSection.hidden || hasLockedVideoRow()) return;
+    if (videoRowHost.querySelector('.phase12-video-toggle-row')) return;
 
     const row = document.createElement('div');
     row.className = 'phase7-resource-row phase12-video-toggle-row';
@@ -253,23 +191,9 @@
     button.type = 'button';
     button.className = 'phase7-resource-action phase12-video-toggle';
     button.textContent = 'View';
-
     button.addEventListener('click', () => {
-      if (pendingMainVideo) {
-        mainVideoExpanded = true;
-        button.disabled = true;
-        button.textContent = 'Loading…';
-        if (videoLoading) videoLoading.hidden = false;
-        releasePendingMainVideo();
-        return;
-      }
-
-      const hasLoadedVideo = player && player.src && player.src !== 'about:blank';
-      if (!hasLoadedVideo || !videoFrame) return;
-
-      mainVideoExpanded = videoFrame.hidden;
-      videoFrame.hidden = !mainVideoExpanded;
-      button.textContent = mainVideoExpanded ? 'Hide' : 'View';
+      expanded = !expanded;
+      syncVideoUi();
     });
 
     row.appendChild(copy);
@@ -278,75 +202,73 @@
     videoRowHost.hidden = false;
   }
 
-  function syncVideoToggle() {
+  function syncVideoUi() {
     if (!videoSection || !videoRowHost) return;
 
+    normalizeResourceButtons();
+
     if (videoSection.hidden) {
-      if (pendingMainVideo) cancelPendingMainVideo();
-      mainVideoExpanded = false;
+      expanded = false;
       return;
     }
 
-    const existingLocked = videoRowHost.querySelector(
-      '.phase7-resource-row:not(.phase12-video-toggle-row) .phase7-resource-action[disabled]'
-    );
-    if (!pendingMainVideo && !videoToggleButton() && existingLocked) return;
+    if (hasLockedVideoRow()) {
+      const compact = videoRowHost.querySelector('.phase12-video-toggle-row');
+      compact?.remove();
+      return;
+    }
 
-    if (pendingMainVideo) createVideoToggleRow();
-
-    const button = videoToggleButton();
+    ensureVideoToggle();
+    const button = toggleButton();
     if (!button) return;
 
-    if (pendingMainVideo && !mainVideoExpanded) {
-      if (videoLoading) videoLoading.hidden = true;
-      if (videoFrame) videoFrame.hidden = true;
+    const loaded = Boolean(player && player.src && player.src !== 'about:blank');
+    const failed = Boolean(videoError && videoError.textContent.trim());
+
+    if (!expanded) {
+      if (videoFrame && !videoFrame.hidden) videoFrame.hidden = true;
+      if (videoLoading && !videoLoading.hidden) videoLoading.hidden = true;
+      if (videoError && !videoError.hidden) videoError.hidden = true;
       button.disabled = false;
-      button.textContent = 'View';
+      if (button.textContent !== 'View') button.textContent = 'View';
       return;
     }
 
-    if (videoFrame && !videoFrame.hidden) {
+    if (failed && !loaded) {
+      if (videoLoading && !videoLoading.hidden) videoLoading.hidden = true;
+      if (videoError && videoError.hidden) videoError.hidden = false;
       button.disabled = false;
-      button.textContent = 'Hide';
+      if (button.textContent !== 'Hide') button.textContent = 'Hide';
       return;
     }
 
-    if (videoError && !videoError.hidden) {
-      mainVideoExpanded = false;
+    if (loaded) {
+      if (videoFrame && videoFrame.hidden) videoFrame.hidden = false;
+      if (videoLoading && !videoLoading.hidden) videoLoading.hidden = true;
       button.disabled = false;
-      button.textContent = 'View';
+      if (button.textContent !== 'Hide') button.textContent = 'Hide';
       return;
     }
 
-    if (mainVideoExpanded) {
-      button.disabled = true;
-      button.textContent = 'Loading…';
-    } else {
-      button.disabled = false;
-      button.textContent = 'View';
-    }
-  }
-
-  function syncCompactLessonUi() {
-    normalizeResourceButtons();
-    syncVideoToggle();
+    if (videoLoading && videoLoading.hidden) videoLoading.hidden = false;
+    button.disabled = true;
+    if (button.textContent !== 'Loading…') button.textContent = 'Loading…';
   }
 
   if (lessonContent) {
-    new MutationObserver(syncCompactLessonUi).observe(lessonContent, {
+    new MutationObserver(syncVideoUi).observe(lessonContent, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['hidden']
+      attributeFilter: ['hidden', 'src']
     });
   }
 
   document.addEventListener('click', event => {
     if (event.target.closest('#back-to-lessons, #back-to-views, #back-to-subjects, #logout-button')) {
-      if (pendingMainVideo) cancelPendingMainVideo();
-      mainVideoExpanded = false;
+      expanded = false;
     }
   });
 
-  syncCompactLessonUi();
+  syncVideoUi();
 })();
