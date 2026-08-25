@@ -1,0 +1,374 @@
+name: Phase 11 Year 5 Answer Pack PDF guarded apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/phase11-year5-answer-pdf-apply-trigger.txt]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  EXPECTED_BUCKET: fpt-materials-dev
+  SHARED_KEY: maths/level2/Y5M1/homework/answers/L2T1M01 Answer Pack Homework Number and Place Value I.pdf
+  YEAR5_KEY: phase11/view-overrides/maths-year5/Y5M1/homework/answers/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf
+  SHARED_SHA256: e1b900264b562abfe561a0cd8149ccce991f69876f02690f6def9a6f535277e5
+
+jobs:
+  apply:
+    name: Apply and verify Year 5-only corrected Answer Pack PDF
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase11-year5-answer-pdf-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact trigger branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only apply branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          test "$(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD)" = '.github/phase11-year5-answer-pdf-apply-trigger.txt'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Validate Change 4 source and canonical invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/phase11-year5-answer-pdf.js
+          node --check worker/src/index-phase11-change4.js
+          node tests/phase11-year5-answer-pdf-static-verification.mjs
+          python -m py_compile scripts/phase11-build-year5-answer-pdf.py
+          bash -n tests/phase11-api-verification.sh
+          node --check tests/phase11-browser-verification.mjs
+          rm -rf /tmp/phase11-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-package >/tmp/phase11-package.log
+          jq -e '.phase==11 and .catalogueLessons==369 and .catalogueCurricula==11 and .lessonsKvWrites==380 and .r2References==1669 and .developmentAllowlistCount==16' /tmp/phase11-package/phase11-apply-summary.json >/dev/null
+
+      - name: Guard isolated V2 development bindings and login state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings.json >/dev/null
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          ALLOWLIST="$(jq -r '.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text' /tmp/settings.json)"
+          TARGET_ALLOWLIST="$(cat /tmp/phase11-package/phase11-dev-allowlist.txt)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings.json)"
+          test "$R2" = "$EXPECTED_BUCKET"
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          test "$ALLOWLIST" = "$TARGET_ALLOWLIST"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login appears enabled; refusing Change 4 apply.' >&2; exit 1;; esac
+          { echo "students=$STUDENTS"; echo "lessons=$LESSONS"; echo "r2=$R2"; echo "db=$DB"; echo "allowlist=$ALLOWLIST"; } >> "$GITHUB_OUTPUT"
+
+      - name: Snapshot current Worker and exact R2 inputs
+        id: target_snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change4-backup
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change4-backup/worker-before.bin
+          for marker in student_session_profiles X-FPT-Students-KV-Read-Ops Y5T1M01 VR_HOWTO; do
+            grep -aFq "$marker" /tmp/change4-backup/worker-before.bin
+          done
+
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${SHARED_KEY}" \
+            --file=/tmp/change4-backup/shared-original.pdf --remote >/tmp/shared-get.log
+          test "$(sha256sum /tmp/change4-backup/shared-original.pdf | awk '{print $1}')" = "$SHARED_SHA256"
+
+          printf '[]' >/tmp/r2-objects.json
+          cursor=''
+          while :; do
+            url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${EXPECTED_BUCKET}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              url="${url}&cursor=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+            fi
+            page="$(curl --fail --silent --show-error --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | .key]' <<<"$page" >/tmp/r2-page.json
+            jq -s '.[0]+.[1]' /tmp/r2-objects.json /tmp/r2-page.json >/tmp/r2-next.json
+            mv /tmp/r2-next.json /tmp/r2-objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+
+          if jq -e --arg key "$YEAR5_KEY" 'index($key) != null' /tmp/r2-objects.json >/dev/null; then
+            echo 'existed=true' >> "$GITHUB_OUTPUT"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${YEAR5_KEY}" \
+              --file=/tmp/change4-backup/year5-target-before.pdf --remote >/tmp/target-get.log
+            sha256sum /tmp/change4-backup/year5-target-before.pdf >/tmp/change4-backup/year5-target-before.sha256
+          else
+            echo 'existed=false' >> "$GITHUB_OUTPUT"
+            echo 'Target override did not exist before this apply.' >/tmp/change4-backup/year5-target-before.txt
+          fi
+
+      - name: Upload pre-write rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change4-prewrite-backup
+          path: /tmp/change4-backup/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build and verify corrected Year 5 PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'PyMuPDF==1.26.7'
+          python scripts/phase11-build-year5-answer-pdf.py \
+            /tmp/change4-backup/shared-original.pdf \
+            '/tmp/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf' \
+            | tee /tmp/change4-build.txt
+          python - <<'PY'
+          import fitz
+          p='/tmp/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf'
+          d=fitz.open(p)
+          text='\n'.join(page.get_text('text') for page in d)
+          assert d.page_count == 3
+          assert 'L2T1M01' not in text
+          assert text.count('Y5T1M01') == 6
+          print('Corrected Year 5 PDF independent verification: PASS')
+          PY
+          sha256sum '/tmp/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf' | tee /tmp/change4-generated.sha256
+
+      - name: Apply only the Year 5 R2 override object
+        id: r2apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${EXPECTED_BUCKET}/${YEAR5_KEY}" \
+            --file='/tmp/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf' \
+            --content-type='application/pdf' --remote >/tmp/r2-put.log
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${YEAR5_KEY}" \
+            --file=/tmp/year5-target-after.pdf --remote >/tmp/r2-get-after.log
+          test "$(sha256sum /tmp/year5-target-after.pdf | awk '{print $1}')" = "$(sha256sum '/tmp/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf' | awk '{print $1}')"
+
+      - name: Generate Change 4 V2 runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.change4.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-change4.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run Change 4 Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.change4.toml --dry-run --outdir /tmp/change4-worker-build >/tmp/change4-dry-run.log
+          for marker in 'phase11/view-overrides/maths-year5/Y5M1' student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO; do
+            grep -R -aFq "$marker" /tmp/change4-worker-build
+          done
+
+      - name: Deploy Change 4 Worker to V2 development only
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.change4.toml \
+            --keep-vars --message 'Phase 11 Year 5 Answer Pack PDF view override' >/tmp/change4-deploy.log
+
+      - name: Verify deployed Worker markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change4-worker-after.bin
+          for marker in 'phase11/view-overrides/maths-year5/Y5M1' student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO; do
+            grep -aFq "$marker" /tmp/change4-worker-after.bin
+          done
+
+      - name: Run full Phase 11 deployed API acceptance
+        shell: bash
+        run: bash tests/phase11-api-verification.sh
+
+      - name: Prove Year 5 and Level 2 receive different PDF identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER_BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+          mkdir -p /tmp/change4-proof
+
+          verify_view(){
+            local user="$1" view="$2" expected="$3" forbidden="$4" out="$5"
+            local jar="/tmp/change4-proof/${user}.cookies"
+            curl --fail-with-body --silent --show-error --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data "{\"username\":\"$user\",\"password\":\"Te12\"}" \
+              "$WORKER_BASE/api/v1/student/auth/login" >/tmp/change4-proof/login.json
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" \
+              "$WORKER_BASE/api/v1/student/lessons/Y5M1?viewId=$view" >/tmp/change4-proof/detail.json
+            key="$(jq -r '.lesson.homeworks[0].answerPack.resourceKey // empty' /tmp/change4-proof/detail.json)"
+            test -n "$key"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data '{"password":"Te12"}' \
+              "$WORKER_BASE/api/v1/student/resources/$key/answer/authorize?viewId=$view" >/tmp/change4-proof/auth.json
+            path="$(jq -r '.viewerPath // empty' /tmp/change4-proof/auth.json)"
+            test -n "$path"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" "$WORKER_BASE$path" --output "$out"
+            python - "$out" "$expected" "$forbidden" <<'PY'
+          import fitz, sys
+          p, expected, forbidden = sys.argv[1:]
+          d = fitz.open(p)
+          text = '\n'.join(page.get_text('text') for page in d)
+          assert d.page_count == 3
+          assert text.count(expected) == 6, (expected, text.count(expected))
+          assert forbidden not in text
+          print(f'{expected} PDF proof: PASS')
+          PY
+          }
+
+          verify_view testy5em maths-year5 Y5T1M01 L2T1M01 /tmp/change4-proof/year5.pdf
+          verify_view testy411m maths-level2 L2T1M01 Y5T1M01 /tmp/change4-proof/level2.pdf
+          test "$(sha256sum /tmp/change4-proof/year5.pdf | awk '{print $1}')" = "$(sha256sum /tmp/year5-target-after.pdf | awk '{print $1}')"
+          test "$(sha256sum /tmp/change4-proof/level2.pdf | awk '{print $1}')" = "$SHARED_SHA256"
+
+      - name: Run real Chrome Phase 11 acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          npm install --no-save --no-package-lock playwright@latest >/dev/null
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+
+      - name: Re-measure representative pupil KV journey
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-kv-journey.sh /tmp/change4-kv-journey.json
+          jq -e '.totals.studentsKvReadOps <= 6 and .totals.lessonsKvReadOps <= 5 and .totals.totalKvReadOps <= 11' /tmp/change4-kv-journey.json >/dev/null
+
+      - name: Reverify isolated settings and shared Level 2 source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-after.json
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-after.json >/dev/null
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings-after.json)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) exit 1;; esac
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${SHARED_KEY}" \
+            --file=/tmp/shared-after.pdf --remote >/tmp/shared-after.log
+          test "$(sha256sum /tmp/shared-after.pdf | awk '{print $1}')" = "$SHARED_SHA256"
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/change4-d1-final.json
+          grep -Fq 'trg_student_sessions_single_active' /tmp/change4-d1-final.json
+          grep -Fq '"ok"' /tmp/change4-d1-final.json
+
+      - name: Roll back Worker on post-deploy failure
+        if: failure() && steps.deploy.outcome == 'success'
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-efficient.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.rollback.toml \
+            --keep-vars --message 'Rollback Phase 11 Year 5 Answer Pack PDF override' >/tmp/change4-worker-rollback.log
+
+      - name: Roll back Year 5 R2 object on failure
+        if: failure() && steps.r2apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ steps.target_snapshot.outputs.existed }}' = 'true' ]; then
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${EXPECTED_BUCKET}/${YEAR5_KEY}" \
+              --file=/tmp/change4-backup/year5-target-before.pdf --content-type='application/pdf' --remote >/tmp/change4-r2-rollback.log
+          else
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object delete "${EXPECTED_BUCKET}/${YEAR5_KEY}" --remote >/tmp/change4-r2-rollback.log
+          fi
+
+      - name: Completion
+        if: success()
+        run: echo 'Phase 11 Change 4 Year 5-only Answer Pack PDF apply and verification: PASS'
