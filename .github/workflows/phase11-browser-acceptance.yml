@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - phase11.html
+      - phase11-change8.html
+      - assets/phase11-change8.css
       - assets/phase11-other.js
       - tests/phase11-browser-verification.mjs
       - .github/workflows/phase11-browser-acceptance.yml
