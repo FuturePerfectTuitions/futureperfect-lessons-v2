@@ -95,9 +95,25 @@ Owner decision: **1 normal/core Homework with 1 Answer Pack**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E3/`.
 
+## 7. Y5E4 - Non Chronological Report Writing (display Y5T1E03)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source: `Homework Y5E4 Non Chronological Report Writing.pdf`
+- Homework SHA-256: `f76d9bd849c1235fa54f1e3567274f2269d0e5226a183bfa54058889fcb91dc9`
+- Homework pages: 7
+- Content note: page 1 is the open-ended spidergram/non-chronological report task; pages 2-7 are Year 5 SPaG practice mats.
+- Intended R2 key: `english/year5/Y5E4/homework/sheets/Homework Y5E4 Non Chronological Report Writing.pdf`
+- Answer Pack source: `Answer Pack Homework Y5E4 Non Chronological Report Writing.pdf`
+- Answer Pack SHA-256: `6d6181a75e36a28a08f65795e2a7694220ae2324acc1701b2580a3c9d295fc64`
+- Answer Pack pages: 6
+- Content note: the Answer Pack supplies answers for the six SPaG practice mats; the open-ended report task on Homework page 1 has no fixed answer.
+- Intended R2 key: `english/year5/Y5E4/homework/answers/Answer Pack Homework Y5E4 Non Chronological Report Writing.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E4/`.
+
 ## Remaining owner decisions
 
-7. Y5E4 - Non Chronological Report Writing (display Y5T1E03)
 8. Y5E6 - Instructional reports (display Y5T1E05)
 9. Y5E7 - Verbal Reasoning (display Y5T1E06)
 10. Y5E11 - Advertising (display Y5T1E08)
