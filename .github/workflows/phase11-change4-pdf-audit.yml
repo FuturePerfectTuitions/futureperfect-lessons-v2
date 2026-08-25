@@ -1,0 +1,87 @@
+name: Phase 11 Change 4 PDF read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-change4-pdf-audit.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_BUCKET: fpt-materials-dev
+  TARGET_KEY: maths/level2/Y5M1/homework/answers/L2T1M01 Answer Pack Homework Number and Place Value I.pdf
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-change4-pdf-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact audit branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard read-only single-file diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)"
+          test "$changed" = '.github/workflows/phase11-change4-pdf-audit.yml'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Guard isolated V2 development bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e --arg b "$EXPECTED_BUCKET" '.result.bindings[] | select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$b)' /tmp/settings.json >/dev/null
+          echo 'V2 development R2 guard: PASS'
+
+      - name: Download exact shared Y5M1 Answer Pack read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/change4-pdf-audit
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${TARGET_KEY}" \
+            --file=artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf --remote >/tmp/r2-get.log
+          test -s artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf
+          sha256sum artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf | tee artifacts/change4-pdf-audit/sha256.txt
+          file artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf
+
+      - name: Extract searchable text evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          pdftotext -layout artifacts/change4-pdf-audit/original-shared-Y5M1-answer-pack.pdf artifacts/change4-pdf-audit/text.txt
+          echo '=== Legacy-code matches ==='
+          grep -n -i 'L2T1M01' artifacts/change4-pdf-audit/text.txt | tee artifacts/change4-pdf-audit/legacy-code-matches.txt || true
+          echo '=== Year5-code matches ==='
+          grep -n -i 'Y5T1M01' artifacts/change4-pdf-audit/text.txt | tee artifacts/change4-pdf-audit/year5-code-matches.txt || true
+
+      - name: Upload exact source PDF and audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change4-y5m1-pdf-audit
+          path: artifacts/change4-pdf-audit/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm no mutation
+        run: echo 'Read-only Change 4 audit complete. No R2, KV, D1 or Worker write/deploy command was executed.'
