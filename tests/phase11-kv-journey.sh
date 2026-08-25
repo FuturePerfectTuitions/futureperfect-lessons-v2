@@ -115,12 +115,12 @@ require_http_success video "$status" "$TMP/video.json"
 jq -e '.ok == true and (.embedUrl|startswith("https://go.screenpal.com/player/"))' "$TMP/video.json" >/dev/null
 record_step video "$TMP/video.h"
 
-# 7. Homework download.
+# 7. Homework download uses the same /download route as the Phase 7 renderer.
 status="$(curl --silent --show-error \
   --dump-header "$TMP/homework.h" --cookie "$JAR" --cookie-jar "$JAR" \
-  --header "Origin: $ORIGIN" \
+  --header "Origin: $ORIGIN" --header 'Accept: application/pdf,application/octet-stream' \
   --output "$TMP/homework.bin" --write-out '%{http_code}' \
-  "$WORKER_BASE/api/v1/student/resources/$HOMEWORK_KEY?viewId=$VIEW_ID")"
+  "$WORKER_BASE/api/v1/student/resources/$HOMEWORK_KEY/download?viewId=$VIEW_ID")"
 require_http_success homework "$status" "$TMP/homework.bin"
 test -s "$TMP/homework.bin"
 record_step homework "$TMP/homework.h"
