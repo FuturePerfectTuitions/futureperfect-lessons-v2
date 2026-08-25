@@ -1,1 +1,0 @@
-This branch fixes the Phase 12 lesson page loading regression introduced by the previous lazy-video fetch interception. The video remains visually collapsed until View is clicked, but normal lesson API requests are no longer intercepted.
