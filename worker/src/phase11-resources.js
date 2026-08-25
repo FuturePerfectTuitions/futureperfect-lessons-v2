@@ -51,6 +51,56 @@ function normaliseAnswers(values, fallbackName = 'Additional Answer Pack') {
   return values.map(value => normaliseFile(value, fallbackName)).filter(Boolean);
 }
 
+function coreHomeworks(record) {
+  if (Array.isArray(record?.homeworks)) return record.homeworks;
+  if (Array.isArray(record?.core?.homeworks)) return record.core.homeworks;
+  return [];
+}
+
+function answerIdentity(value) {
+  const name = text(value?.displayName || value?.name).toLowerCase().replace(/\.pdf$/i, '');
+  if (!name) return '';
+  return name
+    .replace(/\b(?:answer|pack|homework)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function answerPacksFromPairs(pairs) {
+  return (Array.isArray(pairs) ? pairs : [])
+    .map(pair => pair?.answerPack || null)
+    .filter(Boolean);
+}
+
+function ordinaryCoreAnswerPacks(record) {
+  return coreHomeworks(record)
+    .map(pair => normaliseFile(
+      pair?.answerPack || pair?.answerKey || pair?.answer,
+      'Answer Pack'
+    ))
+    .filter(Boolean);
+}
+
+function suppressDuplicateAnswers(answers, pairedAnswers) {
+  const seen = new Set(
+    (Array.isArray(pairedAnswers) ? pairedAnswers : [])
+      .map(answerIdentity)
+      .filter(Boolean)
+  );
+
+  // Preserve array positions with null tombstones. Phase 11 answer resource keys
+  // encode the original supplementary offset, so removing an item by splicing
+  // would make an old key resolve to a different document. A null slot makes the
+  // duplicate inaccessible while keeping every later protected resource stable.
+  return (Array.isArray(answers) ? answers : []).map(answer => {
+    if (!answer) return null;
+    const identity = answerIdentity(answer);
+    if (identity && seen.has(identity)) return null;
+    if (identity) seen.add(identity);
+    return answer;
+  });
+}
+
 function normalisePhase11Resources(record) {
   const source = record?.phase11Resources;
   if (!source || typeof source !== 'object') {
@@ -67,45 +117,68 @@ function normalisePhase11Resources(record) {
     : {};
   const vr = source.vr && typeof source.vr === 'object' ? source.vr : {};
 
+  const corePreLessonPairs = normalisePairs(
+    core.preLessonPairs,
+    'sheet',
+    'PreLesson Sheet',
+    'PreLesson Answer Pack'
+  );
+  const coreCumulativeHomeworks = normalisePairs(
+    core.cumulativeHomeworks,
+    'homework',
+    'Cumulative Homework',
+    'Cumulative Homework Answer Pack'
+  );
+  const coreSupplementaryAnswers = suppressDuplicateAnswers(
+    normaliseAnswers(core.supplementaryAnswers),
+    [
+      ...ordinaryCoreAnswerPacks(record),
+      ...answerPacksFromPairs(corePreLessonPairs),
+      ...answerPacksFromPairs(coreCumulativeHomeworks)
+    ]
+  );
+
+  const elevenPlusPreLessonPairs = normalisePairs(
+    elevenPlus.preLessonPairs,
+    'sheet',
+    '11+ PreLesson Sheet',
+    '11+ PreLesson Answer Pack'
+  );
+  const elevenPlusHomeworks = normalisePairs(
+    elevenPlus.homeworks,
+    'homework',
+    '11+ Homework',
+    '11+ Homework Answer Pack'
+  );
+  const elevenPlusCumulativeHomeworks = normalisePairs(
+    elevenPlus.cumulativeHomeworks,
+    'homework',
+    'Cumulative Homework',
+    'Cumulative Homework Answer Pack'
+  );
+  const elevenPlusSupplementaryAnswers = suppressDuplicateAnswers(
+    normaliseAnswers(
+      elevenPlus.supplementaryAnswers,
+      'Additional 11+ Answer Pack'
+    ),
+    [
+      ...answerPacksFromPairs(elevenPlusPreLessonPairs),
+      ...answerPacksFromPairs(elevenPlusHomeworks),
+      ...answerPacksFromPairs(elevenPlusCumulativeHomeworks)
+    ]
+  );
+
   return {
     core: {
-      preLessonPairs: normalisePairs(
-        core.preLessonPairs,
-        'sheet',
-        'PreLesson Sheet',
-        'PreLesson Answer Pack'
-      ),
-      cumulativeHomeworks: normalisePairs(
-        core.cumulativeHomeworks,
-        'homework',
-        'Cumulative Homework',
-        'Cumulative Homework Answer Pack'
-      ),
-      supplementaryAnswers: normaliseAnswers(core.supplementaryAnswers)
+      preLessonPairs: corePreLessonPairs,
+      cumulativeHomeworks: coreCumulativeHomeworks,
+      supplementaryAnswers: coreSupplementaryAnswers
     },
     elevenPlus: {
-      preLessonPairs: normalisePairs(
-        elevenPlus.preLessonPairs,
-        'sheet',
-        '11+ PreLesson Sheet',
-        '11+ PreLesson Answer Pack'
-      ),
-      homeworks: normalisePairs(
-        elevenPlus.homeworks,
-        'homework',
-        '11+ Homework',
-        '11+ Homework Answer Pack'
-      ),
-      cumulativeHomeworks: normalisePairs(
-        elevenPlus.cumulativeHomeworks,
-        'homework',
-        'Cumulative Homework',
-        'Cumulative Homework Answer Pack'
-      ),
-      supplementaryAnswers: normaliseAnswers(
-        elevenPlus.supplementaryAnswers,
-        'Additional 11+ Answer Pack'
-      )
+      preLessonPairs: elevenPlusPreLessonPairs,
+      homeworks: elevenPlusHomeworks,
+      cumulativeHomeworks: elevenPlusCumulativeHomeworks,
+      supplementaryAnswers: elevenPlusSupplementaryAnswers
     },
     vr: {
       supplementaryAnswers: normaliseAnswers(
@@ -172,12 +245,6 @@ function phase11AnswerResource(record, index) {
   return answerAt(record, category, index);
 }
 
-function coreHomeworks(record) {
-  if (Array.isArray(record?.homeworks)) return record.homeworks;
-  if (Array.isArray(record?.core?.homeworks)) return record.core.homeworks;
-  return [];
-}
-
 function bridgePhase11Answers(record) {
   const model = normalisePhase11Resources(record);
   const existing = coreHomeworks(record);
@@ -199,11 +266,11 @@ function bridgePhase11Answers(record) {
     });
   };
 
-  put(ANSWER_BASE.CORE_PRELESSON, model.core.preLessonPairs, value => value.answerPack);
-  put(ANSWER_BASE.ELEVENPLUS_PRELESSON, model.elevenPlus.preLessonPairs, value => value.answerPack);
-  put(ANSWER_BASE.ELEVENPLUS_HOMEWORK, model.elevenPlus.homeworks, value => value.answerPack);
-  put(ANSWER_BASE.CORE_CUMULATIVE, model.core.cumulativeHomeworks, value => value.answerPack);
-  put(ANSWER_BASE.ELEVENPLUS_CUMULATIVE, model.elevenPlus.cumulativeHomeworks, value => value.answerPack);
+  put(ANSWER_BASE.CORE_PRELESSON, model.core.preLessonPairs, value => value?.answerPack);
+  put(ANSWER_BASE.ELEVENPLUS_PRELESSON, model.elevenPlus.preLessonPairs, value => value?.answerPack);
+  put(ANSWER_BASE.ELEVENPLUS_HOMEWORK, model.elevenPlus.homeworks, value => value?.answerPack);
+  put(ANSWER_BASE.CORE_CUMULATIVE, model.core.cumulativeHomeworks, value => value?.answerPack);
+  put(ANSWER_BASE.ELEVENPLUS_CUMULATIVE, model.elevenPlus.cumulativeHomeworks, value => value?.answerPack);
   put(ANSWER_BASE.CORE_SUPPLEMENTARY, model.core.supplementaryAnswers, value => value);
   put(ANSWER_BASE.ELEVENPLUS_SUPPLEMENTARY, model.elevenPlus.supplementaryAnswers, value => value);
   put(ANSWER_BASE.VR_SUPPLEMENTARY, model.vr.supplementaryAnswers, value => value);
@@ -243,6 +310,8 @@ function answerIndexFor(category, offset) {
 export {
   ANSWER_BASE,
   ANSWER_INDEX_SPAN,
+  answerIdentity,
+  suppressDuplicateAnswers,
   normalisePhase11Resources,
   classifyPhase11AnswerIndex,
   phase11AnswerResource,
