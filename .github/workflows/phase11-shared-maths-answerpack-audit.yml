@@ -1,0 +1,72 @@
+name: Phase 11 shared Maths Answer Pack read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-shared-maths-answerpack-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-shared-maths-answerpack-audit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Audit shared Year/Level Answer Pack mappings
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { loadPhase11Catalogue, validatePhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c = loadPhase11Catalogue();
+          validatePhase11Catalogue(c);
+          const pairs = [
+            ['maths-year4','maths-level1'],
+            ['maths-year5','maths-level2'],
+            ['maths-year6','maths-level3']
+          ];
+          function answerPacks(lesson) {
+            const out=[];
+            for (const [i, hw] of (lesson?.core?.homeworks || []).entries()) {
+              if (hw?.answerPack?.r2Key) out.push({kind:'homework', index:i+1, ...hw.answerPack});
+            }
+            for (const [i, ap] of (lesson?.core?.supplementaryAnswers || []).entries()) {
+              if (ap?.r2Key) out.push({kind:'supplementary', index:i+1, ...ap});
+            }
+            return out;
+          }
+          const summary=[];
+          for (const [yearView,levelView] of pairs) {
+            const rows=[];
+            for (const [lessonId, lesson] of Object.entries(c.lessons)) {
+              const yearCode = lesson?.displayIds?.[yearView];
+              const levelCode = lesson?.displayIds?.[levelView];
+              if (!yearCode || !levelCode) continue;
+              for (const pack of answerPacks(lesson)) {
+                rows.push({lessonId,yearView,levelView,yearCode,levelCode,kind:pack.kind,index:pack.index,displayName:pack.displayName,r2Key:pack.r2Key,
+                  nameHasYear:String(pack.displayName||'').includes(yearCode),
+                  nameHasLevel:String(pack.displayName||'').includes(levelCode),
+                  keyHasYear:String(pack.r2Key||'').includes(yearCode),
+                  keyHasLevel:String(pack.r2Key||'').includes(levelCode)});
+              }
+            }
+            const legacy = rows.filter(r => r.nameHasLevel || r.keyHasLevel);
+            const s={yearView,levelView,sharedLessons:new Set(rows.map(r=>r.lessonId)).size,answerPacks:rows.length,legacyNamed:legacy.length};
+            summary.push(s);
+            console.log(`=== ${yearView} <-> ${levelView} ===`);
+            console.log(JSON.stringify({summary:s, sample:legacy.slice(0,12)}, null, 2));
+          }
+          console.log('=== SUMMARY ===');
+          console.log(JSON.stringify(summary,null,2));
+          for (const id of ['Y4M1','Y5M1','Y6M1']) {
+            console.log(`=== RECORD ${id} ===`);
+            console.log(JSON.stringify(c.lessons[id],null,2));
+          }
+          NODE
