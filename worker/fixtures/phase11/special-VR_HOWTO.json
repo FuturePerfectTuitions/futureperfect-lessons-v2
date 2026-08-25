@@ -1,0 +1,87 @@
+{
+  "bucketId": "VR_HOWTO",
+  "type": "vr-howto",
+  "title": "VR How To",
+  "description": "Verbal Reasoning technique videos for 11+ English students.",
+  "active": true,
+  "source": "legacy-live-VR_HOWTO",
+  "items": [
+    {
+      "id": "vr-howto-1",
+      "n": 1,
+      "title": "Mirroring Codes",
+      "description": "In this Verbal Reasoning lesson, we look at mirroring code questions. You will learn how letters reflect across the alphabet, with M and N being in the middle, and how to apply this idea to solve word codes step by step. Pause when prompted, attempt the question in your book, and then unpause to check the full solution.",
+      "video": { "screenpal": "cOnF1kn0uLz" }
+    },
+    {
+      "id": "vr-howto-2",
+      "n": 2,
+      "title": "Jumping Codes",
+      "description": "In this Verbal Reasoning lesson, we explore jumping code questions. You will learn how letters move forward or backward through the alphabet using a clear rule, and how to apply the same pattern to find the missing code. Pause when prompted, try the question yourself, and then unpause to check the answer.",
+      "video": { "screenpal": "cOnF1zn0uM7" }
+    },
+    {
+      "id": "vr-howto-3",
+      "n": 3,
+      "title": "4-Letter Code Matching",
+      "description": "In this Verbal Reasoning lesson, we explore four-letter code matching questions. You will learn how to match number codes to words by spotting repeating digits, analysing letter positions, and building the code step by step. The lesson shows how to identify which number represents each letter, how to write the codes above the words, and how this makes the final questions quick and easy to solve. Pause when prompted, attempt the questions in your book, and then unpause to check the full solutions.",
+      "video": { "screenpal": "cOnFoTn0vHl" }
+    },
+    {
+      "id": "vr-howto-4",
+      "n": 4,
+      "title": "Solving Big Riddles",
+      "description": "In this Verbal Reasoning lesson, we work through big riddle-style questions that require careful reading and logical comparison. You will learn how to organise information clearly, track each statement step by step, and eliminate incorrect options methodically. The lesson shows how to avoid common traps by focusing on what the final question is really asking. Pause when prompted, attempt the riddle in your book, and then unpause to check the full reasoning and solution.",
+      "video": { "screenpal": "cOnqQ2n0ywq" }
+    },
+    {
+      "id": "vr-howto-5",
+      "n": 5,
+      "title": "Solving Synonyms",
+      "description": "In this Verbal Reasoning lesson, we explore synonym-type questions and learn how to identify words that are closest in meaning. Students practise systematic elimination, testing word meanings carefully, and using sentence substitution to confirm answers.\n\nThis lesson includes:\n✔ Understanding what synonyms are\n✔ Systematically testing and eliminating incorrect options\n✔ Identifying multiple meanings of words\n✔ Using sentence substitution to confirm matches\n✔ Recognising subtle differences in emotional strength between similar words\n✔ Handling unfamiliar vocabulary using elimination strategies\n✔ Solving comparison-style reasoning questions under timed conditions",
+      "video": { "screenpal": "cOnrjAn0kh3" }
+    },
+    {
+      "id": "vr-howto-6",
+      "n": 6,
+      "title": "Words 2 codes and Vice Versa",
+      "description": "In this Verbal Reasoning lesson, students learn how to solve word-to-code and code-to-word questions using the alphabet to track letter movements accurately. They practise identifying the rule from an example, writing the jump under each letter, and applying the same rule to a new word. They also learn the key rule that if you need to go from code back to a word, you must reverse the direction of the jumps.\n\nThis lesson includes:\n✔ Identifying whether the question is word→code or code→word\n✔ Using an example pair to find the rule (forward/backward jumps)\n✔ Recording jumps under each letter to stay systematic\n✔ Applying the same jumps to generate a new code\n✔ Reversing jumps to decode a word from a given code\n✔ Solving mixed-rule questions (including mirror codes and increasing jumps)\n✔ Accuracy tips to avoid common traps under timed conditions",
+      "video": { "screenpal": "cOnOivn0Ndc" }
+    },
+    {
+      "id": "vr-howto-7",
+      "n": 7,
+      "title": "Move one letter",
+      "description": "In this Verbal Reasoning lesson, students learn how to solve 'move one letter' questions systematically and efficiently. They practise removing one letter from the first word and inserting it into the second word so that both new words are real words. The lesson emphasises working methodically, testing one letter at a time, and using elimination strategies to avoid guessing.\n\nThis lesson includes:\n✔ Removing one letter at a time to test valid word formation\n✔ Applying a systematic elimination strategy\n✔ Using the 'left-side hack' to identify the only viable option quickly\n✔ Recognising when multiple removals form words and narrowing choices logically\n✔ Inserting letters into all possible positions in the second word\n✔ Avoiding slang and non-standard words\n✔ Working efficiently under timed conditions",
+      "video": { "screenpal": "cOntiAn0RGm" }
+    },
+    {
+      "id": "vr-howto-8",
+      "n": 8,
+      "title": "One in the Middle",
+      "description": "In this Verbal Reasoning lesson, students learn how to solve 'one in the middle' questions, where the middle word is created using letters taken from the two outside words in a consistent positional pattern. The lesson demonstrates how to identify which letters come from the first word and which come from the second word, how to record positions clearly (for example F2, F3, S1, S2), and how to apply the same pattern to generate the missing word in the second example. Students also learn an efficient exam technique: eliminate answer options as soon as each letter is confirmed, and ignore repeated letters so that attention stays focused on the letters that reveal the pattern. Pause when prompted, attempt each question in your book, and then unpause to check the full method and solution.",
+      "video": { "screenpal": "cOnuignZcLM" }
+    },
+    {
+      "id": "vr-howto-9",
+      "n": 9,
+      "title": "Alphabet Code Pairs",
+      "description": "In this Verbal Reasoning lesson, students learn how to solve letter pair sequence questions by spotting patterns separately in the first letters and the second letters. They practise using the alphabet strip provided, identifying constant jumps (such as +1 each time or -3 each time), and also recognising growing patterns (such as +1, +2, +3 then +4). Students learn the key exam method: work out the first letter pattern first, eliminate options immediately, then solve the second letter pattern and confirm the answer.\n\nThis lesson includes:\n✔ Separating the first and second letters to find two patterns\n✔ Finding constant jumps (e.g., +1, +1, +1 or -3, -3, -3)\n✔ Handling wrap-around after Z back to A\n✔ Eliminating answer choices as soon as the first letter is known\n✔ Recognising growing jumps (e.g., +1, +2, +3 then +4)\n✔ Identifying paired opposite patterns (one increasing forward while the other increases backward)\n✔ Solving multiple examples step by step with pauses for independent practice",
+      "video": { "screenpal": "cOee2ynZQ5T" }
+    },
+    {
+      "id": "vr-howto-10",
+      "n": 10,
+      "title": "Word Ladders",
+      "description": "In this Verbal Reasoning lesson, students learn how to solve word ladder questions by changing one letter at a time to move from a starting word to a final word. They practise keeping the word length the same, making sure each new step is a real word, and using matching letters in the same position as clues to guide the ladder. Students also learn to avoid common mistakes, such as changing two letters at once, and to work systematically through each step until they reach the final word.\n\nThis lesson includes:\n✔ Changing one letter at a time\n✔ Keeping the word length the same throughout\n✔ Making sure every step is a real word\n✔ Freezing letters that are already correct and in the right position\n✔ Choosing helpful intermediate words that move closer to the target word\n✔ Spotting and avoiding the mistake of changing two letters at once\n✔ Solving multiple word ladder examples step by step with pauses for independent practice",
+      "video": { "screenpal": "cOeDjpnZdb7" }
+    },
+    {
+      "id": "vr-howto-11",
+      "n": 11,
+      "title": "Hidden Words",
+      "description": "In this Verbal Reasoning lesson, students learn how to solve hidden word questions, where a four-letter word is hidden across two neighbouring words in a sentence. They practise checking all three possible splits between the two words: three letters and one letter, two letters and two letters, or one letter and three letters. The lesson also teaches a faster exam technique: instead of reading the whole sentence first, students go straight to the answer options and test each word pair quickly using the finger method.\n\nThis lesson includes:\n✔ Finding a four-letter hidden word across two neighbouring words\n✔ Checking the three possible splits: 3+1, 2+2, and 1+3\n✔ Using the finger method to test letter combinations clearly\n✔ Moving systematically from one word pair to the next\n✔ Recognising real words quickly and rejecting letter strings that do not form words\n✔ Using the faster exam method by testing the answer options directly\n✔ Solving practice examples step by step with pauses for independent work",
+      "video": { "screenpal": "cOeFodnZ9WB" }
+    }
+  ]
+}
