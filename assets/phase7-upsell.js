@@ -84,13 +84,9 @@
 
   const lessonContent = document.getElementById('lesson-content');
 
-  function protectedButtonText(displayName) {
-    return /answer\s*key/i.test(displayName || '') ? 'Open Answer Key' : 'Open Answer Pack';
-  }
-
   function enhanceProtectedAnswerRow(button) {
     const row = button?.closest('.phase7-resource-row');
-    if (!row || row.dataset.phase12ProtectedSignage === '1') return;
+    if (!row) return;
 
     const name = row.querySelector('.phase7-resource-name');
     if (!name) return;
@@ -109,7 +105,9 @@
       meta.className = 'phase7-resource-meta';
       copy.appendChild(meta);
     }
-    meta.textContent = 'Password required every time';
+    if (meta.textContent !== 'Password required every time') {
+      meta.textContent = 'Password required every time';
+    }
 
     let chip = copy.querySelector('.phase7-protected-chip');
     if (!chip) {
@@ -117,9 +115,11 @@
       chip.className = 'phase7-protected-chip';
       copy.appendChild(chip);
     }
-    chip.textContent = '🔒 Password protected';
+    if (chip.textContent !== '🔒 Password protected') {
+      chip.textContent = '🔒 Password protected';
+    }
 
-    if (!button.disabled) button.textContent = protectedButtonText(name.textContent);
+    if (!button.disabled && button.textContent !== 'Open') button.textContent = 'Open';
     row.dataset.phase12ProtectedSignage = '1';
   }
 
@@ -136,4 +136,217 @@
     });
   }
   enhanceProtectedAnswerRows();
+})();
+
+(() => {
+  'use strict';
+
+  const lessonContent = document.getElementById('lesson-content');
+  const videoSection = document.getElementById('video-section');
+  const videoRowHost = document.getElementById('video-locked-row');
+  const videoLoading = document.getElementById('video-loading');
+  const videoError = document.getElementById('video-error');
+  const videoFrame = document.getElementById('video-frame');
+  const player = document.getElementById('lesson-player');
+  const downstreamFetch = window.fetch.bind(window);
+
+  let pendingMainVideo = null;
+  let mainVideoExpanded = false;
+
+  function requestInfo(input, init) {
+    try {
+      const raw = typeof input === 'string' || input instanceof URL
+        ? String(input)
+        : input?.url;
+      const url = new URL(raw, location.href);
+      const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+      return { url, method };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function cancelPendingMainVideo() {
+    const pending = pendingMainVideo;
+    pendingMainVideo = null;
+    if (!pending) return;
+    pending.resolve(new Response(JSON.stringify({
+      ok: false,
+      error: 'VIDEO_DEFERRED_CANCELLED'
+    }), {
+      status: 409,
+      headers: { 'content-type': 'application/json; charset=utf-8' }
+    }));
+  }
+
+  function releasePendingMainVideo() {
+    const pending = pendingMainVideo;
+    pendingMainVideo = null;
+    if (!pending) return;
+    downstreamFetch(pending.input, pending.init).then(pending.resolve, pending.reject);
+  }
+
+  window.fetch = (input, init) => {
+    const info = requestInfo(input, init);
+    if (!info) return downstreamFetch(input, init);
+
+    if (
+      info.method === 'GET' &&
+      /^\/api\/v1\/student\/lessons\/[^/]+$/.test(info.url.pathname)
+    ) {
+      cancelPendingMainVideo();
+      mainVideoExpanded = false;
+      return downstreamFetch(input, init);
+    }
+
+    const isVideoRequest =
+      info.method === 'GET' &&
+      /^\/api\/v1\/student\/resources\/[^/]+\/video$/.test(info.url.pathname);
+
+    if (
+      isVideoRequest &&
+      videoSection &&
+      !videoSection.hidden &&
+      !mainVideoExpanded &&
+      !pendingMainVideo
+    ) {
+      return new Promise((resolve, reject) => {
+        pendingMainVideo = { input, init, resolve, reject };
+        queueMicrotask(syncCompactLessonUi);
+      });
+    }
+
+    return downstreamFetch(input, init);
+  };
+
+  function normalizeResourceButtons() {
+    if (!lessonContent) return;
+    for (const button of lessonContent.querySelectorAll('button')) {
+      const text = String(button.textContent || '').trim();
+      if (/^Download\s+Homework$/i.test(text) && button.textContent !== 'Download') {
+        button.textContent = 'Download';
+      } else if (/^Open\s+(?:Answer Pack|Answer Key)$/i.test(text) && button.textContent !== 'Open') {
+        button.textContent = 'Open';
+      }
+    }
+  }
+
+  function videoToggleButton() {
+    return videoRowHost?.querySelector('.phase12-video-toggle');
+  }
+
+  function createVideoToggleRow() {
+    if (!videoRowHost || videoRowHost.querySelector('.phase12-video-toggle-row')) return;
+
+    const row = document.createElement('div');
+    row.className = 'phase7-resource-row phase12-video-toggle-row';
+
+    const copy = document.createElement('div');
+    copy.className = 'phase7-resource-copy';
+
+    const name = document.createElement('span');
+    name.className = 'phase7-resource-name';
+    name.textContent = 'Lesson Video';
+    copy.appendChild(name);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'phase7-resource-action phase12-video-toggle';
+    button.textContent = 'View';
+
+    button.addEventListener('click', () => {
+      if (pendingMainVideo) {
+        mainVideoExpanded = true;
+        button.disabled = true;
+        button.textContent = 'Loading…';
+        if (videoLoading) videoLoading.hidden = false;
+        releasePendingMainVideo();
+        return;
+      }
+
+      const hasLoadedVideo = player && player.src && player.src !== 'about:blank';
+      if (!hasLoadedVideo || !videoFrame) return;
+
+      mainVideoExpanded = videoFrame.hidden;
+      videoFrame.hidden = !mainVideoExpanded;
+      button.textContent = mainVideoExpanded ? 'Hide' : 'View';
+    });
+
+    row.appendChild(copy);
+    row.appendChild(button);
+    videoRowHost.appendChild(row);
+    videoRowHost.hidden = false;
+  }
+
+  function syncVideoToggle() {
+    if (!videoSection || !videoRowHost) return;
+
+    if (videoSection.hidden) {
+      if (pendingMainVideo) cancelPendingMainVideo();
+      mainVideoExpanded = false;
+      return;
+    }
+
+    const existingLocked = videoRowHost.querySelector(
+      '.phase7-resource-row:not(.phase12-video-toggle-row) .phase7-resource-action[disabled]'
+    );
+    if (!pendingMainVideo && !videoToggleButton() && existingLocked) return;
+
+    if (pendingMainVideo) createVideoToggleRow();
+
+    const button = videoToggleButton();
+    if (!button) return;
+
+    if (pendingMainVideo && !mainVideoExpanded) {
+      if (videoLoading) videoLoading.hidden = true;
+      if (videoFrame) videoFrame.hidden = true;
+      button.disabled = false;
+      button.textContent = 'View';
+      return;
+    }
+
+    if (videoFrame && !videoFrame.hidden) {
+      button.disabled = false;
+      button.textContent = 'Hide';
+      return;
+    }
+
+    if (videoError && !videoError.hidden) {
+      mainVideoExpanded = false;
+      button.disabled = false;
+      button.textContent = 'View';
+      return;
+    }
+
+    if (mainVideoExpanded) {
+      button.disabled = true;
+      button.textContent = 'Loading…';
+    } else {
+      button.disabled = false;
+      button.textContent = 'View';
+    }
+  }
+
+  function syncCompactLessonUi() {
+    normalizeResourceButtons();
+    syncVideoToggle();
+  }
+
+  if (lessonContent) {
+    new MutationObserver(syncCompactLessonUi).observe(lessonContent, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden']
+    });
+  }
+
+  document.addEventListener('click', event => {
+    if (event.target.closest('#back-to-lessons, #back-to-views, #back-to-subjects, #logout-button')) {
+      if (pendingMainVideo) cancelPendingMainVideo();
+      mainVideoExpanded = false;
+    }
+  });
+
+  syncCompactLessonUi();
 })();
