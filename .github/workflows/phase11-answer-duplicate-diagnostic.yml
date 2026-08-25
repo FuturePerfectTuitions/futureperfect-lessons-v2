@@ -1,0 +1,56 @@
+name: Phase 11 answer duplicate diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-answer-duplicate-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Inspect Y5T1M11 answer resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module <<'NODE'
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const catalogue = loadPhase11Catalogue();
+          const matches = Object.values(catalogue.lessons).filter(r => r?.displayIds?.['maths-year5'] === 'Y5T1M11');
+          if (matches.length !== 1) throw new Error(`Expected exactly one Y5T1M11 record, found ${matches.length}`);
+          const r = matches[0];
+          console.log('TARGET_RECORD_START');
+          console.log(JSON.stringify({
+            lessonId:r.lessonId,
+            title:r.title,
+            displayIds:r.displayIds,
+            homeworks:r.homeworks,
+            coreHomeworks:r.core?.homeworks,
+            phase11Resources:r.phase11Resources
+          }, null, 2));
+          console.log('TARGET_RECORD_END');
+
+          function text(v){ return String(v || '').toLowerCase().replace(/\.pdf$/,'').replace(/\b(?:y\d+t\d+m\d+|l\d+t\d+m\d+)\b/g,'').replace(/\b(?:answer|pack|homework|11\+)\b/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+          const suspect = [];
+          for (const record of Object.values(catalogue.lessons)) {
+            const ordinary = Array.isArray(record?.homeworks) ? record.homeworks : (Array.isArray(record?.core?.homeworks) ? record.core.homeworks : []);
+            const paired = ordinary.map(x => x?.answerPack).filter(Boolean);
+            const supplementary = record?.phase11Resources?.core?.supplementaryAnswers || [];
+            for (const a of paired) for (const s of supplementary) {
+              const an = text(a?.displayName || a?.name);
+              const sn = text(s?.displayName || s?.name);
+              if (an && sn && an === sn) suspect.push({lessonId:record.lessonId, displayIds:record.displayIds, paired:a, supplementary:s, normalized:an});
+            }
+          }
+          console.log('SUSPECT_DUPLICATES_START');
+          console.log(JSON.stringify(suspect, null, 2));
+          console.log(`SUSPECT_DUPLICATES_COUNT=${suspect.length}`);
+          console.log('SUSPECT_DUPLICATES_END');
+          NODE
