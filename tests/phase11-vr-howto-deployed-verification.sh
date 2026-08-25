@@ -7,7 +7,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 login() {
-  local user="$1" jar="$TMP/${user}.cookies"
+  local user="$1"
+  local jar="$TMP/${user}.cookies"
   curl --fail-with-body --silent --show-error --cookie-jar "$jar" \
     --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
     --request POST --data "{\"username\":\"$user\",\"password\":\"Te12\"}" \
