@@ -1,0 +1,470 @@
+name: Phase 11 Change 7 owner Homework guarded apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/phase11-change7-owner-homeworks-apply-trigger.txt
+      - .github/phase11-change7-payload/**
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  EXPECTED_BUCKET: fpt-materials-dev
+  PAYLOAD_SHA256: 6a7c760c0d309e4a2e083786425ba4c424e661a89ade4123eae28849fa1179ad
+  EXPECTED_CHUNKS: '42'
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  ORIGIN: https://futureperfecttuitions.github.io
+
+jobs:
+  apply:
+    name: Apply and verify owner-confirmed Homeworks
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase11-change7-owner-homeworks-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact operations branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only operations branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          mapfile -t changed < <(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD | sort)
+          test "${#changed[@]}" -eq 43
+          printf '%s\n' "${changed[@]}" | grep -Fxq '.github/phase11-change7-owner-homeworks-apply-trigger.txt'
+          payload_count="$(printf '%s\n' "${changed[@]}" | grep -Ec '^\.github/phase11-change7-payload/payload-[0-9]{3}\.b64part$')"
+          test "$payload_count" -eq "$EXPECTED_CHUNKS"
+          unexpected="$(printf '%s\n' "${changed[@]}" | grep -Ev '^(\.github/phase11-change7-owner-homeworks-apply-trigger\.txt|\.github/phase11-change7-payload/payload-[0-9]{3}\.b64part)$' || true)"
+          test -z "$unexpected"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'Operations branch scope guard: PASS'
+
+      - name: Validate source overlay and locked canonical catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/phase11-change7-owner-homeworks-static-verification.mjs
+          rm -rf /tmp/phase11-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-package >/tmp/phase11-package.log
+          jq -e '.phase==11 and .catalogueLessons==369 and .catalogueCurricula==11 and .lessonsKvWrites==380 and .r2References==1669 and .developmentAllowlistCount==16' /tmp/phase11-package/phase11-apply-summary.json >/dev/null
+          echo 'Canonical catalogue remains locked: PASS'
+
+      - name: Guard isolated V2 development bindings and disabled normal login
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings-before.json >/dev/null
+
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings-before.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-before.json)"
+          ALLOWLIST="$(jq -r '.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text' /tmp/settings-before.json)"
+          TARGET_ALLOWLIST="$(cat /tmp/phase11-package/phase11-dev-allowlist.txt)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings-before.json)"
+          test "$R2" = "$EXPECTED_BUCKET"
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          test "$ALLOWLIST" = "$TARGET_ALLOWLIST"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login is enabled; refusing Change 7 apply.' >&2; exit 1;; esac
+
+          {
+            echo "students=$STUDENTS"
+            echo "lessons=$LESSONS"
+            echo "r2=$R2"
+            echo "db=$DB"
+            echo "allowlist=$ALLOWLIST"
+          } >> "$GITHUB_OUTPUT"
+          echo 'V2 development isolation and login guard: PASS'
+
+      - name: Reconstruct and verify owner payload before any write
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t chunks < <(find .github/phase11-change7-payload -maxdepth 1 -type f -name 'payload-*.b64part' | sort)
+          test "${#chunks[@]}" -eq "$EXPECTED_CHUNKS"
+          cat "${chunks[@]}" | tr -d '\r\n' | base64 --decode >/tmp/change7-homeworks.tar.gz
+          test "$(sha256sum /tmp/change7-homeworks.tar.gz | awk '{print $1}')" = "$PAYLOAD_SHA256"
+          rm -rf /tmp/change7-files
+          mkdir -p /tmp/change7-files
+          tar -xzf /tmp/change7-homeworks.tar.gz -C /tmp/change7-files
+          test "$(find /tmp/change7-files -type f -name '*.pdf' | wc -l)" -eq 21
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+          const manifest = JSON.parse(fs.readFileSync('docs/data/phase11/change7-owner-homeworks.json','utf8'));
+          const expected = [];
+          for (const [lessonId, lesson] of Object.entries(manifest.lessons)) {
+            for (const pair of lesson.homeworks) {
+              for (const kind of ['homework','answerPack']) {
+                const item = pair[kind];
+                if (!item) continue;
+                expected.push({lessonId, ...item});
+              }
+            }
+          }
+          if (expected.length !== 21) throw new Error(`Expected 21 files, got ${expected.length}`);
+          const files = fs.readdirSync('/tmp/change7-files').filter(name => name.toLowerCase().endsWith('.pdf')).sort();
+          if (files.length !== 21) throw new Error(`Extracted PDF count ${files.length}`);
+          const seen = new Set();
+          for (const item of expected) {
+            const name = path.basename(item.r2Key);
+            const file = path.join('/tmp/change7-files', name);
+            if (!fs.existsSync(file)) throw new Error(`Missing payload file: ${name}`);
+            const bytes = fs.readFileSync(file);
+            const sha = crypto.createHash('sha256').update(bytes).digest('hex');
+            if (sha !== item.sha256) throw new Error(`SHA mismatch: ${name}`);
+            if (bytes.length !== item.sizeBytes) throw new Error(`Size mismatch: ${name}`);
+            seen.add(name);
+          }
+          if (seen.size !== 21 || files.some(name => !seen.has(name))) throw new Error('Payload has unexpected or duplicate file names');
+          console.log('All 21 owner files match manifest SHA and size: PASS');
+          NODE
+
+      - name: Snapshot current Worker and all target R2 object states
+        id: snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change7-backup/r2
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change7-backup/worker-before.bin
+          for marker in student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO phase11/view-overrides; do
+            grep -aFq "$marker" /tmp/change7-backup/worker-before.bin
+          done
+
+          jq -r '.lessons | to_entries[] | .value.homeworks[] | [.homework, .answerPack] | .[] | select(. != null) | .r2Key' \
+            docs/data/phase11/change7-owner-homeworks.json >/tmp/change7-target-keys.txt
+          test "$(wc -l </tmp/change7-target-keys.txt)" -eq 21
+          : >/tmp/change7-backup/r2-state.tsv
+          n=0
+          while IFS= read -r key; do
+            n=$((n+1))
+            backup="/tmp/change7-backup/r2/object-$(printf '%02d' "$n").pdf"
+            if npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${key}" --file="$backup" --remote >/tmp/r2-before.log 2>&1; then
+              sha="$(sha256sum "$backup" | awk '{print $1}')"
+              printf '%s\t1\t%s\t%s\n' "$key" "$backup" "$sha" >>/tmp/change7-backup/r2-state.tsv
+            else
+              printf '%s\t0\t-\t-\n' "$key" >>/tmp/change7-backup/r2-state.tsv
+            fi
+          done </tmp/change7-target-keys.txt
+          test "$(wc -l </tmp/change7-backup/r2-state.tsv)" -eq 21
+          echo 'Pre-write Worker/R2 snapshots: PASS'
+
+      - name: Upload pre-write rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change7-prewrite-backup
+          path: /tmp/change7-backup/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload exactly 21 owner-confirmed PDFs to V2 development R2
+        id: r2apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -r '.lessons | to_entries[] | .value.homeworks[] | [.homework, .answerPack] | .[] | select(. != null) | [.r2Key,.sha256] | @tsv' \
+            docs/data/phase11/change7-owner-homeworks.json >/tmp/change7-targets.tsv
+          while IFS=$'\t' read -r key expected_sha; do
+            name="${key##*/}"
+            src="/tmp/change7-files/${name}"
+            test "$(sha256sum "$src" | awk '{print $1}')" = "$expected_sha"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${EXPECTED_BUCKET}/${key}" \
+              --file="$src" --content-type='application/pdf' --remote >/tmp/r2-put.log
+          done </tmp/change7-targets.tsv
+          echo 'All 21 owner-confirmed R2 writes completed.'
+
+      - name: Re-download and SHA verify all 21 uploaded R2 objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/change7-r2-verify
+          mkdir -p /tmp/change7-r2-verify
+          n=0
+          while IFS=$'\t' read -r key expected_sha; do
+            n=$((n+1))
+            dest="/tmp/change7-r2-verify/object-$(printf '%02d' "$n").pdf"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${key}" --file="$dest" --remote >/tmp/r2-get.log
+            test "$(sha256sum "$dest" | awk '{print $1}')" = "$expected_sha"
+          done </tmp/change7-targets.tsv
+          test "$n" -eq 21
+          echo 'All 21 deployed R2 objects SHA-verified: PASS'
+
+      - name: Generate Change 7 V2 runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.change7.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-change7.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run Change 7 Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/change7-worker-build
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.change7.toml --dry-run --outdir /tmp/change7-worker-build >/tmp/change7-dry-run.log
+          for marker in 'Homework Y4E23 Editing.pdf' 'phase11/view-overrides' student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO; do
+            grep -R -aFq "$marker" /tmp/change7-worker-build
+          done
+          echo 'Change 7 Worker dry-run markers: PASS'
+
+      - name: Deploy Change 7 Worker to V2 development only
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.change7.toml \
+            --keep-vars --message 'Phase 11 Change 7 owner-confirmed Homeworks' >/tmp/change7-deploy.log
+
+      - name: Verify deployed Worker markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change7-worker-after.bin
+          for marker in 'Homework Y4E23 Editing.pdf' 'phase11/view-overrides' student_session_profiles X-FPT-Students-KV-Read-Ops VR_HOWTO; do
+            grep -aFq "$marker" /tmp/change7-worker-after.bin
+          done
+          echo 'Deployed Change 7 Worker markers: PASS'
+
+      - name: Run full Phase 11 deployed API acceptance
+        shell: bash
+        run: bash tests/phase11-api-verification.sh
+
+      - name: Prove owner Homework structure, downloads and protected answers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change7-proof
+
+          login(){
+            local user="$1" jar="$2"
+            curl --fail-with-body --silent --show-error --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data "{\"username\":\"$user\",\"password\":\"Te12\"}" \
+              "$WORKER_BASE/api/v1/student/auth/login" >/tmp/change7-proof/login.json
+            jq -e '.ok == true' /tmp/change7-proof/login.json >/dev/null
+          }
+
+          detail(){
+            local jar="$1" lesson="$2" view="$3" out="$4"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" \
+              "$WORKER_BASE/api/v1/student/lessons/$lesson?viewId=$view" >"$out"
+            jq -e '.ok == true and .lesson.locked == false' "$out" >/dev/null
+          }
+
+          verify_download(){
+            local jar="$1" resource_key="$2" view="$3" expected_sha="$4" out="$5"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" \
+              "$WORKER_BASE/api/v1/student/resources/$resource_key/download?viewId=$view" --output "$out"
+            test "$(sha256sum "$out" | awk '{print $1}')" = "$expected_sha"
+          }
+
+          verify_answer(){
+            local jar="$1" resource_key="$2" view="$3" expected_sha="$4" out="$5"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data '{"password":"Te12"}' \
+              "$WORKER_BASE/api/v1/student/resources/$resource_key/answer/authorize?viewId=$view" >/tmp/change7-proof/answer-auth.json
+            path="$(jq -r '.viewerPath // empty' /tmp/change7-proof/answer-auth.json)"
+            test -n "$path"
+            curl --fail-with-body --silent --show-error --cookie "$jar" --cookie-jar "$jar" \
+              --header "Origin: $ORIGIN" "$WORKER_BASE$path" --output "$out"
+            test "$(sha256sum "$out" | awk '{print $1}')" = "$expected_sha"
+          }
+
+          jar4=/tmp/change7-proof/y4.cookies
+          login testy4em "$jar4"
+          detail "$jar4" Y4E23 english-year4 /tmp/change7-proof/y4e23.json
+          jq -e '.lesson.homeworks | length == 2' /tmp/change7-proof/y4e23.json >/dev/null
+          jq -e '.lesson.homeworks[0].homework.available == true and .lesson.homeworks[0].answerPack.available == true and .lesson.homeworks[0].answerPack.passwordRequired == true' /tmp/change7-proof/y4e23.json >/dev/null
+          jq -e '.lesson.homeworks[1].homework.available == true and .lesson.homeworks[1].answerPack == null' /tmp/change7-proof/y4e23.json >/dev/null
+          hw1="$(jq -r '.lesson.homeworks[0].homework.resourceKey' /tmp/change7-proof/y4e23.json)"
+          ap1="$(jq -r '.lesson.homeworks[0].answerPack.resourceKey' /tmp/change7-proof/y4e23.json)"
+          hw2="$(jq -r '.lesson.homeworks[1].homework.resourceKey' /tmp/change7-proof/y4e23.json)"
+          verify_download "$jar4" "$hw1" english-year4 707ef05ede872e41d24ab0f738f5addfac8176af5d806877db0b1fa9231bd178 /tmp/change7-proof/y4e23-hw1.pdf
+          verify_download "$jar4" "$hw2" english-year4 a362f72793f001256048ce468b458bf4bb47c63eb6cf469076b5f59a1edb08aa /tmp/change7-proof/y4e23-hw2.pdf
+          verify_answer "$jar4" "$ap1" english-year4 cb4cacf37dfdab6631a0c4521c3e6599e4367ea0f30383b820000cad9797bbfa /tmp/change7-proof/y4e23-ap1.pdf
+          detail "$jar4" Y4E38 english-year4 /tmp/change7-proof/y4e38.json
+          jq -e '.lesson.homeworks | length == 0' /tmp/change7-proof/y4e38.json >/dev/null
+
+          jar5=/tmp/change7-proof/y5.cookies
+          login testy5em "$jar5"
+          detail "$jar5" Y5E11 english-year5 /tmp/change7-proof/y5e11.json
+          jq -e '.lesson.homeworks | length == 1 and .lesson.homeworks[0].homework.available == true and .lesson.homeworks[0].answerPack == null' /tmp/change7-proof/y5e11.json >/dev/null
+          key="$(jq -r '.lesson.homeworks[0].homework.resourceKey' /tmp/change7-proof/y5e11.json)"
+          verify_download "$jar5" "$key" english-year5 dcca754fba49baf35b87fe79a5fcb05852a3d4138b2137034a5a9ec4df878643 /tmp/change7-proof/y5e11-hw.pdf
+
+          detail "$jar5" Y5E12 english-year5 /tmp/change7-proof/y5e12.json
+          jq -e '.lesson.homeworks | length == 1 and .lesson.homeworks[0].answerPack.passwordRequired == true' /tmp/change7-proof/y5e12.json >/dev/null
+          key="$(jq -r '.lesson.homeworks[0].answerPack.resourceKey' /tmp/change7-proof/y5e12.json)"
+          verify_answer "$jar5" "$key" english-year5 afbb1a605d7ed6d671449fee18d7986679423b46dd727d784943f9da341ca7c8 /tmp/change7-proof/y5e12-ap.pdf
+
+          detail "$jar5" Y5E31 english-year5 /tmp/change7-proof/y5e31.json
+          jq -e '.lesson.homeworks | length == 1 and .lesson.homeworks[0].homework.available == true and .lesson.homeworks[0].answerPack == null' /tmp/change7-proof/y5e31.json >/dev/null
+          detail "$jar5" Y5E15 english-year5 /tmp/change7-proof/y5e15.json
+          jq -e '.lesson.homeworks | length == 0' /tmp/change7-proof/y5e15.json >/dev/null
+          detail "$jar5" Y5E39 english-year5 /tmp/change7-proof/y5e39.json
+          jq -e '.lesson.homeworks | length == 0' /tmp/change7-proof/y5e39.json >/dev/null
+          echo 'Owner Homework deployed API proof: PASS'
+
+      - name: Run real Chrome Phase 11 acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock playwright@latest >/dev/null
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+
+      - name: Re-measure representative pupil KV journey
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-kv-journey.sh /tmp/change7-kv-journey.json
+          jq -e '.totals.studentsKvReadOps <= 6 and .totals.lessonsKvReadOps <= 5 and .totals.totalKvReadOps <= 11' /tmp/change7-kv-journey.json >/dev/null
+          cat /tmp/change7-kv-journey.json
+
+      - name: Reverify V2 settings, D1 security, and R2 targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-after.json
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-after.json >/dev/null
+          jq -e --arg b "$EXPECTED_BUCKET" '.result.bindings[] | select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$b)' /tmp/settings-after.json >/dev/null
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings-after.json)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) exit 1;; esac
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/change7-d1-final.json
+          grep -Fq 'trg_student_sessions_single_active' /tmp/change7-d1-final.json
+          grep -Fq '"ok"' /tmp/change7-d1-final.json
+          while IFS=$'\t' read -r key expected_sha; do
+            tmp="$(mktemp)"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${EXPECTED_BUCKET}/${key}" --file="$tmp" --remote >/tmp/r2-final.log
+            test "$(sha256sum "$tmp" | awk '{print $1}')" = "$expected_sha"
+            rm -f "$tmp"
+          done </tmp/change7-targets.tsv
+          echo 'Final settings/D1/R2 integrity: PASS'
+
+      - name: Roll back Worker on post-deploy failure
+        if: failure() && steps.deploy.outcome == 'success'
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.change7.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-change4.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.change7.rollback.toml \
+            --keep-vars --message 'Rollback Phase 11 Change 7 owner Homeworks' >/tmp/change7-worker-rollback.log
+
+      - name: Roll back all Change 7 R2 writes on failure
+        if: failure() && steps.r2apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r key existed backup sha; do
+            if [ "$existed" = '1' ]; then
+              test "$(sha256sum "$backup" | awk '{print $1}')" = "$sha"
+              npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${EXPECTED_BUCKET}/${key}" \
+                --file="$backup" --content-type='application/pdf' --remote >/tmp/change7-r2-rollback.log
+            else
+              npx --yes wrangler@${WRANGLER_VERSION} r2 object delete "${EXPECTED_BUCKET}/${key}" --remote >/tmp/change7-r2-rollback.log
+            fi
+          done </tmp/change7-backup/r2-state.tsv
+          echo 'Change 7 R2 rollback completed.'
+
+      - name: Completion
+        if: success()
+        run: "echo 'Phase 11 Change 7 owner-confirmed Homework apply and verification: PASS'"
