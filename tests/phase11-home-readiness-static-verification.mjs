@@ -13,6 +13,9 @@ assert.match(script, /\/api\/v1\/student\/auth\/login/);
 assert.match(script, /response\.clone\(\)/);
 assert.match(script, /Curriculum navigation is still loading\. Please try again in a moment\./);
 assert.match(script, /Loading your curriculum…/);
+assert.match(script, /function clearLoadingNotice\(\)/);
+assert.match(script, /if \(response\?\.ok\) \{\s*clearLoadingNotice\(\)/);
+assert.match(script, /holder\.hidden = true/);
 assert.ok(
   html.indexOf('assets/phase11-home-readiness.js') < html.indexOf('assets/phase7.js'),
   'home readiness wrapper must load before phase7.js'
