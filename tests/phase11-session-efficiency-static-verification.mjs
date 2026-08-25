@@ -179,7 +179,13 @@ const efficientEntrypoint = fs.readFileSync(
 );
 assert.match(efficientEntrypoint, /prepareSessionProfileEnv/);
 assert.match(efficientEntrypoint, /appendKvAuditHeaders/);
-assert.match(efficientEntrypoint, /index-phase11-final\.js/);
+assert.match(efficientEntrypoint, /phase11-vr-howto\.js/);
+
+const vrHowToEntrypoint = fs.readFileSync(
+  path.join(root, 'worker', 'src', 'phase11-vr-howto.js'),
+  'utf8'
+);
+assert.match(vrHowToEntrypoint, /index-phase11-final\.js/);
 
 const finalEntrypoint = fs.readFileSync(
   path.join(root, 'worker', 'src', 'index-phase11-final.js'),
