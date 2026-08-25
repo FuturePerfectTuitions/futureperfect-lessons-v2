@@ -1,0 +1,73 @@
+name: Phase 11 Change 7 legacy Worker Homework routing audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-change7-legacy-worker-audit.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER_NAME: frosty-rain-828e
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-change7-legacy-worker-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+      - name: Guard one-file read-only diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          test "$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)" = '.github/workflows/phase11-change7-legacy-worker-audit.yml'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Fetch legacy Worker settings and deployed bundle read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change7worker
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change7worker/settings.json
+          jq -e '.success == true' /tmp/change7worker/settings.json >/dev/null
+          echo 'LEGACY_RESOURCE_BINDINGS'
+          jq -r '.result.bindings[] | select(.type=="r2_bucket" or .type=="kv_namespace" or .type=="plain_text") | [.name,.type,(.bucket_name // .namespace_id // .text // "")] | @tsv' /tmp/change7worker/settings.json | tee /tmp/change7worker/bindings.tsv
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change7worker/worker.bin
+          test -s /tmp/change7worker/worker.bin
+          echo "worker_bytes=$(wc -c </tmp/change7worker/worker.bin)"
+
+      - name: Extract Homework/resource routing evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          strings /tmp/change7worker/worker.bin >/tmp/change7worker/worker.strings.txt
+          echo 'HOMEWORK_RESOURCE_EVIDENCE'
+          grep -Ein -C 3 'homework|answer.?pack|r2|bucket|download|resource|prelesson|materials|lesson.?files' /tmp/change7worker/worker.strings.txt \
+            | head -n 1200 | tee /tmp/change7worker/resource-evidence.txt || true
+
+      - name: Upload read-only evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change7-legacy-worker-audit
+          path: /tmp/change7worker/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm no mutation
+        run: echo 'Legacy Worker routing audit complete. No Cloudflare or GitHub state was modified.'
