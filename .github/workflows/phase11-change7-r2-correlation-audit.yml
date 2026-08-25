@@ -1,0 +1,134 @@
+name: Phase 11 Change 7 R2 Homework correlation audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-change7-r2-correlation-audit.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_BUCKET: fpt-materials-dev
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-change7-r2-correlation-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard read-only V2 development audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          test "$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)" = '.github/workflows/phase11-change7-r2-correlation-audit.yml'
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e --arg b "$EXPECTED_BUCKET" '.result.bindings[] | select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$b)' /tmp/settings.json >/dev/null
+
+      - name: List complete R2 inventory read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '[]' >/tmp/r2.json
+          cursor=''
+          while :; do
+            url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${EXPECTED_BUCKET}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded}"
+            fi
+            page="$(curl --fail --silent --show-error --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]?.key]' <<<"$page" >/tmp/page.json
+            jq -s '.[0]+.[1]' /tmp/r2.json /tmp/page.json >/tmp/next.json
+            mv /tmp/next.json /tmp/r2.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+
+      - name: Correlate target lessons with every R2 object
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/change7correlation
+          node --experimental-default-type=module <<'NODE' | tee /tmp/change7correlation/correlation.txt
+          import fs from 'node:fs';
+          import { loadPhase11Catalogue, validatePhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const catalogue = loadPhase11Catalogue();
+          validatePhase11Catalogue(catalogue);
+          const objects = JSON.parse(fs.readFileSync('/tmp/r2.json','utf8'));
+
+          function refs(value, out = []) {
+            if (!value || typeof value !== 'object') return out;
+            if (typeof value.r2Key === 'string' && value.r2Key.trim()) out.push(value.r2Key.trim());
+            if (Array.isArray(value)) value.forEach(item => refs(item,out));
+            else for (const [k,v] of Object.entries(value)) if (k !== 'r2Key') refs(v,out);
+            return out;
+          }
+          const canonicalRefs = new Set(refs(catalogue));
+          const extras = objects.filter(key => !canonicalRefs.has(key));
+          console.log(`R2_TOTAL=${objects.length}`);
+          console.log(`CANONICAL_REFERENCES=${canonicalRefs.size}`);
+          console.log(`UNREFERENCED_OBJECTS=${extras.length}`);
+          console.log('\nALL_UNREFERENCED_OBJECTS');
+          extras.sort().forEach(key => console.log(key));
+
+          const targets = ['Y4E23','Y4E25','Y4E26','Y4E27','Y4E38','Y5E3','Y5E4','Y5E6','Y5E7','Y5E11','Y5E12','Y5E15','Y5E31','Y5E39','Y6M68'];
+          const stop = new Set(['and','the','with','writing','lesson','english','maths','reasoning','focus','revision','verbal','reports']);
+          const words = text => String(text||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(w => w.length >= 4 && !stop.has(w));
+          const norm = text => String(text||'').toLowerCase().replace(/[^a-z0-9]+/g,'');
+
+          for (const lessonId of targets) {
+            const lesson = catalogue.lessons[lessonId];
+            const displayIds = Object.values(lesson.displayIds || {}).map(String);
+            const titleWords = [...new Set(words(lesson.title))];
+            const ownRefs = refs(lesson);
+            const candidates = [];
+            for (const key of objects) {
+              const lower = key.toLowerCase();
+              const nk = norm(key);
+              let score = 0;
+              const reasons = [];
+              if (lower.includes(`/${lessonId.toLowerCase()}/`)) { score += 20; reasons.push('canonical-folder'); }
+              if (displayIds.some(id => id && nk.includes(norm(id)))) { score += 12; reasons.push('display-id'); }
+              const hits = titleWords.filter(w => lower.includes(w));
+              if (hits.length) { score += hits.length * 3; reasons.push(`title:${hits.join(',')}`); }
+              if (/homework|\bhw\b/i.test(key)) { score += 2; reasons.push('homework-name'); }
+              if (/answer|answers|\bap\b/i.test(key)) score -= 2;
+              if (score >= 5) candidates.push({ score, key, referenced: canonicalRefs.has(key), reasons });
+            }
+            candidates.sort((a,b) => b.score-a.score || a.key.localeCompare(b.key));
+            console.log(`\nTARGET ${lessonId} ${JSON.stringify(lesson.title)} display=${displayIds.join('|')}`);
+            console.log(`OWN_CANONICAL_REFS=${ownRefs.length}`);
+            ownRefs.forEach(key => console.log(`  REF ${key}`));
+            console.log(`CORRELATED_CANDIDATES=${candidates.length}`);
+            candidates.slice(0,40).forEach(c => console.log(`  SCORE=${c.score} referenced=${c.referenced} ${c.reasons.join(';')} :: ${c.key}`));
+          }
+          NODE
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change7-r2-correlation-audit
+          path: /tmp/change7correlation/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm no mutation
+        run: echo 'R2 correlation audit complete. No Cloudflare or GitHub state was modified.'
