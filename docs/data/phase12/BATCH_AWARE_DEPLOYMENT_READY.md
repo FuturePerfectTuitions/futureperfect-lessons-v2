@@ -1,0 +1,1 @@
+Phase 12 batch-aware runtime deployment is guarded for the isolated development Worker only. Operational September batch definitions and assignments remain intentionally absent until exact owner-supplied Column C batch keys are available.
