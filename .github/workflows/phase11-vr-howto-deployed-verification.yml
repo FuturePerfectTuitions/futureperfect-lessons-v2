@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - '.github/phase11-session-efficiency-trigger.txt'
+      - '.github/phase11-vr-howto-verify-trigger.txt'
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Wait for guarded deploy and verify VR How To
+      - name: Verify deployed VR How To after guarded deploy
         shell: bash
         run: |
           set -euo pipefail
