@@ -1,0 +1,254 @@
+{
+  "phase": 11,
+  "change": 7,
+  "status": "owner_review_complete",
+  "confirmedHomeworkLessons": [
+    "Y4E23",
+    "Y4E25",
+    "Y4E26",
+    "Y4E27",
+    "Y5E3",
+    "Y5E4",
+    "Y5E6",
+    "Y5E7",
+    "Y5E11",
+    "Y5E12",
+    "Y5E31"
+  ],
+  "confirmedNoHomeworkLessons": [
+    "Y4E38",
+    "Y5E15",
+    "Y5E39",
+    "Y6M68"
+  ],
+  "excludedUploads": [
+    "Y5E14 Verbal Reasoning"
+  ],
+  "lessons": {
+    "Y4E23": {
+      "displayId": "Y4T2E18",
+      "title": "Editing",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y4E23 Editing.pdf",
+            "r2Key": "english/year4/Y4E23/homework/sheets/Homework Y4E23 Editing.pdf",
+            "sha256": "707ef05ede872e41d24ab0f738f5addfac8176af5d806877db0b1fa9231bd178",
+            "sizeBytes": 2302100
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y4E23 Editing.pdf",
+            "r2Key": "english/year4/Y4E23/homework/answers/Answer Pack Homework Y4E23 Editing.pdf",
+            "sha256": "cb4cacf37dfdab6631a0c4521c3e6599e4367ea0f30383b820000cad9797bbfa",
+            "sizeBytes": 625584
+          }
+        },
+        {
+          "homework": {
+            "displayName": "Week 2 Homework Y4E23 Editing.pdf",
+            "r2Key": "english/year4/Y4E23/homework/sheets/Week 2 Homework Y4E23 Editing.pdf",
+            "sha256": "a362f72793f001256048ce468b458bf4bb47c63eb6cf469076b5f59a1edb08aa",
+            "sizeBytes": 656985
+          },
+          "answerPack": null
+        }
+      ]
+    },
+    "Y4E25": {
+      "displayId": "Y4T2E20",
+      "title": "Word Families",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y4E25 Word Families.pdf",
+            "r2Key": "english/year4/Y4E25/homework/sheets/Homework Y4E25 Word Families.pdf",
+            "sha256": "1d43c06dca3564a6999199fbfc50d7ea8a996cd96cb3b7da087b54cd3bd39f89",
+            "sizeBytes": 488431
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y4E25 Word Families.pdf",
+            "r2Key": "english/year4/Y4E25/homework/answers/Answer Pack Homework Y4E25 Word Families.pdf",
+            "sha256": "e7c95f41c6eafb57ec02ed760ea2327cb1cdc118dc3204f187a76a8bbb106546",
+            "sizeBytes": 418784
+          }
+        }
+      ]
+    },
+    "Y4E26": {
+      "displayId": "Y4T2E21",
+      "title": "Prepositional Phrases and Expanded Noun Phrases",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf",
+            "r2Key": "english/year4/Y4E26/homework/sheets/Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf",
+            "sha256": "8b915e74620659203d0e3aea42c4c1e5efb0c6e65a0c1b2376d66476c44baab4",
+            "sizeBytes": 1064607
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf",
+            "r2Key": "english/year4/Y4E26/homework/answers/Answer Pack Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf",
+            "sha256": "ff1d096dfb62d4fdf38e77352f55073640929801f37b6a0e29c066c952f85798",
+            "sizeBytes": 338129
+          }
+        }
+      ]
+    },
+    "Y4E27": {
+      "displayId": "Y4T2E22",
+      "title": "Inverted Commas and Speech Punctuations 1",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y4E27 Inverted Commas and Speech Punctuations.pdf",
+            "r2Key": "english/year4/Y4E27/homework/sheets/Homework Y4E27 Inverted Commas and Speech Punctuations.pdf",
+            "sha256": "63c513e24da94a8cc5345731f918f968de1256978ce2dcd0d15682005a648d69",
+            "sizeBytes": 931316
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y4E27 Inverted Commas and Speech Punctuations.pdf",
+            "r2Key": "english/year4/Y4E27/homework/answers/Answer Pack Homework Y4E27 Inverted Commas and Speech Punctuations.pdf",
+            "sha256": "75ccfb31ac4e059d113f5e88a62b042ecf09c2c7849ececcb87f768009f924a2",
+            "sizeBytes": 273770
+          }
+        }
+      ]
+    },
+    "Y5E3": {
+      "displayId": "Y5T1E02",
+      "title": "Figures of Speech and Comprehension",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E3 Figures of Speech and comprehension.pdf",
+            "r2Key": "english/year5/Y5E3/homework/sheets/Homework Y5E3 Figures of Speech and comprehension.pdf",
+            "sha256": "e8ba797fd3245e08d2386a911fb9e0557d4a370e9ca1f4d45587c56b5d495d1f",
+            "sizeBytes": 2020771
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Y5E3 Figures of Speech and comprehension.pdf",
+            "r2Key": "english/year5/Y5E3/homework/answers/Answer Pack Y5E3 Figures of Speech and comprehension.pdf",
+            "sha256": "a1fcf901a0afab0cf1927e5079cb6ea4943c50544c6e12b03200ac054671749b",
+            "sizeBytes": 348220
+          }
+        }
+      ]
+    },
+    "Y5E4": {
+      "displayId": "Y5T1E03",
+      "title": "Non Chronological Report Writing",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E4 Non Chronological Report Writing.pdf",
+            "r2Key": "english/year5/Y5E4/homework/sheets/Homework Y5E4 Non Chronological Report Writing.pdf",
+            "sha256": "f76d9bd849c1235fa54f1e3567274f2269d0e5226a183bfa54058889fcb91dc9",
+            "sizeBytes": 5865046
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y5E4 Non Chronological Report Writing.pdf",
+            "r2Key": "english/year5/Y5E4/homework/answers/Answer Pack Homework Y5E4 Non Chronological Report Writing.pdf",
+            "sha256": "6d6181a75e36a28a08f65795e2a7694220ae2324acc1701b2580a3c9d295fc64",
+            "sizeBytes": 2071455
+          }
+        }
+      ]
+    },
+    "Y5E6": {
+      "displayId": "Y5T1E05",
+      "title": "Instructional Reports",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E6 Instructional Reports.pdf",
+            "r2Key": "english/year5/Y5E6/homework/sheets/Homework Y5E6 Instructional Reports.pdf",
+            "sha256": "43adfe950a4f4b8a1bb944edee0a36169d02afdd579991905919dae7eb5ee999",
+            "sizeBytes": 1172969
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y5E6 Instructional Reports.pdf",
+            "r2Key": "english/year5/Y5E6/homework/answers/Answer Pack Homework Y5E6 Instructional Reports.pdf",
+            "sha256": "19a102e9872e4105bb46422b0dd6c8faac8a43610bdd524e197fb67fd7dbbf73",
+            "sizeBytes": 1774851
+          }
+        }
+      ]
+    },
+    "Y5E7": {
+      "displayId": "Y5T1E06",
+      "title": "Verbal Reasoning",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E7 Verbal Reasoning.pdf",
+            "r2Key": "english/year5/Y5E7/homework/sheets/Homework Y5E7 Verbal Reasoning.pdf",
+            "sha256": "fca552b44fdff08177a709f3a5ac063e463faccc14ebd27fe34b5bad0d8edccc",
+            "sizeBytes": 570448
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Y5E7 Verbal Reasoning.pdf",
+            "r2Key": "english/year5/Y5E7/homework/answers/Answer Pack Y5E7 Verbal Reasoning.pdf",
+            "sha256": "8d1b01e1acdd671790b128ea023e08e757e864e375afc2793913a23e31577de9",
+            "sizeBytes": 199757
+          }
+        }
+      ]
+    },
+    "Y5E11": {
+      "displayId": "Y5T1E08",
+      "title": "Advertising",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E11 Advertising.pdf",
+            "r2Key": "english/year5/Y5E11/homework/sheets/Homework Y5E11 Advertising.pdf",
+            "sha256": "dcca754fba49baf35b87fe79a5fcb05852a3d4138b2137034a5a9ec4df878643",
+            "sizeBytes": 924721
+          },
+          "answerPack": null
+        }
+      ]
+    },
+    "Y5E12": {
+      "displayId": "Y5T1E09",
+      "title": "Diary Writing",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E12 Diary Writing.pdf",
+            "r2Key": "english/year5/Y5E12/homework/sheets/Homework Y5E12 Diary Writing.pdf",
+            "sha256": "81a3ab96430a25045a7b9d4c961cfee55721ef71f86feb661aa0f3bb67893859",
+            "sizeBytes": 2953019
+          },
+          "answerPack": {
+            "displayName": "Answer Pack Homework Y5E12 Diary Writing.pdf",
+            "r2Key": "english/year5/Y5E12/homework/answers/Answer Pack Homework Y5E12 Diary Writing.pdf",
+            "sha256": "afbb1a605d7ed6d671449fee18d7986679423b46dd727d784943f9da341ca7c8",
+            "sizeBytes": 12291
+          }
+        }
+      ]
+    },
+    "Y5E31": {
+      "displayId": "Y5T3E28",
+      "title": "Creative Writing - Writing the Dilemma",
+      "homeworks": [
+        {
+          "homework": {
+            "displayName": "Homework Y5E31 Creative Writing Writing the Dilemma.pdf",
+            "r2Key": "english/year5/Y5E31/homework/sheets/Homework Y5E31 Creative Writing Writing the Dilemma.pdf",
+            "sha256": "2e4b10223f6fef082dffcf5c699b540dd0eb36888d05e6960be94cb3b381dfa8",
+            "sizeBytes": 62703
+          },
+          "answerPack": null
+        }
+      ]
+    }
+  },
+  "totals": {
+    "lessonsWithHomework": 11,
+    "homeworkPairs": 12,
+    "answerPacks": 9,
+    "r2Files": 21
+  }
+}
