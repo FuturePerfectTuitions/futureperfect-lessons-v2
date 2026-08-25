@@ -1,0 +1,26 @@
+name: Phase 11 view display-name static verification
+
+on:
+  pull_request:
+    paths:
+      - 'worker/src/index-phase11-efficient.js'
+      - 'worker/src/phase11-view-display-names.js'
+      - 'tests/phase11-view-display-names-static-verification.mjs'
+      - '.github/workflows/phase11-view-display-names-static-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify Year 5 Maths view-specific display names
+        run: |
+          node --check worker/src/index-phase11-efficient.js
+          node --check worker/src/phase11-view-display-names.js
+          node --experimental-default-type=module tests/phase11-view-display-names-static-verification.mjs
