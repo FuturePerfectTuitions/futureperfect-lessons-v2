@@ -61,6 +61,7 @@ function answerIdentity(value) {
   const name = text(value?.displayName || value?.name).toLowerCase().replace(/\.pdf$/i, '');
   if (!name) return '';
   return name
+    .replace(/\b(?:l\d+t\d+m\d+|y\d+t\d+(?:m|e|ee)\d+|y\d+[me]\d+)\b/g, ' ')
     .replace(/\b(?:answer|pack|homework)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
