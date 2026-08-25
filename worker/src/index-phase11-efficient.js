@@ -1,4 +1,4 @@
-import phase11Worker from './index-phase11-final.js';
+import phase11Worker from './phase11-vr-howto.js';
 import {
   prepareSessionProfileEnv,
   persistSessionProfile

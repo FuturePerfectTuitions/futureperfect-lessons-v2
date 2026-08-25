@@ -1,0 +1,21 @@
+name: Phase 11 VR How To deployed verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/phase11-session-efficiency-trigger.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Wait for guarded deploy and verify VR How To
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-vr-howto-deployed-verification.sh
