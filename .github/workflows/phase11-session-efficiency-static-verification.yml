@@ -9,8 +9,10 @@ on:
       - 'worker/src/phase11-kv-audit.js'
       - 'worker/migrations/0007_student_session_profiles.sql'
       - 'tests/phase11-session-efficiency-static-verification.mjs'
+      - 'tests/phase11-session-efficiency-workflow-static-verification.mjs'
       - 'tests/phase11-kv-journey.sh'
       - '.github/workflows/phase11-session-efficiency-static-verification.yml'
+      - '.github/workflows/phase11-session-efficiency-deploy.yml'
 
 permissions:
   contents: read
@@ -32,6 +34,7 @@ jobs:
           node --check worker/src/phase11-kv-audit.js
           bash -n tests/phase11-kv-journey.sh
           node --experimental-default-type=module tests/phase11-session-efficiency-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-session-efficiency-workflow-static-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
           grep -Fq 'CREATE TABLE IF NOT EXISTS student_session_profiles' worker/migrations/0007_student_session_profiles.sql
