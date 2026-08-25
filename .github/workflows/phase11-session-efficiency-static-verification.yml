@@ -9,6 +9,7 @@ on:
       - 'worker/src/phase11-kv-audit.js'
       - 'worker/migrations/0007_student_session_profiles.sql'
       - 'tests/phase11-session-efficiency-static-verification.mjs'
+      - 'tests/phase11-kv-journey.sh'
       - '.github/workflows/phase11-session-efficiency-static-verification.yml'
 
 permissions:
@@ -29,6 +30,7 @@ jobs:
           node --check worker/src/index-phase11-efficient.js
           node --check worker/src/phase11-session-profile.js
           node --check worker/src/phase11-kv-audit.js
+          bash -n tests/phase11-kv-journey.sh
           node --experimental-default-type=module tests/phase11-session-efficiency-static-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
