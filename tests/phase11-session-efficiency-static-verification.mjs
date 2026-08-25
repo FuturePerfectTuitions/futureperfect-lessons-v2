@@ -190,7 +190,7 @@ assert.match(finalEntrypoint, /syntheticLessonRequest/);
 assert.match(finalEntrypoint, /FROM answer_view_tokens/);
 assert.match(finalEntrypoint, /phase11NavigationEnv\(env, syntheticLessonRequest\(request, parsed\.lessonId\)\)/);
 assert.match(finalEntrypoint, /phase11NavigationEnv\(env, syntheticLessonRequest\(request, lessonId\)\)/);
-assert.match(finalEntrypoint, /answer\/authorize/);
-assert.match(finalEntrypoint, /answer-view/);
+assert.match(finalEntrypoint, /authorizeMatch/);
+assert.match(finalEntrypoint, /answerViewMatch/);
 
 console.log('Phase 11 STUDENTS_KV/session efficiency static verification: PASS');
