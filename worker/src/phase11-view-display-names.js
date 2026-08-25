@@ -1,8 +1,15 @@
+import { PHASE11_NAVIGATION_MANIFEST } from './phase11-navigation-manifest.generated.js';
+
 const YEAR5_MATHS_VIEW = 'maths-year5';
 const LEGACY_LEVEL2_CODE = /\bL2T\d+M\d+\b/gi;
 
 function displayLessonIdForView(record, viewId) {
   return String(record?.displayIds?.[String(viewId || '').trim()] || '').trim();
+}
+
+function displayLessonIdForLesson(lessonId, viewId) {
+  const record = PHASE11_NAVIGATION_MANIFEST?.lessons?.[String(lessonId || '').trim()] || null;
+  return displayLessonIdForView(record, viewId);
 }
 
 function rewriteLegacyLevel2Code(value, displayLessonId) {
@@ -28,16 +35,14 @@ function rewriteDisplayNames(value, displayLessonId) {
   return value;
 }
 
-function normaliseLessonDisplayNamesForView(lesson, record, viewId) {
+function normaliseLessonDisplayNamesForView(lesson, displayLessonId, viewId) {
   if (String(viewId || '').trim() !== YEAR5_MATHS_VIEW) return lesson;
-  const displayLessonId = displayLessonIdForView(record, viewId);
-  if (!displayLessonId) return lesson;
+  if (!String(displayLessonId || '').trim()) return lesson;
   return rewriteDisplayNames(lesson, displayLessonId);
 }
 
-function normaliseDisplayNameForView(displayName, record, viewId) {
+function normaliseDisplayNameForView(displayName, displayLessonId, viewId) {
   if (String(viewId || '').trim() !== YEAR5_MATHS_VIEW) return String(displayName || '');
-  const displayLessonId = displayLessonIdForView(record, viewId);
   return rewriteLegacyLevel2Code(displayName, displayLessonId);
 }
 
@@ -45,6 +50,7 @@ export {
   YEAR5_MATHS_VIEW,
   LEGACY_LEVEL2_CODE,
   displayLessonIdForView,
+  displayLessonIdForLesson,
   rewriteLegacyLevel2Code,
   normaliseLessonDisplayNamesForView,
   normaliseDisplayNameForView
