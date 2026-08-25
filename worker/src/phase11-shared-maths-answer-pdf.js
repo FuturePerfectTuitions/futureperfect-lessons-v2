@@ -1,12 +1,4 @@
-const YEAR5_MATHS_VIEW = 'maths-year5';
-const TARGET_LESSON_ID = 'Y5M1';
-const TARGET_ANSWER_INDEX = 1;
-
-const SHARED_LEVEL2_R2_KEY =
-  'maths/level2/Y5M1/homework/answers/L2T1M01 Answer Pack Homework Number and Place Value I.pdf';
-
-const YEAR5_R2_KEY =
-  'phase11/view-overrides/maths-year5/Y5M1/homework/answers/Y5T1M01 Answer Pack Homework Number and Place Value I.pdf';
+import { sharedMathsAnswerPdfOverride } from './phase11-shared-maths-answer-pdf-overrides.js';
 
 function decodeSegment(value) {
   try {
@@ -26,25 +18,20 @@ function parseAnswerResourceKey(value) {
   return { lessonId, answerIndex };
 }
 
-function answerR2KeyForView({ viewId, lessonId, answerIndex, defaultR2Key }) {
-  const fallback = String(defaultR2Key || '').trim();
-  if (
-    String(viewId || '').trim() === YEAR5_MATHS_VIEW &&
-    String(lessonId || '').trim() === TARGET_LESSON_ID &&
-    Number(answerIndex) === TARGET_ANSWER_INDEX &&
-    fallback === SHARED_LEVEL2_R2_KEY
-  ) {
-    return YEAR5_R2_KEY;
-  }
-  return fallback;
-}
-
-function isTargetAnswer({ viewId, lessonId, answerIndex }) {
-  return (
-    String(viewId || '').trim() === YEAR5_MATHS_VIEW &&
-    String(lessonId || '').trim() === TARGET_LESSON_ID &&
-    Number(answerIndex) === TARGET_ANSWER_INDEX
-  );
+function answerOverrideTarget({ viewId, lessonId, answerIndex }) {
+  const audited = sharedMathsAnswerPdfOverride(viewId, lessonId, answerIndex);
+  if (!audited) return null;
+  return {
+    viewId: audited.viewId,
+    lessonId: audited.lessonId,
+    answerIndex: audited.answerIndex,
+    yearCode: audited.yearCode,
+    levelCode: audited.levelCode,
+    sourceR2Key: audited.sourceR2Key,
+    sourceSha256: audited.sourceSha256,
+    sourceLevelTextCount: audited.sourceLevelTextCount,
+    r2Key: audited.overrideR2Key
+  };
 }
 
 function bindMethods(target, property) {
@@ -52,18 +39,15 @@ function bindMethods(target, property) {
   return typeof value === 'function' ? value.bind(target) : value;
 }
 
-function withYear5R2Override(env) {
+function withAnswerR2Override(env, overrideKey) {
   const sourceR2 = env?.MATERIALS_R2;
-  if (!sourceR2) return env;
+  const targetKey = String(overrideKey || '').trim();
+  if (!sourceR2 || !targetKey) return env;
 
   const wrappedR2 = new Proxy(sourceR2, {
     get(target, property) {
       if (property === 'head' || property === 'get') {
-        return async (key, ...args) => {
-          const requested = String(key || '');
-          const actual = requested === SHARED_LEVEL2_R2_KEY ? YEAR5_R2_KEY : requested;
-          return target[property](actual, ...args);
-        };
+        return async (_requestedKey, ...args) => target[property](targetKey, ...args);
       }
       return bindMethods(target, property);
     }
@@ -136,7 +120,7 @@ async function sha256Hex(value) {
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function prepareYear5AnswerPdfEnv(request, env) {
+async function prepareSharedMathsAnswerPdfEnv(request, env) {
   const url = new URL(request.url);
 
   const authorizeMatch = url.pathname.match(
@@ -145,7 +129,8 @@ async function prepareYear5AnswerPdfEnv(request, env) {
   if (authorizeMatch && request.method === 'POST') {
     const parsed = parseAnswerResourceKey(authorizeMatch[1]);
     const viewId = String(url.searchParams.get('viewId') || '').trim();
-    return parsed && isTargetAnswer({ viewId, ...parsed }) ? withYear5R2Override(env) : env;
+    const target = parsed ? answerOverrideTarget({ viewId, ...parsed }) : null;
+    return target ? withAnswerR2Override(env, target.r2Key) : env;
   }
 
   const answerViewMatch = url.pathname.match(/^\/api\/v1\/student\/answer-view\/([^/]+)$/);
@@ -175,29 +160,21 @@ async function prepareYear5AnswerPdfEnv(request, env) {
 
   let runtimeEnv = withAnswerTokenRowCache(env, tokenHash, tokenRow || null);
   const parsed = parseAnswerResourceKey(tokenRow?.resource_key || '');
-  if (
-    parsed &&
-    isTargetAnswer({
-      viewId: tokenRow?.view_id,
-      lessonId: tokenRow?.lesson_id,
-      answerIndex: parsed.answerIndex
-    })
-  ) {
-    runtimeEnv = withYear5R2Override(runtimeEnv);
-  }
+  const target = parsed
+    ? answerOverrideTarget({
+        viewId: tokenRow?.view_id,
+        lessonId: tokenRow?.lesson_id,
+        answerIndex: parsed.answerIndex
+      })
+    : null;
+  if (target) runtimeEnv = withAnswerR2Override(runtimeEnv, target.r2Key);
   return runtimeEnv;
 }
 
 export {
-  YEAR5_MATHS_VIEW,
-  TARGET_LESSON_ID,
-  TARGET_ANSWER_INDEX,
-  SHARED_LEVEL2_R2_KEY,
-  YEAR5_R2_KEY,
   parseAnswerResourceKey,
-  answerR2KeyForView,
-  isTargetAnswer,
-  withYear5R2Override,
+  answerOverrideTarget,
+  withAnswerR2Override,
   withAnswerTokenRowCache,
-  prepareYear5AnswerPdfEnv
+  prepareSharedMathsAnswerPdfEnv
 };

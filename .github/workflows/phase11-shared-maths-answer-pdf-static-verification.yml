@@ -1,0 +1,38 @@
+name: Phase 11 shared Maths Answer Pack PDF static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/phase11-shared-maths-answer-pdf.js
+      - worker/src/phase11-shared-maths-answer-pdf-overrides.js
+      - worker/src/index-phase11-change4.js
+      - scripts/phase11-build-shared-maths-answer-pdf.py
+      - tests/phase11-shared-maths-answer-pdf-static-verification.mjs
+      - .github/workflows/phase11-shared-maths-answer-pdf-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Generate navigation manifest
+        run: node --experimental-default-type=module scripts/phase11-navigation-manifest.mjs >/tmp/phase11-navigation-manifest.json
+      - name: Verify shared Maths Answer Pack routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/phase11-shared-maths-answer-pdf.js
+          node --check worker/src/phase11-shared-maths-answer-pdf-overrides.js
+          node --check worker/src/index-phase11-change4.js
+          node tests/phase11-shared-maths-answer-pdf-static-verification.mjs
+          python -m py_compile scripts/phase11-build-shared-maths-answer-pdf.py
+          grep -Fq 'maths-year4' worker/src/phase11-view-display-names.js
+          grep -Fq 'maths-year5' worker/src/phase11-view-display-names.js
+          grep -Fq 'maths-year6' worker/src/phase11-view-display-names.js
