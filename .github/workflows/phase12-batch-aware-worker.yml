@@ -10,6 +10,7 @@ on:
       - worker/src/phase11-session-profile.js
       - worker/wrangler.toml
       - tests/phase11-screenpal-static-verification.mjs
+      - tests/phase11-catalogue-static-verification.mjs
       - tests/phase12-batch-aware-worker-verification.mjs
       - .github/workflows/phase12-batch-aware-worker.yml
 
@@ -172,8 +173,8 @@ jobs:
 
           rollback_worker() {
             set +e
-            make_config 'src/index-phase11-efficient.js' /tmp/wrangler.rollback.toml
-            $W deploy --config /tmp/wrangler.rollback.toml --keep-vars \
+            make_config 'src/index-phase11-efficient.js' 'worker/wrangler.phase11.rollback.toml'
+            $W deploy --config worker/wrangler.phase11.rollback.toml --keep-vars \
               --message 'Rollback Phase 12 batch-aware Worker acceptance failure' >/tmp/rollback.log 2>&1
             set -e
           }
@@ -186,8 +187,8 @@ jobs:
           }
           trap failure ERR
 
-          make_config 'src/index-phase12.js' /tmp/wrangler.phase12.toml
-          $W deploy --config /tmp/wrangler.phase12.toml --keep-vars \
+          make_config 'src/index-phase12.js' 'worker/wrangler.phase12.runtime.toml'
+          $W deploy --config worker/wrangler.phase12.runtime.toml --keep-vars \
             --message 'Phase 12 batch-aware development Worker' >/tmp/deploy.log 2>&1
 
           curl --fail --silent --show-error \
