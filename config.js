@@ -4,5 +4,5 @@ window.FPT_V2_CONFIG = Object.freeze({
 });
 
 if (/\/phase11\.html$/.test(window.location.pathname)) {
-  document.write('<script src="assets/phase11-vr-howto.js"><\\/script>');
+  document.write('<script src="assets/phase11-vr-howto.js"></script>');
 }
