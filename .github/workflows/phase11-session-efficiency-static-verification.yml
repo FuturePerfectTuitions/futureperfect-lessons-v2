@@ -1,0 +1,41 @@
+name: Phase 11 session efficiency static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/src/index-phase11-efficient.js'
+      - 'worker/src/phase11-session-profile.js'
+      - 'worker/src/phase11-kv-audit.js'
+      - 'worker/migrations/0007_student_session_profiles.sql'
+      - 'tests/phase11-session-efficiency-static-verification.mjs'
+      - 'tests/phase11-session-efficiency-workflow-static-verification.mjs'
+      - 'tests/phase11-kv-journey.sh'
+      - '.github/workflows/phase11-session-efficiency-static-verification.yml'
+      - '.github/workflows/phase11-session-efficiency-deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify Phase 11 session/KV efficiency only
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11-efficient.js
+          node --check worker/src/phase11-session-profile.js
+          node --check worker/src/phase11-kv-audit.js
+          bash -n tests/phase11-kv-journey.sh
+          node --experimental-default-type=module tests/phase11-session-efficiency-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-session-efficiency-workflow-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
+          grep -Fq 'CREATE TABLE IF NOT EXISTS student_session_profiles' worker/migrations/0007_student_session_profiles.sql
+          grep -Fq 'trg_student_session_profile_delete_on_revoke' worker/migrations/0007_student_session_profiles.sql
