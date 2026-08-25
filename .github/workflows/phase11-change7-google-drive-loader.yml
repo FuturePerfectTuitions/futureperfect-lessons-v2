@@ -67,7 +67,7 @@ jobs:
           rm -rf /tmp/change7-key
           mkdir -p /tmp/change7-key
           unzip -q /tmp/change7-key.zip -d /tmp/change7-key
-          (cd /tmp/change7-key && sha256sum -c SHA256SUMS.txt)
+          sed 's#/tmp/change7-keygen/#/tmp/change7-key/#g' /tmp/change7-key/SHA256SUMS.txt | sha256sum -c -
 
       - name: Decrypt package and verify guarded apply script
         shell: bash
