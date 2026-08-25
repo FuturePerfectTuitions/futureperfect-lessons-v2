@@ -1,0 +1,301 @@
+name: Phase 11 session efficiency guarded deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/phase11-session-efficiency-trigger.txt]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy:
+    name: Deploy and measure Phase 11 session efficiency
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase11-session-efficiency-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact trigger branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard trigger-only branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          test "$(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD)" = ".github/phase11-session-efficiency-trigger.txt"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Validate exact Phase 11 package and efficiency gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11-efficient.js
+          node --check worker/src/index-phase11-final.js
+          node --check worker/src/phase11-session-profile.js
+          node --check worker/src/phase11-kv-audit.js
+          bash -n tests/phase11-api-verification.sh
+          bash -n tests/phase11-kv-journey.sh
+          node --experimental-default-type=module tests/phase11-session-efficiency-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs
+          rm -rf /tmp/phase11-worker-apply
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-worker-apply >/tmp/phase11-worker-package.log
+          jq -e '.phase==11 and .catalogueLessons==369 and .catalogueCurricula==11 and .lessonsKvWrites==380 and .r2References==1669 and .developmentAllowlistCount==16' /tmp/phase11-worker-apply/phase11-apply-summary.json >/dev/null
+
+      - name: Guard isolated V2 development bindings and login state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ALLOWED_ORIGINS" and .type=="plain_text" and .text=="https://futureperfecttuitions.github.io")' /tmp/settings.json >/dev/null
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          CURRENT="$(jq -r '.result.bindings[] | select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text") | .text' /tmp/settings.json)"
+          TARGET="$(cat /tmp/phase11-worker-apply/phase11-dev-allowlist.txt)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          test "$CURRENT" = "$TARGET"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login appears enabled; refusing Phase 11 efficiency deploy.' >&2; exit 1;; esac
+          { echo "students=$STUDENTS"; echo "lessons=$LESSONS"; echo "r2=$R2"; echo "db=$DB"; echo "allowlist=$CURRENT"; } >> "$GITHUB_OUTPUT"
+
+      - name: Verify D1 baseline before additive migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" > /tmp/d1-before.json
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-before.json
+          grep -Fq '"ok"' /tmp/d1-before.json
+
+      - name: Snapshot currently deployed Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/phase11-worker-backup
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/phase11-worker-backup/worker-before.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother HOME_ORDER_SENSITIVE_CURRICULA; do
+            grep -aFq "$marker" /tmp/phase11-worker-backup/worker-before.bin
+          done
+
+      - name: Apply additive session-profile D1 migration only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --file=worker/migrations/0007_student_session_profiles.sql > /tmp/d1-migration.log
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name='student_session_profiles'; SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_student_sessions_single_active','trg_student_session_profile_delete_on_revoke') ORDER BY name; PRAGMA quick_check;" > /tmp/d1-after.json
+          grep -Fq 'student_session_profiles' /tmp/d1-after.json
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-after.json
+          grep -Fq 'trg_student_session_profile_delete_on_revoke' /tmp/d1-after.json
+          grep -Fq '"ok"' /tmp/d1-after.json
+
+      - name: Generate isolated efficient Phase 11 Worker runtime config
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.efficient.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-efficient.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+
+      - name: Dry-run efficient Phase 11 Worker bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.efficient.toml --dry-run --outdir /tmp/phase11-efficient-build >/tmp/phase11-efficient-dry-run.log
+          grep -R -aFq 'HOME_ORDER_SENSITIVE_CURRICULA' /tmp/phase11-efficient-build
+          grep -R -aFq 'student_session_profiles' /tmp/phase11-efficient-build
+          grep -R -aFq 'X-FPT-Students-KV-Read-Ops' /tmp/phase11-efficient-build
+
+      - name: Deploy efficient Phase 11 Worker to V2 development
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.efficient.toml --keep-vars --message 'Phase 11 STUDENTS_KV session efficiency' >/tmp/phase11-efficient-deploy.log
+
+      - name: Verify deployed efficient Worker markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-after-efficiency.bin
+          for marker in SPECIAL_ACCESS_REQUIRED MOCK_PASSWORD_INCORRECT MOCK_DAILY_PASSWORDS QUIZ_NOT_AVAILABLE answer_view_tokens previous VIDEO_URL_REQUIRED p11elevenother HOME_ORDER_SENSITIVE_CURRICULA student_session_profiles X-FPT-Students-KV-Read-Ops; do
+            grep -aFq "$marker" /tmp/worker-after-efficiency.bin
+          done
+
+      - name: Run deployed Phase 11 API acceptance
+        shell: bash
+        run: bash tests/phase11-api-verification.sh
+
+      - name: Wait for Phase 11 GitHub Pages proof page
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase11.html'
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error "$URL" --output /tmp/phase11-page.html && grep -Fq 'assets/phase11-resources.js' /tmp/phase11-page.html && grep -Fq 'assets/phase11-other.js' /tmp/phase11-page.html; then exit 0; fi
+            sleep 5
+          done
+          echo 'Phase 11 GitHub Pages proof page did not become available in time.' >&2
+          exit 1
+
+      - name: Install Playwright driver
+        shell: bash
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+
+      - name: Run real Chrome Phase 11 acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+
+      - name: Measure representative pupil KV journey
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/phase11-kv-journey.sh /tmp/phase11-kv-journey.json
+          jq -e '
+            .persona == "TestY5EM" and
+            (.steps[] | select(.step=="login") | .studentsKvReadOps == 1) and
+            (.steps[] | select(.step=="home") | .studentsKvReadOps == 0 and .lessonsKvReadOps == 0) and
+            (.steps[] | select(.step=="yearLevel") | .studentsKvReadOps == 0 and .lessonsKvReadOps == 0) and
+            (.steps[] | select(.step=="lesson") | .studentsKvReadOps == 0 and .lessonsKvReadOps == 1) and
+            (.steps[] | select(.step=="video") | .studentsKvReadOps == 0 and .lessonsKvReadOps == 1) and
+            (.steps[] | select(.step=="homework") | .studentsKvReadOps == 0 and .lessonsKvReadOps == 1) and
+            .totals.studentsKvReadOps <= 6 and
+            .totals.lessonsKvReadOps <= 5 and
+            .totals.totalKvReadOps <= 11
+          ' /tmp/phase11-kv-journey.json >/dev/null
+
+      - name: Re-verify isolated settings and D1 integrity after acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings-after.json
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-after.json >/dev/null
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text][0] // ""' /tmp/settings-after.json)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) exit 1;; esac
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_student_sessions_single_active','trg_student_session_profile_delete_on_revoke') ORDER BY name; PRAGMA quick_check;" > /tmp/d1-final.json
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-final.json
+          grep -Fq 'trg_student_session_profile_delete_on_revoke' /tmp/d1-final.json
+          grep -Fq '"ok"' /tmp/d1-final.json
+
+      - name: Roll back Worker code on post-deploy acceptance failure
+        if: failure() && steps.deploy.outcome == 'success'
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          R2_BUCKET: ${{ steps.guard.outputs.r2 }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          TARGET_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase11.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-final.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${TARGET_ALLOWLIST}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase11.rollback.toml --keep-vars --message 'Rollback Phase 11 session efficiency Worker' >/tmp/phase11-efficiency-rollback.log
+
+      - name: Collect Phase 11 efficiency evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/phase11-session-efficiency
+          for f in /tmp/phase11-worker-package.log /tmp/settings.json /tmp/settings-after.json /tmp/d1-before.json /tmp/d1-migration.log /tmp/d1-after.json /tmp/d1-final.json /tmp/phase11-efficient-dry-run.log /tmp/phase11-efficient-deploy.log /tmp/phase11-efficiency-rollback.log /tmp/phase11-kv-journey.json; do
+            if [ -f "$f" ]; then cp "$f" artifacts/phase11-session-efficiency/; fi
+          done
+
+      - name: Upload Phase 11 efficiency acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-session-efficiency-acceptance
+          path: |
+            artifacts/phase11-session-efficiency
+            artifacts/phase11-browser
+          if-no-files-found: warn
+          retention-days: 30
