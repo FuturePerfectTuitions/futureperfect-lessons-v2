@@ -129,9 +129,26 @@ Owner decision: **1 normal/core Homework with 1 Answer Pack**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E6/`.
 
+## 9. Y5E7 - Verbal Reasoning (display Y5T1E06)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Corrected owner upload supersedes the earlier accidental `Y5E14 Verbal Reasoning` upload; that earlier set is not to be mapped or deployed.
+- Homework source: `Homework Y5E7 Verbal Reasoning.pdf`
+- Homework SHA-256: `fca552b44fdff08177a709f3a5ac063e463faccc14ebd27fe34b5bad0d8edccc`
+- Homework pages: 4
+- Content note: starts with the `Complete the Word` verbal-reasoning activity.
+- Intended R2 key: `english/year5/Y5E7/homework/sheets/Homework Y5E7 Verbal Reasoning.pdf`
+- Answer Pack source: `Answer Pack Y5E7 Verbal Reasoning.pdf`
+- Answer Pack SHA-256: `8d1b01e1acdd671790b128ea023e08e757e864e375afc2793913a23e31577de9`
+- Answer Pack pages: 2
+- Content note: matches the Homework, beginning with `Complete the Word Answers`.
+- Intended R2 key: `english/year5/Y5E7/homework/answers/Answer Pack Y5E7 Verbal Reasoning.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E7/`.
+
 ## Remaining owner decisions
 
-9. Y5E7 - Verbal Reasoning (display Y5T1E06)
 10. Y5E11 - Advertising (display Y5T1E08)
 11. Y5E12 - Diary Writing (display Y5T1E09)
 12. Y5E15 - Riddles and Puzzles (display Y5T2E12)
