@@ -74,6 +74,30 @@ assert.ok(!diagnostic.includes('UPDATE student_sessions'), 'Login diagnostic D1 
 assert.ok(!diagnostic.includes('DELETE FROM'), 'Login diagnostic D1 command must not delete rows directly.');
 assert.ok(!diagnostic.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Login diagnostic must not enable production student login.');
 
+const quotaSafe = fs.readFileSync('.github/workflows/phase11-quota-safe-worker-deploy.yml', 'utf8');
+for (const required of [
+  "github.event.pull_request.head.ref == 'ops/phase11-quota-safe-worker-apply'",
+  '.github/phase11-quota-safe-worker-trigger.txt',
+  'navigationManifestSha256',
+  'd82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083',
+  'Home navigation must use zero LESSONS_KV gets.',
+  'KV get() limit exceeded for the day.',
+  'loadPhase4User',
+  'phase11-quota-safe-worker-before',
+  'BUNDLED_MANIFEST_VALID',
+  'Student/API/Chrome acceptance remains pending KV quota availability.',
+  'Roll back if quota-safe Worker deployment or marker verification fails'
+]) {
+  assert.ok(quotaSafe.includes(required), `Phase 11 quota-safe deploy missing guard/evidence rule: ${required}`);
+}
+assert.ok(!quotaSafe.includes('phase11-kv-snapshot.mjs'), 'Quota-safe Worker deploy must not call KV snapshot endpoints.');
+assert.ok(!quotaSafe.includes('kv bulk put'), 'Quota-safe Worker deploy must not write KV catalogue data.');
+assert.ok(!quotaSafe.includes('d1 execute'), 'Quota-safe Worker deploy must not directly read/write D1 via wrangler.');
+assert.ok(!quotaSafe.includes('r2 object'), 'Quota-safe Worker deploy must not mutate R2 objects.');
+assert.ok(!quotaSafe.includes('tests/phase11-api-verification.sh'), 'Quota-blocked recovery deploy must not pretend full API acceptance ran.');
+assert.ok(!quotaSafe.includes('tests/phase11-browser-verification.mjs'), 'Quota-blocked recovery deploy must not pretend Chrome acceptance ran.');
+assert.ok(!quotaSafe.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Quota-safe Worker deploy must not enable production student login.');
+
 const homePerformance = fs.readFileSync('tests/phase11-home-performance.sh', 'utf8');
 for (const required of [
   'login_with_transient_retry',

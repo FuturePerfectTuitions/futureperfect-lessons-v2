@@ -1,3 +1,6 @@
+import { PHASE11_NAVIGATION_MANIFEST } from './phase11-navigation-manifest.generated.js';
+
+const PHASE11_CATALOGUE_SHA256 = '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663';
 const PHASE11_CURRICULUM_CODES = Object.freeze([
   'MATHS_Y2',
   'MATHS_Y3',
@@ -12,9 +15,7 @@ const PHASE11_CURRICULUM_CODES = Object.freeze([
   'ENGLISH_Y6'
 ]);
 
-// These two curricula can use curriculum_start_points on the home screen for
-// current 11+ Maths missed-lesson previews. Keep their real canonical `order`
-// values on /home; all other home calculations need lesson identity only.
+// Retained for fail-safe legacy fallback and as a deployed feature marker.
 const HOME_ORDER_SENSITIVE_CURRICULA = Object.freeze(['MATHS_L2', 'MATHS_L3']);
 const PREFETCH_CONCURRENCY = 64;
 
@@ -68,13 +69,42 @@ async function readJsonInBatches(namespace, keys, batchSize = PREFETCH_CONCURREN
   return values;
 }
 
-function cacheNamespace(namespace, cache) {
+function validBundledManifest(manifest = PHASE11_NAVIGATION_MANIFEST) {
+  if (!manifest || typeof manifest !== 'object') return false;
+  if (manifest.catalogueSha256 !== PHASE11_CATALOGUE_SHA256) return false;
+  if (!manifest.curricula || !manifest.lessons) return false;
+  if (Object.keys(manifest.curricula).length !== 11) return false;
+  if (Object.keys(manifest.lessons).length !== 369) return false;
+  return PHASE11_CURRICULUM_CODES.every(code => {
+    const curriculum = manifest.curricula[code];
+    return curriculum?.curriculumCode === code && Array.isArray(curriculum.lessonIds);
+  });
+}
+
+const BUNDLED_MANIFEST_VALID = validBundledManifest();
+
+function bundledJsonValue(key) {
+  if (!BUNDLED_MANIFEST_VALID || typeof key !== 'string') return undefined;
+  if (key.startsWith('curriculum:')) {
+    return PHASE11_NAVIGATION_MANIFEST.curricula[key.slice('curriculum:'.length)];
+  }
+  if (key.startsWith('lesson:')) {
+    return PHASE11_NAVIGATION_MANIFEST.lessons[key.slice('lesson:'.length)];
+  }
+  return undefined;
+}
+
+function cacheNamespace(namespace, overrides = new Map(), bundled = false) {
   return new Proxy(namespace, {
     get(target, prop) {
       if (prop === 'get') {
         return async (key, options) => {
           const wantsJson = options?.type === 'json';
-          if (wantsJson && cache.has(key)) return structuredClone(cache.get(key));
+          if (wantsJson && overrides.has(key)) return structuredClone(overrides.get(key));
+          if (wantsJson && bundled) {
+            const value = bundledJsonValue(key);
+            if (value !== undefined) return structuredClone(value);
+          }
           return target.get(key, options);
         };
       }
@@ -84,8 +114,8 @@ function cacheNamespace(namespace, cache) {
   });
 }
 
-function cacheEnv(env, cache) {
-  const lessonsKv = cacheNamespace(env.LESSONS_KV, cache);
+function cacheEnv(env, overrides = new Map(), bundled = false) {
+  const lessonsKv = cacheNamespace(env.LESSONS_KV, overrides, bundled);
   return new Proxy(env, {
     get(target, prop) {
       if (prop === 'LESSONS_KV') return lessonsKv;
@@ -137,28 +167,19 @@ function seedSyntheticLessons(cache, curriculumKeys) {
     for (const lessonId of lessonIdsFromCurriculum(curriculum)) {
       const lessonKey = `lesson:${lessonId}`;
       if (!cache.has(lessonKey)) {
-        // Downstream home/descriptor logic needs identity, active state and a
-        // stable fallback title. `order` is intentionally omitted so the
-        // established loader falls back to the curriculum-index position.
         cache.set(lessonKey, { lessonId, title: lessonId, active: true });
       }
     }
   }
 }
 
-async function phase11NavigationEnv(env, request) {
-  if (!env?.LESSONS_KV || !request) return env;
-
+async function legacyTargetedNavigationEnv(env, request) {
   const curriculumKeys = PHASE11_CURRICULUM_CODES.map(code => `curriculum:${code}`);
   const cache = await readJsonInBatches(
     env.LESSONS_KV,
     curriculumKeys,
     PHASE11_CURRICULUM_CODES.length
   );
-
-  // The unchanged downstream navigation builder probes all curricula. Seed
-  // lightweight request-local lesson records so those probes never trigger a
-  // second wave of hundreds of KV reads merely to establish membership/counts.
   seedSyntheticLessons(cache, curriculumKeys);
 
   const realCurricula = new Set(realCurriculaForRequest(request));
@@ -168,9 +189,6 @@ async function phase11NavigationEnv(env, request) {
     if (!curriculum) continue;
     for (const lessonId of lessonIdsFromCurriculum(curriculum)) realLessonIds.add(lessonId);
   }
-
-  // Lesson/resource requests must always receive the real target record even
-  // if an unknown or future view id is supplied.
   const targetLessonId = lessonIdFromRequest(request);
   if (targetLessonId) realLessonIds.add(targetLessonId);
 
@@ -179,8 +197,30 @@ async function phase11NavigationEnv(env, request) {
     [...realLessonIds].map(id => `lesson:${id}`)
   );
   for (const [key, value] of realValues) cache.set(key, value);
+  return cacheEnv(env, cache, false);
+}
 
-  return cacheEnv(env, cache);
+async function phase11NavigationEnv(env, request) {
+  if (!env?.LESSONS_KV || !request) return env;
+
+  // Normal Phase 11 path: identity/order/title/display metadata remains
+  // module-resident in the deterministic canonical manifest. The proxy clones
+  // only the records downstream code actually requests; it does not rebuild or
+  // clone the complete 380-record navigation catalogue per invocation.
+  if (BUNDLED_MANIFEST_VALID) {
+    const overrides = new Map();
+    const targetLessonId = lessonIdFromRequest(request);
+    if (targetLessonId) {
+      const real = await env.LESSONS_KV.get(`lesson:${targetLessonId}`, { type: 'json' });
+      if (real != null) overrides.set(`lesson:${targetLessonId}`, real);
+    }
+    return cacheEnv(env, overrides, true);
+  }
+
+  // Fail-safe only: an accidental/manual build that did not generate the
+  // canonical manifest preserves the previously verified targeted KV behavior
+  // rather than trusting stale or incomplete metadata.
+  return legacyTargetedNavigationEnv(env, request);
 }
 
 function shouldPrefetchPhase11Navigation(request) {
@@ -195,10 +235,12 @@ function shouldPrefetchPhase11Navigation(request) {
 }
 
 export {
+  PHASE11_CATALOGUE_SHA256,
   PHASE11_CURRICULUM_CODES,
   HOME_ORDER_SENSITIVE_CURRICULA,
   VIEW_CURRICULA,
   PREFETCH_CONCURRENCY,
+  validBundledManifest,
   phase11NavigationEnv,
   shouldPrefetchPhase11Navigation
 };
