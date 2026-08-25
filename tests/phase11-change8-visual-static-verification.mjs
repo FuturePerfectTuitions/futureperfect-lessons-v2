@@ -1,28 +1,40 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const base = fs.readFileSync('phase11.html', 'utf8');
-const preview = fs.readFileSync('phase11-change8.html', 'utf8');
+const active = fs.readFileSync('phase11.html', 'utf8');
+const approvedPreview = fs.readFileSync('phase11-change8.html', 'utf8');
 const css = fs.readFileSync('assets/phase11-change8.css', 'utf8');
 
-const normalizedPreview = preview
-  .replace('  <meta name="theme-color" content="#012169">\n', '')
-  .replace('  <link rel="stylesheet" href="assets/phase11-change8.css">\n', '')
-  .replace('<body class="phase5-page phase11-change8">', '<body class="phase5-page">');
-
 assert.equal(
-  normalizedPreview.trim(),
-  base.trim(),
-  'Change 8 preview must differ from approved phase11.html only by the theme meta, scoped body class and refinement stylesheet.'
+  active.trim(),
+  approvedPreview.trim(),
+  'Activated phase11.html must exactly match the owner-approved Change 8 preview.'
 );
 
 const ids = (html) => [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]).sort();
 const scripts = (html) => [...html.matchAll(/<script\s+[^>]*src="([^"]+)"[^>]*><\/script>/g)].map((m) => m[1]);
 
-assert.deepEqual(ids(preview), ids(base), 'Change 8 must preserve the complete DOM ID contract.');
-assert.deepEqual(scripts(preview), scripts(base), 'Change 8 must preserve script order and script sources exactly.');
-assert.match(preview, /<body class="phase5-page phase11-change8">/);
-assert.match(preview, /assets\/phase11-change8\.css/);
+const expectedScripts = [
+  'config.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'assets/phase8.js',
+  'assets/phase9.js',
+  'assets/phase10.js',
+  'assets/phase10-counts.js',
+  'assets/phase10-history.js',
+  'assets/phase11-protected-bridge.js',
+  'assets/phase11-resources.js',
+  'assets/phase11-other.js',
+  'assets/phase11-home-readiness.js',
+  'assets/phase7.js',
+  'assets/phase7-upsell.js'
+];
+
+assert.deepEqual(ids(active), ids(approvedPreview), 'Change 8 activation must preserve the complete DOM ID contract.');
+assert.deepEqual(scripts(active), expectedScripts, 'Change 8 activation must preserve the approved Phase 11 JavaScript order and sources.');
+assert.match(active, /<body class="phase5-page phase11-change8">/);
+assert.match(active, /assets\/phase11-change8\.css/);
+assert.match(active, /<meta name="theme-color" content="#012169">/);
 
 assert.match(css, /body\.phase11-change8/);
 assert.doesNotMatch(css, /<script|javascript:/i);
@@ -41,4 +53,4 @@ for (const selector of selectorHeaders) {
   );
 }
 
-console.log('Phase 11 Change 8 visual-only static verification: PASS');
+console.log('Phase 11 Change 8 activated visual-only verification: PASS');
