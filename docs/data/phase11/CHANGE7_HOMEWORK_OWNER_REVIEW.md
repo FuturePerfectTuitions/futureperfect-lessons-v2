@@ -112,9 +112,25 @@ Owner decision: **1 normal/core Homework with 1 Answer Pack**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E4/`.
 
+## 8. Y5E6 - Instructional reports (display Y5T1E05)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source: `Homework Y5E6 Instructional Reports.pdf`
+- Homework SHA-256: `43adfe950a4f4b8a1bb944edee0a36169d02afdd579991905919dae7eb5ee999`
+- Homework pages: 4
+- Content note: includes the `How to Build a Sandcastle` instructional-text comprehension and related questions/tasks.
+- Intended R2 key: `english/year5/Y5E6/homework/sheets/Homework Y5E6 Instructional Reports.pdf`
+- Answer Pack source: `Answer Pack Homework Y5E6 Instructional Reports.pdf`
+- Answer Pack SHA-256: `19a102e9872e4105bb46422b0dd6c8faac8a43610bdd524e197fb67fd7dbbf73`
+- Answer Pack pages: 4
+- Content note: matches the Homework page-for-page with completed/acceptable answers.
+- Intended R2 key: `english/year5/Y5E6/homework/answers/Answer Pack Homework Y5E6 Instructional Reports.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E6/`.
+
 ## Remaining owner decisions
 
-8. Y5E6 - Instructional reports (display Y5T1E05)
 9. Y5E7 - Verbal Reasoning (display Y5T1E06)
 10. Y5E11 - Advertising (display Y5T1E08)
 11. Y5E12 - Diary Writing (display Y5T1E09)
