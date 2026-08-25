@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { loadPhase11Catalogue, validatePhase11Catalogue } from '../scripts/phase11-catalogue.mjs';
 import {
   parseAnswerResourceKey,
   answerOverrideTarget,
@@ -6,11 +7,36 @@ import {
 } from '../worker/src/phase11-shared-maths-answer-pdf.js';
 import { SHARED_MATHS_ANSWER_PDF_OVERRIDES } from '../worker/src/phase11-shared-maths-answer-pdf-overrides.js';
 
+const catalogue = loadPhase11Catalogue();
+validatePhase11Catalogue(catalogue);
+
 assert.equal(SHARED_MATHS_ANSWER_PDF_OVERRIDES.length, 31);
 assert.equal(SHARED_MATHS_ANSWER_PDF_OVERRIDES.filter(x => x.viewId === 'maths-year4').length, 10);
 assert.equal(SHARED_MATHS_ANSWER_PDF_OVERRIDES.filter(x => x.viewId === 'maths-year5').length, 6);
 assert.equal(SHARED_MATHS_ANSWER_PDF_OVERRIDES.filter(x => x.viewId === 'maths-year6').length, 15);
 assert.equal(new Set(SHARED_MATHS_ANSWER_PDF_OVERRIDES.map(x => x.overrideR2Key)).size, 31);
+assert.equal(new Set(SHARED_MATHS_ANSWER_PDF_OVERRIDES.map(x => `${x.viewId}|${x.lessonId}|${x.answerIndex}`)).size, 31);
+
+for (const entry of SHARED_MATHS_ANSWER_PDF_OVERRIDES) {
+  assert.match(entry.sourceSha256, /^[a-f0-9]{64}$/);
+  assert.ok(entry.sourceLevelTextCount > 0);
+  const lesson = catalogue.lessons[entry.lessonId];
+  assert.ok(lesson, `missing canonical lesson ${entry.lessonId}`);
+  assert.equal(lesson.displayIds?.[entry.viewId], entry.yearCode);
+  const levelView = entry.viewId === 'maths-year4'
+    ? 'maths-level1'
+    : entry.viewId === 'maths-year5'
+      ? 'maths-level2'
+      : 'maths-level3';
+  assert.equal(lesson.displayIds?.[levelView], entry.levelCode);
+  const answer = lesson.core?.homeworks?.[entry.answerIndex - 1]?.answerPack;
+  assert.ok(answer, `missing canonical answer pack for ${entry.lessonId} answer ${entry.answerIndex}`);
+  assert.equal(answer.r2Key, entry.sourceR2Key);
+  assert.equal(
+    entry.overrideR2Key,
+    `phase11/view-overrides/${entry.viewId}/${entry.lessonId}/homework/answers/${String(entry.answerIndex).padStart(2, '0')}-${entry.yearCode}.pdf`
+  );
+}
 
 assert.deepEqual(parseAnswerResourceKey('Y4M10~answer~1'), { lessonId: 'Y4M10', answerIndex: 1 });
 assert.deepEqual(parseAnswerResourceKey('Y5M1~answer~1'), { lessonId: 'Y5M1', answerIndex: 1 });
