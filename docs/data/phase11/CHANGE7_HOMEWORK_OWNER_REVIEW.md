@@ -147,9 +147,21 @@ Owner decision: **1 normal/core Homework with 1 Answer Pack**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E7/`.
 
+## 10. Y5E11 - Advertising (display Y5T1E08)
+
+Owner decision: **1 normal/core Homework and NO Answer Pack**.
+
+- Homework source: `Homework Y5E11 Advertising.pdf`
+- Homework SHA-256: `dcca754fba49baf35b87fe79a5fcb05852a3d4138b2137034a5a9ec4df878643`
+- Homework pages: 5
+- Content note: this is an open-ended advertising/design task; owner confirmed no Answer Pack should exist.
+- Intended R2 key: `english/year5/Y5E11/homework/sheets/Homework Y5E11 Advertising.pdf`
+- Has Answer Pack: NO - intentional/open-ended.
+
+Owner file staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y5E11/`.
+
 ## Remaining owner decisions
 
-10. Y5E11 - Advertising (display Y5T1E08)
 11. Y5E12 - Diary Writing (display Y5T1E09)
 12. Y5E15 - Riddles and Puzzles (display Y5T2E12)
 13. Y5E31 - Creative Writing Writing the Dilemma (display Y5T3E28)
