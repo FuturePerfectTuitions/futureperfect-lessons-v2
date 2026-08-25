@@ -1,0 +1,42 @@
+name: Phase 11 resource correctness diagnostic
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/phase11-resource-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Inspect target Phase 11 catalogue records
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const catalogue = loadPhase11Catalogue();
+          const needles = [
+            'FAR120526Y5T3EE06VRH01',
+            'DIP140225Y5E29',
+            'L2T1M01'
+          ];
+          for (const needle of needles) {
+            console.log(`=== MATCHES FOR ${needle} ===`);
+            let found = 0;
+            for (const [lessonId, lesson] of Object.entries(catalogue.lessons || {})) {
+              const text = JSON.stringify(lesson);
+              if (text.includes(needle)) {
+                found += 1;
+                console.log(JSON.stringify({ lessonId, lesson }, null, 2));
+              }
+            }
+            console.log(`=== COUNT ${needle}: ${found} ===`);
+          }
+          NODE
