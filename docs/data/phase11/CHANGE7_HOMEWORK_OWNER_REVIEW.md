@@ -73,9 +73,15 @@ Owner decision: **1 normal/core Homework with 1 Answer Pack**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y4E27/`.
 
+## 5. Y4E38 - Revision 4 (display Y4T3E33)
+
+Owner decision: **NO normal/core Homework**.
+
+- This is intentional.
+- No Homework or Answer Pack should be added for this lesson.
+
 ## Remaining owner decisions
 
-5. Y4E38 - Revision 4 (display Y4T3E33)
 6. Y5E3 - Figures of Speech and comprehension (display Y5T1E02)
 7. Y5E4 - Non Chronological Report Writing (display Y5T1E03)
 8. Y5E6 - Instructional reports (display Y5T1E05)
