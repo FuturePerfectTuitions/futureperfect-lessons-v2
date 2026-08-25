@@ -181,4 +181,16 @@ assert.match(efficientEntrypoint, /prepareSessionProfileEnv/);
 assert.match(efficientEntrypoint, /appendKvAuditHeaders/);
 assert.match(efficientEntrypoint, /index-phase11-final\.js/);
 
+const finalEntrypoint = fs.readFileSync(
+  path.join(root, 'worker', 'src', 'index-phase11-final.js'),
+  'utf8'
+);
+assert.match(finalEntrypoint, /protectedAnswerNavigationEnv/);
+assert.match(finalEntrypoint, /syntheticLessonRequest/);
+assert.match(finalEntrypoint, /FROM answer_view_tokens/);
+assert.match(finalEntrypoint, /phase11NavigationEnv\(env, syntheticLessonRequest\(request, parsed\.lessonId\)\)/);
+assert.match(finalEntrypoint, /phase11NavigationEnv\(env, syntheticLessonRequest\(request, lessonId\)\)/);
+assert.match(finalEntrypoint, /answer\/authorize/);
+assert.match(finalEntrypoint, /answer-view/);
+
 console.log('Phase 11 STUDENTS_KV/session efficiency static verification: PASS');
