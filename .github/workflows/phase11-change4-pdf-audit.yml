@@ -36,6 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
           changed="$(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD)"
           test "$changed" = '.github/workflows/phase11-change4-pdf-audit.yml'
           test -n "$CLOUDFLARE_API_TOKEN"
