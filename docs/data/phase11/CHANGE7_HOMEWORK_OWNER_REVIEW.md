@@ -28,10 +28,38 @@ Owner decision: **2 normal/core Homeworks**.
 
 Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y4E23/`.
 
+## 2. Y4E25 - Word Families (display Y4T2E20)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source: `Homework Y4E25 Word Families.pdf`
+- Homework SHA-256: `1d43c06dca3564a6999199fbfc50d7ea8a996cd96cb3b7da087b54cd3bd39f89`
+- Homework pages: 6
+- Intended R2 key: `english/year4/Y4E25/homework/sheets/Homework Y4E25 Word Families.pdf`
+- Answer Pack source: `Answer Pack Homework Y4E25 Word Families.pdf`
+- Answer Pack SHA-256: `e7c95f41c6eafb57ec02ed760ea2327cb1cdc118dc3204f187a76a8bbb106546`
+- Answer Pack pages: 3
+- Intended R2 key: `english/year4/Y4E25/homework/answers/Answer Pack Homework Y4E25 Word Families.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y4E25/`.
+
+## 3. Y4E26 - Prepositional Phrases and Expanded Noun Phrases (display Y4T2E21)
+
+Owner decision: **1 normal/core Homework with 1 Answer Pack**.
+
+- Homework source: `Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf`
+- Homework SHA-256: `8b915e74620659203d0e3aea42c4c1e5efb0c6e65a0c1b2376d66476c44baab4`
+- Homework pages: 8
+- Intended R2 key: `english/year4/Y4E26/homework/sheets/Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf`
+- Answer Pack source: `Answer Pack Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf`
+- Answer Pack SHA-256: `ff1d096dfb62d4fdf38e77352f55073640929801f37b6a0e29c066c952f85798`
+- Answer Pack pages: 11
+- Intended R2 key: `english/year4/Y4E26/homework/answers/Answer Pack Homework Y4E26 Prepositional Phrases and Expanded Noun Phrases.pdf`
+
+Owner files staged in persistent workspace folder: `/FPT Portal V2/Phase11 Change7 Homeworks/Y4E26/`.
+
 ## Remaining owner decisions
 
-2. Y4E25 - Word Families (display Y4T2E20)
-3. Y4E26 - Prepositional Phrases and Expanded Noun Phrases (display Y4T2E21)
 4. Y4E27 - Inverted Commas and Speech Punctuations 1 (display Y4T2E22)
 5. Y4E38 - Revision 4 (display Y4T3E33)
 6. Y5E3 - Figures of Speech and comprehension (display Y5T1E02)
