@@ -1,0 +1,123 @@
+name: Phase 11 Change 7 encrypted Google Drive apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase11-change7-google-drive-loader.yml
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GITHUB_TOKEN: ${{ github.token }}
+  DRIVE_FILE_ID: 1EMbMZG6CWkyW3rz4seR4DQmZT4CHSjmg
+  CIPHERTEXT_SHA256: d0e5306df8916cdef07539d35e0f7804b82843da3d5e800264c8612be50eb911
+  CIPHERTEXT_BYTES: '21633214'
+  APPLY_SCRIPT_SHA256: 9fecf27bac0f9b041a8f52da2fae3cee2a10d9a6b92303602493445b4207b22d
+  KEY_ARTIFACT_ID: '9573322006'
+  CHANGE7_PACKAGE_DIR: /tmp/change7-package
+
+jobs:
+  apply:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase11-change7-google-drive-apply' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard one-file operations branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          mapfile -t changed < <(git diff --name-only '${{ github.event.pull_request.base.sha }}'..HEAD | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = '.github/workflows/phase11-change7-google-drive-loader.yml'
+          test '${{ github.event.pull_request.base.sha }}' = '93c9070c4b88833e4e3bee1478e8006f68c8ed0c'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Fetch encrypted Drive package and one-time private key artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet 'gdown==5.2.0'
+          gdown "https://drive.google.com/uc?id=${DRIVE_FILE_ID}" -O /tmp/change7-package.cms
+          test "$(stat -c '%s' /tmp/change7-package.cms)" = "$CIPHERTEXT_BYTES"
+          test "$(sha256sum /tmp/change7-package.cms | awk '{print $1}')" = "$CIPHERTEXT_SHA256"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${KEY_ARTIFACT_ID}/zip" \
+            --output /tmp/change7-key.zip
+          rm -rf /tmp/change7-key
+          mkdir -p /tmp/change7-key
+          unzip -q /tmp/change7-key.zip -d /tmp/change7-key
+          (cd /tmp/change7-key && sha256sum -c SHA256SUMS.txt)
+
+      - name: Decrypt package and verify guarded apply script
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in /tmp/change7-key/private.pem.enc \
+            -out /tmp/change7-key/private.pem
+          openssl cms -decrypt -binary -inform DER \
+            -in /tmp/change7-package.cms \
+            -recip /tmp/change7-key/cert.pem \
+            -inkey /tmp/change7-key/private.pem \
+            -out /tmp/change7-package.tar.gz
+          rm -f /tmp/change7-key/private.pem
+          rm -rf "$CHANGE7_PACKAGE_DIR"
+          mkdir -p "$CHANGE7_PACKAGE_DIR"
+          tar -xzf /tmp/change7-package.tar.gz -C "$CHANGE7_PACKAGE_DIR"
+          test "$(find "$CHANGE7_PACKAGE_DIR" -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 21
+          test -f "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh"
+          test "$(sha256sum "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh" | awk '{print $1}')" = "$APPLY_SCRIPT_SHA256"
+          chmod 700 "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh"
+
+      - name: Preflight and snapshot before any write
+        shell: bash
+        run: "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh preflight"
+
+      - name: Upload pre-write rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-change7-google-drive-prewrite-backup
+          path: /tmp/change7-backup/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Apply 21 R2 objects and deploy Change 7 Worker
+        id: apply
+        shell: bash
+        run: "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh apply"
+
+      - name: Full API, Chrome, security and efficiency acceptance
+        shell: bash
+        run: "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh accept"
+
+      - name: Roll back on any post-write failure
+        if: failure() && steps.apply.outcome != 'skipped'
+        shell: bash
+        run: "$CHANGE7_PACKAGE_DIR/change7-drive-apply.sh rollback"
+
+      - name: Completion
+        if: success()
+        run: "echo 'Phase 11 Change 7 encrypted Google Drive apply: PASS'"
