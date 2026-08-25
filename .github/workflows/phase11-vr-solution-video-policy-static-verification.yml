@@ -1,0 +1,30 @@
+name: Phase 11 VR solution video policy static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/src/index-phase11-efficient.js'
+      - 'worker/src/index-phase9.js'
+      - 'tests/phase11-vr-solution-video-policy-static-verification.mjs'
+      - 'tests/phase11-api-verification.sh'
+      - '.github/workflows/phase11-vr-solution-video-policy-static-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify VR homework solution videos remain withheld
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase11-efficient.js
+          bash -n tests/phase11-api-verification.sh
+          node --experimental-default-type=module tests/phase11-vr-solution-video-policy-static-verification.mjs
