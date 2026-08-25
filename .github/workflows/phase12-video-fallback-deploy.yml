@@ -1,0 +1,200 @@
+name: Phase 12 video fallback deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/phase11-screenpal.js
+      - worker/src/index-phase11-final.js
+      - tests/phase11-screenpal-static-verification.mjs
+      - .github/workflows/phase12-video-fallback-deploy.yml
+      - .github/phase12-video-fallback-trigger.txt
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase12-owner-check' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify owner-approved video rules and locked catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.sha }}" = 'ac01bd4590fccb313fbafd58259e87a696e05b31'
+          node tests/phase11-screenpal-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue-check.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue-check.log
+          node --experimental-default-type=module <<'NODE' > /tmp/autumn-static.json
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c = loadPhase11Catalogue();
+          const ids = c.curricula.ENGLISH_Y4.lessonIds;
+          const rows = ids.map(id => c.lessons[id]).filter(Boolean);
+          const matches = rows.filter(x => /autumn starter/i.test(String(x.title || '')));
+          if (matches.length !== 1) throw new Error(`Expected exactly one Y4 English Autumn Starter; found ${matches.length}`);
+          const x = matches[0];
+          console.log(JSON.stringify({ lessonId:x.lessonId,title:x.title,hasVideo:Boolean(x.core?.video?.embedUrl),hasQuiz:Boolean(x.core?.video?.quiz) }));
+          NODE
+
+      - name: Guard isolated development Cloudflare state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings-before.json >/dev/null
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-before.json)"
+          ALLOWLIST="$(jq -r '.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text' /tmp/settings-before.json)"
+          ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // "https://futureperfecttuitions.github.io"' /tmp/settings-before.json)"
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          for V in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$V"; test "$V" != null; done
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login is enabled; refusing.' >&2; exit 1;; esac
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/d1-check.json 2>/tmp/d1-check.err
+          grep -Fq 'trg_student_sessions_single_active' /tmp/d1-check.json
+          grep -Fq '"ok"' /tmp/d1-check.json
+          {
+            echo "students=$STUDENTS"
+            echo "lessons=$LESSONS"
+            echo "db=$DB"
+            echo "allowlist=$ALLOWLIST"
+            echo "origins=$ORIGINS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compare Autumn Starter against deployed V2 Lessons KV
+        shell: bash
+        env:
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        run: |
+          set -euo pipefail
+          LESSON_ID="$(jq -r '.lessonId' /tmp/autumn-static.json)"
+          KEY_ESCAPED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("lesson:"+sys.argv[1],safe=""))' "$LESSON_ID")"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/values/${KEY_ESCAPED}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/autumn-kv.json
+          jq -n --argjson static "$(cat /tmp/autumn-static.json)" --argjson kv "$(cat /tmp/autumn-kv.json)" '{static:$static,deployed:{lessonId:$kv.lessonId,title:$kv.title,hasVideo:($kv.core.video.embedUrl? != null),hasQuiz:($kv.core.video.quiz? != null)}}' > /tmp/autumn-audit.json
+          jq -e '.static.lessonId == .deployed.lessonId and .static.hasVideo == .deployed.hasVideo and .static.hasQuiz == .deployed.hasQuiz' /tmp/autumn-audit.json >/dev/null
+          cat /tmp/autumn-audit.json
+
+      - name: Deploy only the owner-approved presentation rule change
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+          DB_ID: ${{ steps.guard.outputs.db }}
+          CURRENT_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+          CURRENT_ORIGINS: ${{ steps.guard.outputs.origins }}
+        run: |
+          set -euo pipefail
+          cat >worker/wrangler.phase12.video-fallback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase11-efficient.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "${CURRENT_ORIGINS}"
+          DEV_LOGIN_ALLOWLIST = "${CURRENT_ALLOWLIST}"
+          STUDENT_LOGIN_ENABLED = "false"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_KV_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "fpt-materials-dev"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB_ID}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy \
+            --config worker/wrangler.phase12.video-fallback.toml --keep-vars \
+            --message 'Phase 12 English shared video and Maths quiz fallback' >/tmp/deploy.log 2>&1
+
+      - name: Verify deployed English 11+ shared-video behaviour
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+          node --experimental-default-type=module <<'NODE' > /tmp/english-video-candidate.json
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c = loadPhase11Catalogue();
+          const rows = c.curricula.ENGLISH_Y5.lessonIds.map(id => c.lessons[id]).filter(x => x?.core?.video?.embedUrl && !x?.core?.video?.quiz);
+          if (!rows.length) throw new Error('No Y5 English ordinary-video/no-quiz candidate');
+          console.log(JSON.stringify({lessonId:rows[0].lessonId}));
+          NODE
+          ID="$(jq -r '.lessonId' /tmp/english-video-candidate.json)"
+          curl --fail-with-body --silent --show-error --cookie-jar /tmp/test.cookies \
+            --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+            --request POST --data '{"username":"testy511e","password":"Te12"}' \
+            "$BASE/api/v1/student/auth/login" >/tmp/login.json
+          jq -e '.ok == true' /tmp/login.json >/dev/null
+          curl --fail-with-body --silent --show-error --cookie /tmp/test.cookies \
+            --header "Origin: $ORIGIN" \
+            "$BASE/api/v1/student/lessons/$ID?viewId=english-year5-11plus" >/tmp/detail.json
+          jq -e '.ok == true and .lesson.presentation == "11plus" and .lesson.video.resourceKey != null and .lesson.quiz == null' /tmp/detail.json >/dev/null
+          KEY="$(jq -r '.lesson.video.resourceKey' /tmp/detail.json)"
+          curl --fail-with-body --silent --show-error --cookie /tmp/test.cookies \
+            --header "Origin: $ORIGIN" \
+            "$BASE/api/v1/student/resources/$KEY/video?viewId=english-year5-11plus" >/tmp/video.json
+          jq -e '.ok == true and (.embedUrl|startswith("https://go.screenpal.com/player/")) and ((.embedUrl|contains("quiz_id="))|not)' /tmp/video.json >/dev/null
+          curl --fail-with-body --silent --show-error --cookie /tmp/test.cookies --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' --request POST \
+            "$BASE/api/v1/student/auth/logout" >/dev/null
+
+      - name: Recheck isolation and security invariants
+        shell: bash
+        env:
+          EXPECTED_STUDENTS: ${{ steps.guard.outputs.students }}
+          EXPECTED_LESSONS: ${{ steps.guard.outputs.lessons }}
+          EXPECTED_DB: ${{ steps.guard.outputs.db }}
+          EXPECTED_ALLOWLIST: ${{ steps.guard.outputs.allowlist }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-after.json
+          jq -e --arg s "$EXPECTED_STUDENTS" --arg l "$EXPECTED_LESSONS" --arg d "$EXPECTED_DB" --arg a "$EXPECTED_ALLOWLIST" '
+            .success == true and
+            (.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text) == "development" and
+            (.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name) == "fpt-materials-dev" and
+            (.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id) == $s and
+            (.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id) == $l and
+            (.result.bindings[]|select(.name=="DB" and .type=="d1")|.id) == $d and
+            (.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text) == $a and
+            (([.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // "false")|ascii_downcase) == "false"
+          ' /tmp/settings-after.json >/dev/null
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue-after.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue-after.log
