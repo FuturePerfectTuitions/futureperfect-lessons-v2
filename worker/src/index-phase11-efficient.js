@@ -9,10 +9,10 @@ import {
   kvAuditEnv
 } from './phase11-kv-audit.js';
 import {
-  YEAR5_MATHS_VIEW,
   displayLessonIdForLesson,
   normaliseLessonDisplayNamesForView,
-  normaliseDisplayNameForView
+  normaliseDisplayNameForView,
+  isNormalMathsYearView
 } from './phase11-view-display-names.js';
 
 function decodeSegment(value) {
@@ -83,10 +83,10 @@ async function suppressVrVideoResponse(request, response) {
   return response;
 }
 
-async function normaliseYear5MathsResponse(request, response) {
+async function normaliseMathsYearResponse(request, response) {
   const url = new URL(request.url);
   const viewId = String(url.searchParams.get('viewId') || '').trim();
-  if (viewId !== YEAR5_MATHS_VIEW || !response) return response;
+  if (!isNormalMathsYearView(viewId) || !response) return response;
 
   const lessonMatch = url.pathname.match(/^\/api\/v1\/student\/lessons\/([^/]+)$/);
   if (lessonMatch && request.method === 'GET' && response.ok) {
@@ -140,7 +140,7 @@ export default {
     const prepared = await prepareSessionProfileEnv(request, measuredEnv);
     const response = await phase11Worker.fetch(request, prepared.env, ctx);
     await persistSessionProfile(request, response, measuredEnv, prepared.state);
-    const displayResponse = await normaliseYear5MathsResponse(request, response);
+    const displayResponse = await normaliseMathsYearResponse(request, response);
     const presentedResponse = await suppressVrVideoResponse(request, displayResponse);
     return appendKvAuditHeaders(presentedResponse, env, audit);
   }
