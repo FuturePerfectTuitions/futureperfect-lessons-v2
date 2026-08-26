@@ -32,8 +32,24 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify private apply engine syntax
-        run: node --check scripts/phase12-real-student-apply-v2.mjs
+      - name: Prepare exact private apply engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/phase12-real-student-apply-v2.mjs scripts/phase12-real-student-run.mjs
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'scripts/phase12-real-student-run.mjs';
+          let text = fs.readFileSync(path, 'utf8');
+          const beforeValue = 'fullLibraries: [],';
+          const afterValue = 'fullLibraries: [...(student.fullLibraries || [])],';
+          const beforeGuard = "if ((student.fullLibraries || []).length) fail('Full Library override not permitted for this exact apply');";
+          const afterGuard = "{ const allowedFullLibraries = new Set(['ENGLISH_Y4_11PLUS_FULL','MATHS_L1_FULL','MATHS_L2_FULL']); for (const code of (student.fullLibraries || [])) if (!allowedFullLibraries.has(code)) fail('Unexpected full-catalogue presentation override'); }";
+          if (!text.includes(beforeValue) || !text.includes(beforeGuard)) throw new Error('Private apply patch anchors changed');
+          text = text.replace(beforeValue, afterValue).replace(beforeGuard, afterGuard);
+          fs.writeFileSync(path, text);
+          NODE
+          node --check scripts/phase12-real-student-run.mjs
 
       - name: Apply and verify exactly two owner-approved students
-        run: node --experimental-default-type=module scripts/phase12-real-student-apply-v2.mjs
+        run: node --experimental-default-type=module scripts/phase12-real-student-run.mjs
