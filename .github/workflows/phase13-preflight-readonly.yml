@@ -1,0 +1,95 @@
+name: Phase 13 read-only preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase13-preflight-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'ops/phase13-preflight-readonly' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.126.0
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Confirm repository baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.sha }}" = 'c41cd413e16d336f116a564f52fe93382d001e1c'
+          grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue-static.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue-static.log
+          echo 'PASS: main closure SHA, Phase 12 entrypoint and locked catalogue source verified.'
+
+      - name: Confirm isolated development Worker state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "ENVIRONMENT" and .type == "plain_text" and .text == "development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "MATERIALS_R2" and .type == "r2_bucket" and .bucket_name == "fpt-materials-dev")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[] | select(.name == "STUDENT_LOGIN_ENABLED" and .type == "plain_text") | .text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'ERROR: normal student login is enabled.' >&2; exit 1;; esac
+          for B in STUDENTS_KV LESSONS_KV DB; do
+            jq -e --arg B "$B" '.result.bindings[] | select(.name == $B)' /tmp/settings.json >/dev/null
+          done
+          npx --yes wrangler@${WRANGLER_VERSION} deployments status --name "$WORKER_NAME" --json >/tmp/deployment.json
+          jq -e '.annotations["workers/message"] == "Phase 12 final batch-aware development Worker"' /tmp/deployment.json >/dev/null
+          jq -e '[.versions[] | select(.percentage == 100)] | length == 1' /tmp/deployment.json >/dev/null
+          echo 'PASS: isolated development Worker, development R2, login-disabled state and Phase 12 deployment verified.'
+
+      - name: Verify remote locked V2 catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/p11 >/tmp/p11-summary.json
+          grep -Fq '"catalogueLessons": 369' /tmp/p11-summary.json
+          grep -Fq '"catalogueCurricula": 11' /tmp/p11-summary.json
+          grep -Fq '"lessonsKvWrites": 380' /tmp/p11-summary.json
+          LESSONS="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV" and .type == "kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS"; test "$LESSONS" != null
+          node scripts/phase11-kv-remote-verify.mjs "$LESSONS" /tmp/p11/phase11-lessons-kv-bulk.json >/tmp/kv-verify.json
+          jq -e '.verifiedKeys == 380 and .status == "PASS"' /tmp/kv-verify.json >/dev/null
+          echo 'PASS: remote V2 Lessons KV matches all 380 locked canonical lesson/curriculum records.'
+
+      - name: Verify exact Phase 12 D1 closure invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS trigger_count FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/d1.json 2>/tmp/d1.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/d1.json)" = '173'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/d1.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/d1.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/d1.json)" = '0'
+          test "$(jq -r '.[4].results[0].trigger_count' /tmp/d1.json)" = '1'
+          test "$(jq -r '.[5].results[0].quick_check' /tmp/d1.json)" = 'ok'
+          echo 'PASS: exact 173/4/4/0 D1 closure counts, single-device trigger and quick_check verified.'
+
+      - name: Safety declaration
+        run: echo 'PASS: this workflow executed read-only inspection only; no Worker, KV, D1, R2, DNS, route, login or live-portal write was performed.'
