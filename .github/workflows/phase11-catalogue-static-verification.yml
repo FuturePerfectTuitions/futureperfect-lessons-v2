@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Verify final Phase 11 catalogue and dormant runtime boundary
+      - name: Verify final Phase 11 catalogue through later progression
         shell: bash
         run: |
           set -euo pipefail
@@ -41,5 +41,6 @@ jobs:
           node tests/phase11-catalogue-static-verification.mjs
           jq -e '.status == "CATALOGUE_FINAL_APPLY_READY" and .canonicalLessonCount == 369 and .canonicalCurriculumCount == 11 and .kvWriteKeyCount == 380 and .lessonsWithOwnerConfirmedPendingVideo == 246 and .applyReady == true' docs/data/phase11/catalogue_final_validation.json >/dev/null
           grep -Fq 'Status: **PASS' docs/data/phase11/CATALOGUE_METADATA_GATE.md
-          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
-          echo 'Phase 11 final pre-apply static gate: PASS'
+          grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' <(node tests/phase11-catalogue-static-verification.mjs)
+          echo 'Phase 11 canonical catalogue static gate: PASS'
