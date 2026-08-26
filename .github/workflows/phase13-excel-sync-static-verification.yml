@@ -71,4 +71,4 @@ jobs:
           grep -Fq 'selected rows only' docs/data/phase13/README.md
           grep -Fq 'Student + Lesson' docs/data/phase13/README.md
           grep -Fq 'Batch + Lesson' docs/data/phase13/README.md
-          grep -Fq 'normal student login remains disabled' docs/data/phase13/README.md
+          grep -Fq 'Normal student login remains disabled' docs/data/phase13/README.md
