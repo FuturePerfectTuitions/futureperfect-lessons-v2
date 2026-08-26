@@ -1,0 +1,49 @@
+name: Phase 13 D1 read-only diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase13-d1-readonly-diagnostic.yml
+  push:
+    branches:
+      - phase13-sync-portal-entitlements
+    paths:
+      - .github/workflows/phase13-d1-readonly-diagnostic.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  inspect:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Read Phase 13 D1 closure state only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT batch_key, COUNT(*) AS assignments FROM student_batch_assignments GROUP BY batch_key ORDER BY batch_key; SELECT batch_key, COUNT(*) AS releases FROM batch_lesson_releases GROUP BY batch_key ORDER BY batch_key; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/p13-d1-diagnostic.json
+          jq -c '[.[0].results[0],.[1].results[0],.[2].results[0],.[3].results[0]]' /tmp/p13-d1-diagnostic.json
+          echo 'Assignments by batch:'
+          jq -c '.[4].results' /tmp/p13-d1-diagnostic.json
+          echo 'Releases by batch:'
+          jq -c '.[5].results' /tmp/p13-d1-diagnostic.json
+          jq -e '.[6].results[] | select(.name=="trg_student_sessions_single_active")' /tmp/p13-d1-diagnostic.json >/dev/null
+          jq -e '.[7].results[] | select(.quick_check=="ok")' /tmp/p13-d1-diagnostic.json >/dev/null
+          echo 'Phase 13 D1 read-only diagnostic: PASS'
