@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - docs/data/phase12/real-students-payload.enc.json
-      - scripts/phase12-real-student-apply.mjs
+      - scripts/phase12-real-student-apply-v2.mjs
       - .github/workflows/phase12-real-student-apply.yml
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
           node-version: '22'
 
       - name: Verify private apply engine syntax
-        run: node --check scripts/phase12-real-student-apply.mjs
+        run: node --check scripts/phase12-real-student-apply-v2.mjs
 
       - name: Apply and verify exactly two owner-approved students
-        run: node --experimental-default-type=module scripts/phase12-real-student-apply.mjs
+        run: node --experimental-default-type=module scripts/phase12-real-student-apply-v2.mjs
