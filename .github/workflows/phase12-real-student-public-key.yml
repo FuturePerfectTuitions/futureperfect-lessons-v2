@@ -46,15 +46,38 @@ jobs:
           STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
           test -n "$STUDENTS"; test "$STUDENTS" != null
 
+          KEY_NAME='phase12:real-students:private-key'
           KEY_ESCAPED="$(python3 - <<'PY'
           import urllib.parse
-          print(urllib.parse.quote('phase12:owner-check:private-key', safe=''))
+          print(urllib.parse.quote('phase12:real-students:private-key', safe=''))
           PY
           )"
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/private.pem
+          KEY_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}"
+          HTTP_CODE="$(curl --silent --show-error --output /tmp/private.pem --write-out '%{http_code}' \
+            "$KEY_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+
+          if [ "$HTTP_CODE" = '404' ]; then
+            rm -f /tmp/private.pem
+            node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const { privateKey } = crypto.generateKeyPairSync('rsa', {
+            modulusLength: 2048,
+            publicKeyEncoding: { type: 'spki', format: 'pem' },
+            privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+          });
+          fs.writeFileSync('/tmp/private.pem', privateKey, { mode: 0o600 });
+          NODE
+            curl --fail --silent --show-error --request PUT \
+              "$KEY_URL" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header 'Content-Type: application/octet-stream' \
+              --data-binary @/tmp/private.pem >/dev/null
+            echo 'Created a new private transport key in isolated development STUDENTS_KV.'
+          elif [ "$HTTP_CODE" != '200' ]; then
+            echo "Unexpected private-key read status: ${HTTP_CODE}" >&2
+            exit 1
+          fi
           chmod 600 /tmp/private.pem
 
           node <<'NODE'
