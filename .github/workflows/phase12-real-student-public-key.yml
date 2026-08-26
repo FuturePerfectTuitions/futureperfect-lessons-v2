@@ -1,0 +1,72 @@
+name: Phase 12 real-student public-key export
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase12-real-student-public-key.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  export-public-key:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase12-real-student-data' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify isolated development state and export public key only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal student login enabled; refusing.' >&2; exit 1;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$STUDENTS"; test "$STUDENTS" != null
+
+          KEY_ESCAPED="$(python3 - <<'PY'
+          import urllib.parse
+          print(urllib.parse.quote('phase12:owner-check:private-key', safe=''))
+          PY
+          )"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/private.pem
+          chmod 600 /tmp/private.pem
+
+          node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const privateKey = fs.readFileSync('/tmp/private.pem','utf8');
+          const publicKey = crypto.createPublicKey(privateKey).export({ type:'spki', format:'pem' });
+          const fingerprint = crypto.createHash('sha256').update(publicKey).digest('hex');
+          console.log('PHASE12_PUBLIC_KEY_BEGIN');
+          process.stdout.write(publicKey);
+          console.log('PHASE12_PUBLIC_KEY_END');
+          console.log(`PHASE12_PUBLIC_KEY_SHA256=${fingerprint}`);
+          NODE
+
+          rm -f /tmp/private.pem
