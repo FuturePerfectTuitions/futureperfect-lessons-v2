@@ -2,12 +2,6 @@ name: Cloudflare read-only audit
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/cloudflare-audit
-    paths:
-      - .github/workflows/cloudflare-audit.yml
-      - .github/cloudflare-audit-trigger.txt
   pull_request:
     branches:
       - main
@@ -22,11 +16,12 @@ jobs:
   audit:
     name: Audit V2 Cloudflare state
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.126.0
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -36,81 +31,66 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Confirm secrets are available
+      - name: Verify isolated Worker bindings without printing private values
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo "Cloudflare CI credentials are present. Values are not printed."
-
-      - name: Wrangler identity and version
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@latest --version
-          npx --yes wrangler@latest whoami
-
-      - name: Worker deployment status
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "=== Current deployment status ==="
-          npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json
-          echo "=== Recent deployments ==="
-          npx --yes wrangler@latest deployments list --name "$WORKER_NAME" --json
-          echo "=== Secret names only ==="
-          npx --yes wrangler@latest secret list --name "$WORKER_NAME" --format json
-
-      - name: Worker runtime settings and bindings (sanitized)
-        shell: bash
-        run: |
-          set -euo pipefail
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/worker-settings.json
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "ENVIRONMENT" and .type == "plain_text" and .text == "development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name == "MATERIALS_R2" and .type == "r2_bucket" and .bucket_name == "fpt-materials-dev")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[] | select(.name == "STUDENT_LOGIN_ENABLED" and .type == "plain_text") | .text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'ERROR: normal student login is enabled.' >&2; exit 1;; esac
+          for B in STUDENTS_KV LESSONS_KV DB; do
+            jq -e --arg B "$B" '.result.bindings[] | select(.name == $B)' /tmp/settings.json >/dev/null
+          done
+          echo 'PASS: isolated development bindings and login-disabled state verified.'
 
-          jq '{
-            success,
-            errors,
-            messages,
-            result: {
-              compatibility_date: .result.compatibility_date,
-              compatibility_flags: .result.compatibility_flags,
-              usage_model: .result.usage_model,
-              placement: .result.placement,
-              bindings: [
-                (.result.bindings // [])[] |
-                if .type == "plain_text" and (["ENVIRONMENT","ALLOWED_ORIGINS","DEV_LOGIN_ALLOWLIST","STUDENT_LOGIN_ENABLED"] | index(.name)) then
-                  {name, type, text}
-                elif ((.type // "") | test("secret"; "i")) then
-                  {name, type}
-                else
-                  {name, type, namespace_id, bucket_name, database_name, database_id, id, service, environment}
-                end
-              ]
-            }
-          }' /tmp/worker-settings.json
-
-      - name: Account resource inventory (read-only)
+      - name: Verify current deployment remains Phase 12
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== KV namespaces ==="
-          npx --yes wrangler@latest kv namespace list
-          echo "=== D1 databases ==="
-          npx --yes wrangler@latest d1 list --json
-          echo "=== R2 buckets ==="
-          npx --yes wrangler@latest r2 bucket list
+          npx --yes wrangler@${WRANGLER_VERSION} deployments status --name "$WORKER_NAME" --json >/tmp/deployment.json
+          jq -e '.annotations["workers/message"] == "Phase 12 final batch-aware development Worker"' /tmp/deployment.json >/dev/null
+          jq -e '[.versions[] | select(.percentage == 100)] | length == 1' /tmp/deployment.json >/dev/null
+          echo 'PASS: deployed Worker is the Phase 12 final batch-aware development Worker.'
 
-      - name: Repository deployment config snapshot
+      - name: Verify locked canonical catalogue against remote V2 Lessons KV
         shell: bash
-        working-directory: worker
         run: |
           set -euo pipefail
-          echo "=== worker/wrangler.toml ==="
-          cat wrangler.toml
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/p11 >/tmp/p11-summary.json
+          grep -Fq '"catalogueLessons": 369' /tmp/p11-summary.json
+          grep -Fq '"catalogueCurricula": 11' /tmp/p11-summary.json
+          grep -Fq '"lessonsKvWrites": 380' /tmp/p11-summary.json
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue-static.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue-static.log
+          LESSONS="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV" and .type == "kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS"; test "$LESSONS" != null
+          node scripts/phase11-kv-remote-verify.mjs "$LESSONS" /tmp/p11/phase11-lessons-kv-bulk.json >/tmp/kv-verify.json
+          jq -e '.verifiedKeys == 380 and .status == "PASS"' /tmp/kv-verify.json >/dev/null
+          echo 'PASS: remote V2 Lessons KV exactly matches the locked 369/11 canonical package (380 keys).'
+
+      - name: Verify Phase 12 D1 closure invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS trigger_count FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/d1.json 2>/tmp/d1.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/d1.json)" = '173'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/d1.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/d1.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/d1.json)" = '0'
+          test "$(jq -r '.[4].results[0].trigger_count' /tmp/d1.json)" = '1'
+          test "$(jq -r '.[5].results[0].quick_check' /tmp/d1.json)" = 'ok'
+          echo 'PASS: D1 Phase 12 closure counts, single-session trigger and quick_check verified.'
 
       - name: Audit completed
-        run: echo "Read-only Cloudflare audit completed. No deploy or write command was executed."
+        run: echo 'Read-only Phase 13 preflight completed. No Worker, KV, D1, R2, DNS, route or live-portal write was executed.'
