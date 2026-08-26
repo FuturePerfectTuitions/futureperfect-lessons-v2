@@ -205,7 +205,7 @@ jobs:
           STAGE='authenticated-route-no-mutation-acceptance'
           CODE="$(curl --silent --show-error --output /tmp/p13-noauth.json --write-out '%{http_code}' \
             --header 'Content-Type: application/json' --request POST --data '{"items":[{"syncRowId":"noauth","operation":"grant","portalUserId":"missing","lessonId":"missing","batchKey":"missing","lessonDate":"2026-09-01"}]}' \
-            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync')"
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync")"
           test "$CODE" = '401'
           jq -e '.error == "SYNC_UNAUTHORISED"' /tmp/p13-noauth.json >/dev/null
 
@@ -213,7 +213,7 @@ jobs:
             --header "Authorization: Bearer $FPT_PORTAL_V2_EXCEL_SYNC_TOKEN" \
             --header 'Origin: https://futureperfecttuitions.github.io' \
             --header 'Content-Type: application/json' --request POST --data '{"items":[{"syncRowId":"browser","operation":"grant","portalUserId":"missing","lessonId":"missing","batchKey":"missing","lessonDate":"2026-09-01"}]}' \
-            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync')"
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync")"
           test "$CODE" = '403'
           jq -e '.error == "BROWSER_REQUEST_NOT_ALLOWED"' /tmp/p13-browser.json >/dev/null
 
