@@ -1,1 +1,1 @@
-Batch-aware runtime ready for guarded development verification. Real September batch configuration remains pending exact owner data.
+Phase 12 is complete in the isolated V2 development environment. Real September batch definitions and future-dated student assignments were applied privately through guarded operational workflows, verified without creating any Batch + Lesson releases or changing permanent Student + Lesson entitlement counts, and removed from the public-repository workflow path after verification. Normal student login remains disabled. Phase 13 has not started.
