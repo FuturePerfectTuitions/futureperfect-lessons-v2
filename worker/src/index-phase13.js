@@ -181,10 +181,6 @@ async function validateAgainstStores(env, item) {
     return { error: 'STUDENT_NOT_FOUND', message: 'Portal student does not exist.' };
   }
 
-  if (isBlocked(student, item.lessonId)) {
-    return { blocked: true, student };
-  }
-
   const lesson = await loadLesson(env, item.lessonId);
   if (!lesson || cleanText(lesson.lessonId) !== item.lessonId || lesson.active === false) {
     return { error: 'LESSON_NOT_FOUND', message: 'Lesson ID does not resolve to an active V2 lesson.' };
@@ -219,6 +215,10 @@ async function validateAgainstStores(env, item) {
       error: 'NOT_ASSIGNED_ON_LESSON_DATE',
       message: 'Student is not effectively assigned to this batch on the lesson date.'
     };
+  }
+
+  if (isBlocked(student, item.lessonId)) {
+    return { blocked: true, student, lesson, batch, subject };
   }
 
   return { student, lesson, batch, subject };
