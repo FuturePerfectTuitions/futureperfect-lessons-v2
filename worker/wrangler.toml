@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase12.js"
+main = "src/index-phase13.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -8,17 +8,17 @@ ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
 DEV_LOGIN_ALLOWLIST = "test0101,test0202,test0303,test0404,test0505,test0606,test0707"
 
-# Phase 12 development entrypoint. src/index-phase12.js adds structured,
-# effective-dated D1 batch interpretation on top of the completed Phase 11
-# efficient Worker stack. Exact real batch names are stored only as data in the
-# isolated development D1 database; their meaning comes from batch_definitions
-# metadata rather than from parsing the batch-name text.
+# Phase 13 development entrypoint. src/index-phase13.js adds one narrow,
+# development-only authenticated Excel entitlement-sync route on top of the
+# completed Phase 12 batch-aware Worker. All ordinary student routes continue
+# to delegate to Phase 12 unchanged.
 #
-# Batch assignment is navigation/configuration only. It must not create, delete
-# or rewrite permanent Student + Lesson entitlements. The existing Phase 11
-# efficient stack continues to enforce single-device sessions, protected answers,
-# special areas, dormant VR lesson-video policy, quota-safe navigation and the
-# owner-approved English/Maths ScreenPal presentation rules.
+# The Excel route requires the dedicated EXCEL_SYNC_TOKEN Worker secret. The
+# secret is deliberately not present in this file or any repository source.
+# It processes explicit student-level items only, validates exact D1 batch
+# configuration/effective dates, and keeps Student + Lesson as the permanent
+# idempotent entitlement identity while Batch + Lesson remains operational
+# release context.
 #
 # MOCK_DAILY_PASSWORDS and other sensitive values are Worker secrets/config and
 # must never be committed. Cloudflare binding identifiers remain generated from
