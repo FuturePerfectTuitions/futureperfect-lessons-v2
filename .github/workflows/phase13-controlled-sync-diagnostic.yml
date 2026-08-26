@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Read-only diagnose controlled workbook row
+      - name: Read-only diagnose controlled workbook row after retry
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -44,7 +44,7 @@ jobs:
             --data '{"items":[{"syncRowId":"p13-workbook-diagnostic","operation":"status_check","portalUserId":"testy2e","lessonId":"Y5E10","batchKey":"__P13_ACCEPT_E5__","lessonDate":"2026-09-12"}]}' \
             "$WORKER_BASE/api/v1/admin/excel-entitlements/sync" | jq -c .
 
-          echo 'Exact D1 fixture state:'
+          echo 'Exact D1 fixture state after workbook retry:'
           $W d1 execute fpt_portal_v2_db --remote --json --command \
             "SELECT batch_key,subject,school_year,stream,active_from,active_to FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; SELECT portal_user_id_norm,batch_key,effective_from,effective_to FROM student_batch_assignments WHERE portal_user_id_norm='testy2e' AND batch_key='__P13_ACCEPT_E5__'; SELECT portal_user_id_norm,lesson_id,core_access,vr_access,source,source_batch_code,source_lesson_date FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id='Y5E10'; SELECT batch_key,lesson_id,lesson_date,source_row_id FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id='Y5E10'; PRAGMA quick_check;" \
             | jq -c '[.[0].results,.[1].results,.[2].results,.[3].results,.[4].results]'
