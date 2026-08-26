@@ -1,4 +1,4 @@
-name: Phase 12 September batch transport key
+name: Phase 12 September batch definitions
 
 on:
   pull_request:
@@ -13,52 +13,71 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
 
 jobs:
-  bootstrap:
+  register-development-batches:
     if: >-
       github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
       github.event.pull_request.head.ref == 'phase12-september-batches' &&
       github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
 
-      - name: Guard isolated development state and create one-time transport key
+      - name: Guard isolated development state
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-
+          test "${{ github.event.pull_request.base.sha }}" = '681b16d6344236168acb2d1824a0bb2e7bed9bb5'
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/settings.json
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
           jq -e '.success == true' /tmp/settings.json >/dev/null
           jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
           jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings.json >/dev/null
           LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal student login enabled; refusing.' >&2; exit 1;; esac
+          case "${LOGIN,,}" in ''|'false') ;; *) exit 1;; esac
           STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
-          test -n "$STUDENTS"; test "$STUDENTS" != null
+          printf '%s' "$STUDENTS" >/tmp/students-kv-id
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue.log
 
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/private.pem >/dev/null 2>&1
-          openssl pkey -in /tmp/private.pem -pubout -out /tmp/public.pem >/dev/null 2>&1
-          chmod 600 /tmp/private.pem
-          KEY_NAME='phase12:september-batches:private-key'
+      - name: Register four exact future-dated batch definitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; PRAGMA quick_check;" >/tmp/before.json 2>/tmp/before.err
+          BEFORE="$(jq -r '.[0].results[0].entitlement_count' /tmp/before.json)"
+          test "$BEFORE" = '173'
+          test "$(jq -r '.[1].results[0].release_count' /tmp/before.json)" = '0'
+          grep -Fq '"ok"' /tmp/before.json
+
+          $W d1 execute fpt_portal_v2_db --remote --command "
+            INSERT OR IGNORE INTO batch_definitions(batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to,created_at,updated_at) VALUES
+              ('Y3FE','2026-27','english',3,'normal',NULL,'2026-09-10',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+              ('Y3FM','2026-27','maths',3,'normal',NULL,'2026-09-07',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+              ('Y511FE','2026-27','english',5,'11plus',NULL,'2026-09-12',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+              ('Y511FM','2026-27','maths',5,'11plus',3,'2026-09-08',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);" --yes >/tmp/apply.out 2>/tmp/apply.err
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to FROM batch_definitions WHERE batch_key IN ('Y3FE','Y3FM','Y511FE','Y511FM') ORDER BY batch_key; SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; PRAGMA quick_check;" >/tmp/after.json 2>/tmp/after.err
+          test "$(jq -r '.[0].results|length' /tmp/after.json)" = '4'
+          jq -e '.[0].results | any(.batch_key=="Y3FE" and .subject=="english" and .school_year==3 and .stream=="normal" and .active_from=="2026-09-10")' /tmp/after.json >/dev/null
+          jq -e '.[0].results | any(.batch_key=="Y3FM" and .subject=="maths" and .school_year==3 and .stream=="normal" and .active_from=="2026-09-07")' /tmp/after.json >/dev/null
+          jq -e '.[0].results | any(.batch_key=="Y511FE" and .subject=="english" and .school_year==5 and .stream=="11plus" and .active_from=="2026-09-12")' /tmp/after.json >/dev/null
+          jq -e '.[0].results | any(.batch_key=="Y511FM" and .subject=="maths" and .school_year==5 and .stream=="11plus" and .maths_level==3 and .active_from=="2026-09-08")' /tmp/after.json >/dev/null
+          test "$(jq -r '.[1].results[0].entitlement_count' /tmp/after.json)" = "$BEFORE"
+          test "$(jq -r '.[2].results[0].release_count' /tmp/after.json)" = '0'
+          grep -Fq '"ok"' /tmp/after.json
+
+          STUDENTS="$(cat /tmp/students-kv-id)"
           KEY_ESCAPED="$(python3 -c 'import urllib.parse; print(urllib.parse.quote("phase12:september-batches:private-key", safe=""))')"
-          curl --fail --silent --show-error --request PUT \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --header 'Content-Type: application/octet-stream' \
-            --data-binary @/tmp/private.pem >/dev/null
-
-          echo 'PHASE12_BATCH_PUBLIC_KEY_BEGIN'
-          cat /tmp/public.pem
-          echo 'PHASE12_BATCH_PUBLIC_KEY_END'
-          sha256sum /tmp/public.pem | awk '{print "PHASE12_BATCH_PUBLIC_KEY_SHA256=" $1}'
-          rm -f /tmp/private.pem /tmp/public.pem
+          curl --silent --show-error --request DELETE "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/dev/null || true
+          echo 'Phase 12 September batch definitions: PASS'
