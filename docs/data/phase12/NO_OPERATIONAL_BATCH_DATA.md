@@ -1,1 +1,1 @@
-No real operational September batch keys or student batch assignments are included in this branch.
+No real student identifiers, credentials, entitlement histories or exact operational batch keys are committed to this public repository. Phase 12 operational batch definitions and student assignments were applied privately to the isolated V2 development stores through guarded workflows and verified there.
