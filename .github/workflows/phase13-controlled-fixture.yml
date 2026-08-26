@@ -15,7 +15,7 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   WRANGLER_VERSION: 4.125.0
   FIXTURE_BATCH: __P13_ACCEPT_E5__
-  FIXTURE_USER: testy511e
+  FIXTURE_USER: testy2e
 
 jobs:
   prepare:
@@ -61,7 +61,7 @@ jobs:
           const catalogue = loadPhase11Catalogue();
           const ids = catalogue.curricula.ENGLISH_Y5.lessonIds;
           const values = ids.map(id => `('${String(id).replaceAll("'", "''")}')`).join(',');
-          console.log(`WITH candidates(lesson_id) AS (VALUES ${values}) SELECT lesson_id FROM candidates WHERE NOT EXISTS (SELECT 1 FROM lesson_entitlements e WHERE e.portal_user_id_norm='testy511e' AND e.lesson_id=candidates.lesson_id) ORDER BY lesson_id LIMIT 1;`);
+          console.log(`WITH candidates(lesson_id) AS (VALUES ${values}) SELECT lesson_id FROM candidates WHERE NOT EXISTS (SELECT 1 FROM lesson_entitlements e WHERE e.portal_user_id_norm='testy2e' AND e.lesson_id=candidates.lesson_id) ORDER BY lesson_id LIMIT 1;`);
           NODE
 
           $W d1 execute fpt_portal_v2_db --remote --json --command "$(cat /tmp/p13-candidate.sql)" >/tmp/p13-candidate.json
@@ -72,11 +72,11 @@ jobs:
           case "$TEST_LESSON" in Y5E*) ;; *) echo 'Unexpected test lesson.' >&2; false;; esac
 
           $W d1 execute fpt_portal_v2_db --remote --command \
-            "INSERT INTO batch_definitions(batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to,created_at,updated_at) VALUES ('__P13_ACCEPT_E5__','2026-27','english',5,'11plus',NULL,'2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP); INSERT INTO student_batch_assignments(portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy511e','__P13_ACCEPT_E5__','2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);" \
+            "INSERT INTO batch_definitions(batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to,created_at,updated_at) VALUES ('__P13_ACCEPT_E5__','2026-27','english',5,'normal',NULL,'2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP); INSERT INTO student_batch_assignments(portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy2e','__P13_ACCEPT_E5__','2000-01-01',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);" \
             --yes >/tmp/p13-fixture-seed.log 2>&1
 
           $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS batch_rows FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS assignment_rows FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__' AND portal_user_id_norm='testy511e'; SELECT COUNT(*) AS entitlement_rows FROM lesson_entitlements WHERE portal_user_id_norm='testy511e' AND lesson_id='${TEST_LESSON}'; SELECT COUNT(*) AS release_rows FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id='${TEST_LESSON}';" \
+            "SELECT COUNT(*) AS batch_rows FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS assignment_rows FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__' AND portal_user_id_norm='testy2e'; SELECT COUNT(*) AS entitlement_rows FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id='${TEST_LESSON}'; SELECT COUNT(*) AS release_rows FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id='${TEST_LESSON}';" \
             >/tmp/p13-fixture-after.json
           test "$(jq -r '.[0].results[0].batch_rows' /tmp/p13-fixture-after.json)" = '1'
           test "$(jq -r '.[1].results[0].assignment_rows' /tmp/p13-fixture-after.json)" = '1'
