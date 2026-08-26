@@ -1,6 +1,6 @@
 # Phase 13 — Excel entitlement sync
 
-Status: implementation PR #122 / controlled development proof pending.
+Status: implementation PR #122 / controlled development proof pending. Static and guarded deployment verification are required before the workbook acceptance step.
 
 Phase 13 adds the narrow `SyncPortalEntitlements` path from the 2026–27 owner workbook to the isolated V2 development Worker and D1. It is not a production cutover.
 
