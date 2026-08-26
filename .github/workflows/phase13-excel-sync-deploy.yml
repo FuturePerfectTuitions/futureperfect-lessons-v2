@@ -1,0 +1,245 @@
+name: Phase 13 Excel sync guarded development deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/index-phase13.js
+      - worker/src/index-phase12.js
+      - worker/wrangler.toml
+      - scripts/phase11-apply-package.mjs
+      - scripts/phase11-navigation-manifest.mjs
+      - tests/phase13-excel-sync-verification.mjs
+      - .github/workflows/phase13-excel-sync-deploy.yml
+      - docs/data/phase13/**
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  FPT_PORTAL_V2_EXCEL_SYNC_TOKEN: ${{ secrets.FPT_PORTAL_V2_EXCEL_SYNC_TOKEN }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy-development:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase13-sync-portal-entitlements' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Check dedicated Excel sync secret readiness
+        id: secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$FPT_PORTAL_V2_EXCEL_SYNC_TOKEN" ]; then
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'Deployment deferred: repository secret FPT_PORTAL_V2_EXCEL_SYNC_TOKEN is not configured.'
+            exit 0
+          fi
+          test "${#FPT_PORTAL_V2_EXCEL_SYNC_TOKEN}" -ge 24
+          echo 'configured=true' >> "$GITHUB_OUTPUT"
+          echo 'Dedicated Excel sync secret is configured. Value is not printed.'
+
+      - name: Guard, deploy and accept isolated Phase 13 Worker
+        if: steps.secret.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          STAGE='initialise'
+          STUDENTS=''; LESSONS=''; DB=''; R2=''; DEPLOYED=0
+
+          make_config() {
+            local ENTRYPOINT="$1"
+            local OUT="$2"
+            cat >"$OUT" <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "${ENTRYPOINT}"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          }
+
+          rollback_worker() {
+            if [ "$DEPLOYED" -ne 1 ] || [ -z "$STUDENTS" ] || [ -z "$LESSONS" ] || [ -z "$DB" ] || [ -z "$R2" ]; then return; fi
+            set +e
+            make_config 'src/index-phase12.js' 'worker/wrangler.phase13.rollback.toml'
+            $W deploy --config worker/wrangler.phase13.rollback.toml --keep-vars \
+              --message 'Rollback Phase 13 Excel sync guarded deployment' >/tmp/p13-rollback.log 2>&1
+            local RC=$?
+            if [ "$RC" -eq 0 ]; then
+              echo 'Fail-closed Worker rollback to Phase 12 completed.'
+            else
+              echo 'ERROR: automatic Worker rollback failed.' >&2
+              tail -n 60 /tmp/p13-rollback.log || true
+            fi
+            set -e
+          }
+
+          failure() {
+            local STATUS=$?
+            trap - ERR
+            echo "Phase 13 deployment failed at stage: ${STAGE}" >&2
+            rollback_worker
+            exit "$STATUS"
+          }
+          trap failure ERR
+
+          STAGE='source-and-base-guard'
+          test "${{ github.event.pull_request.base.sha }}" = 'c41cd413e16d336f116a564f52fe93382d001e1c'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check worker/src/index-phase13.js
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/p13-catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p13-catalogue.log
+
+          STAGE='cloudflare-isolation-guard'
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/p13-settings-before.json
+          jq -e '.success == true' /tmp/p13-settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p13-settings-before.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p13-settings-before.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal V2 student login is enabled; refusing Phase 13 deployment.' >&2; false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p13-settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p13-settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p13-settings-before.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p13-settings-before.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for V in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$V"; test "$V" != null; done
+          ! jq -e '.result.bindings[]|select(.name=="LESSONS_KV" and (.namespace_id == "FPT_LESSONS_TEST" or .namespace_id == "legacy"))' /tmp/p13-settings-before.json >/dev/null
+
+          STAGE='phase12-d1-closure-guard'
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/p13-d1-before.json 2>/tmp/p13-d1-before.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-d1-before.json)" = '173'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p13-d1-before.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p13-d1-before.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p13-d1-before.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/p13-d1-before.json
+          grep -Fq '"ok"' /tmp/p13-d1-before.json
+
+          STAGE='generate-locked-navigation-manifest'
+          rm -rf /tmp/p13-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/p13-package >/tmp/p13-package.log
+          jq -e '.phase == 11 and .catalogueLessons == 369 and .catalogueCurricula == 11 and .navigationManifestSha256 == "d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083"' /tmp/p13-package/phase11-apply-summary.json >/dev/null
+          grep -Fq 'Navigation manifest SHA-256: d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' worker/src/phase11-navigation-manifest.generated.js
+
+          STAGE='dedicated-worker-secret'
+          $W secret list --name "$WORKER_NAME" --format json >/tmp/p13-secret-list.json
+          if ! jq -e '.[] | select(.name == "EXCEL_SYNC_TOKEN")' /tmp/p13-secret-list.json >/dev/null; then
+            printf '%s' "$FPT_PORTAL_V2_EXCEL_SYNC_TOKEN" | \
+              $W secret put EXCEL_SYNC_TOKEN --name "$WORKER_NAME" >/tmp/p13-secret-put.log 2>&1
+            echo 'Dedicated EXCEL_SYNC_TOKEN Worker secret created; value not printed.'
+          else
+            echo 'Dedicated EXCEL_SYNC_TOKEN Worker secret already exists; value not changed or printed.'
+          fi
+
+          STAGE='dry-run-worker-bundle'
+          make_config 'src/index-phase13.js' 'worker/wrangler.phase13.runtime.toml'
+          $W deploy --config worker/wrangler.phase13.runtime.toml --dry-run --outdir /tmp/p13-build >/tmp/p13-dry-run.log
+          grep -R -aFq '/api/v1/admin/excel-entitlements/sync' /tmp/p13-build
+          grep -R -aFq 'NOT_ASSIGNED_ON_LESSON_DATE' /tmp/p13-build
+          grep -R -aFq 'd82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' /tmp/p13-build
+
+          STAGE='deploy-phase13-development-worker'
+          $W deploy --config worker/wrangler.phase13.runtime.toml --keep-vars \
+            --message 'Phase 13 guarded Excel entitlement sync development Worker' >/tmp/p13-deploy.log 2>&1
+          DEPLOYED=1
+          sleep 3
+
+          STAGE='post-deploy-binding-guard'
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/p13-settings-after.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p13-settings-after.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p13-settings-after.json)" = 'fpt-materials-dev'
+          AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p13-settings-after.json)"
+          case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          for VAR in ALLOWED_ORIGINS DEV_LOGIN_ALLOWLIST STUDENT_LOGIN_ENABLED; do
+            test "$(jq -r --arg n "$VAR" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p13-settings-after.json)" = \
+                 "$(jq -r --arg n "$VAR" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p13-settings-before.json)"
+          done
+          $W secret list --name "$WORKER_NAME" --format json >/tmp/p13-secret-after.json
+          jq -e '.[] | select(.name == "EXCEL_SYNC_TOKEN")' /tmp/p13-secret-after.json >/dev/null
+
+          STAGE='authenticated-route-no-mutation-acceptance'
+          CODE="$(curl --silent --show-error --output /tmp/p13-noauth.json --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' --request POST --data '{"items":[{"syncRowId":"noauth","operation":"grant","portalUserId":"missing","lessonId":"missing","batchKey":"missing","lessonDate":"2026-09-01"}]}' \
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync')"
+          test "$CODE" = '401'
+          jq -e '.error == "SYNC_UNAUTHORISED"' /tmp/p13-noauth.json >/dev/null
+
+          CODE="$(curl --silent --show-error --output /tmp/p13-browser.json --write-out '%{http_code}' \
+            --header "Authorization: Bearer $FPT_PORTAL_V2_EXCEL_SYNC_TOKEN" \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            --header 'Content-Type: application/json' --request POST --data '{"items":[{"syncRowId":"browser","operation":"grant","portalUserId":"missing","lessonId":"missing","batchKey":"missing","lessonDate":"2026-09-01"}]}' \
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync')"
+          test "$CODE" = '403'
+          jq -e '.error == "BROWSER_REQUEST_NOT_ALLOWED"' /tmp/p13-browser.json >/dev/null
+
+          curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $FPT_PORTAL_V2_EXCEL_SYNC_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"items":[{"syncRowId":"p13-invalid-student","operation":"grant","portalUserId":"__phase13_missing__","lessonId":"Y5E1","batchKey":"Y511FE","lessonDate":"2026-09-12"},{"syncRowId":"p13-invalid-lesson","operation":"grant","portalUserId":"TestY5E","lessonId":"__P13_MISSING_LESSON__","batchKey":"Y511FE","lessonDate":"2026-09-12"}]}' \
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync" >/tmp/p13-auth.json
+          jq -e '.ok == true and (.results|length)==2' /tmp/p13-auth.json >/dev/null
+          jq -e '.results[0].status == "STUDENT_NOT_FOUND" and .results[0].ok == false' /tmp/p13-auth.json >/dev/null
+          jq -e '.results[1].status == "LESSON_NOT_FOUND" and .results[1].ok == false' /tmp/p13-auth.json >/dev/null
+
+          STAGE='d1-post-no-mutation-guard'
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/p13-d1-after.json 2>/tmp/p13-d1-after.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-d1-after.json)" = '173'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p13-d1-after.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p13-d1-after.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p13-d1-after.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/p13-d1-after.json
+          grep -Fq '"ok"' /tmp/p13-d1-after.json
+
+          STAGE='complete'
+          trap - ERR
+          echo 'Phase 13 development Worker deployed. Authenticated route accepted mixed invalid items independently with zero D1 mutation.'
+
+      - name: Report deferred deployment when secret is absent
+        if: steps.secret.outputs.configured != 'true'
+        run: |
+          echo 'Static Phase 13 implementation can be reviewed, but runtime deployment is intentionally deferred until the dedicated repository secret is configured.'
