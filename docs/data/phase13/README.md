@@ -1,6 +1,6 @@
 # Phase 13 — Excel entitlement sync
 
-Status: implementation branch / controlled development proof pending.
+Status: implementation PR #122 / controlled development proof pending.
 
 Phase 13 adds the narrow `SyncPortalEntitlements` path from the 2026–27 owner workbook to the isolated V2 development Worker and D1. It is not a production cutover.
 
@@ -44,12 +44,14 @@ Items are processed independently so one invalid row cannot block other valid se
 For every item the Worker:
 
 1. verifies the V2 student exists;
-2. respects an existing direct `blockedLessons` suppression;
-3. verifies the exact active Lesson ID exists in V2;
-4. verifies the exact Batch ID exists in `batch_definitions`;
-5. verifies batch subject matches lesson subject;
-6. verifies the batch is active on the lesson date;
-7. verifies an effective-dated `student_batch_assignments` row covers the student, exact batch and lesson date.
+2. verifies the exact active Lesson ID exists in V2;
+3. verifies the exact Batch ID exists in `batch_definitions`;
+4. verifies batch subject matches lesson subject;
+5. verifies the batch is active on the lesson date;
+6. verifies an effective-dated `student_batch_assignments` row covers the student, exact batch and lesson date;
+7. only after that source context is valid, respects an existing direct `blockedLessons` suppression.
+
+This ordering means a stale blocked-list value cannot make an invalid Lesson/Batch/source row appear as a valid red blocked row.
 
 Excel never creates, changes or infers batch membership.
 
