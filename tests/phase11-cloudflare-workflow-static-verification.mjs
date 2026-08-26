@@ -111,6 +111,11 @@ for (const required of [
 assert.equal((homePerformance.match(/\/api\/v1\/student\/home/g) || []).length, 1, 'Home performance probe must keep exactly one single-shot /home request in its measurement path.');
 
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
-assert.ok(wrangler.includes('main = "src/index-phase10-history.js"'), 'Implementation PR must not switch the checked-in Worker entrypoint before guarded apply.');
+assert.ok(
+  wrangler.includes('main = "src/index-phase10-history.js"') ||
+    wrangler.includes('main = "src/index-phase12.js"'),
+  'Checked-in Worker entrypoint must be the original guarded baseline or the explicitly progressed Phase 12 entrypoint.'
+);
+assert.ok(!wrangler.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Progressed checked-in Worker configuration must not enable normal student login.');
 
 console.log('Phase 11 guarded Cloudflare workflow static verification: PASS');

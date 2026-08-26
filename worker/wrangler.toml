@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase10-history.js"
+main = "src/index-phase12.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -8,12 +8,20 @@ ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
 DEV_LOGIN_ALLOWLIST = "test0101,test0202,test0303,test0404,test0505,test0606,test0707"
 
-# Phase 10 development entrypoint with navigation regression correction:
-# src/index-phase10-history.js layers Current/Previous Year/Level grouping over
-# src/index-phase10.js, which provides manually assigned 11+ Maths Assessments,
-# Year 5 11+ MOCKS with separate daily-password gating, and VR How-To.
-# MOCK_DAILY_PASSWORDS is a Worker secret/config value and must never be committed.
-# Cloudflare binding identifiers remain generated from the audited V2 runtime by
-# guarded deployment workflows rather than hard-coded in this repository file.
-# Normal student login remains disabled; only DEV_LOGIN_ALLOWLIST can authenticate
-# while ENVIRONMENT=development.
+# Phase 12 development entrypoint. src/index-phase12.js adds structured,
+# effective-dated D1 batch interpretation on top of the completed Phase 11
+# efficient Worker stack. Exact real batch names are stored only as data in the
+# isolated development D1 database; their meaning comes from batch_definitions
+# metadata rather than from parsing the batch-name text.
+#
+# Batch assignment is navigation/configuration only. It must not create, delete
+# or rewrite permanent Student + Lesson entitlements. The existing Phase 11
+# efficient stack continues to enforce single-device sessions, protected answers,
+# special areas, dormant VR lesson-video policy, quota-safe navigation and the
+# owner-approved English/Maths ScreenPal presentation rules.
+#
+# MOCK_DAILY_PASSWORDS and other sensitive values are Worker secrets/config and
+# must never be committed. Cloudflare binding identifiers remain generated from
+# the audited V2 runtime by guarded deployment workflows rather than hard-coded
+# in this repository file. Normal student login remains disabled; the checked-in
+# DEV_LOGIN_ALLOWLIST contains controlled TestY/development fixtures only.

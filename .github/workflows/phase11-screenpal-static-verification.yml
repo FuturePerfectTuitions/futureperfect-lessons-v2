@@ -6,6 +6,7 @@ on:
     paths:
       - worker/src/index-phase11.js
       - worker/src/phase11-screenpal.js
+      - worker/wrangler.toml
       - tests/phase11-screenpal-static-verification.mjs
       - docs/data/PHASE11_SCREENPAL_URL_RULES.md
       - .github/workflows/phase11-screenpal-static-verification.yml
@@ -29,7 +30,11 @@ jobs:
           node --check worker/src/index-phase11.js
           node --check worker/src/phase11-screenpal.js
           node --experimental-default-type=module tests/phase11-screenpal-static-verification.mjs
-          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          if ! grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml && \
+             ! grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml; then
+            echo 'Unexpected checked-in Worker entrypoint.' >&2
+            exit 1
+          fi
           grep -Fq "import phase10HistoryWorker from './index-phase10-history.js';" worker/src/index-phase11.js
           if grep -Eq 'go\.screenpal\.com/(player|watch)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js; then
             echo 'Phase 11 runtime code contains a synthesized ScreenPal URL.' >&2

@@ -1,0 +1,1 @@
+The intended development entrypoint is worker/src/index-phase12.js, wrapping the completed Phase 11 efficient Worker stack.

@@ -1,0 +1,1 @@
+The batch-aware Worker deployment is limited to the isolated V2 development environment and does not populate operational September batch rows.

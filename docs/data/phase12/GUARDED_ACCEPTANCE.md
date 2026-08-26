@@ -1,0 +1,1 @@
+Guarded acceptance uses controlled TestY fixtures only and cleans all temporary batch rows before success.

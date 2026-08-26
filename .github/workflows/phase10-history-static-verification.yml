@@ -36,7 +36,7 @@ jobs:
           node --check tests/phase10-history-browser-verification.mjs
           bash -n tests/phase10-history-api-verification.sh
           grep -Fq 'assets/phase10-history.js' phase10.html
-          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
           grep -Fq 'test0707' worker/wrangler.toml
           for f in worker/fixtures/phase10/user-test0707.json worker/fixtures/phase10/lesson-DEV-HISTORY-*.json worker/fixtures/phase10/curriculum-*.json; do jq -e . "$f" >/dev/null; done
           jq -e '.batches == ["Y5MDEVHIST","Y5EDEVHIST"] and .schoolYear == 5' worker/fixtures/phase10/user-test0707.json >/dev/null

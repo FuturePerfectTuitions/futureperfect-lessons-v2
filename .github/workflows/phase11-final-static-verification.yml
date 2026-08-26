@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Verify Phase 11 final adapter remains dormant and safe
+      - name: Verify Phase 11 final adapter remains safe through later progression
         shell: bash
         run: |
           set -euo pipefail
@@ -39,7 +39,7 @@ jobs:
           node --check assets/phase11-other.js
           node --experimental-default-type=module tests/phase11-other-static-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
-          grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml
+          grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
           ! grep -Fq 'assets/phase11-other.js' phase10.html
           grep -Fq "import phase11ResourcesWorker from './index-phase11-resources.js';" worker/src/index-phase11-final.js
           grep -Fq "phase11NavigationEnv" worker/src/index-phase11-final.js

@@ -1,0 +1,1 @@
+Batch-aware runtime ready for guarded development verification. Real September batch configuration remains pending exact owner data.
