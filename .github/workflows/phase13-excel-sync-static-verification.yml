@@ -1,0 +1,62 @@
+name: Phase 13 Excel sync static verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker/src/index-phase13.js
+      - worker/src/index-phase12.js
+      - worker/wrangler.toml
+      - tests/phase13-excel-sync-verification.mjs
+      - tests/phase12-batch-aware-worker-verification.mjs
+      - .github/workflows/phase13-excel-sync-static-verification.yml
+      - docs/data/phase13/**
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify Phase 13 Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase13.js
+          node --check worker/src/index-phase12.js
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          grep -Fq 'main = "src/index-phase13.js"' worker/wrangler.toml
+          grep -Fq 'EXCEL_SYNC_TOKEN' worker/src/index-phase13.js
+          grep -Fq 'ENVIRONMENT' worker/src/index-phase13.js
+          grep -Fq 'student_batch_assignments' worker/src/index-phase13.js
+          grep -Fq 'batch_lesson_releases' worker/src/index-phase13.js
+          ! grep -Fq 'DELETE FROM lesson_entitlements' worker/src/index-phase13.js
+          ! grep -Fq 'INSERT INTO student_batch_assignments' worker/src/index-phase13.js
+          ! grep -Fq 'UPDATE student_batch_assignments' worker/src/index-phase13.js
+
+      - name: Verify locked catalogue remains unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue.log
+
+      - name: Verify Phase 13 scope markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'selected rows only' docs/data/phase13/README.md
+          grep -Fq 'Student + Lesson' docs/data/phase13/README.md
+          grep -Fq 'Batch + Lesson' docs/data/phase13/README.md
+          grep -Fq 'normal student login remains disabled' docs/data/phase13/README.md
