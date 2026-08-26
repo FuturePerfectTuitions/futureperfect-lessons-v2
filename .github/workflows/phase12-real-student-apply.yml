@@ -1,0 +1,343 @@
+name: Phase 12 guarded real-student apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - docs/data/phase12/real-students-payload.enc.json
+      - .github/workflows/phase12-real-student-apply.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  TEST_ORIGIN: https://futureperfecttuitions.github.io
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  apply-development:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase12-real-student-data' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard, decrypt, apply and verify exactly two real students
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          STAGE='initialise'
+          STUDENTS=''; LESSONS=''; DB=''; OLD_ALLOWLIST=''; ORIGINS=''
+          DATA_MUTATED=0; ALLOWLIST_CHANGED=0
+
+          make_worker_config() {
+            local ALLOWLIST_VALUE="$1" OUT="$2"
+            local OQ AQ
+            OQ="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$ORIGINS")"
+            AQ="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$ALLOWLIST_VALUE")"
+            cat >"$OUT" <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase12.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = ${OQ}
+          DEV_LOGIN_ALLOWLIST = ${AQ}
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "fpt-materials-dev"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          }
+
+          restore_kv() {
+            [ -f /tmp/ids.txt ] || return 0
+            local INDEX=0
+            while IFS= read -r NORM; do
+              [ -n "$NORM" ] || continue
+              local KEY_ESCAPED URL
+              KEY_ESCAPED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("user:"+sys.argv[1], safe=""))' "$NORM")"
+              URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}"
+              if [ -f "/tmp/kv-backup-${INDEX}.json" ]; then
+                curl --fail --silent --show-error --request PUT "$URL" \
+                  --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  --header 'Content-Type: application/json' \
+                  --data-binary @"/tmp/kv-backup-${INDEX}.json" >/dev/null
+              else
+                curl --silent --show-error --request DELETE "$URL" \
+                  --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/dev/null || true
+              fi
+              INDEX=$((INDEX+1))
+            done </tmp/ids.txt
+          }
+
+          restore_d1() {
+            [ -f /tmp/rollback.sql ] || return 0
+            $W d1 execute fpt_portal_v2_db --remote --command "$(cat /tmp/rollback.sql)" --yes \
+              >/tmp/rollback-d1.out 2>/tmp/rollback-d1.err || true
+          }
+
+          restore_allowlist() {
+            [ "$ALLOWLIST_CHANGED" = '1' ] || return 0
+            make_worker_config "$OLD_ALLOWLIST" /tmp/wrangler.restore.toml
+            $W deploy --config /tmp/wrangler.restore.toml --keep-vars \
+              --message 'Rollback Phase 12 real-student allowlist' >/tmp/rollback-worker.out 2>&1 || true
+          }
+
+          fail_closed() {
+            local RC=$?
+            trap - ERR
+            echo "Phase 12 real-student apply failed at stage: ${STAGE}" >&2
+            if [ "$DATA_MUTATED" = '1' ]; then
+              restore_d1
+              restore_kv
+            fi
+            restore_allowlist
+            rm -f /tmp/private.pem /tmp/payload.json /tmp/login-*.json
+            exit "$RC"
+          }
+          trap fail_closed ERR
+
+          STAGE='repository-and-catalogue-guard'
+          test "${{ github.event.pull_request.base.sha }}" = '681b16d6344236168acb2d1824a0bb2e7bed9bb5'
+          test -f docs/data/phase12/real-students-payload.enc.json
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue.log
+
+          STAGE='cloudflare-isolation-guard'
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings-before.json >/dev/null
+          LOGIN_ENABLED="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          case "${LOGIN_ENABLED,,}" in ''|'false') ;; *) echo 'Normal student login enabled; refusing.' >&2; false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-before.json)"
+          OLD_ALLOWLIST="$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // "https://futureperfecttuitions.github.io"' /tmp/settings-before.json)"
+          for V in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$V"; test "$V" != null; done
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            >/tmp/preflight-d1.json 2>/tmp/preflight-d1.err
+          test "$(jq -r '.[0].results[0].batch_count' /tmp/preflight-d1.json)" = '0'
+          test "$(jq -r '.[1].results[0].assignment_count' /tmp/preflight-d1.json)" = '0'
+          test "$(jq -r '.[2].results[0].release_count' /tmp/preflight-d1.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/preflight-d1.json
+          grep -Fq '"ok"' /tmp/preflight-d1.json
+
+          STAGE='private-payload-decrypt'
+          PRIVATE_KEY_NAME='phase12:real-students:private-key'
+          PRIVATE_KEY_ESCAPED="$(python3 -c 'import urllib.parse; print(urllib.parse.quote("phase12:real-students:private-key", safe=""))')"
+          PRIVATE_KEY_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${PRIVATE_KEY_ESCAPED}"
+          curl --fail --silent --show-error "$PRIVATE_KEY_URL" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/private.pem
+          chmod 600 /tmp/private.pem
+          node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const envelope = JSON.parse(fs.readFileSync('docs/data/phase12/real-students-payload.enc.json','utf8'));
+          if (envelope.schemaVersion !== 1 || envelope.alg !== 'RSA-OAEP-256+A256GCM') throw new Error('Bad encrypted envelope');
+          const privateKey = fs.readFileSync('/tmp/private.pem');
+          const publicKey = crypto.createPublicKey(privateKey).export({type:'spki',format:'pem'});
+          const fingerprint = crypto.createHash('sha256').update(publicKey).digest('hex');
+          if (fingerprint !== envelope.keyFingerprintSha256) throw new Error('Transport-key fingerprint mismatch');
+          const aesKey = crypto.privateDecrypt({key:privateKey,oaepHash:'sha256',padding:crypto.constants.RSA_PKCS1_OAEP_PADDING},Buffer.from(envelope.encryptedKey,'base64'));
+          const decipher = crypto.createDecipheriv('aes-256-gcm',aesKey,Buffer.from(envelope.iv,'base64'));
+          decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));
+          const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]).toString('utf8'));
+          const goodPassword = v => typeof v==='string' && v.length===4 && /[A-Z]/.test(v) && /[a-z]/.test(v) && /\d/.test(v);
+          if (payload.schemaVersion !== 1 || !Array.isArray(payload.students) || payload.students.length !== 2) throw new Error('Exactly two students required');
+          const ids = new Set();
+          for (const s of payload.students) {
+            const id = String(s.portalUserId||'').trim(); const norm=id.toLowerCase();
+            if (!id || ids.has(norm)) throw new Error('Invalid Portal User ID set');
+            if (!goodPassword(s.loginPassword) || !goodPassword(s.answerPassword)) throw new Error('Invalid four-character password');
+            if (![3,5].includes(Number(s.schoolYear))) throw new Error('Unexpected September school year');
+            if (!Array.isArray(s.curricula) || !s.curricula.length || !Array.isArray(s.vrCurricula) || !Array.isArray(s.expectedViews) || !Array.isArray(s.deniedViews)) throw new Error('Incomplete access plan');
+            if (Array.isArray(s.fullLibraries) && s.fullLibraries.length) throw new Error('Phase 12A uses exact Student + Lesson rows, not Full Library overrides');
+            ids.add(norm);
+          }
+          fs.writeFileSync('/tmp/payload.json',JSON.stringify(payload),{mode:0o600});
+          NODE
+          rm -f /tmp/private.pem
+
+          STAGE='build-exact-plan'
+          node --experimental-default-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c=loadPhase11Catalogue();
+          const p=JSON.parse(fs.readFileSync('/tmp/payload.json','utf8'));
+          const q=v=>`'${String(v).replaceAll("'","''")}'`;
+          const now=new Date().toISOString();
+          const rows=[]; const expected={}; const users=[];
+          const viewCurriculum={'english-year2':'ENGLISH_Y2','maths-year2':'MATHS_Y2','english-year4-11plus':'ENGLISH_Y4','maths-level1':'MATHS_L1','maths-level2':'MATHS_L2'};
+          for (const s of p.students) {
+            const norm=s.portalUserId.trim().toLowerCase();
+            const user={firstName:String(s.firstName),p:String(s.loginPassword),answerPassword:String(s.answerPassword),schoolYear:Number(s.schoolYear),vrEligible:Boolean(s.vrEligible),status:'active',expires:null,batches:[],fullLibraries:[],manualAccess:{coreLessons:[],vrLessons:[],specialBuckets:[]},blockedLessons:[]};
+            users.push({norm,key:`user:${norm}`,value:user});
+            expected[norm]={open:{},denied:[...s.deniedViews]};
+            for (const view of s.expectedViews) {
+              const code=viewCurriculum[view]; if(!code) throw new Error('Unsupported expected view');
+              expected[norm].open[view]=c.curricula[code].lessonIds.length;
+            }
+            for (const code of s.curricula) {
+              const cur=c.curricula[code]; if(!cur?.lessonIds?.length) throw new Error('Unknown curriculum');
+              const vr=s.vrCurricula.includes(code)?1:0;
+              for (const lessonId of cur.lessonIds) rows.push({norm,lessonId,vr});
+            }
+          }
+          const dedup=new Map();
+          for(const r of rows){const k=`${r.norm}|${r.lessonId}`;const old=dedup.get(k);dedup.set(k,old?{...old,vr:Math.max(old.vr,r.vr)}:r)}
+          const exact=[...dedup.values()];
+          fs.writeFileSync('/tmp/ids.txt',users.map(x=>x.norm).join('\n')+'\n',{mode:0o600});
+          fs.writeFileSync('/tmp/users.json',JSON.stringify(users),{mode:0o600});
+          fs.writeFileSync('/tmp/plan.json',JSON.stringify(exact),{mode:0o600});
+          fs.writeFileSync('/tmp/expected.json',JSON.stringify(expected),{mode:0o600});
+          users.forEach((u,i)=>fs.writeFileSync(`/tmp/user-${i}.json`,JSON.stringify(u.value),{mode:0o600}));
+          p.students.forEach((s,i)=>fs.writeFileSync(`/tmp/login-${i}.json`,JSON.stringify({username:s.portalUserId,password:s.loginPassword}),{mode:0o600}));
+          const perUser=new Map(); for(const r of exact){if(!perUser.has(r.norm))perUser.set(r.norm,[]);perUser.get(r.norm).push(r)}
+          let sql='';
+          for(const [norm,list] of perUser){sql+=`DELETE FROM lesson_entitlements WHERE portal_user_id_norm=${q(norm)} AND lesson_id NOT IN (${list.map(r=>q(r.lessonId)).join(',')});\n`;}
+          if(exact.length){sql+=`INSERT INTO lesson_entitlements (portal_user_id_norm,lesson_id,core_access,vr_access,source,first_granted_at,last_confirmed_at,source_batch_code,source_lesson_date) VALUES\n${exact.map(r=>`(${q(r.norm)},${q(r.lessonId)},1,${r.vr},'excel',${q(now)},${q(now)},NULL,NULL)`).join(',\n')}\nON CONFLICT(portal_user_id_norm,lesson_id) DO UPDATE SET core_access=1,vr_access=excluded.vr_access,last_confirmed_at=excluded.last_confirmed_at,source_batch_code=NULL,source_lesson_date=NULL;\n`;}
+          fs.writeFileSync('/tmp/apply.sql',sql,{mode:0o600});
+          const ids=users.map(u=>q(u.norm)).join(',');
+          fs.writeFileSync('/tmp/select.sql',`SELECT portal_user_id_norm,lesson_id,core_access,vr_access,source,first_granted_at,last_confirmed_at,source_batch_code,source_lesson_date FROM lesson_entitlements WHERE portal_user_id_norm IN (${ids});`,{mode:0o600});
+          fs.writeFileSync('/tmp/safe-summary.json',JSON.stringify({students:users.length,entitlementRows:exact.length,catalogueLessons:369,catalogueCurricula:11}));
+          NODE
+
+          STAGE='backup-existing-target-state'
+          INDEX=0
+          while IFS= read -r NORM; do
+            [ -n "$NORM" ] || continue
+            KEY_ESCAPED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("user:"+sys.argv[1], safe=""))' "$NORM")"
+            URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}"
+            CODE="$(curl --silent --show-error --output "/tmp/kv-backup-${INDEX}.json" --write-out '%{http_code}' "$URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+            if [ "$CODE" = '404' ]; then rm -f "/tmp/kv-backup-${INDEX}.json"; elif [ "$CODE" != '200' ]; then false; fi
+            INDEX=$((INDEX+1))
+          done </tmp/ids.txt
+          $W d1 execute fpt_portal_v2_db --remote --json --command "$(cat /tmp/select.sql)" >/tmp/d1-backup.json 2>/tmp/d1-backup.err
+          node <<'NODE'
+          const fs=require('fs'); const q=v=>`'${String(v).replaceAll("'","''")}'`;
+          const ids=fs.readFileSync('/tmp/ids.txt','utf8').trim().split(/\n+/).filter(Boolean);
+          const raw=JSON.parse(fs.readFileSync('/tmp/d1-backup.json','utf8')); const rows=(Array.isArray(raw)?raw.flatMap(x=>x.results||[]):raw.results||[]);
+          let sql=`DELETE FROM lesson_entitlements WHERE portal_user_id_norm IN (${ids.map(q).join(',')});\n`;
+          if(rows.length) sql+=`INSERT INTO lesson_entitlements (portal_user_id_norm,lesson_id,core_access,vr_access,source,first_granted_at,last_confirmed_at,source_batch_code,source_lesson_date) VALUES\n${rows.map(r=>`(${q(r.portal_user_id_norm)},${q(r.lesson_id)},${Number(r.core_access)},${Number(r.vr_access)},${q(r.source)},${q(r.first_granted_at)},${q(r.last_confirmed_at)},${r.source_batch_code==null?'NULL':q(r.source_batch_code)},${r.source_lesson_date==null?'NULL':q(r.source_lesson_date)})`).join(',\n')};\n`;
+          fs.writeFileSync('/tmp/rollback.sql',sql,{mode:0o600});
+          NODE
+
+          STAGE='ensure-controlled-development-login'
+          NEW_ALLOWLIST="$(node <<'NODE'
+          const fs=require('fs'); const old=process.env.OLD_ALLOWLIST_VALUE||''; const ids=fs.readFileSync('/tmp/ids.txt','utf8').trim().split(/\n+/).filter(Boolean); const set=new Set(old.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean)); ids.forEach(x=>set.add(x.toLowerCase())); process.stdout.write([...set].join(','));
+          NODE
+          )"
+          export NEW_ALLOWLIST
+          # Recompute with shell-visible current allowlist without exposing its value.
+          NEW_ALLOWLIST="$(OLD_ALLOWLIST_VALUE="$OLD_ALLOWLIST" node <<'NODE'
+          const fs=require('fs'); const old=process.env.OLD_ALLOWLIST_VALUE||''; const ids=fs.readFileSync('/tmp/ids.txt','utf8').trim().split(/\n+/).filter(Boolean); const set=new Set(old.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean)); ids.forEach(x=>set.add(x.toLowerCase())); process.stdout.write([...set].join(','));
+          NODE
+          )"
+          if [ "$NEW_ALLOWLIST" != "$OLD_ALLOWLIST" ]; then
+            make_worker_config "$NEW_ALLOWLIST" /tmp/wrangler.allowlist.toml
+            $W deploy --config /tmp/wrangler.allowlist.toml --keep-vars --message 'Phase 12 controlled two-student owner access' >/tmp/allowlist-deploy.out 2>&1
+            ALLOWLIST_CHANGED=1
+          fi
+
+          STAGE='apply-exact-student-records'
+          DATA_MUTATED=1
+          INDEX=0
+          while IFS= read -r NORM; do
+            [ -n "$NORM" ] || continue
+            KEY_ESCAPED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("user:"+sys.argv[1], safe=""))' "$NORM")"
+            URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}"
+            curl --fail --silent --show-error --request PUT "$URL" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --header 'Content-Type: application/json' \
+              --data-binary @"/tmp/user-${INDEX}.json" >/dev/null
+            INDEX=$((INDEX+1))
+          done </tmp/ids.txt
+          $W d1 execute fpt_portal_v2_db --remote --command "$(cat /tmp/apply.sql)" --yes >/tmp/apply-d1.out 2>/tmp/apply-d1.err
+
+          STAGE='postwrite-exact-verification'
+          INDEX=0
+          while IFS= read -r NORM; do
+            [ -n "$NORM" ] || continue
+            KEY_ESCAPED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("user:"+sys.argv[1], safe=""))' "$NORM")"
+            URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}"
+            curl --fail --silent --show-error "$URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output "/tmp/kv-after-${INDEX}.json"
+            node -e 'const a=require("assert");const fs=require("fs");const i=process.argv[1];a.deepStrictEqual(JSON.parse(fs.readFileSync(`/tmp/kv-after-${i}.json`)),JSON.parse(fs.readFileSync(`/tmp/user-${i}.json`)));' "$INDEX"
+            INDEX=$((INDEX+1))
+          done </tmp/ids.txt
+          $W d1 execute fpt_portal_v2_db --remote --json --command "$(cat /tmp/select.sql)" >/tmp/d1-after.json 2>/tmp/d1-after.err
+          node <<'NODE'
+          const fs=require('fs'); const plan=JSON.parse(fs.readFileSync('/tmp/plan.json')); const raw=JSON.parse(fs.readFileSync('/tmp/d1-after.json')); const rows=(Array.isArray(raw)?raw.flatMap(x=>x.results||[]):raw.results||[]); if(rows.length!==plan.length) throw new Error('Entitlement row count mismatch'); const want=new Map(plan.map(r=>[`${r.norm}|${r.lessonId}`,r])); for(const r of rows){const p=want.get(`${r.portal_user_id_norm}|${r.lesson_id}`); if(!p||Number(r.core_access)!==1||Number(r.vr_access)!==p.vr) throw new Error('Entitlement mismatch');}
+          NODE
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/final-d1.json 2>/tmp/final-d1.err
+          test "$(jq -r '.[0].results[0].batch_count' /tmp/final-d1.json)" = '0'
+          test "$(jq -r '.[1].results[0].assignment_count' /tmp/final-d1.json)" = '0'
+          test "$(jq -r '.[2].results[0].release_count' /tmp/final-d1.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/final-d1.json
+          grep -Fq '"ok"' /tmp/final-d1.json
+
+          STAGE='real-student-login-and-access-acceptance'
+          for INDEX in 0 1; do
+            curl --fail-with-body --silent --show-error --cookie-jar "/tmp/cookies-${INDEX}" \
+              --header "Origin: $TEST_ORIGIN" --header 'Content-Type: application/json' \
+              --request POST --data-binary @"/tmp/login-${INDEX}.json" "$WORKER_BASE/api/v1/student/auth/login" >"/tmp/login-result-${INDEX}.json"
+            jq -e '.ok == true' "/tmp/login-result-${INDEX}.json" >/dev/null
+            curl --fail-with-body --silent --show-error --cookie "/tmp/cookies-${INDEX}" --header "Origin: $TEST_ORIGIN" \
+              "$WORKER_BASE/api/v1/student/home" >"/tmp/home-${INDEX}.json"
+            jq -e '.ok == true' "/tmp/home-${INDEX}.json" >/dev/null
+            curl --silent --show-error --cookie "/tmp/cookies-${INDEX}" --header "Origin: $TEST_ORIGIN" --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null
+          done
+          node <<'NODE'
+          const fs=require('fs'); const users=JSON.parse(fs.readFileSync('/tmp/users.json')); const expected=JSON.parse(fs.readFileSync('/tmp/expected.json'));
+          users.forEach((u,i)=>{const h=JSON.parse(fs.readFileSync(`/tmp/home-${i}.json`)); const views=(h.subjects||[]).flatMap(s=>(s.views||[]).map(v=>({...v,subject:s.subject}))); const e=expected[u.norm]; for(const [viewId,count] of Object.entries(e.open)){const v=views.find(x=>x.viewId===viewId); if(!v||v.lockedPreview===true||Number(v.openLessonCount)!==Number(count)) throw new Error('Required historical access missing');} for(const viewId of e.denied){const v=views.find(x=>x.viewId===viewId); if(v && v.lockedPreview!==true && Number(v.openLessonCount)>0) throw new Error('Denied future access is open');}});
+          NODE
+
+          STAGE='final-control-plane-and-catalogue-check'
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-after.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .text=="development")' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .bucket_name=="fpt-materials-dev")' /tmp/settings-after.json >/dev/null
+          FINAL_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-after.json)"
+          case "${FINAL_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/catalogue-after.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/catalogue-after.log
+
+          STAGE='destroy-private-transport-key'
+          curl --fail --silent --show-error --request DELETE "$PRIVATE_KEY_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/dev/null
+          KEY_STATUS="$(curl --silent --show-error --output /tmp/key-after --write-out '%{http_code}' "$PRIVATE_KEY_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          test "$KEY_STATUS" = '404'
+
+          DATA_MUTATED=0
+          ALLOWLIST_CHANGED=0
+          trap - ERR
+          echo 'Phase 12 real-student apply: PASS (2 students; exact owner-confirmed access; no September batches).'
