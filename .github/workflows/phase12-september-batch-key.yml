@@ -1,4 +1,4 @@
-name: Phase 12 entitlement cohort diagnostic
+name: Phase 12 September student batch assignments
 
 on:
   pull_request:
@@ -16,10 +16,10 @@ env:
   WRANGLER_VERSION: 4.125.0
 
 jobs:
-  diagnose:
+  assign:
     if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' && github.event.pull_request.head.ref == 'phase12-september-batches'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v6
         with:
@@ -27,13 +27,75 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Read aggregate cohort signatures only
+
+      - name: Resolve only the controlled non-test owner-check accounts
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name=="fpt-materials-dev")' /tmp/settings.json >/dev/null
           LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
           case "${LOGIN,,}" in ''|'false') ;; *) exit 1;; esac
-          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command "SELECT source,COUNT(*) AS rows,COUNT(DISTINCT portal_user_id_norm) AS users FROM lesson_entitlements GROUP BY source ORDER BY source; SELECT COUNT(*) AS users_65 FROM (SELECT portal_user_id_norm FROM lesson_entitlements WHERE core_access=1 GROUP BY portal_user_id_norm HAVING COUNT(*)=65); SELECT COUNT(*) AS users_108 FROM (SELECT portal_user_id_norm FROM lesson_entitlements WHERE core_access=1 GROUP BY portal_user_id_norm HAVING COUNT(*)=108); SELECT COUNT(*) AS excel_users_65 FROM (SELECT portal_user_id_norm FROM lesson_entitlements WHERE core_access=1 AND source='excel' GROUP BY portal_user_id_norm HAVING COUNT(*)=65); SELECT COUNT(*) AS excel_users_108 FROM (SELECT portal_user_id_norm FROM lesson_entitlements WHERE core_access=1 AND source='excel' GROUP BY portal_user_id_norm HAVING COUNT(*)=108); SELECT COUNT(*) AS batches FROM batch_definitions WHERE batch_key IN ('Y3FE','Y3FM','Y511FE','Y511FM'); SELECT COUNT(*) AS assignments FROM student_batch_assignments; SELECT COUNT(*) AS releases FROM batch_lesson_releases; PRAGMA quick_check;" >/tmp/state.json 2>/tmp/state.err
-          cat /tmp/state.json
+          ALLOWLIST="$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$ALLOWLIST"; test -n "$STUDENTS"; test "$STUDENTS" != null
+          printf '%s' "$STUDENTS" >/tmp/students-kv-id
+
+          python3 - "$ALLOWLIST" <<'PY'
+          import sys
+          values=[x.strip().lower() for x in sys.argv[1].split(',') if x.strip()]
+          real=[x for x in values if not x.startswith('test')]
+          if len(real)!=2 or len(set(real))!=2:
+              raise SystemExit('Expected exactly two controlled non-test owner-check accounts')
+          open('/tmp/real-candidates','w').write('\n'.join(real)+'\n')
+          PY
+
+          : >/tmp/year3-id
+          : >/tmp/year5-id
+          while IFS= read -r ID; do
+            KEY_ESCAPED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("user:"+sys.argv[1], safe=""))' "$ID")"
+            curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY_ESCAPED}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/user.json
+            YEAR="$(jq -r '.schoolYear // 0' /tmp/user.json)"
+            BATCH_COUNT="$(jq -r 'if (.batches|type)=="array" then (.batches|length) else -1 end' /tmp/user.json)"
+            test "$BATCH_COUNT" = '0'
+            case "$YEAR" in
+              3) test ! -s /tmp/year3-id; printf '%s' "$ID" >/tmp/year3-id ;;
+              5) test ! -s /tmp/year5-id; printf '%s' "$ID" >/tmp/year5-id ;;
+              *) echo 'Unexpected school year among controlled real accounts' >&2; exit 1 ;;
+            esac
+          done </tmp/real-candidates
+          test -s /tmp/year3-id; test -s /tmp/year5-id
+          rm -f /tmp/user.json /tmp/real-candidates
+
+      - name: Apply future-dated D1 assignments and prove no entitlement release
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          Y3_ID="$(cat /tmp/year3-id)"
+          Y5_ID="$(cat /tmp/year5-id)"
+          test -n "$Y3_ID"; test -n "$Y5_ID"; test "$Y3_ID" != "$Y5_ID"
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions WHERE batch_key IN ('Y3FE','Y3FM','Y511FE','Y511FM'); SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/before.json 2>/tmp/before.err
+          BEFORE="$(jq -r '.[0].results[0].entitlement_count' /tmp/before.json)"
+          test "$BEFORE" -ge 173
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/before.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/before.json)" = '0'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/before.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/before.json
+          grep -Fq '"ok"' /tmp/before.json
+
+          $W d1 execute fpt_portal_v2_db --remote --command "INSERT OR IGNORE INTO student_batch_assignments(portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('${Y3_ID}','Y3FE','2026-09-10',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),('${Y3_ID}','Y3FM','2026-09-07',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),('${Y5_ID}','Y511FE','2026-09-12',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),('${Y5_ID}','Y511FM','2026-09-08',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);" --yes >/tmp/apply.out 2>/tmp/apply.err
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT batch_key,effective_from,effective_to,COUNT(*) AS assignment_count FROM student_batch_assignments WHERE batch_key IN ('Y3FE','Y3FM','Y511FE','Y511FM') GROUP BY batch_key,effective_from,effective_to ORDER BY batch_key; SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/after.json 2>/tmp/after.err
+          test "$(jq -r '.[0].results|length' /tmp/after.json)" = '4'
+          jq -e '.[0].results | all(.assignment_count==1 and .effective_to==null)' /tmp/after.json >/dev/null
+          jq -e '.[0].results | any(.batch_key=="Y3FE" and .effective_from=="2026-09-10") and any(.batch_key=="Y3FM" and .effective_from=="2026-09-07") and any(.batch_key=="Y511FE" and .effective_from=="2026-09-12") and any(.batch_key=="Y511FM" and .effective_from=="2026-09-08")' /tmp/after.json >/dev/null
+          test "$(jq -r '.[1].results[0].entitlement_count' /tmp/after.json)" = "$BEFORE"
+          test "$(jq -r '.[2].results[0].release_count' /tmp/after.json)" = '0'
+          grep -Fq 'trg_student_sessions_single_active' /tmp/after.json
+          grep -Fq '"ok"' /tmp/after.json
+
+          rm -f /tmp/year3-id /tmp/year5-id
+          echo 'Phase 12 September assignments: PASS (4 future-dated assignments, entitlements unchanged, 0 batch releases).'
