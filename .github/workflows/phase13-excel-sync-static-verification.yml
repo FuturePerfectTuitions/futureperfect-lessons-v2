@@ -9,6 +9,7 @@ on:
       - worker/wrangler.toml
       - tests/phase13-excel-sync-verification.mjs
       - tests/phase12-batch-aware-worker-verification.mjs
+      - tests/phase11-catalogue-static-verification.mjs
       - .github/workflows/phase13-excel-sync-static-verification.yml
       - docs/data/phase13/**
   pull_request:
@@ -19,6 +20,7 @@ on:
       - worker/wrangler.toml
       - tests/phase13-excel-sync-verification.mjs
       - tests/phase12-batch-aware-worker-verification.mjs
+      - tests/phase11-catalogue-static-verification.mjs
       - .github/workflows/phase13-excel-sync-static-verification.yml
       - docs/data/phase13/**
 
