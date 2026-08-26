@@ -1,6 +1,16 @@
 name: Phase 13 Excel sync static verification
 
 on:
+  push:
+    branches: [phase13-sync-portal-entitlements]
+    paths:
+      - worker/src/index-phase13.js
+      - worker/src/index-phase12.js
+      - worker/wrangler.toml
+      - tests/phase13-excel-sync-verification.mjs
+      - tests/phase12-batch-aware-worker-verification.mjs
+      - .github/workflows/phase13-excel-sync-static-verification.yml
+      - docs/data/phase13/**
   pull_request:
     branches: [main]
     paths:
@@ -22,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-node@v6
         with:
