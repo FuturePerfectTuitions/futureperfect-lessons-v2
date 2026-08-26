@@ -48,6 +48,8 @@ jobs:
           $W d1 execute fpt_portal_v2_db --remote --json --command \
             "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; PRAGMA quick_check;" \
             >/tmp/p13-fixture-before.json
+          echo 'Fixture preflight:'
+          jq -c '[.[0].results[0],.[1].results[0],.[2].results[0],.[3].results[0],.[4].results[0]]' /tmp/p13-fixture-before.json
           test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-fixture-before.json)" = '632'
           test "$(jq -r '.[1].results[0].batch_count' /tmp/p13-fixture-before.json)" = '4'
           test "$(jq -r '.[2].results[0].assignment_count' /tmp/p13-fixture-before.json)" = '4'
@@ -63,6 +65,8 @@ jobs:
           NODE
 
           $W d1 execute fpt_portal_v2_db --remote --json --command "$(cat /tmp/p13-candidate.sql)" >/tmp/p13-candidate.json
+          echo 'Candidate query:'
+          jq -c '.[0].results' /tmp/p13-candidate.json
           TEST_LESSON="$(jq -r '.[0].results[0].lesson_id // ""' /tmp/p13-candidate.json)"
           test -n "$TEST_LESSON"
           case "$TEST_LESSON" in Y5E*) ;; *) echo 'Unexpected test lesson.' >&2; false;; esac
