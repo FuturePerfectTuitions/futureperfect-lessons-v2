@@ -145,12 +145,14 @@ jobs:
 
           STAGE='phase12-d1-closure-guard'
           $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
             >/tmp/p13-d1-before.json 2>/tmp/p13-d1-before.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-d1-before.json)" = '173'
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-d1-before.json)" = '632'
           test "$(jq -r '.[1].results[0].batch_count' /tmp/p13-d1-before.json)" = '4'
           test "$(jq -r '.[2].results[0].assignment_count' /tmp/p13-d1-before.json)" = '4'
           test "$(jq -r '.[3].results[0].release_count' /tmp/p13-d1-before.json)" = '0'
+          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p13-d1-before.json)" = '2'
+          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p13-d1-before.json)" = '173'
           grep -Fq 'trg_student_sessions_single_active' /tmp/p13-d1-before.json
           grep -Fq '"ok"' /tmp/p13-d1-before.json
 
@@ -178,6 +180,7 @@ jobs:
           grep -R -aFq 'd82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' /tmp/p13-build
 
           STAGE='deploy-phase13-development-worker'
+          make_config 'src/index-phase13.js' 'worker/wrangler.phase13.runtime.toml'
           $W deploy --config worker/wrangler.phase13.runtime.toml --keep-vars \
             --message 'Phase 13 guarded Excel entitlement sync development Worker' >/tmp/p13-deploy.log 2>&1
           DEPLOYED=1
@@ -226,12 +229,14 @@ jobs:
 
           STAGE='d1-post-no-mutation-guard'
           $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
             >/tmp/p13-d1-after.json 2>/tmp/p13-d1-after.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-d1-after.json)" = '173'
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p13-d1-after.json)" = '632'
           test "$(jq -r '.[1].results[0].batch_count' /tmp/p13-d1-after.json)" = '4'
           test "$(jq -r '.[2].results[0].assignment_count' /tmp/p13-d1-after.json)" = '4'
           test "$(jq -r '.[3].results[0].release_count' /tmp/p13-d1-after.json)" = '0'
+          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p13-d1-after.json)" = '2'
+          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p13-d1-after.json)" = '173'
           grep -Fq 'trg_student_sessions_single_active' /tmp/p13-d1-after.json
           grep -Fq '"ok"' /tmp/p13-d1-after.json
 
