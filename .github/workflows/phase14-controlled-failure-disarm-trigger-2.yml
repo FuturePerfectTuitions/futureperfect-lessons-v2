@@ -1,0 +1,17 @@
+name: Phase 14 controlled failure disarm trigger 2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase14-controlled-failure-disarm-trigger-2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  noop:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo noop
