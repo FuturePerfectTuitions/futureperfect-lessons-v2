@@ -46,11 +46,13 @@ jobs:
         run: |
           set -euo pipefail
           test "${{ github.event.pull_request.base.sha }}" = '458a67cee0f20b21a6083e7073190cfe14628867'
+
           node --check worker/src/index-phase13.js
           node tests/phase14-excel-sync-matrix-verification.mjs
           node tests/phase13-excel-sync-verification.mjs
           node tests/phase12-batch-aware-worker-verification.mjs
           node tests/phase12-batch-schema-static-verification.mjs
+
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/p14-catalogue.log
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p14-catalogue.log
           node tests/phase11-session-efficiency-static-verification.mjs
@@ -61,10 +63,25 @@ jobs:
           node --experimental-default-type=module tests/phase11-vr-howto-real-catalogue-static-verification.mjs
           node tests/phase11-vr-solution-video-policy-static-verification.mjs
           node --experimental-default-type=module tests/phase11-test-personas-static-verification.mjs
-          grep -Fq "MATHS_L2_FULL" worker/src/index.js
-          grep -Fq "function fullLibraryCoversLesson" worker/src/index.js
-          grep -Fq "ENGLISH_Y5_11PLUS_FULL" worker/src/index.js
-          grep -Fq "function fullLibraryGrantsVr" worker/src/index-phase9.js
+
+          # Re-run the accepted special-content source gates without exposing or
+          # requiring operational MOCKS password values.
+          node --check worker/src/index-phase10.js
+          node --check worker/src/index-phase10-history.js
+          node --check assets/phase10.js
+          node --check assets/phase10-counts.js
+          node --check assets/phase10-history.js
+          node --check tests/phase10-browser-verification.mjs
+          bash -n tests/phase10-api-verification.sh
+          grep -Fq 'MOCK_DAILY_PASSWORDS' worker/wrangler.toml
+          grep -Fq 'must never be committed' worker/wrangler.toml
+          grep -Fq 'CREATE TABLE IF NOT EXISTS mock_password_rate_limits' worker/migrations/0006_mock_password_rate_limits.sql
+          ! grep -R -E '"password"[[:space:]]*:[[:space:]]*".+"' worker/fixtures/phase10/special-MOCKS.json
+
+          grep -Fq 'MATHS_L2_FULL' worker/src/index.js
+          grep -Fq 'function fullLibraryCoversLesson' worker/src/index.js
+          grep -Fq 'ENGLISH_Y5_11PLUS_FULL' worker/src/index.js
+          grep -Fq 'function fullLibraryGrantsVr' worker/src/index-phase9.js
           echo 'Phase 14 static and inherited regression matrix: PASS'
 
   guarded-live-matrix:
@@ -93,10 +110,7 @@ jobs:
           MUTATION_STARTED=0
           STUDENTS=''
           LESSONS=''
-          DB=''
-          R2=''
           USERS=(testy5p14m testy5p14e testy5p1411e testy5p14full)
-          BATCHES=(P14_Y5M P14_Y5E P14_Y511E)
 
           kv_key_url() {
             local namespace="$1"
@@ -114,10 +128,9 @@ jobs:
           }
 
           kv_cleanup() {
-            local user key url
+            local user url
             for user in "${USERS[@]}"; do
-              key="user:${user}"
-              url="$(kv_key_url "$STUDENTS" "$key")"
+              url="$(kv_key_url "$STUDENTS" "user:${user}")"
               curl --fail --silent --show-error --request DELETE "$url" \
                 --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/dev/null
             done
@@ -160,12 +173,12 @@ jobs:
           jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p14-settings.json >/dev/null
           LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p14-settings.json)"
           case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal V2 student login is enabled; refusing Phase 14 fixture work.' >&2; false;; esac
+
           STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-settings.json)"
           LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-settings.json)"
-          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p14-settings.json)"
           R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p14-settings.json)"
           test "$R2" = 'fpt-materials-dev'
-          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          for value in "$STUDENTS" "$LESSONS"; do test -n "$value"; test "$value" != null; done
 
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
@@ -192,8 +205,8 @@ jobs:
           test "$(jq -r '.[7].results[0].temp_batches' /tmp/p14-d1-before.json)" = '0'
           test "$(jq -r '.[8].results[0].temp_assignments' /tmp/p14-d1-before.json)" = '0'
           test "$(jq -r '.[9].results[0].temp_releases' /tmp/p14-d1-before.json)" = '0'
-          grep -Fq 'trg_student_sessions_single_active' /tmp/p14-d1-before.json
-          grep -Fq '"ok"' /tmp/p14-d1-before.json
+          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p14-d1-before.json >/dev/null
+          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p14-d1-before.json >/dev/null
 
           PREFIX="$(node -e 'process.stdout.write(encodeURIComponent("user:testy5p14"))')"
           curl --fail --silent --show-error \
@@ -251,7 +264,7 @@ jobs:
             --request POST \
             --data '{"items":[{"syncRowId":"p14-full-precheck","operation":"status_check","portalUserId":"TestY5P14FULL","lessonId":"Y5M1","batchKey":"P14_Y5M","lessonDate":"2026-09-15"}]}' \
             "$WORKER_BASE/api/v1/admin/excel-entitlements/sync" >/tmp/p14-full-precheck.json
-          jq -e '.ok == true and (.results|length)==1 and .results[0].status == "NOT_CONFIRMED" and .results[0].ok == false' /tmp/p14-full-precheck.json >/dev/null
+          jq -e '.ok == true and (.results|length)==1 and .results[0].status == "ENTITLEMENT_MISSING" and .results[0].ok == false' /tmp/p14-full-precheck.json >/dev/null
 
           curl --fail-with-body --silent --show-error \
             --header "Authorization: Bearer ${FPT_PORTAL_V2_EXCEL_SYNC_TOKEN}" \
@@ -298,8 +311,8 @@ jobs:
           test "$(jq -r '.[7].results[0].temp_batches' /tmp/p14-d1-after.json)" = '0'
           test "$(jq -r '.[8].results[0].temp_assignments' /tmp/p14-d1-after.json)" = '0'
           test "$(jq -r '.[9].results[0].temp_releases' /tmp/p14-d1-after.json)" = '0'
-          grep -Fq 'trg_student_sessions_single_active' /tmp/p14-d1-after.json
-          grep -Fq '"ok"' /tmp/p14-d1-after.json
+          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p14-d1-after.json >/dev/null
+          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p14-d1-after.json >/dev/null
 
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/keys?prefix=${PREFIX}&limit=100" \
