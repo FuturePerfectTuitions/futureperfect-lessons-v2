@@ -1,79 +1,143 @@
 # Phase 14 — deliberate Excel failure/retry/correction matrix
 
-Status: **IN PROGRESS**. Phase 13 remains formally CLOSED/PASS. Phase 15 must not start until Phase 14 is explicitly closed.
+Status: **CLOSED / PASS**. Phase 13 remains the starting checkpoint. Phase 15 has not started and must begin only in a new chat from the Phase 14 closure checkpoint.
 
 ## Starting evidence boundary
 
-Phase 14 starts from Phase 13 closure main SHA `458a67cee0f20b21a6083e7073190cfe14628867` (PR #122 merged). The first Phase 14 preflight reconnected to GitHub before implementation work and confirmed that main was still exactly that SHA. All pre-existing open PRs were stale Phase 11 operational/diagnostic work; no earlier Phase 14 implementation branch existed.
+Phase 14 started from the formally closed Phase 13 `main` SHA `458a67cee0f20b21a6083e7073190cfe14628867` (PR #122 merged). A fresh preflight confirmed `main` was still exactly that SHA before Phase 14 work began.
 
-A fresh read-only Cloudflare audit was also run before Phase 14 implementation changes. It confirmed the deployed Worker is the Phase 13 development Worker, `ENVIRONMENT=development`, normal student login disabled, development R2 `fpt-materials-dev`, the expected V2 KV/D1 bindings, the dedicated Excel sync secret present by name only, and no legacy `FPT_LESSONS_TEST` binding. The audit performed no deploy or Cloudflare write.
+The initial read-only Cloudflare audit confirmed the deployed V2 Worker remained isolated in development: `ENVIRONMENT=development`, normal student login disabled, development R2 `fpt-materials-dev`, expected V2 KV/D1 bindings, dedicated Excel sync secret present by name only, and no legacy `FPT_LESSONS_TEST` lesson binding. No production route, DNS, live portal or normal-login change was made.
 
-## Credit / gap matrix
+## Credited Phase 13 evidence
 
-Phase 13 acceptance is authoritative evidence. Already-passed mutation tests are credited rather than recreated merely to reproduce a green result.
+Phase 13 acceptance remained authoritative and was not destructively recreated merely to obtain another green run. Credited behaviours included first Completed release, repeat/status-check idempotency, duplicate Student+Lesson handling, copied Sync Row ID repair, Student/Lesson fingerprint changes without revocation, invalid-lesson independence, effective-dated assignment rejection/retry, moved lesson date, late-added lesson, manual block/unblock and exact TestY cleanup.
 
-| Original matrix behaviour | Phase 14 disposition | Evidence / remaining work |
-| --- | --- | --- |
-| First selected Completed release | CREDIT | Phase 13 copied-workbook Worker → D1 grant passed. |
-| Same row again / read-only status check | CREDIT | Phase 13 repeat/idempotency passed. |
-| Duplicate Student + Lesson | CREDIT + regression | Phase 13 copied-row proof retained one permanent entitlement; Phase 14 may re-check non-destructively. |
-| Copied rows / duplicate Sync Row IDs | CREDIT | Phase 13 R3 copied-ID repair passed. |
-| Changed Student/Lesson fingerprints | CREDIT | Phase 13 proved new current context without revoking old permanent entitlement. |
-| Invalid/nonexistent Lesson ID | CREDIT | Phase 13 mixed valid + invalid request passed independently. |
-| Effective-dated assignment reject/retry | CREDIT | Phase 13 rejection and successful retry after restoration passed. |
-| Moved lesson date | CREDIT | Phase 13 updated Batch + Lesson context without duplicating Student + Lesson. |
-| Late-added second lesson | CREDIT | Phase 13 passed. |
-| Manual block / unblock | CREDIT | Phase 13 passed; final owner R3 uses bold red / bold green font with no status fill. |
-| Worker/API unavailable or transport failure | **MISSING** | Must be proved end-to-end in the owner’s current copied R3 workbook: queued rows must lose any stale confirmed styling, remain retryable and produce no unintended D1 mutation. |
-| Full Library overlap | **MISSING → Phase 14 test** | An unsynced Excel row must remain unconfirmed even if manual Full Library already opens the lesson; an explicit successful sync must create/confirm an independent direct Student + Lesson entitlement. |
-| Ordinary Maths outcome | **MISSING → Phase 14 test** | Prove ordinary Maths creates core access only and preserves all release guards. |
-| Ordinary English outcome | **MISSING → Phase 14 test** | Prove normal English creates core access only, not VR. |
-| English 11+ + VR outcome | **MISSING → Phase 14 test** | Prove a VR-eligible student in an exact active English 11+ batch receives core + VR on a first valid release. |
-| One bad item does not block valid items | CREDIT + regression | Phase 13 mixed-result proof passed; Phase 14 static/live regression will re-check without repeating old fixtures. |
-| Failed/skipped case never confirmed green | CREDIT + workbook transport gap | Phase 13 failure/skip cases passed; the transport-failure desktop path remains mandatory because it is the remaining unproved stale-status scenario. |
+## Phase 14 backend matrix — PASS
 
-## Phase 14 controlled fixture plan
+The final guarded backend acceptance passed on GitHub Actions run **33060941602**. It proved, in the isolated development environment:
 
-Only temporary, clearly named TestY development fixtures may be used. Before any temporary D1/KV write, the acceptance workflow must prove:
+- Full Library alone does not make an unsynced Excel source row confirmed;
+- explicit Excel sync still creates/confirms the independent direct Student+Lesson entitlement when Full Library already grants portal access;
+- ordinary Maths creates core access only;
+- ordinary English creates core access only;
+- first valid English 11+ release to a VR-eligible student creates core + VR access;
+- one invalid item does not block valid items in the same request;
+- deliberate per-item runtime/store failure remains retryable and does not create an unintended entitlement;
+- duplicate Student+Lesson remains idempotent;
+- Excel sync introduces no entitlement-revocation path and no batch-membership mutation path.
 
-- documented D1 closure baseline is exactly 632 `lesson_entitlements`, 4 `batch_definitions`, 4 `student_batch_assignments`, 0 `batch_lesson_releases`;
-- exactly two assigned development users retain 173 entitlement rows;
-- D1 `PRAGMA quick_check` is `ok` and `trg_student_sessions_single_active` exists;
-- every exact Phase 14 temporary user/batch/assignment/release/entitlement key is absent;
-- Worker remains development-only, normal login disabled, R2 is `fpt-materials-dev`, and legacy `FPT_LESSONS_TEST` is not the Worker lesson binding;
-- the selected canonical test lessons are live/active with the expected subject and canonical curriculum metadata.
+The inherited regression suite also passed the locked catalogue/hash, session/single-device, protected-answer, ScreenPal/11+, VR HowTo/VR video policy, special-content and development-isolation checks.
 
-After testing, cleanup must remove only the exact Phase 14 rows/keys proved absent at preflight and restore the same documented baseline. Cleanup must run on failure as well as success.
+## Owner desktop Excel acceptance — PASS
 
-## Phase 14 static matrix added
+The owner’s actual current macro-enabled workbook was used, rather than an older repository/Library workbook copy.
 
-`tests/phase14-excel-sync-matrix-verification.mjs` covers the still-missing API semantics without touching Cloudflare:
+### Controlled Worker/API unavailable path
 
-- Full Library alone does not make the Excel `status_check` confirmed;
-- ordinary Maths creates core only;
-- ordinary English creates core only;
-- first English 11+ release for a VR-eligible student creates core + VR;
-- Full Library overlap still creates the independent direct Excel entitlement;
-- one invalid item does not block four valid items in the same request;
-- a deliberate per-item runtime/store exception returns retryable `ERROR` without blocking a valid item;
-- duplicate Student + Lesson remains idempotent;
-- no entitlement deletion or batch-membership mutation path is introduced.
+A temporary development-only failure was narrowly scoped to the exact TestY Phase 14 request. The owner ran the normal workbook Sync button while the computer remained online. Excel reported **0 confirmed / 1 failed**, and the guarded backend check proved the request created no entitlement and no batch release. The temporary failure was then removed and the canonical Phase 13 development Worker restored before retry.
 
-## Workbook boundary
+This satisfies the authoritative Phase 14 **Worker/API unavailable** branch. A literal physical network/TCP disconnect was not used; it was not required because the acceptance criterion is Worker/API unavailable **or** network/runtime failure.
 
-The final owner R3 workbook is private and was manually refined after the repository BAS source used during Phase 13 acceptance. The authoritative current callback is:
+### Retry and mixed-result matrix
+
+After canonical Worker restoration:
+
+- retry of the same Maths row succeeded and became green + bold;
+- ordinary English succeeded;
+- English 11+ + VR succeeded;
+- Full Library overlap succeeded;
+- deliberate nonexistent lesson `Y3M999` failed independently;
+- the four-row mixed request produced **3 confirmed / 1 failed**, proving a bad item did not block valid rows;
+- backend read-only verification showed exactly four expected temporary entitlements and four expected batch releases, correct VR flags, Full Library preserved, and no invalid entitlement.
+
+### Failed-row formatting defect found and corrected
+
+Phase 14 exposed a workbook defect: `P13_ClearWorkflowColour` used `xlThemeColorAccent6`, which rendered failed/unconfirmed rows green in the owner workbook even though they were not bold and were correctly counted as failures.
+
+The accepted VBA correction is:
+
+```vb
+Private Sub P13_ClearWorkflowColour(ByVal target As Range)
+    target.Interior.Pattern = xlNone
+    target.Font.Color = RGB(0, 0, 0)
+    target.Font.Bold = False
+End Sub
+```
+
+Owner desktop acceptance then proved a deliberately failed row remained **black + non-bold** after the macro processed it. Confirmed/created remains **green + bold** and manually blocked remains **red + bold**, all with no status fill.
+
+The public ribbon callback remains exactly:
 
 `Public Sub SyncPortalEntitlements(Optional ByVal control As IRibbonControl)`
 
-The owner’s current workbook copy must be inspected/used for the remaining transport-failure and desktop acceptance gates. Older Library workbook/module copies must not be substituted silently.
+### Final idempotency proof
 
-## Safety boundary
+The owner synced the already-entitled valid Maths row again. Excel confirmed the row successfully and the backend pre-cleanup check proved there was still **exactly one** `testy3p14m + Y3M1` entitlement.
+
+## Email Database → Live N/Q continuity
+
+The accepted workbook now uses the same Name + Subject + Day + Time membership match for the Live table’s calculated columns:
+
+- **N / Batch ID** pulls Email Database column H;
+- **Q / Portal User ID** pulls Email Database column K.
+
+The owner’s newly added Abigail record was verified with `Q = Abi3007`. Existing Live N/Q data rows contain the new multi-criteria formulas. The final workbook package also corrects the Live table’s stored calculated-column metadata so new table rows inherit the same N/Q logic rather than the superseded name-only VLOOKUP.
+
+Final Phase 14 workbook artifact: `FuturePerfectLive_2026-27_Phase14_FINAL.xlsm`.
+
+Final artifact SHA-256: `45e53026d3434a40070e098c103a53dd4e027c3073d6c858f44ab060140cb77e`.
+
+The final metadata correction did not alter `xl/vbaProject.bin`; its SHA-256 remains `862bef54848e4d939a568755f471d04d2e2090ed5788a99a029a369720bc2f06`.
+
+## Exact fixture cleanup — PASS
+
+GitHub Actions run **33072650628** first reconfirmed desktop idempotency, then removed only the exact four Phase 14 TestY users/assignments/entitlements/releases. It restored the documented Phase 13 baseline exactly:
+
+- 632 lesson entitlements;
+- 4 batch definitions;
+- 4 student batch assignments;
+- 0 batch lesson releases;
+- 2 assigned real development users;
+- 173 entitlements belonging to those assigned users;
+- 0 Phase 14 TestY entitlements;
+- 0 Phase 14 TestY assignments;
+- 0 Phase 14 TestY releases;
+- all four temporary TestY KV user keys absent;
+- single-device trigger present;
+- D1 `PRAGMA quick_check = ok`.
+
+## Final read-only closure preflight — PASS
+
+GitHub Actions run **33072808234** passed the final read-only static/inherited regression and environment verification after cleanup. It reconfirmed:
+
+- locked catalogue hash `7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663`;
+- Phase 14/13/12 regression gates;
+- session/single-device rules;
+- protected Answer Pack behaviour;
+- ScreenPal/11+ and VR rules;
+- Full Library source rules;
+- development Worker isolation;
+- normal student login disabled;
+- development R2 `fpt-materials-dev`;
+- dedicated Excel sync secret present by name only;
+- legacy `FPT_LESSONS_TEST` not used as the Worker lesson binding;
+- D1 exact 632/4/4/0 baseline;
+- TestY fixtures absent;
+- D1 `quick_check` PASS.
+
+## Safety boundary preserved
 
 - No production cutover.
 - No general real-student login.
 - No DNS/CNAME/production route or existing live-portal change.
 - No locked catalogue rewrite.
 - No legacy `FPT_LESSONS_TEST` binding.
-- No secret/password value in source, logs or chat.
-- Excel sync never creates or changes student batch membership.
-- Phase 15 is out of scope until Phase 14 is explicitly CLOSED/PASS.
+- No secret/password value committed, logged or disclosed.
+- Excel sync does not create/change batch membership.
+- Student+Lesson entitlement remains permanent/idempotent and is not auto-revoked by this workflow.
+
+## Closure decision
+
+**Phase 14 is formally CLOSED / PASS.**
+
+Phase 15 is the next implementation phase. It must not be started in this Phase 14 chat. The Phase 14 merged `main` SHA is the required next-chat checkpoint and must be recorded in the Steps to Progression and cumulative Implementation Handover after merge.
