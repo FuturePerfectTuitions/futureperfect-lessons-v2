@@ -1,0 +1,127 @@
+name: Phase 14 desktop acceptance fixture setup
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase14-desktop-fixture-setup.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  setup:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase14-failure-retry-matrix' &&
+      github.event.pull_request.base.sha == '458a67cee0f20b21a6083e7073190cfe14628867' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Create exact TestY desktop fixtures with zero entitlements
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/p14-desktop-settings.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p14-desktop-settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p14-desktop-settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal V2 student login is enabled; refusing fixture setup.' >&2; false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-desktop-settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-desktop-settings.json)"
+          test -n "$STUDENTS" && test "$STUDENTS" != null
+          test -n "$LESSONS" && test "$LESSONS" != null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p14-desktop-settings.json)" = 'fpt-materials-dev'
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS test_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS test_assignments FROM student_batch_assignments WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS test_releases FROM batch_lesson_releases WHERE source_row_id LIKE 'P14-DESKTOP-%'; SELECT batch_key,subject,school_year,stream,maths_level,active_from,active_to FROM batch_definitions WHERE batch_key IN ('Y3FM','Y3FE','Y511FE','Y511FM') ORDER BY batch_key; PRAGMA quick_check;" \
+            >/tmp/p14-desktop-before.json 2>/tmp/p14-desktop-before.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p14-desktop-before.json)" = '632'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p14-desktop-before.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p14-desktop-before.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p14-desktop-before.json)" = '0'
+          test "$(jq -r '.[4].results[0].test_entitlements' /tmp/p14-desktop-before.json)" = '0'
+          test "$(jq -r '.[5].results[0].test_assignments' /tmp/p14-desktop-before.json)" = '0'
+          test "$(jq -r '.[6].results[0].test_releases' /tmp/p14-desktop-before.json)" = '0'
+          test "$(jq '.[7].results|length' /tmp/p14-desktop-before.json)" = '4'
+          jq -e '.[8].results[0].quick_check == "ok"' /tmp/p14-desktop-before.json >/dev/null
+
+          PREFIX="$(node -e 'process.stdout.write(encodeURIComponent("user:testy"))')"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/keys?prefix=${PREFIX}&limit=1000" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/p14-testy-keys-before.json
+          for u in testy3p14m testy3p14e testy5p1411e testy5p14full; do
+            ! jq -e --arg k "user:${u}" '.result[]? | select(.name==$k)' /tmp/p14-testy-keys-before.json >/dev/null
+          done
+
+          for key in lesson:Y3M1 lesson:Y3E1 lesson:Y5E10 lesson:Y5M1; do
+            encoded="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$key")"
+            curl --fail --silent --show-error \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS}/values/${encoded}" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/tmp/p14-lesson.json
+            jq -e '.active != false' /tmp/p14-lesson.json >/dev/null
+          done
+
+          cat >/tmp/testy3p14m.json <<'JSON'
+          {"firstName":"TestY3P14M","schoolYear":3,"vrEligible":false,"status":"active","expires":null,"batches":["Y3FM"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]}
+          JSON
+          cat >/tmp/testy3p14e.json <<'JSON'
+          {"firstName":"TestY3P14E","schoolYear":3,"vrEligible":false,"status":"active","expires":null,"batches":["Y3FE"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]}
+          JSON
+          cat >/tmp/testy5p1411e.json <<'JSON'
+          {"firstName":"TestY5P1411E","schoolYear":5,"vrEligible":true,"status":"active","expires":null,"batches":["Y511FE"],"fullLibraries":[],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]}
+          JSON
+          cat >/tmp/testy5p14full.json <<'JSON'
+          {"firstName":"TestY5P14FULL","schoolYear":5,"vrEligible":false,"status":"active","expires":null,"batches":["Y511FM"],"fullLibraries":["MATHS_L2_FULL"],"manualAccess":{"coreLessons":[],"vrLessons":[],"specialBuckets":[]},"blockedLessons":[]}
+          JSON
+
+          for pair in \
+            'testy3p14m:/tmp/testy3p14m.json' \
+            'testy3p14e:/tmp/testy3p14e.json' \
+            'testy5p1411e:/tmp/testy5p1411e.json' \
+            'testy5p14full:/tmp/testy5p14full.json'; do
+            user="${pair%%:*}"; file="${pair#*:}"
+            encoded="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "user:${user}")"
+            curl --fail --silent --show-error --request PUT \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${encoded}" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data-binary "@${file}" >/dev/null
+          done
+
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "INSERT INTO student_batch_assignments (portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy3p14m','Y3FM','2026-09-15',NULL,'${NOW}','${NOW}'),('testy3p14e','Y3FE','2026-09-15',NULL,'${NOW}','${NOW}'),('testy5p1411e','Y511FE','2026-09-15',NULL,'${NOW}','${NOW}'),('testy5p14full','Y511FM','2026-09-15',NULL,'${NOW}','${NOW}');" \
+            >/tmp/p14-desktop-seed.json 2>/tmp/p14-desktop-seed.err
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS test_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS test_assignments FROM student_batch_assignments WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); PRAGMA quick_check;" \
+            >/tmp/p14-desktop-after.json 2>/tmp/p14-desktop-after.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p14-desktop-after.json)" = '632'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p14-desktop-after.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p14-desktop-after.json)" = '8'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p14-desktop-after.json)" = '0'
+          test "$(jq -r '.[4].results[0].test_entitlements' /tmp/p14-desktop-after.json)" = '0'
+          test "$(jq -r '.[5].results[0].test_assignments' /tmp/p14-desktop-after.json)" = '4'
+          test "$(jq -r '.[6].results[0].assigned_user_entitlements' /tmp/p14-desktop-after.json)" = '173'
+          jq -e '.[7].results[0].quick_check == "ok"' /tmp/p14-desktop-after.json >/dev/null
+
+          echo 'Phase 14 desktop fixtures READY: 4 TestY assignments, 0 TestY entitlements, 0 releases.'
