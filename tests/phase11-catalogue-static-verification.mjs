@@ -60,8 +60,9 @@ assert.ok(!phase10.includes('assets/phase11-protected-bridge.js'));
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 assert.ok(
   wrangler.includes('main = "src/index-phase10-history.js"') ||
-    wrangler.includes('main = "src/index-phase12.js"'),
-  'catalogue lock verification must run against either the approved Phase 10 pre-apply entrypoint or the Phase 12 batch-aware entrypoint'
+    wrangler.includes('main = "src/index-phase12.js"') ||
+    wrangler.includes('main = "src/index-phase13.js"'),
+  'catalogue lock verification must run against an approved Phase 10, Phase 12 or Phase 13 entrypoint'
 );
 
 console.log('Phase 11 canonical catalogue static verification: PASS');
