@@ -1,0 +1,51 @@
+name: Phase 13 temporary next-lesson fixture lookup
+
+on:
+  push:
+    branches:
+      - phase13-sync-portal-entitlements
+    paths:
+      - .github/workflows/phase13-next-lesson-temp.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  lookup:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Find next safe Y5 English controlled lesson
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/fpt-portal-v2-worker/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal login enabled; refusing.' >&2; false;; esac
+          node --experimental-default-type=module <<'NODE' >/tmp/candidate.sql
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const catalogue = loadPhase11Catalogue();
+          const ids = catalogue.curricula.ENGLISH_Y5.lessonIds.filter(id => id !== 'Y5E10');
+          const values = ids.map(id => `('${String(id).replaceAll("'", "''")}')`).join(',');
+          console.log(`WITH candidates(lesson_id) AS (VALUES ${values}) SELECT lesson_id FROM candidates WHERE NOT EXISTS (SELECT 1 FROM lesson_entitlements e WHERE e.portal_user_id_norm='testy2e' AND e.lesson_id=candidates.lesson_id) ORDER BY lesson_id LIMIT 1;`);
+          NODE
+          $W d1 execute fpt_portal_v2_db --remote --json --command "$(cat /tmp/candidate.sql)" >/tmp/candidate.json
+          CANDIDATE="$(jq -r '.[0].results[0].lesson_id // ""' /tmp/candidate.json)"
+          test -n "$CANDIDATE"
+          case "$CANDIDATE" in Y5E*) ;; *) echo 'Unexpected candidate.' >&2; false;; esac
+          echo "NEXT_SAFE_Y5_ENGLISH_LESSON=${CANDIDATE}"
