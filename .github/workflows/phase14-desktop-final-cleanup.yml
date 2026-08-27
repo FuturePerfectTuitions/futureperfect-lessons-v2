@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 # Phase 14 desktop idempotency and exact TestY cleanup passed on run 33072650628.
-# Frozen to prevent any repeat deletion attempt after the documented baseline was restored.
+# Frozen permanently for the Phase 14 closure checkpoint; do not re-enable without a new explicit test plan.
 
 jobs:
   frozen:
