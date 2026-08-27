@@ -7,10 +7,10 @@ permissions:
   contents: read
 
 # Superseded by the corrected final backend acceptance, which passed as run 33060941602.
-# Frozen to prevent obsolete Y5E1 fixture assumptions from generating misleading PR failures.
+# Retained only as historical evidence and permanently frozen for the Phase 14 checkpoint.
 
 jobs:
   frozen:
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'Superseded Phase 14 workflow is frozen.'
+      - run: echo 'Superseded Phase 14 acceptance workflow is frozen.'
