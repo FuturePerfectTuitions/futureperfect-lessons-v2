@@ -16,7 +16,7 @@ env:
   WRANGLER_VERSION: 4.125.0
 
 jobs:
-  set-gate:
+  restore-gate:
     if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Guard and move only controlled assignment start
+      - name: Guard and restore only controlled assignment start
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -47,17 +47,19 @@ jobs:
           test "$(jq -r '.[0].results|length' /tmp/pre.json)" = '1'
           test "$(jq -r '.[0].results[0].active_from' /tmp/pre.json)" = '2000-01-01'
           test "$(jq -r '.[1].results|length' /tmp/pre.json)" = '1'
-          test "$(jq -r '.[1].results[0].effective_from' /tmp/pre.json)" = '2000-01-01'
+          test "$(jq -r '.[1].results[0].effective_from' /tmp/pre.json)" = '2026-09-15'
           test "$(jq -r '.[2].results[0].entitlement_rows' /tmp/pre.json)" = '1'
           test "$(jq -r '.[3].results[0].release_rows' /tmp/pre.json)" = '1'
           jq -e '.[4].results[]|select(.quick_check=="ok")' /tmp/pre.json >/dev/null
 
           $W d1 execute fpt_portal_v2_db --remote --command \
-            "UPDATE student_batch_assignments SET effective_from='2026-09-15', updated_at=CURRENT_TIMESTAMP WHERE portal_user_id_norm='testy2e' AND batch_key='__P13_ACCEPT_E5__' AND effective_from='2000-01-01' AND effective_to IS NULL;" --yes >/tmp/update.log 2>&1
+            "UPDATE student_batch_assignments SET effective_from='2000-01-01', updated_at=CURRENT_TIMESTAMP WHERE portal_user_id_norm='testy2e' AND batch_key='__P13_ACCEPT_E5__' AND effective_from='2026-09-15' AND effective_to IS NULL;" --yes >/tmp/update.log 2>&1
 
           $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT portal_user_id_norm,batch_key,effective_from,effective_to FROM student_batch_assignments WHERE portal_user_id_norm='testy2e' AND batch_key='__P13_ACCEPT_E5__'; PRAGMA quick_check;" >/tmp/post.json
+            "SELECT portal_user_id_norm,batch_key,effective_from,effective_to FROM student_batch_assignments WHERE portal_user_id_norm='testy2e' AND batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS entitlement_rows FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id='Y5E10'; SELECT COUNT(*) AS release_rows FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id='Y5E10'; PRAGMA quick_check;" >/tmp/post.json
           test "$(jq -r '.[0].results|length' /tmp/post.json)" = '1'
-          test "$(jq -r '.[0].results[0].effective_from' /tmp/post.json)" = '2026-09-15'
-          jq -e '.[1].results[]|select(.quick_check=="ok")' /tmp/post.json >/dev/null
-          echo 'Controlled assignment now begins 2026-09-15; existing entitlement/release retained.'
+          test "$(jq -r '.[0].results[0].effective_from' /tmp/post.json)" = '2000-01-01'
+          test "$(jq -r '.[1].results[0].entitlement_rows' /tmp/post.json)" = '1'
+          test "$(jq -r '.[2].results[0].release_rows' /tmp/post.json)" = '1'
+          jq -e '.[3].results[]|select(.quick_check=="ok")' /tmp/post.json >/dev/null
+          echo 'Controlled assignment restored to 2000-01-01; existing entitlement/release retained.'
