@@ -1,0 +1,64 @@
+name: Phase 13 temporary blocked diagnostic
+
+on:
+  push:
+    branches:
+      - phase13-sync-portal-entitlements
+    paths:
+      - .github/workflows/phase13-blocked-diagnostic-temp.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  FPT_PORTAL_V2_EXCEL_SYNC_TOKEN: ${{ secrets.FPT_PORTAL_V2_EXCEL_SYNC_TOKEN }}
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  diagnose-blocked:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Prove KV block and direct Worker response
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$FPT_PORTAL_V2_EXCEL_SYNC_TOKEN"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/fpt-portal-v2-worker/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal login enabled; refusing.' >&2; false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$STUDENTS"; test "$STUDENTS" != null
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/user%3Atesty2e" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/user.json
+          jq -e '((.blockedLessons // []) | index("Y5E11")) != null' /tmp/user.json >/dev/null
+          echo 'KV_BLOCK_PRESENT=Y5E11'
+
+          curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer ${FPT_PORTAL_V2_EXCEL_SYNC_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"items":[{"syncRowId":"p13-blocked-diagnostic","operation":"grant","portalUserId":"testy2e","lessonId":"Y5E11","batchKey":"__P13_ACCEPT_E5__","lessonDate":"2026-09-13"}]}' \
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync" >/tmp/response.json
+          jq -c '{ok,summary,results:[.results[]|{syncRowId,ok,status,message}]}' /tmp/response.json
+          jq -e '.results|length==1 and .[0].status=="BLOCKED" and .[0].ok==true' /tmp/response.json >/dev/null
+          echo 'WORKER_BLOCKED_RESPONSE=PASS'
