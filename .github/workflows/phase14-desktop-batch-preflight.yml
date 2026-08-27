@@ -1,0 +1,15 @@
+name: Phase 14 desktop batch and lesson preflight (frozen after PASS)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Historical read-only preparation evidence only. Phase 14 is closed and its final acceptance/cleanup is recorded in docs/data/phase14/README.md.
+
+jobs:
+  frozen:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Phase 14 desktop preflight is frozen after Phase 14 closure.'

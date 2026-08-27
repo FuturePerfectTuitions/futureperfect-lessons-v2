@@ -1,0 +1,16 @@
+name: Phase 14 final read-only closure preflight (frozen after PASS)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Final read-only regression/isolation preflight passed on run 33072808234.
+# Frozen to avoid redundant checks after Phase 14 closure.
+
+jobs:
+  frozen:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Phase 14 final read-only closure preflight is frozen after PASS run 33072808234.'

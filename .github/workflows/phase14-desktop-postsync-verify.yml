@@ -1,0 +1,15 @@
+name: Phase 14 desktop postsync verification (frozen after PASS)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Historical acceptance evidence only. Final accepted state and cleanup are recorded in docs/data/phase14/README.md.
+
+jobs:
+  frozen:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Phase 14 desktop postsync verification is permanently frozen.'

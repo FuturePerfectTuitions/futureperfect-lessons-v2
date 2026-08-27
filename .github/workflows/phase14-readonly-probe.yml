@@ -1,0 +1,15 @@
+name: Phase 14 superseded read-only probe (frozen)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Superseded after the actual deployed English fixture was identified as Y5E10. Historical evidence only.
+
+jobs:
+  frozen:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Superseded Phase 14 read-only probe is permanently frozen.'
