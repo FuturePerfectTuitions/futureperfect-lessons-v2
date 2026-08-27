@@ -7,11 +7,10 @@ permissions:
   contents: read
 
 # Phase 14 backend acceptance conclusively passed on run 33060941602.
-# This workflow is intentionally frozen so later desktop-acceptance preparation
-# cannot repeat already-passed database mutations merely because PR #124 changes.
+# Frozen permanently for the Phase 14 closure checkpoint.
 
 jobs:
   frozen:
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'Phase 14 backend acceptance is frozen after conclusive PASS run 33060941602.'
+      - run: echo 'Phase 14 backend acceptance is frozen after PASS run 33060941602.'
