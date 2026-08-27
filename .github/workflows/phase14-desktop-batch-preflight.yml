@@ -1,4 +1,4 @@
-name: Phase 14 desktop batch and lesson preflight
+name: Phase 14 desktop batch and lesson preflight (frozen after PASS)
 
 on:
   workflow_dispatch:
@@ -6,24 +6,10 @@ on:
 permissions:
   contents: read
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  WORKER_NAME: fpt-portal-v2-worker
-  WRANGLER_VERSION: 4.125.0
+# Historical read-only preparation evidence only. Phase 14 is closed and its final acceptance/cleanup is recorded in docs/data/phase14/README.md.
 
 jobs:
-  preflight:
+  frozen:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Frozen read-only preflight
-        shell: bash
-        run: |
-          echo 'FROZEN: this pre-acceptance baseline check expected 632 entitlements / 4 assignments / 0 releases.'
-          echo 'Superseded after controlled Phase 14 desktop fixtures and successful workbook sync tests.'
-          echo 'Do not rerun as current-state acceptance evidence.'
+      - run: echo 'Phase 14 desktop preflight is frozen after Phase 14 closure.'
