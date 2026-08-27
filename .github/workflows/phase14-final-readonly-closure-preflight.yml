@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 # Final read-only regression/isolation preflight passed on run 33072808234.
-# Frozen to avoid redundant checks while closure documents are prepared.
+# Frozen to avoid redundant checks after Phase 14 closure.
 
 jobs:
   frozen:
