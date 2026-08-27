@@ -1,10 +1,7 @@
 name: Phase 14 desktop batch and lesson preflight
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/phase14-desktop-batch-preflight.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,49 +14,16 @@ env:
 
 jobs:
   preflight:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      github.event.pull_request.head.ref == 'phase14-failure-retry-matrix' &&
-      github.event.pull_request.base.sha == '458a67cee0f20b21a6083e7073190cfe14628867'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Read-only D1 and deployed lesson inventory for desktop acceptance
+      - name: Frozen read-only preflight
         shell: bash
         run: |
-          set -euo pipefail
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions ORDER BY batch_key; SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; PRAGMA quick_check;" \
-            >/tmp/p14-desktop-batches.json 2>/tmp/p14-desktop-batches.err
-          echo 'BEGIN_SAFE_BATCH_INVENTORY'
-          jq -c '.[0].results' /tmp/p14-desktop-batches.json
-          echo 'END_SAFE_BATCH_INVENTORY'
-          test "$(jq -r '.[1].results[0].entitlement_count' /tmp/p14-desktop-batches.json)" = '632'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p14-desktop-batches.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p14-desktop-batches.json)" = '0'
-          jq -e '.[4].results[0].quick_check == "ok"' /tmp/p14-desktop-batches.json >/dev/null
-
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p14-desktop-settings.json
-          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-desktop-settings.json)"
-          test -n "$LESSONS" && test "$LESSONS" != null
-          $W kv key list --namespace-id "$LESSONS" --prefix 'lesson:Y3M' --remote >/tmp/p14-y3m-keys.json
-          $W kv key list --namespace-id "$LESSONS" --prefix 'lesson:Y3E' --remote >/tmp/p14-y3e-keys.json
-          echo 'BEGIN_SAFE_Y3_MATHS_KEYS'
-          jq -c '[.[].name] | .[:12]' /tmp/p14-y3m-keys.json
-          echo 'END_SAFE_Y3_MATHS_KEYS'
-          echo 'BEGIN_SAFE_Y3_ENGLISH_KEYS'
-          jq -c '[.[].name] | .[:12]' /tmp/p14-y3e-keys.json
-          echo 'END_SAFE_Y3_ENGLISH_KEYS'
-          test "$(jq 'length' /tmp/p14-y3m-keys.json)" -gt 0
-          test "$(jq 'length' /tmp/p14-y3e-keys.json)" -gt 0
-          echo 'Phase 14 desktop preflight: PASS; read-only baseline unchanged.'
+          echo 'FROZEN: this pre-acceptance baseline check expected 632 entitlements / 4 assignments / 0 releases.'
+          echo 'Superseded after controlled Phase 14 desktop fixtures and successful workbook sync tests.'
+          echo 'Do not rerun as current-state acceptance evidence.'
