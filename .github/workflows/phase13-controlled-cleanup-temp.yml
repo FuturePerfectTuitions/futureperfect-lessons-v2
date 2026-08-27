@@ -53,27 +53,54 @@ jobs:
           jq -e '((.blockedLessons // []) | index("Y5E11")) == null' /tmp/user.json >/dev/null
 
           $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT lesson_id,COUNT(*) AS rows,MIN(source_batch_code) AS source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11') GROUP BY lesson_id ORDER BY lesson_id; SELECT lesson_id,COUNT(*) AS rows FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id IN ('Y5E10','Y5E11') GROUP BY lesson_id ORDER BY lesson_id; SELECT COUNT(*) AS batch_rows FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS assignment_rows FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__' AND portal_user_id_norm='testy2e'; SELECT COUNT(*) AS invalid_rows FROM lesson_entitlements WHERE portal_user_id_norm='p13missinguser9999'; PRAGMA quick_check;" >/tmp/before.json
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/before.json)" = '634'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/before.json)" = '5'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/before.json)" = '5'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/before.json)" = '2'
-          test "$(jq -r '.[4].results|length' /tmp/before.json)" = '2'
-          test "$(jq -r '.[4].results[]|select(.lesson_id=="Y5E10")|.rows' /tmp/before.json)" = '1'
-          test "$(jq -r '.[4].results[]|select(.lesson_id=="Y5E11")|.rows' /tmp/before.json)" = '1'
-          test "$(jq -r '.[4].results[]|select(.lesson_id=="Y5E10")|.source_batch_code' /tmp/before.json)" = '__P13_ACCEPT_E5__'
-          test "$(jq -r '.[4].results[]|select(.lesson_id=="Y5E11")|.source_batch_code' /tmp/before.json)" = '__P13_ACCEPT_E5__'
-          test "$(jq -r '.[5].results|length' /tmp/before.json)" = '2'
-          test "$(jq -r '.[6].results[0].batch_rows' /tmp/before.json)" = '1'
-          test "$(jq -r '.[7].results[0].assignment_rows' /tmp/before.json)" = '1'
-          test "$(jq -r '.[8].results[0].invalid_rows' /tmp/before.json)" = '0'
-          jq -e '.[9].results[]|select(.quick_check=="ok")' /tmp/before.json >/dev/null
+            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS fixture_entitlements FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11'); SELECT COUNT(*) AS fixture_entitlements_exact FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11') AND source_batch_code='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS fixture_releases FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS fixture_batches FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS fixture_assignments FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__' AND portal_user_id_norm='testy2e'; SELECT COUNT(*) AS invalid_rows FROM lesson_entitlements WHERE portal_user_id_norm='p13missinguser9999'; PRAGMA quick_check;" >/tmp/before.json
+          echo 'Cleanup preflight:'
+          jq -c '[.[0].results[0],.[1].results[0],.[2].results[0],.[3].results[0],.[4].results[0],.[5].results[0],.[6].results[0],.[7].results[0],.[8].results[0],.[9].results[0],.[10].results[0]]' /tmp/before.json
 
-          $W d1 execute fpt_portal_v2_db --remote --yes --command \
-            "BEGIN; DELETE FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id IN ('Y5E10','Y5E11'); DELETE FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__' AND portal_user_id_norm='testy2e'; DELETE FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; DELETE FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11') AND source_batch_code='__P13_ACCEPT_E5__'; COMMIT;" >/tmp/delete.log 2>&1
+          ENT="$(jq -r '.[0].results[0].entitlement_count' /tmp/before.json)"
+          BAT="$(jq -r '.[1].results[0].batch_count' /tmp/before.json)"
+          ASN="$(jq -r '.[2].results[0].assignment_count' /tmp/before.json)"
+          REL="$(jq -r '.[3].results[0].release_count' /tmp/before.json)"
+          FENT="$(jq -r '.[4].results[0].fixture_entitlements' /tmp/before.json)"
+          FENTX="$(jq -r '.[5].results[0].fixture_entitlements_exact' /tmp/before.json)"
+          FREL="$(jq -r '.[6].results[0].fixture_releases' /tmp/before.json)"
+          FBAT="$(jq -r '.[7].results[0].fixture_batches' /tmp/before.json)"
+          FASN="$(jq -r '.[8].results[0].fixture_assignments' /tmp/before.json)"
+          INVALID="$(jq -r '.[9].results[0].invalid_rows' /tmp/before.json)"
+          jq -e '.[10].results[]|select(.quick_check=="ok")' /tmp/before.json >/dev/null
+
+          test "$INVALID" = '0'
+          test "$FENT" = "$FENTX"
+          test $((ENT - FENT)) -eq 632
+          test $((BAT - FBAT)) -eq 4
+          test $((ASN - FASN)) -eq 4
+          test $((REL - FREL)) -eq 0
+          test "$FENT" -ge 0; test "$FENT" -le 2
+          test "$FREL" -ge 0; test "$FREL" -le 2
+          test "$FBAT" -ge 0; test "$FBAT" -le 1
+          test "$FASN" -ge 0; test "$FASN" -le 1
+
+          if [ "$FREL" -gt 0 ]; then
+            $W d1 execute fpt_portal_v2_db --remote --yes --command \
+              "DELETE FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__' AND lesson_id IN ('Y5E10','Y5E11');" >/tmp/delete-release.log 2>&1
+          fi
+          if [ "$FASN" -gt 0 ]; then
+            $W d1 execute fpt_portal_v2_db --remote --yes --command \
+              "DELETE FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__' AND portal_user_id_norm='testy2e';" >/tmp/delete-assignment.log 2>&1
+          fi
+          if [ "$FBAT" -gt 0 ]; then
+            $W d1 execute fpt_portal_v2_db --remote --yes --command \
+              "DELETE FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__';" >/tmp/delete-batch.log 2>&1
+          fi
+          if [ "$FENT" -gt 0 ]; then
+            $W d1 execute fpt_portal_v2_db --remote --yes --command \
+              "DELETE FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11') AND source_batch_code='__P13_ACCEPT_E5__';" >/tmp/delete-entitlement.log 2>&1
+          fi
 
           $W d1 execute fpt_portal_v2_db --remote --json --command \
             "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS fixture_entitlements FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11'); SELECT COUNT(*) AS fixture_releases FROM batch_lesson_releases WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS fixture_batches FROM batch_definitions WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS fixture_assignments FROM student_batch_assignments WHERE batch_key='__P13_ACCEPT_E5__'; SELECT COUNT(*) AS invalid_rows FROM lesson_entitlements WHERE portal_user_id_norm='p13missinguser9999'; PRAGMA quick_check;" >/tmp/after.json
+          echo 'Cleanup result:'
+          jq -c '[.[0].results[0],.[1].results[0],.[2].results[0],.[3].results[0],.[4].results[0],.[5].results[0],.[6].results[0],.[7].results[0],.[8].results[0],.[9].results[0]]' /tmp/after.json
           test "$(jq -r '.[0].results[0].entitlement_count' /tmp/after.json)" = '632'
           test "$(jq -r '.[1].results[0].batch_count' /tmp/after.json)" = '4'
           test "$(jq -r '.[2].results[0].assignment_count' /tmp/after.json)" = '4'
