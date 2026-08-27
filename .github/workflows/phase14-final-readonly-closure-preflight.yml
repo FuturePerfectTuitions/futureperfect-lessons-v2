@@ -1,123 +1,16 @@
-name: Phase 14 final read-only closure preflight
+name: Phase 14 final read-only closure preflight (frozen after PASS)
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/phase14-final-readonly-closure-preflight.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  WORKER_NAME: fpt-portal-v2-worker
-  WRANGLER_VERSION: 4.125.0
+# Final read-only regression/isolation preflight passed on run 33072808234.
+# Frozen to avoid redundant checks while closure documents are prepared.
 
 jobs:
-  final-readonly:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      github.event.pull_request.head.ref == 'phase14-failure-retry-matrix' &&
-      github.event.pull_request.base.sha == '458a67cee0f20b21a6083e7073190cfe14628867' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+  frozen:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Static and inherited regression gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --check worker/src/index-phase13.js
-          node tests/phase14-excel-sync-matrix-verification.mjs
-          node tests/phase13-excel-sync-verification.mjs
-          node tests/phase12-batch-aware-worker-verification.mjs
-          node tests/phase12-batch-schema-static-verification.mjs
-          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/p14-catalogue.log
-          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p14-catalogue.log
-          node tests/phase11-session-efficiency-static-verification.mjs
-          node tests/phase11-answer-dedup-static-verification.mjs
-          node tests/phase11-answer-header-static-verification.mjs
-          node tests/phase11-screenpal-static-verification.mjs
-          node tests/phase11-vr-howto-top-level-static-verification.mjs
-          node --experimental-default-type=module tests/phase11-vr-howto-real-catalogue-static-verification.mjs
-          node tests/phase11-vr-solution-video-policy-static-verification.mjs
-          node --experimental-default-type=module tests/phase11-test-personas-static-verification.mjs
-          node --check worker/src/index-phase10.js
-          node --check worker/src/index-phase10-history.js
-          node --check assets/phase10.js
-          node --check assets/phase10-counts.js
-          node --check assets/phase10-history.js
-          node --check tests/phase10-browser-verification.mjs
-          bash -n tests/phase10-api-verification.sh
-          grep -Fq 'MATHS_L2_FULL' worker/src/index.js
-          grep -Fq 'function fullLibraryCoversLesson' worker/src/index.js
-          grep -Fq 'ENGLISH_Y5_11PLUS_FULL' worker/src/index.js
-          grep -Fq 'function fullLibraryGrantsVr' worker/src/index-phase9.js
-          echo 'PHASE14_FINAL_STATIC_REGRESSION_PASS'
-
-      - name: Read-only Cloudflare and D1 baseline verification
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p14-final-settings.json
-          jq -e '.success == true' /tmp/p14-final-settings.json >/dev/null
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p14-final-settings.json >/dev/null
-          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p14-final-settings.json)" = 'fpt-materials-dev'
-          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p14-final-settings.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal V2 student login is enabled; FAIL.' >&2; false;; esac
-          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-final-settings.json)"
-          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-final-settings.json)"
-          test -n "$STUDENTS" && test "$STUDENTS" != null
-          test -n "$LESSONS" && test "$LESSONS" != null
-
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p14-final-namespaces.json
-          LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' /tmp/p14-final-namespaces.json)"
-          if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
-
-          $W secret list --name "$WORKER_NAME" --format json >/tmp/p14-final-secret-list.json
-          jq -e '.[] | select(.name == "EXCEL_SYNC_TOKEN")' /tmp/p14-final-secret-list.json >/dev/null
-          echo 'Dedicated Excel sync secret present by name; value not printed.'
-
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS test_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS test_assignments FROM student_batch_assignments WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS test_releases FROM batch_lesson_releases WHERE (batch_key='Y3FM' AND lesson_id='Y3M1') OR (batch_key='Y3FE' AND lesson_id='Y3E1') OR (batch_key='Y511FE' AND lesson_id='Y5E10') OR (batch_key='Y511FM' AND lesson_id='Y5M1'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
-            >/tmp/p14-final-d1.json 2>/tmp/p14-final-d1.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p14-final-d1.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p14-final-d1.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p14-final-d1.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p14-final-d1.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p14-final-d1.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p14-final-d1.json)" = '173'
-          test "$(jq -r '.[6].results[0].test_entitlements' /tmp/p14-final-d1.json)" = '0'
-          test "$(jq -r '.[7].results[0].test_assignments' /tmp/p14-final-d1.json)" = '0'
-          test "$(jq -r '.[8].results[0].test_releases' /tmp/p14-final-d1.json)" = '0'
-          jq -e '.[9].results[0].name == "trg_student_sessions_single_active"' /tmp/p14-final-d1.json >/dev/null
-          jq -e '.[10].results[0].quick_check == "ok"' /tmp/p14-final-d1.json >/dev/null
-
-          enc() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
-          for user in testy3p14m testy3p14e testy5p1411e testy5p14full; do
-            code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/$(enc "user:${user}")" \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
-            test "$code" = '404'
-          done
-
-          echo 'PHASE14_FINAL_READONLY_BASELINE_PASS'
-          echo 'Baseline 632/4/4/0; TestY absent; dev isolation and D1 quick_check PASS.'
+      - run: echo 'Phase 14 final read-only closure preflight is frozen after PASS run 33072808234.'
