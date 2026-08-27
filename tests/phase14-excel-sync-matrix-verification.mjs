@@ -190,7 +190,7 @@ const env = makeEnv();
     item('p14-full-precheck', 'TestY5P14FULL', 'Y5M1', 'P14_Y5M', 'status_check')
   ]), env);
   const body = await response.json();
-  assert.equal(body.results[0].status, 'NOT_CONFIRMED');
+  assert.equal(body.results[0].status, 'ENTITLEMENT_MISSING');
   assert.equal(env.DB.entitlements.size, 0);
   assert.deepEqual(
     env.STUDENTS_KV.values.get('user:testy5p14full').fullLibraries,
