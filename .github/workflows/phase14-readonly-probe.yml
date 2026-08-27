@@ -47,9 +47,25 @@ jobs:
           jq -e 'length == 0' /tmp/p14-users.json >/dev/null
 
           $W kv key get 'lesson:Y5M1' --namespace-id "$LESSONS" --remote >/tmp/y5m1.json
-          $W kv key get 'lesson:Y5E1' --namespace-id "$LESSONS" --remote >/tmp/y5e1.json
-          jq -c '{lessonId,subject,active,curriculumCodes}' /tmp/y5m1.json
-          jq -c '{lessonId,subject,active,curriculumCodes}' /tmp/y5e1.json
           jq -e '.lessonId=="Y5M1" and .subject=="maths"' /tmp/y5m1.json >/dev/null
-          jq -e '.lessonId=="Y5E1" and .subject=="english"' /tmp/y5e1.json >/dev/null
+          jq -c '{lessonId,subject,active,curriculumCodes}' /tmp/y5m1.json
+
+          $W kv key list --namespace-id "$LESSONS" --prefix 'lesson:Y5E' --remote >/tmp/y5e-keys.json
+          jq -e 'length > 0' /tmp/y5e-keys.json >/dev/null
+          echo 'Candidate Year 5 English lesson keys (safe names only):'
+          jq -c '[.[0:20][] | .name]' /tmp/y5e-keys.json
+          ENGLISH_KEY="$(jq -r '.[0].name' /tmp/y5e-keys.json)"
+          test -n "$ENGLISH_KEY" && test "$ENGLISH_KEY" != null
+          $W kv key get "$ENGLISH_KEY" --namespace-id "$LESSONS" --remote >/tmp/y5e-candidate.json
+          jq -e '.subject=="english" and .active != false and (.curriculumCodes|index("ENGLISH_Y5")) != null' /tmp/y5e-candidate.json >/dev/null
+          echo 'Selected safe English fixture metadata:'
+          jq -c '{lessonId,subject,active,curriculumCodes}' /tmp/y5e-candidate.json
+
+          $W kv key get 'curriculum:ENGLISH_Y5' --namespace-id "$LESSONS" --remote >/tmp/english-y5-curriculum.json
+          echo 'ENGLISH_Y5 curriculum record shape:'
+          jq -c 'if type=="array" then {type:"array",length:length,first:(.[0] // null)} else {type:type,keys:(keys // [])} end' /tmp/english-y5-curriculum.json
+
+          echo 'Wrangler KV mutation command syntax (help only; no mutation):'
+          $W kv key put --help | sed -n '1,100p'
+          $W kv key delete --help | sed -n '1,100p'
           echo 'Phase 14 read-only KV probe: PASS'
