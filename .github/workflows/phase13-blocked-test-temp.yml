@@ -1,0 +1,73 @@
+name: Phase 13 temporary blocked-lesson setup
+
+on:
+  push:
+    branches:
+      - phase13-sync-portal-entitlements
+    paths:
+      - .github/workflows/phase13-blocked-test-temp.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  prepare-blocked-test:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify invalid-user attempt was non-mutating and temporarily block Y5E11
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/fpt-portal-v2-worker/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal login enabled; refusing.' >&2; false;; esac
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)" = 'fpt-materials-dev'
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$STUDENTS"; test "$STUDENTS" != null
+
+          $W d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT lesson_id,COUNT(*) AS rows FROM lesson_entitlements WHERE portal_user_id_norm='testy2e' AND lesson_id IN ('Y5E10','Y5E11') GROUP BY lesson_id ORDER BY lesson_id; SELECT COUNT(*) AS invalid_rows FROM lesson_entitlements WHERE portal_user_id_norm='p13missinguser9999'; PRAGMA quick_check;" >/tmp/d1.json
+          test "$(jq -r '.[0].results|length' /tmp/d1.json)" = '2'
+          test "$(jq -r '.[0].results[]|select(.lesson_id=="Y5E10")|.rows' /tmp/d1.json)" = '1'
+          test "$(jq -r '.[0].results[]|select(.lesson_id=="Y5E11")|.rows' /tmp/d1.json)" = '1'
+          test "$(jq -r '.[1].results[0].invalid_rows' /tmp/d1.json)" = '0'
+          jq -e '.[2].results[]|select(.quick_check=="ok")' /tmp/d1.json >/dev/null
+
+          KEY='user%3Atesty2e'
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/user.json
+          jq -e 'type=="object"' /tmp/user.json >/dev/null
+          jq -e '((.blockedLessons // []) | index("Y5E11")) == null' /tmp/user.json >/dev/null
+          jq '.blockedLessons = (((.blockedLessons // []) + ["Y5E11"]) | unique)' /tmp/user.json >/tmp/user-blocked.json
+          curl --fail --silent --show-error --request PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/user-blocked.json >/dev/null
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/${KEY}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/user-after.json
+          jq -e '((.blockedLessons // []) | index("Y5E11")) != null' /tmp/user-after.json >/dev/null
+          echo 'BLOCKED_TEST_READY=invalid user created no entitlement; testy2e Y5E10/Y5E11 retained; Y5E11 temporarily blocked.'
