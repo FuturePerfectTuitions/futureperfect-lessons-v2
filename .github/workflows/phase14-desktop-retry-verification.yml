@@ -1,4 +1,4 @@
-name: Phase 14 frozen temporary workflow
+name: Phase 14 desktop retry verification (frozen after PASS)
 
 on:
   workflow_dispatch:
@@ -6,9 +6,10 @@ on:
 permissions:
   contents: read
 
+# Historical acceptance evidence only. Desktop retry and backend idempotency both passed.
+
 jobs:
   frozen:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo 'FROZEN: Phase 14 temporary acceptance workflow. Do not use as current-state evidence unless explicitly re-enabled.'
+      - run: echo 'Phase 14 desktop retry verification is permanently frozen.'
