@@ -1,4 +1,4 @@
-name: Phase 14 desktop fixture setup (frozen after READY)
+name: Phase 14 desktop fixture setup (frozen after PASS)
 
 on:
   workflow_dispatch:
@@ -6,11 +6,11 @@ on:
 permissions:
   contents: read
 
-# Desktop fixtures were prepared once with zero TestY entitlements.
-# Frozen to prevent duplicate assignment creation while owner acceptance is pending.
+# Phase 14 desktop fixtures were created once, accepted, and then removed by cleanup run 33072650628.
+# Frozen permanently for the Phase 14 closure checkpoint.
 
 jobs:
   frozen:
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'Phase 14 desktop fixtures are already READY; setup is frozen.'
+      - run: echo 'Phase 14 fixture setup is frozen after completed acceptance and cleanup.'
