@@ -1,0 +1,89 @@
+name: Phase 14 controlled failure disarm trigger
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/phase14-controlled-failure-disarm-trigger.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  disarm:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase14-failure-retry-matrix' &&
+      github.event.pull_request.base.sha == '458a67cee0f20b21a6083e7073190cfe14628867' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Restore canonical worker and verify no mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check worker/src/index-phase13.js
+          ! grep -Fq 'PHASE14_FORCED_FAILURE' worker/src/index-phase13.js
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for V in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$V"; test "$V" != null; done
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS target_entitlement FROM lesson_entitlements WHERE portal_user_id_norm='testy3p14m' AND lesson_id='Y3M1'; SELECT COUNT(*) AS target_release FROM batch_lesson_releases WHERE batch_key='Y3FM' AND lesson_id='Y3M1'; PRAGMA quick_check;" >/tmp/before.json 2>/tmp/before.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/before.json)" = '632'
+          test "$(jq -r '.[1].results[0].assignment_count' /tmp/before.json)" = '8'
+          test "$(jq -r '.[2].results[0].release_count' /tmp/before.json)" = '0'
+          test "$(jq -r '.[3].results[0].target_entitlement' /tmp/before.json)" = '0'
+          test "$(jq -r '.[4].results[0].target_release' /tmp/before.json)" = '0'
+          jq -e '.[5].results[0].quick_check == "ok"' /tmp/before.json >/dev/null
+          cat >worker/wrangler.phase14.disarm.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase13.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          $W deploy --config worker/wrangler.phase14.disarm.toml --keep-vars --message 'Phase 14 restore canonical Phase 13 Worker after controlled 503 test' >/tmp/deploy.log 2>&1
+          sleep 3
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS target_entitlement FROM lesson_entitlements WHERE portal_user_id_norm='testy3p14m' AND lesson_id='Y3M1'; SELECT COUNT(*) AS target_release FROM batch_lesson_releases WHERE batch_key='Y3FM' AND lesson_id='Y3M1'; PRAGMA quick_check;" >/tmp/after.json 2>/tmp/after.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/after.json)" = '632'
+          test "$(jq -r '.[1].results[0].assignment_count' /tmp/after.json)" = '8'
+          test "$(jq -r '.[2].results[0].release_count' /tmp/after.json)" = '0'
+          test "$(jq -r '.[3].results[0].target_entitlement' /tmp/after.json)" = '0'
+          test "$(jq -r '.[4].results[0].target_release' /tmp/after.json)" = '0'
+          jq -e '.[5].results[0].quick_check == "ok"' /tmp/after.json >/dev/null
+          echo 'PHASE14_CONTROLLED_FAILURE_DISARMED'
