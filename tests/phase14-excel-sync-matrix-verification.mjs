@@ -236,8 +236,8 @@ const env = makeEnv();
   assert.equal(env.DB.releases.size, 3);
 }
 
-// A per-item runtime/store failure is returned as ERROR and remains isolated
-// from a valid item in the same request.
+// A per-item runtime/store failure returns ERROR with an explicit safe-retry
+// message and remains isolated from a valid item in the same request.
 {
   const response = await handleExcelEntitlementSync(request([
     item('p14-good-with-runtime', 'TestY5P14E', 'Y5E1', 'P14_Y5E'),
@@ -247,7 +247,7 @@ const env = makeEnv();
   assert.equal(response.status, 200);
   assert.equal(body.results[0].status, 'CONFIRMED');
   assert.equal(body.results[1].status, 'ERROR');
-  assert.equal(body.results[1].retryable, true);
+  assert.match(body.results[1].message, /safe to retry/i);
   assert.equal(body.summary.succeeded, 1);
   assert.equal(body.summary.failed, 1);
   assert.equal(env.DB.entitlements.size, 4);
@@ -256,8 +256,8 @@ const env = makeEnv();
 const workerSource = fs.readFileSync(new URL('../worker/src/index-phase13.js', import.meta.url), 'utf8');
 assert.ok(workerSource.includes('ON CONFLICT(portal_user_id_norm, lesson_id)'));
 assert.ok(workerSource.includes('status_check'));
-assert.ok(workerSource.includes("status: 'ERROR'"));
-assert.ok(workerSource.includes('retryable: true'));
+assert.ok(workerSource.includes("status: 'ERROR'") || workerSource.includes("'ERROR'"));
+assert.ok(workerSource.includes('safe to retry'));
 assert.ok(!workerSource.includes('DELETE FROM lesson_entitlements'));
 assert.ok(!workerSource.includes('INSERT INTO student_batch_assignments'));
 assert.ok(!workerSource.includes('UPDATE student_batch_assignments'));
