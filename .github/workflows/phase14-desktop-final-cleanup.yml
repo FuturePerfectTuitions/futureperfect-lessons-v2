@@ -1,106 +1,16 @@
-name: Phase 14 desktop final cleanup
+name: Phase 14 desktop final cleanup (frozen after PASS)
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/phase14-desktop-final-cleanup.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  WORKER_NAME: fpt-portal-v2-worker
-  WRANGLER_VERSION: 4.125.0
+# Phase 14 desktop idempotency and exact TestY cleanup passed on run 33072650628.
+# Frozen to prevent any repeat deletion attempt after the documented baseline was restored.
 
 jobs:
-  cleanup:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      github.event.pull_request.head.ref == 'phase14-failure-retry-matrix' &&
-      github.event.pull_request.base.sha == '458a67cee0f20b21a6083e7073190cfe14628867'
+  frozen:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Verify idempotency, remove exact TestY fixtures, restore baseline
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-
-          # Isolation guard and Students KV discovery. No secret values are printed.
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p14-clean-settings.json
-          jq -e '.success == true' /tmp/p14-clean-settings.json >/dev/null
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p14-clean-settings.json >/dev/null
-          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p14-clean-settings.json)" = 'fpt-materials-dev'
-          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p14-clean-settings.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal V2 student login is enabled; refusing cleanup.' >&2; false;; esac
-          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p14-clean-settings.json)"
-          test -n "$STUDENTS" && test "$STUDENTS" != null
-
-          # Pre-cleanup acceptance state. This proves desktop repeat remained idempotent.
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(*) AS test_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS target_idempotent_count FROM lesson_entitlements WHERE portal_user_id_norm='testy3p14m' AND lesson_id='Y3M1'; SELECT COUNT(*) AS invalid_entitlement FROM lesson_entitlements WHERE portal_user_id_norm='testy3p14m' AND lesson_id='Y3M999'; SELECT COUNT(*) AS exact_releases FROM batch_lesson_releases WHERE (batch_key='Y3FM' AND lesson_id='Y3M1') OR (batch_key='Y3FE' AND lesson_id='Y3E1') OR (batch_key='Y511FE' AND lesson_id='Y5E10') OR (batch_key='Y511FM' AND lesson_id='Y5M1'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
-            >/tmp/p14-clean-before.json 2>/tmp/p14-clean-before.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p14-clean-before.json)" = '636'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p14-clean-before.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p14-clean-before.json)" = '8'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p14-clean-before.json)" = '4'
-          test "$(jq -r '.[4].results[0].test_entitlements' /tmp/p14-clean-before.json)" = '4'
-          test "$(jq -r '.[5].results[0].target_idempotent_count' /tmp/p14-clean-before.json)" = '1'
-          test "$(jq -r '.[6].results[0].invalid_entitlement' /tmp/p14-clean-before.json)" = '0'
-          test "$(jq -r '.[7].results[0].exact_releases' /tmp/p14-clean-before.json)" = '4'
-          jq -e '.[8].results[0].name == "trg_student_sessions_single_active"' /tmp/p14-clean-before.json >/dev/null
-          jq -e '.[9].results[0].quick_check == "ok"' /tmp/p14-clean-before.json >/dev/null
-          echo 'Phase 14 desktop idempotency precheck: PASS (exactly one testy3p14m + Y3M1 entitlement).'
-
-          # Exact D1 cleanup. Do not touch real users or batch definitions.
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "DELETE FROM batch_lesson_releases WHERE (batch_key='Y3FM' AND lesson_id='Y3M1') OR (batch_key='Y3FE' AND lesson_id='Y3E1') OR (batch_key='Y511FE' AND lesson_id='Y5E10') OR (batch_key='Y511FM' AND lesson_id='Y5M1'); DELETE FROM lesson_entitlements WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); DELETE FROM student_batch_assignments WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full');" \
-            >/tmp/p14-clean-delete-d1.json 2>/tmp/p14-clean-delete-d1.err
-
-          enc() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
-          for user in testy3p14m testy3p14e testy5p1411e testy5p14full; do
-            curl --fail --silent --show-error --request DELETE \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/$(enc "user:${user}")" \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/dev/null
-          done
-
-          # Exact documented Phase 13 baseline must be restored.
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS temp_assignments FROM student_batch_assignments WHERE portal_user_id_norm IN ('testy3p14m','testy3p14e','testy5p1411e','testy5p14full'); SELECT COUNT(*) AS temp_releases FROM batch_lesson_releases WHERE (batch_key='Y3FM' AND lesson_id='Y3M1') OR (batch_key='Y3FE' AND lesson_id='Y3E1') OR (batch_key='Y511FE' AND lesson_id='Y5E10') OR (batch_key='Y511FM' AND lesson_id='Y5M1'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
-            >/tmp/p14-clean-after.json 2>/tmp/p14-clean-after.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p14-clean-after.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p14-clean-after.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p14-clean-after.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p14-clean-after.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p14-clean-after.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p14-clean-after.json)" = '173'
-          test "$(jq -r '.[6].results[0].temp_entitlements' /tmp/p14-clean-after.json)" = '0'
-          test "$(jq -r '.[7].results[0].temp_assignments' /tmp/p14-clean-after.json)" = '0'
-          test "$(jq -r '.[8].results[0].temp_releases' /tmp/p14-clean-after.json)" = '0'
-          jq -e '.[9].results[0].name == "trg_student_sessions_single_active"' /tmp/p14-clean-after.json >/dev/null
-          jq -e '.[10].results[0].quick_check == "ok"' /tmp/p14-clean-after.json >/dev/null
-
-          for user in testy3p14m testy3p14e testy5p1411e testy5p14full; do
-            code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/$(enc "user:${user}")" \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
-            test "$code" = '404'
-          done
-
-          echo 'PHASE14_DESKTOP_FINAL_CLEANUP_PASS'
-          echo 'Restored baseline: 632 entitlements / 4 batches / 4 assignments / 0 releases; TestY absent.'
+      - run: echo 'Phase 14 desktop cleanup is frozen after PASS run 33072650628.'
