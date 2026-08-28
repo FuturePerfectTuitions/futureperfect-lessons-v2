@@ -131,17 +131,43 @@ for old,new in repls.items():
         raise SystemExit('missing unique diagnostic marker')
     s=s.replace(old,new,1)
 
-# Diagnose the controlled Full Library persona without printing the user record.
-# Only view identifiers, source labels and locked-preview flags are emitted.
+# Diagnose the controlled Full Library personas without printing user records or
+# resource references. Only view identifiers and locked-preview flags are emitted.
 s=s.replace(
     'api_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)\' "$TMP/full-normal-home.json" >/dev/null',
-    'PHASE15_STAGE="p13-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\necho "PHASE15_STAGE p13-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,source,lockedPreview}]\' "$TMP/full-normal-home.json")"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)\' "$TMP/full-normal-home.json" >/dev/null',
+    'PHASE15_STAGE="p13-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\necho "PHASE15_STAGE p13-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,lockedPreview}]\' "$TMP/full-normal-home.json")"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)\' "$TMP/full-normal-home.json" >/dev/null',
+    1,
+)
+s=s.replace(
+    '# P14 11+ Full Library with VR: VR entitlement is library-scoped; VR How-To remains separate.',
+    'PHASE15_STAGE="p14-full-library-start"\necho "PHASE15_STAGE p14-full-library-start"\n# P14 11+ Full Library with VR: VR entitlement is library-scoped; VR How-To remains separate.',
+    1,
+)
+s=s.replace(
+    'api_get "$JAR" \'/api/v1/student/home\' "$TMP/full-11-home.json"',
+    'PHASE15_STAGE="p14-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-11-home.json"\necho "PHASE15_STAGE p14-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,lockedPreview}]\' "$TMP/full-11-home.json")"',
+    1,
+)
+s=s.replace(
+    'api_get "$JAR" \'/api/v1/student/views/english-year4-11plus/lessons\' "$TMP/full-11-lessons.json"',
+    'PHASE15_STAGE="p14-full-library-list"\necho "PHASE15_STAGE p14-full-library-list"\napi_get "$JAR" \'/api/v1/student/views/english-year4-11plus/lessons\' "$TMP/full-11-lessons.json"',
+    1,
+)
+s=s.replace(
+    'api_get "$JAR" "/api/v1/student/lessons/$(urlenc "$E4_VR_LESSON")?viewId=english-year4-11plus" "$TMP/full-11-detail.json"',
+    'PHASE15_STAGE="p14-full-library-detail"\necho "PHASE15_STAGE p14-full-library-detail"\napi_get "$JAR" "/api/v1/student/lessons/$(urlenc "$E4_VR_LESSON")?viewId=english-year4-11plus" "$TMP/full-11-detail.json"',
+    1,
+)
+s=s.replace(
+    'api_get "$JAR" \'/api/v1/student/special-areas?viewId=english-year4-11plus\' "$TMP/full-11-special.json"',
+    'PHASE15_STAGE="p14-full-library-special"\necho "PHASE15_STAGE p14-full-library-special"\napi_get "$JAR" \'/api/v1/student/special-areas?viewId=english-year4-11plus\' "$TMP/full-11-special.json"',
     1,
 )
 
 # Major persona checkpoints after the Full Library section. These labels make a
 # failing live assertion identifiable without printing commands or payloads.
 stages = [
+    ('# P24 one-off guest/manual individual lesson access:', 'p24-one-off'),
     ('NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"', 'p09-effective-dates'),
     ('api_get "$JAR" \'/api/v1/student/views/maths-year3/lessons\' "$TMP/join-lessons-before.json"', 'p09-locked-catalogue'),
     ('sync_one grant p15-prejoin', 'p09-prejoin-reject'),
