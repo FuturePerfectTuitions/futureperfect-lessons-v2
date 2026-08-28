@@ -13,11 +13,11 @@ import sys
 p=Path(sys.argv[1])
 s=p.read_text()
 
-# Safe diagnostics: report only the named test stage and shell line number. Never
-# echo BASH_COMMAND because it can contain controlled credentials or API payloads.
+# Safe diagnostics: report only a named stage and shell line number. Never echo
+# BASH_COMMAND because it can contain controlled credentials or API payloads.
 s=s.replace(
     'set -Eeuo pipefail\n',
-    'set -Eeuo pipefail\nPHASE15_STAGE="startup"\ntrap \'rc=$?; echo "PHASE15_DIAGNOSTIC_FAIL stage=${PHASE15_STAGE} line=${LINENO} rc=${rc}" >&2\' ERR\n',
+    'set -Eeuo pipefail\nPHASE15_STAGE="preflight"\ntrap \'rc=$?; echo "PHASE15_DIAGNOSTIC_FAIL stage=${PHASE15_STAGE} line=${LINENO} rc=${rc}" >&2\' ERR\n',
     1,
 )
 
@@ -41,27 +41,38 @@ s=s.replace("DELETE FROM mock_password_rate_limits WHERE session_token_hash IN (
 # two M4 history rows and E411 = eight total assignments.
 s=s.replace("test \"$(jq -r '.[1].results[0].a' \"$TMP/reset-invariants.json\")\" = '7'","test \"$(jq -r '.[1].results[0].a' \"$TMP/reset-invariants.json\")\" = '8'")
 
-# Named checkpoints isolate a failed special-area assertion without dumping any
-# API response or sensitive value.
-stages = [
-    ("JAR=\"$TMP/special5.jar\"; login_user test0505", "p15-test0505-login"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas?viewId=maths-level3'", "p15-y5-maths-areas"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas?viewId=english-year5-11plus'", "p15-y5-english-areas"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas/Y5MAssT1?viewId=maths-level3'", "p15-assessment"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus'", "p16-vr-howto"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas/MOCKS?viewId=maths-level3'", "p17-mocks-locked"),
-    ("JAR=\"$TMP/special4.jar\"; login_user test0606", "p15-test0606-login"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas?viewId=maths-level2'", "p15-y4-maths-areas"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas?viewId=english-year4-11plus'", "p15-y4-english-areas"),
-    ("JAR=\"$TMP/special-none.jar\"; login_user test0404", "p15-test0404-login"),
-    ("api_get \"$JAR\" '/api/v1/student/special-areas?viewId=english-year5-11plus'", "p15-ineligible-special-areas"),
-    ("DENIED=\"$(api_code_get \"$JAR\" '/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus'", "p15-ineligible-direct-vr"),
-]
-for marker, stage in stages:
-    idx=s.find(marker)
-    if idx < 0:
-        raise SystemExit(f'missing diagnostic marker: {stage}')
-    s=s[:idx]+f'PHASE15_STAGE="{stage}"\necho "PHASE15_STAGE {stage}"\n'+s[idx:]
+# Unique special-area checkpoints. Only bucket identifiers are printed; no API
+# payload, user profile or credential is emitted.
+repls = {
+'JAR="$TMP/special5.jar"; login_user test0505 "$JAR" "$TMP/special5-login.json"':
+'PHASE15_STAGE="p15-test0505-login"\necho "PHASE15_STAGE p15-test0505-login"\nJAR="$TMP/special5.jar"; login_user test0505 "$JAR" "$TMP/special5-login.json"',
+'jq -e \'[.areas[].bucketId] | sort == ["MOCKS","Y5MAssT1","Y5MAssT2"]\' "$TMP/special5-maths.json" >/dev/null':
+'PHASE15_STAGE="p15-y5-maths-areas"\necho "PHASE15_STAGE p15-y5-maths-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special5-maths.json")"\njq -e \'[.areas[].bucketId] | sort == ["MOCKS","Y5MAssT1","Y5MAssT2"]\' "$TMP/special5-maths.json" >/dev/null',
+'jq -e \'[.areas[].bucketId] | sort == ["MOCKS","VR_HOWTO"]\' "$TMP/special5-english.json" >/dev/null':
+'PHASE15_STAGE="p15-y5-english-areas"\necho "PHASE15_STAGE p15-y5-english-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special5-english.json")"\njq -e \'[.areas[].bucketId] | sort == ["MOCKS","VR_HOWTO"]\' "$TMP/special5-english.json" >/dev/null',
+'ASSESS_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/assessment.json" | head -n1)"':
+'PHASE15_STAGE="p15-assessment"\necho "PHASE15_STAGE p15-assessment"\nASSESS_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/assessment.json" | head -n1)"',
+'VR_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/vrhowto.json" | head -n1)"':
+'PHASE15_STAGE="p16-vr-howto"\necho "PHASE15_STAGE p16-vr-howto"\nVR_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/vrhowto.json" | head -n1)"',
+'jq -e \'.area.passwordProtected==true and .area.passwordScope=="mock-day-browser-session"\' "$TMP/mocks-locked.json" >/dev/null':
+'PHASE15_STAGE="p17-mocks-locked"\necho "PHASE15_STAGE p17-mocks-locked"\njq -e \'.area.passwordProtected==true and .area.passwordScope=="mock-day-browser-session"\' "$TMP/mocks-locked.json" >/dev/null',
+'JAR="$TMP/special4.jar"; login_user test0606 "$JAR" "$TMP/special4-login.json"':
+'PHASE15_STAGE="p15-test0606-login"\necho "PHASE15_STAGE p15-test0606-login"\nJAR="$TMP/special4.jar"; login_user test0606 "$JAR" "$TMP/special4-login.json"',
+'jq -e \'[.areas[].bucketId] | sort == ["Y4MAssT1","Y4MAssT2"]\' "$TMP/special4-maths.json" >/dev/null':
+'PHASE15_STAGE="p15-y4-maths-areas"\necho "PHASE15_STAGE p15-y4-maths-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special4-maths.json")"\njq -e \'[.areas[].bucketId] | sort == ["Y4MAssT1","Y4MAssT2"]\' "$TMP/special4-maths.json" >/dev/null',
+'jq -e \'[.areas[].bucketId] == ["VR_HOWTO"]\' "$TMP/special4-english.json" >/dev/null':
+'PHASE15_STAGE="p15-y4-english-areas"\necho "PHASE15_STAGE p15-y4-english-areas buckets=$(jq -c \'[.areas[].bucketId]\' "$TMP/special4-english.json")"\njq -e \'[.areas[].bucketId] == ["VR_HOWTO"]\' "$TMP/special4-english.json" >/dev/null',
+'JAR="$TMP/special-none.jar"; login_user test0404 "$JAR" "$TMP/special-none-login.json"':
+'PHASE15_STAGE="p15-test0404-login"\necho "PHASE15_STAGE p15-test0404-login"\nJAR="$TMP/special-none.jar"; login_user test0404 "$JAR" "$TMP/special-none-login.json"',
+'jq -e \'.areas==[]\' "$TMP/special-none.json" >/dev/null':
+'PHASE15_STAGE="p15-ineligible-special-areas"\necho "PHASE15_STAGE p15-ineligible-special-areas count=$(jq -r \'.areas|length\' "$TMP/special-none.json")"\njq -e \'.areas==[]\' "$TMP/special-none.json" >/dev/null',
+'test "$DENIED" = \'403\'; jq -e \'.error=="SPECIAL_ACCESS_REQUIRED"\' "$TMP/special-denied.json" >/dev/null':
+'PHASE15_STAGE="p15-ineligible-direct-vr"\necho "PHASE15_STAGE p15-ineligible-direct-vr status=$DENIED"\ntest "$DENIED" = \'403\'; jq -e \'.error=="SPECIAL_ACCESS_REQUIRED"\' "$TMP/special-denied.json" >/dev/null',
+}
+for old,new in repls.items():
+    if old not in s:
+        raise SystemExit('missing unique diagnostic marker')
+    s=s.replace(old,new,1)
 
 p.write_text(s)
 PY
