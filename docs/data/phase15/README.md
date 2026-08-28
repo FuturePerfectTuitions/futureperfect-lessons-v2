@@ -47,7 +47,7 @@ The Phase 15 matrix P01–P25 is accepted against the Master rules. Important li
 - P24 one-off/manual individual lesson access without D1 membership mutation — PASS.
 - P25 simultaneous active batches in the same subject all represented as Current — PASS.
 
-## Defects corrected during Phase 15
+## Defects and harness corrections completed during Phase 15
 
 1. VR How-To now requires its separate manual special-bucket authorisation as well as eligible English 11+ presentation context.
 2. Visible Year/Level views now retain the full canonical lesson catalogue, with missing entitlements shown locked rather than omitted.
@@ -55,6 +55,7 @@ The Phase 15 matrix P01–P25 is accepted against the Master rules. Important li
 4. Explicit 11+ Full Library access is no longer suppressed by an ordinary retained view sharing the underlying curriculum.
 5. Manual individual core lesson access can surface the appropriate historical ordinary Year view without fabricating D1 entitlement or batch membership.
 6. Browser acceptance now follows the current lesson-video presentation by selecting the explicit View control before inspecting the player.
+7. The P14 controlled Full Library harness now retries session creation until the isolated Worker edge observes the intended temporary KV value. This removes a Cloudflare KV propagation race from the test itself without weakening the authorisation assertion or changing portal behaviour.
 
 ## Baseline restored
 
@@ -76,4 +77,4 @@ No production login, DNS/CNAME, production route, cutover, legacy `FPT_LESSONS_T
 
 ## Closure decision
 
-All required Phase 15 static, API, D1, browser and owner-acceptance gates are satisfied. Phase 15 is therefore **CLOSED / PASS** and PR #125 is eligible to be marked ready and merged into `main` after the closure-record commit itself passes the applicable repository checks.
+All required Phase 15 static, API, D1, browser and owner-acceptance gates are satisfied. Phase 15 is therefore **CLOSED / PASS** and PR #125 is eligible to be marked ready and merged into `main` after the closure-record head itself passes the applicable repository checks.
