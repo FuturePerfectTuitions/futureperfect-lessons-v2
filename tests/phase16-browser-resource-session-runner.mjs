@@ -30,6 +30,11 @@ if (!original.includes(probeNeedle)) {
   throw new Error('Phase 16 video-expansion stabilization could not find probeScreenPal.');
 }
 
+const modalCardNeedle = "const box = await page.locator('.phase8-answer-card').boundingBox();";
+if (!original.includes(modalCardNeedle)) {
+  throw new Error('Phase 16 responsive Answer Pack dialog stabilization could not find the expected card selector.');
+}
+
 // GitHub-hosted headless browsers occasionally report the input type before
 // the click-driven DOM mutation has settled. Preserve the real user click and
 // the original assertions, but allow a short rendering turn after each eye
@@ -86,6 +91,15 @@ ${probeNeedle}`
 );
 stabilized = stabilized.replaceAll(pageVideoWait, 'await expandPhase16LessonVideo(page);');
 stabilized = stabilized.replaceAll(page11VideoWait, 'await expandPhase16LessonVideo(page11);');
+
+// Both the legacy/core Phase 8 viewer and the Phase 11 supplementary protected
+// viewer intentionally use the shared .phase8-answer-card styling class. The
+// responsive check has already opened #phase8-answer-modal, so scope the width
+// assertion to that active modal instead of using an ambiguous global class.
+stabilized = stabilized.replace(
+  modalCardNeedle,
+  "const box = await modal.locator('.phase8-answer-card').boundingBox();"
+);
 
 await fs.writeFile(runtimePath, stabilized, 'utf8');
 
