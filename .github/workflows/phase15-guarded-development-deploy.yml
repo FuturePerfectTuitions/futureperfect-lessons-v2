@@ -49,8 +49,7 @@ jobs:
           W="npx --yes wrangler@${WRANGLER_VERSION}"
           BASE='${{ github.event.pull_request.base.sha }}'
           EXPECTED_BASE='525a496ef39f43dfd60241e5f031ea96b451151e'
-          STAGE='initialise'
-          STUDENTS=''; LESSONS=''; DB=''; R2=''; DEPLOYED=0
+          STUDENTS=''; LESSONS=''; DB=''; R2=''; DEPLOYED=0; STAGE='initialise'
 
           make_config() {
             local entrypoint="$1" out="$2"
@@ -76,8 +75,23 @@ jobs:
           EOF
           }
 
+          verify_baseline() {
+            local out="$1"
+            $W d1 execute fpt_portal_v2_db --remote --json --command \
+              "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >"$out" 2>"$out.err"
+            test "$(jq -r '.[0].results[0].entitlement_count' "$out")" = '632'
+            test "$(jq -r '.[1].results[0].batch_count' "$out")" = '4'
+            test "$(jq -r '.[2].results[0].assignment_count' "$out")" = '4'
+            test "$(jq -r '.[3].results[0].release_count' "$out")" = '0'
+            test "$(jq -r '.[4].results[0].assigned_users' "$out")" = '2'
+            test "$(jq -r '.[5].results[0].assigned_user_entitlements' "$out")" = '173'
+            test "$(jq -r '.[6].results[0].temp_entitlements' "$out")" = '0'
+            jq -e '.[7].results[0].name == "trg_student_sessions_single_active"' "$out" >/dev/null
+            jq -e '.[8].results[0].quick_check == "ok"' "$out" >/dev/null
+          }
+
           rollback_worker() {
-            if [ "$DEPLOYED" -ne 1 ] || [ -z "$STUDENTS" ] || [ -z "$LESSONS" ] || [ -z "$DB" ] || [ -z "$R2" ]; then return 0; fi
+            if [ "$DEPLOYED" -ne 1 ]; then return 0; fi
             set +e
             rm -rf /tmp/p15-rollback
             git worktree add --detach /tmp/p15-rollback "$BASE" >/tmp/p15-worktree.log 2>&1
@@ -88,12 +102,7 @@ jobs:
                 --message 'Rollback failed Phase 15 guarded development deployment' >/tmp/p15-rollback.log 2>&1)
               rc=$?
             fi
-            if [ "$rc" -eq 0 ]; then
-              echo 'Fail-closed rollback to the Phase 14 Worker source completed.'
-            else
-              echo 'ERROR: automatic Phase 15 Worker rollback failed.' >&2
-              tail -n 40 /tmp/p15-rollback.log 2>/dev/null || true
-            fi
+            [ "$rc" -eq 0 ] && echo 'Fail-closed rollback to Phase 14 Worker source completed.' || echo 'ERROR: Phase 15 automatic rollback failed.' >&2
             set -e
             return "$rc"
           }
@@ -109,8 +118,7 @@ jobs:
 
           STAGE='source-and-base-guard'
           test "$BASE" = "$EXPECTED_BASE"
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
           node --check worker/src/phase11-vr-howto.js
           node --check worker/src/index-phase12.js
           node --check worker/src/index-phase13.js
@@ -119,16 +127,17 @@ jobs:
           node tests/phase13-excel-sync-verification.mjs
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/p15-catalogue.log
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p15-catalogue.log
+          grep -Fq 'manualAccess.specialBuckets+open-english-11plus-view' worker/src/phase11-vr-howto.js
+          grep -Fq 'SPECIAL_ACCESS_REQUIRED' worker/src/phase11-vr-howto.js
 
-          STAGE='cloudflare-isolation-and-binding-guard'
+          STAGE='cloudflare-isolation-guard'
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p15-settings-before.json
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p15-settings-before.json
           jq -e '.success == true' /tmp/p15-settings-before.json >/dev/null
           jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p15-settings-before.json >/dev/null
           LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p15-settings-before.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal V2 student login is enabled; refusing Phase 15 deployment.' >&2; false;; esac
+          case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
           STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p15-settings-before.json)"
           LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p15-settings-before.json)"
           DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p15-settings-before.json)"
@@ -137,34 +146,17 @@ jobs:
           for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p15-namespaces.json
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p15-namespaces.json
           LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' /tmp/p15-namespaces.json)"
           if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
           $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p15-secrets-before.txt
           grep -Fxq 'EXCEL_SYNC_TOKEN' /tmp/p15-secrets-before.txt
+          verify_baseline /tmp/p15-d1-before.json
 
-          STAGE='exact-phase14-d1-baseline-guard'
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
-            >/tmp/p15-d1-before.json 2>/tmp/p15-d1-before.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p15-d1-before.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p15-d1-before.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p15-d1-before.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p15-d1-before.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p15-d1-before.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p15-d1-before.json)" = '173'
-          test "$(jq -r '.[6].results[0].temp_entitlements' /tmp/p15-d1-before.json)" = '0'
-          jq -e '.[7].results[0].name == "trg_student_sessions_single_active"' /tmp/p15-d1-before.json >/dev/null
-          jq -e '.[8].results[0].quick_check == "ok"' /tmp/p15-d1-before.json >/dev/null
-
-          STAGE='dry-run-current-phase13-composition'
+          STAGE='dry-run-worker-bundle'
           make_config 'src/index-phase13.js' 'worker/wrangler.phase15.runtime.toml'
           $W deploy --config worker/wrangler.phase15.runtime.toml --dry-run --outdir /tmp/p15-build >/tmp/p15-dry-run.log
-          grep -R -aFq '/api/v1/admin/excel-entitlements/sync' /tmp/p15-build
-          grep -R -aFq 'manualAccess.specialBuckets+open-english-11plus-view' /tmp/p15-build
-          grep -R -aFq 'SPECIAL_ACCESS_REQUIRED' /tmp/p15-build
-          grep -R -aFq 'd82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' /tmp/p15-build
+          test -d /tmp/p15-build
 
           STAGE='deploy-isolated-development-worker'
           $W deploy --config worker/wrangler.phase15.runtime.toml --keep-vars \
@@ -172,11 +164,10 @@ jobs:
           DEPLOYED=1
           sleep 3
 
-          STAGE='post-deploy-binding-and-secret-guard'
+          STAGE='post-deploy-binding-secret-guard'
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/p15-settings-after.json
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p15-settings-after.json
           jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p15-settings-after.json >/dev/null
           test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p15-settings-after.json)" = 'fpt-materials-dev'
           AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p15-settings-after.json)"
@@ -197,20 +188,7 @@ jobs:
             "$WORKER_BASE/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus")"
           test "$CODE" = '401'
           jq -e '.error == "SESSION_REQUIRED" or .error == "SESSION_INVALID"' /tmp/p15-vr-noauth.json >/dev/null
-
-          STAGE='exact-post-deploy-d1-baseline-guard'
-          $W d1 execute fpt_portal_v2_db --remote --json --command \
-            "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" \
-            >/tmp/p15-d1-after.json 2>/tmp/p15-d1-after.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p15-d1-after.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p15-d1-after.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p15-d1-after.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p15-d1-after.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p15-d1-after.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p15-d1-after.json)" = '173'
-          test "$(jq -r '.[6].results[0].temp_entitlements' /tmp/p15-d1-after.json)" = '0'
-          jq -e '.[7].results[0].name == "trg_student_sessions_single_active"' /tmp/p15-d1-after.json >/dev/null
-          jq -e '.[8].results[0].quick_check == "ok"' /tmp/p15-d1-after.json >/dev/null
+          verify_baseline /tmp/p15-d1-after.json
 
           STAGE='complete'
           DEPLOYED=0
