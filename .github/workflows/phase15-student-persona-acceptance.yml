@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: phase15-student-persona-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
