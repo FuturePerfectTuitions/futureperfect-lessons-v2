@@ -26,6 +26,19 @@ s=s.replace(
 s=s.replace('  local code="$1" file="$TMP/curriculum-$code.json"',
             '  local code="$1"\n  local file="$TMP/curriculum-$code.json"')
 
+# Phase 11 made VR How-To a separate top-level English 11+ destination. It is
+# deliberately removed from the legacy /special-areas list while the direct
+# VR_HOWTO route remains positively/negatively gated. Correct the original
+# Phase 15 diagnostic expectations to that accepted presentation contract.
+s=s.replace(
+    'jq -e \'[.areas[].bucketId] | sort == ["MOCKS","VR_HOWTO"]\' "$TMP/special5-english.json" >/dev/null',
+    'jq -e \'[.areas[].bucketId] | sort == ["MOCKS"]\' "$TMP/special5-english.json" >/dev/null'
+)
+s=s.replace(
+    'jq -e \'[.areas[].bucketId] == ["VR_HOWTO"]\' "$TMP/special4-english.json" >/dev/null',
+    'jq -e \'[.areas[].bucketId] == []\' "$TMP/special4-english.json" >/dev/null'
+)
+
 # MOCKS locked-payload/visibility is re-tested live, but the wrong-password call
 # is omitted because the existing throttle row can pre-date Phase 15 and its
 # prior state cannot be reconstructed safely.
@@ -56,8 +69,8 @@ repls = {
 'PHASE15_STAGE="p15-test0505-login"\necho "PHASE15_STAGE p15-test0505-login"\nJAR="$TMP/special5.jar"; login_user test0505 "$JAR" "$TMP/special5-login.json"',
 'jq -e \'[.areas[].bucketId] | sort == ["MOCKS","Y5MAssT1","Y5MAssT2"]\' "$TMP/special5-maths.json" >/dev/null':
 'PHASE15_STAGE="p15-y5-maths-areas"\necho "PHASE15_STAGE p15-y5-maths-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special5-maths.json")"\njq -e \'[.areas[].bucketId] | sort == ["MOCKS","Y5MAssT1","Y5MAssT2"]\' "$TMP/special5-maths.json" >/dev/null',
-'jq -e \'[.areas[].bucketId] | sort == ["MOCKS","VR_HOWTO"]\' "$TMP/special5-english.json" >/dev/null':
-'PHASE15_STAGE="p15-y5-english-areas"\necho "PHASE15_STAGE p15-y5-english-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special5-english.json")"\njq -e \'[.areas[].bucketId] | sort == ["MOCKS","VR_HOWTO"]\' "$TMP/special5-english.json" >/dev/null',
+'jq -e \'[.areas[].bucketId] | sort == ["MOCKS"]\' "$TMP/special5-english.json" >/dev/null':
+'PHASE15_STAGE="p15-y5-english-areas"\necho "PHASE15_STAGE p15-y5-english-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special5-english.json")"\njq -e \'[.areas[].bucketId] | sort == ["MOCKS"]\' "$TMP/special5-english.json" >/dev/null',
 'ASSESS_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/assessment.json" | head -n1)"':
 'PHASE15_STAGE="p15-assessment"\necho "PHASE15_STAGE p15-assessment"\nASSESS_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/assessment.json" | head -n1)"',
 'VR_KEY="$(jq -r \'.area.items[] | select(.separator==false) | .resourceKey\' "$TMP/vrhowto.json" | head -n1)"':
@@ -68,8 +81,8 @@ repls = {
 'PHASE15_STAGE="p15-test0606-login"\necho "PHASE15_STAGE p15-test0606-login"\nJAR="$TMP/special4.jar"; login_user test0606 "$JAR" "$TMP/special4-login.json"',
 'jq -e \'[.areas[].bucketId] | sort == ["Y4MAssT1","Y4MAssT2"]\' "$TMP/special4-maths.json" >/dev/null':
 'PHASE15_STAGE="p15-y4-maths-areas"\necho "PHASE15_STAGE p15-y4-maths-areas buckets=$(jq -c \'[.areas[].bucketId] | sort\' "$TMP/special4-maths.json")"\njq -e \'[.areas[].bucketId] | sort == ["Y4MAssT1","Y4MAssT2"]\' "$TMP/special4-maths.json" >/dev/null',
-'jq -e \'[.areas[].bucketId] == ["VR_HOWTO"]\' "$TMP/special4-english.json" >/dev/null':
-'PHASE15_STAGE="p15-y4-english-areas"\necho "PHASE15_STAGE p15-y4-english-areas buckets=$(jq -c \'[.areas[].bucketId]\' "$TMP/special4-english.json")"\njq -e \'[.areas[].bucketId] == ["VR_HOWTO"]\' "$TMP/special4-english.json" >/dev/null',
+'jq -e \'[.areas[].bucketId] == []\' "$TMP/special4-english.json" >/dev/null':
+'PHASE15_STAGE="p15-y4-english-areas"\necho "PHASE15_STAGE p15-y4-english-areas buckets=$(jq -c \'[.areas[].bucketId]\' "$TMP/special4-english.json")"\njq -e \'[.areas[].bucketId] == []\' "$TMP/special4-english.json" >/dev/null',
 'JAR="$TMP/special-none.jar"; login_user test0404 "$JAR" "$TMP/special-none-login.json"':
 'PHASE15_STAGE="p15-test0404-login"\necho "PHASE15_STAGE p15-test0404-login"\nJAR="$TMP/special-none.jar"; login_user test0404 "$JAR" "$TMP/special-none-login.json"',
 'jq -e \'.areas==[]\' "$TMP/special-none.json" >/dev/null':
