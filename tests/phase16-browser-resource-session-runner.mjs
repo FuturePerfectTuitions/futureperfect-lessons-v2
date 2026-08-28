@@ -158,7 +158,7 @@ stabilized = stabilized.replace(
       await previous.getByRole('button', { name: /Year 2/ }).first().click();
       const historyListResponse = await historyListResponsePromise;
       assert.equal(historyListResponse.status(), 200, 'Historical Year 2 lesson-list request did not succeed.');
-      const historyListBody = await historyListResponse.clone().json().catch(() => null);
+      const historyListBody = await historyListResponse.json().catch(() => null);
       evidence.navigation.historyLessonListDiagnostic = {
         responseLessonCount: Array.isArray(historyListBody?.lessons) ? historyListBody.lessons.length : null,
         responseViewId: historyListBody?.view?.viewId || null,
