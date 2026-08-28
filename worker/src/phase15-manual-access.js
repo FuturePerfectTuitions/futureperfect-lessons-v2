@@ -1,4 +1,7 @@
-import phase12Worker from './index-phase12.js';
+import phase12Worker, {
+  applyCanonicalHomeCounts,
+  mergeCanonicalLockedRows
+} from './index-phase12.js';
 import { PHASE11_NAVIGATION_MANIFEST } from './phase11-navigation-manifest.generated.js';
 import { validBundledManifest } from './phase11-navigation-cache.js';
 
@@ -147,6 +150,15 @@ function targetViewIdForRequest(request) {
   return String(url.searchParams.get('viewId') || '').trim().toLowerCase();
 }
 
+function isLessonListRequest(request) {
+  if (request.method !== 'GET') return false;
+  try {
+    return /^\/api\/v1\/student\/views\/[^/]+\/lessons$/.test(new URL(request.url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 function viewSubject(viewId) {
   return MANUAL_CORE_VIEW_RULES[viewId]?.subject || '';
 }
@@ -195,6 +207,25 @@ function replaceOrAddView(body, viewId, candidate) {
   });
 }
 
+// Phase 16: Phase 15 mutates the already-canonical Phase 12 /home body by adding
+// manual-only historical views after Phase 12 has run its count pass. Re-run the
+// same canonical count function after that outer merge so the newly surfaced
+// view exposes the complete catalogue (manual lesson open, all others locked).
+// This is a presentation-only normalization and creates no entitlement/membership.
+function canonicaliseManualAccessHomeBody(body, manifest = PHASE11_NAVIGATION_MANIFEST) {
+  return applyCanonicalHomeCounts(body, manifest);
+}
+
+// Defensive outer-layer normalization for an ordinary manual-access lesson list.
+// Phase 12 already intends to provide the complete canonical catalogue; applying
+// the same idempotent merge here ensures a Phase 15 retry/overlay can never return
+// only the explicitly manual lesson and thereby hide locked canonical lessons.
+function canonicaliseManualAccessLessonListBody(body, viewId, manifest = PHASE11_NAVIGATION_MANIFEST) {
+  const target = String(viewId || '').trim().toLowerCase();
+  if (!MANUAL_CORE_VIEW_RULES[target]) return body;
+  return mergeCanonicalLockedRows(body, target, manifest);
+}
+
 async function mergeManualAccessHome(request, env, ctx) {
   const response = await phase12Worker.fetch(request, env, ctx);
   if (!response.ok) return response;
@@ -224,6 +255,7 @@ async function mergeManualAccessHome(request, env, ctx) {
     }
   }
 
+  canonicaliseManualAccessHomeBody(body);
   return responseLikeJson(response, body);
 }
 
@@ -235,12 +267,24 @@ async function retryManualAccessRoute(request, env, ctx, response) {
   return phase12Worker.fetch(request, runtimeEnv, ctx);
 }
 
+async function canonicaliseManualAccessLessonListResponse(request, response) {
+  if (!response.ok || !isLessonListRequest(request)) return response;
+  const viewId = targetViewIdForRequest(request);
+  if (!MANUAL_CORE_VIEW_RULES[viewId]) return response;
+  const body = await response.clone().json().catch(() => null);
+  if (!body?.ok || !Array.isArray(body.lessons)) return response;
+  canonicaliseManualAccessLessonListBody(body, viewId);
+  return responseLikeJson(response, body);
+}
+
 export {
   MANUAL_CORE_VIEW_RULES,
   manualAccessCoversView,
   manualAccessViewIds,
   manualAccessOverlayUserForView,
   manualCandidateWithAuthoritativeGrouping,
+  canonicaliseManualAccessHomeBody,
+  canonicaliseManualAccessLessonListBody,
   targetViewIdForRequest
 };
 
@@ -251,6 +295,7 @@ export default {
       return mergeManualAccessHome(request, env, ctx);
     }
     const response = await phase12Worker.fetch(request, env, ctx);
-    return retryManualAccessRoute(request, env, ctx, response);
+    const retried = await retryManualAccessRoute(request, env, ctx, response);
+    return canonicaliseManualAccessLessonListResponse(request, retried);
   }
 };
