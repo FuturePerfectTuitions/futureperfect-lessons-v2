@@ -12,6 +12,11 @@ from pathlib import Path
 import sys
 p=Path(sys.argv[1])
 s=p.read_text()
+# The source diagnostic was intentionally not rewritten after its first failed
+# execution. Split this dependent local declaration in the temporary copy so
+# `set -u` cannot expand $code before the assignment takes effect.
+s=s.replace('  local code="$1" file="$TMP/curriculum-$code.json"',
+            '  local code="$1"\n  local file="$TMP/curriculum-$code.json"')
 # MOCKS locked-payload/visibility is re-tested live, but the wrong-password call
 # is omitted here because its throttle row can pre-date Phase 15 and the current
 # value cannot be reconstructed safely from the public harness.
