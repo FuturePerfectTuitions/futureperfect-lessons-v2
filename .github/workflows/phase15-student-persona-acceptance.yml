@@ -59,6 +59,7 @@ jobs:
           node --check worker/src/index-phase13.js
           bash -n tests/phase15-guarded-live-personas.sh
           bash -n tests/phase15-run-guarded-live-personas.sh
+          bash -n tests/phase15-p24-diagnostic.sh
           for id in $(seq -w 1 25); do grep -Fq "P${id}" docs/data/phase15/PERSONA_MATRIX.md; done
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase15/PERSONA_MATRIX.md
 
@@ -113,6 +114,10 @@ jobs:
           done
           echo 'ERROR: exact Phase 15 guarded deployment did not complete successfully in time.' >&2
           exit 1
+
+      - name: Isolated P24 manual-access diagnostic
+        shell: bash
+        run: bash tests/phase15-p24-diagnostic.sh
 
       - name: Guarded effective-date, Full Library, special, session and protected-answer personas
         shell: bash
