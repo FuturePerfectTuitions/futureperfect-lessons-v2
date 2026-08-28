@@ -26,12 +26,15 @@ curl() {
   tmp_out="$(mktemp)"
   tmp_err="$(mktemp)"
   for attempt in $(seq 1 20); do
-    if command /usr/bin/curl "$@" >"$tmp_out" 2>"$tmp_err"; then
+    set +e
+    command /usr/bin/curl "$@" >"$tmp_out" 2>"$tmp_err"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
       cat "$tmp_out"
       rm -f "$tmp_out" "$tmp_err"
       return 0
     fi
-    rc=$?
     if [ "$rc" -ne 22 ]; then
       cat "$tmp_err" >&2
       cat "$tmp_out"
