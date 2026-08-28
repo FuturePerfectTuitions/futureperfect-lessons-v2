@@ -1,4 +1,4 @@
-import phase12Worker from './index-phase12.js';
+import phase12Worker from './phase15-manual-access.js';
 
 const EXCEL_SYNC_PATH = '/api/v1/admin/excel-entitlements/sync';
 const MAX_SYNC_ITEMS = 1000;
