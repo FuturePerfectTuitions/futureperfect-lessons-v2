@@ -6,7 +6,6 @@ on:
     paths:
       - 'docs/data/phase16/**'
       - 'tests/phase16-*'
-      - '.github/workflows/phase16-device-browser-resource-session-acceptance.yml'
       - 'assets/**'
       - 'phase11.html'
       - 'worker/src/**'
@@ -25,6 +24,7 @@ env:
   WORKER_NAME: fpt-portal-v2-worker
   WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
   WRANGLER_VERSION: 4.125.0
+  P16_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
 jobs:
   phase16-matrix:
@@ -41,109 +41,15 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
-      - name: Guard exact Phase 15 base and capture run start
+      - name: Run guarded Phase 16 matrix
         shell: bash
-        run: |
-          set -euo pipefail
-          test "${{ github.event.pull_request.base.sha }}" = 'e9f1085c6797d51a9a14b2d6b118a4fb94576f38'
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo "P16_RUN_START=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "$GITHUB_ENV"
-
-      - name: Static and inherited architecture gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --check tests/phase16-runtime.mjs
-          node --check tests/phase16-browser-resource-session.mjs
-          grep -Fq '369 lessons / 11 curricula' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
-          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
-          grep -Fq 'NOT CONFIRMED' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
-
-          node tests/phase14-excel-sync-matrix-verification.mjs
-          node tests/phase13-excel-sync-verification.mjs
-          node tests/phase12-batch-aware-worker-verification.mjs
-          node tests/phase12-batch-schema-static-verification.mjs
-          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs | tee /tmp/p16-catalogue-static.log
-          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p16-catalogue-static.log
-          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p16-navigation-manifest.log
-          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p16-navigation-manifest.log >/dev/null
-          node tests/phase15-master-navigation-regression.mjs
-          node tests/phase11-session-efficiency-static-verification.mjs
-          node tests/phase11-answer-dedup-static-verification.mjs
-          node tests/phase11-answer-header-static-verification.mjs
-          node tests/phase11-screenpal-static-verification.mjs
-          node tests/phase11-vr-howto-top-level-static-verification.mjs
-          node --experimental-default-type=module tests/phase11-vr-howto-real-catalogue-static-verification.mjs
-          node tests/phase11-vr-solution-video-policy-static-verification.mjs
-          node --experimental-default-type=module tests/phase11-test-personas-static-verification.mjs
-          echo 'PHASE16_STATIC_AND_INHERITED_GATES_PASS'
-
-      - name: Read-only deployed Worker and exact D1 preflight
-        shell: bash
-        run: |
-          set -euo pipefail
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-settings-before.json
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p16-settings-before.json >/dev/null
-          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p16-settings-before.json)" = 'fpt-materials-dev'
-          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p16-settings-before.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal student login unexpectedly enabled.' >&2; exit 1;; esac
-          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-settings-before.json)"
-          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-settings-before.json)"
-          test -n "$STUDENTS" && test -n "$LESSONS"
-          echo "P16_STUDENTS_KV=$STUDENTS" >> "$GITHUB_ENV"
-          echo "P16_LESSONS_KV=$LESSONS" >> "$GITHUB_ENV"
-
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-namespaces.json
-          LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' /tmp/p16-namespaces.json)"
-          if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
-
-          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS p16e FROM lesson_entitlements WHERE source_batch_code LIKE 'P16_%'; SELECT COUNT(*) AS p16b FROM batch_definitions WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS p16a FROM student_batch_assignments WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS p16r FROM batch_lesson_releases WHERE batch_key LIKE 'P16_%'; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/p16-baseline-before.json 2>/tmp/p16-baseline-before.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p16-baseline-before.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p16-baseline-before.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p16-baseline-before.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p16-baseline-before.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p16-baseline-before.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p16-baseline-before.json)" = '173'
-          for i in 6 7 8 9; do test "$(jq -r ".[${i}].results[0] | to_entries[0].value" /tmp/p16-baseline-before.json)" = '0'; done
-          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p16-baseline-before.json >/dev/null
-          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p16-baseline-before.json >/dev/null
-          echo 'PHASE16_READONLY_PREFLIGHT_PASS'
-
-      - name: Back up exact controlled TestY KV profiles
-        shell: bash
-        run: |
-          set -euo pipefail
-          for USER in testy5e testy5em; do
-            curl --fail --silent --show-error \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${P16_STUDENTS_KV}/values/user%3A${USER}" \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output "/tmp/p16-original-${USER}.json"
-            jq -e 'type=="object" and (.p|type=="string") and (.answerPassword|type=="string")' "/tmp/p16-original-${USER}.json" >/dev/null
-          done
-          echo 'PHASE16_CONTROLLED_KV_BACKUP_READY'
-
-      - name: Install Playwright and Firefox/WebKit engines
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-save --no-package-lock playwright@latest >/dev/null
-          npx playwright install --with-deps firefox webkit
-          google-chrome --version
-
-      - name: Run complete Phase 16 automated browser resource session matrix
-        shell: bash
-        run: node tests/phase16-browser-resource-session.mjs
+        run: bash tests/phase16-workflow-run.sh
 
       - name: Upload Phase 16 evidence
         if: always()
@@ -153,63 +59,3 @@ jobs:
           path: artifacts/phase16
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Always restore controlled TestY KV and clean Phase 16-created fixtures
-        if: always()
-        shell: bash
-        run: |
-          set +e
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-          CLEAN_RC=0
-
-          if [ -n "${P16_STUDENTS_KV:-}" ]; then
-            for USER in testy5e testy5em; do
-              FILE="/tmp/p16-original-${USER}.json"
-              if [ -s "$FILE" ]; then
-                curl --fail --silent --show-error --request PUT \
-                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${P16_STUDENTS_KV}/values/user%3A${USER}" \
-                  --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-                  --header 'Content-Type: application/json' --data-binary "@$FILE" >/dev/null || CLEAN_RC=1
-              fi
-            done
-          fi
-
-          IDS="'testy2e','testy2m','testy2em','testy4em','testy411m','testy511e','testy5em','testy5e','testy511em'"
-          SQL="DELETE FROM answer_password_rate_limits WHERE session_token_hash IN (SELECT token_hash FROM student_sessions WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P16_RUN_START}'); DELETE FROM answer_view_tokens WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P16_RUN_START}'; DELETE FROM student_session_profiles WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P16_RUN_START}'; DELETE FROM student_sessions WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P16_RUN_START}'; DELETE FROM batch_lesson_releases WHERE batch_key LIKE 'P16_%'; DELETE FROM student_batch_assignments WHERE batch_key LIKE 'P16_%'; DELETE FROM batch_definitions WHERE batch_key LIKE 'P16_%'; DELETE FROM lesson_entitlements WHERE source_batch_code LIKE 'P16_%';"
-          $W d1 execute fpt_portal_v2_db --remote --json --command "$SQL" >/tmp/p16-final-clean.json 2>/tmp/p16-final-clean.err || CLEAN_RC=1
-          exit "$CLEAN_RC"
-
-      - name: Final exact baseline and isolation gate
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          W="npx --yes wrangler@${WRANGLER_VERSION}"
-
-          # Verify workflow-level KV restoration exactly against the pre-test backup.
-          for USER in testy5e testy5em; do
-            curl --fail --silent --show-error \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${P16_STUDENTS_KV}/values/user%3A${USER}" \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output "/tmp/p16-restored-${USER}.json"
-            diff -u <(jq -S . "/tmp/p16-original-${USER}.json") <(jq -S . "/tmp/p16-restored-${USER}.json") >/dev/null
-          done
-
-          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS p16e FROM lesson_entitlements WHERE source_batch_code LIKE 'P16_%'; SELECT COUNT(*) AS p16b FROM batch_definitions WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS p16a FROM student_batch_assignments WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS p16r FROM batch_lesson_releases WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS active_p16_sessions FROM student_sessions WHERE portal_user_id_norm LIKE 'testy%' AND created_at >= '${P16_RUN_START}' AND revoked_at IS NULL AND idle_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/p16-baseline-final.json 2>/tmp/p16-baseline-final.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p16-baseline-final.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p16-baseline-final.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p16-baseline-final.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p16-baseline-final.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p16-baseline-final.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p16-baseline-final.json)" = '173'
-          for i in 6 7 8 9 10; do test "$(jq -r ".[${i}].results[0] | to_entries[0].value" /tmp/p16-baseline-final.json)" = '0'; done
-          jq -e '.[11].results[0].name == "trg_student_sessions_single_active"' /tmp/p16-baseline-final.json >/dev/null
-          jq -e '.[12].results[0].quick_check == "ok"' /tmp/p16-baseline-final.json >/dev/null
-
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-settings-final.json
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p16-settings-final.json >/dev/null
-          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p16-settings-final.json)" = 'fpt-materials-dev'
-          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p16-settings-final.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) exit 1;; esac
-          echo 'PHASE16_FINAL_EXACT_BASELINE_AND_ISOLATION_PASS'
