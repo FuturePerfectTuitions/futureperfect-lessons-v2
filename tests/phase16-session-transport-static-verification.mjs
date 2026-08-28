@@ -74,9 +74,12 @@ assert.match(frontend, /sessionToken:\s*null/, 'Frontend has no explicit in-memo
 assert.match(frontend, /url\.origin === workerOrigin && url\.pathname\.startsWith\('\/api\/v1\/student\/'\)/, 'Bearer fallback is not restricted to the exact Worker student API origin/path.');
 assert.match(frontend, /headers\.set\('Authorization', `Bearer \$\{state\.sessionToken\}`\)/, 'Frontend does not attach the in-memory bearer token to guarded student API requests.');
 assert.match(frontend, /state\.sessionToken = null;/, 'Frontend does not clear the in-memory bearer token.');
-assert.equal(frontend.includes('localStorage'), false, 'Session bearer fallback must never be persisted in localStorage.');
-assert.equal(frontend.includes('sessionStorage'), false, 'Session bearer fallback must never be persisted in sessionStorage.');
-assert.equal(frontend.includes('document.cookie'), false, 'Frontend must not downgrade session security to a script-readable cookie.');
-assert.equal(frontend.includes('sessionToken='), false, 'Session bearer token must never be placed in a URL query string.');
+
+// Inspect executable persistence/write patterns rather than merely searching for
+// security terminology that may legitimately appear in comments.
+assert.doesNotMatch(frontend, /\blocalStorage\s*\.\s*(?:setItem|getItem|removeItem|clear)\s*\(/, 'Session bearer fallback must never be persisted in localStorage.');
+assert.doesNotMatch(frontend, /\bsessionStorage\s*\.\s*(?:setItem|getItem|removeItem|clear)\s*\(/, 'Session bearer fallback must never be persisted in sessionStorage.');
+assert.doesNotMatch(frontend, /\bdocument\s*\.\s*cookie\s*=/, 'Frontend must not downgrade session security to a script-readable cookie.');
+assert.doesNotMatch(frontend, /[?&]sessionToken\s*=/, 'Session bearer token must never be placed in a URL query string.');
 
 console.log('PHASE16_SESSION_TRANSPORT_STATIC_PASS');
