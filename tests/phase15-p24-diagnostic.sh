@@ -84,6 +84,21 @@ const manual=new Set((user.manualAccess?.coreLessons||[]).map(String));
 const earned=new Set((existing[0]?.results||[]).map(x=>String(x.lesson_id||'')));
 for (const id of ids) if (!manual.has(String(id)) && !earned.has(String(id))) console.log(String(id));
 NODE
+
+# Intersect the deployed curriculum candidates with the exact generated bundled
+# manifest used by the guarded Worker build. This prevents a stale/deployed KV
+# catalogue difference from masquerading as a manual-access presentation defect.
+node --input-type=module - "$TMP/candidates.txt" >"$TMP/bundled-candidates.txt" <<'NODE'
+import fs from 'node:fs';
+import { PHASE11_NAVIGATION_MANIFEST as manifest } from './worker/src/phase11-navigation-manifest.generated.js';
+const candidates=fs.readFileSync(process.argv[2],'utf8').split(/\r?\n/).filter(Boolean);
+const ids=new Set(manifest?.curricula?.ENGLISH_Y4?.lessonIds || []);
+for (const id of candidates) {
+  const record=manifest?.lessons?.[id];
+  if (ids.has(id) && record && record.active !== false) console.log(id);
+}
+NODE
+
 LESSON=''
 while IFS= read -r candidate; do
   [ -n "$candidate" ] || continue
@@ -92,10 +107,10 @@ while IFS= read -r candidate; do
     LESSON="$candidate"
     break
   fi
-done <"$TMP/candidates.txt"
+done <"$TMP/bundled-candidates.txt"
 test -n "$LESSON"; mask "$LESSON"
 
-echo 'PHASE15_P24_DIAG active_unowned_candidate=1'
+echo 'PHASE15_P24_DIAG active_unowned_bundled_candidate=1'
 jq --arg id "$LESSON" '.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)' "$TMP/original.json" >"$TMP/manual.json"
 kv_put "$STUDENTS" "user:$USER" "$TMP/manual.json"
 
