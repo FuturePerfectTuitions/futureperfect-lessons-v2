@@ -6,6 +6,7 @@ on:
     paths:
       - 'docs/data/phase16/**'
       - 'tests/phase16-*'
+      - 'tests/phase15-master-navigation-regression.mjs'
       - 'assets/**'
       - 'phase11.html'
       - 'worker/src/**'
@@ -32,9 +33,10 @@ jobs:
     if: >-
       github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
       github.event.pull_request.head.ref == 'phase16-mobile-browser-resource-session-testing' &&
-      github.event.pull_request.base.ref == 'main'
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 85
 
     steps:
       - name: Checkout exact Phase 16 head
@@ -46,6 +48,152 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+
+      - name: Guard and deploy exact isolated development Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          PHASE15_CLOSURE='e9f1085c6797d51a9a14b2d6b118a4fb94576f38'
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          STUDENTS=''; LESSONS=''; DB=''; R2=''; DEPLOYED=0; STAGE='initialise'
+
+          make_config() {
+            local entrypoint="$1" out="$2"
+            cat >"$out" <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "${entrypoint}"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          }
+
+          verify_baseline() {
+            local out="$1"
+            $W d1 execute fpt_portal_v2_db --remote --json --command \
+              "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS p16_batch_fixtures FROM batch_definitions WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS p16_assignment_fixtures FROM student_batch_assignments WHERE batch_key LIKE 'P16_%'; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >"$out" 2>"$out.err"
+            test "$(jq -r '.[0].results[0].entitlement_count' "$out")" = '632'
+            test "$(jq -r '.[1].results[0].batch_count' "$out")" = '4'
+            test "$(jq -r '.[2].results[0].assignment_count' "$out")" = '4'
+            test "$(jq -r '.[3].results[0].release_count' "$out")" = '0'
+            test "$(jq -r '.[4].results[0].assigned_users' "$out")" = '2'
+            test "$(jq -r '.[5].results[0].assigned_user_entitlements' "$out")" = '173'
+            test "$(jq -r '.[6].results[0].p16_batch_fixtures' "$out")" = '0'
+            test "$(jq -r '.[7].results[0].p16_assignment_fixtures' "$out")" = '0'
+            jq -e '.[8].results[0].name == "trg_student_sessions_single_active"' "$out" >/dev/null
+            jq -e '.[9].results[0].quick_check == "ok"' "$out" >/dev/null
+          }
+
+          rollback_worker() {
+            if [ "$DEPLOYED" -ne 1 ]; then return 0; fi
+            set +e
+            rm -rf /tmp/p16-worker-rollback
+            git worktree add --detach /tmp/p16-worker-rollback "$CURRENT_MAIN" >/tmp/p16-worker-worktree.log 2>&1
+            local rc=$?
+            if [ "$rc" -eq 0 ]; then
+              make_config 'src/index-phase13.js' '/tmp/p16-worker-rollback/worker/wrangler.phase16.rollback.toml'
+              (cd /tmp/p16-worker-rollback && $W deploy --config worker/wrangler.phase16.rollback.toml --keep-vars \
+                --message 'Rollback failed Phase 16 guarded development Worker deployment' >/tmp/p16-worker-rollback.log 2>&1)
+              rc=$?
+            fi
+            [ "$rc" -eq 0 ] && echo 'PHASE16_WORKER_ROLLBACK_PASS' || echo 'ERROR: Phase 16 automatic Worker rollback failed.' >&2
+            set -e
+            return "$rc"
+          }
+
+          failure() {
+            local status=$?
+            trap - ERR
+            echo "Phase 16 development Worker deployment failed at stage: ${STAGE}" >&2
+            rollback_worker || true
+            exit "$status"
+          }
+          trap failure ERR
+
+          STAGE='repository-and-source-guard'
+          git merge-base --is-ancestor "$PHASE15_CLOSURE" "$CURRENT_MAIN"
+          mapfile -t MAIN_DIFF < <(git diff --name-only "$PHASE15_CLOSURE" "$CURRENT_MAIN")
+          test "${#MAIN_DIFF[@]}" -eq 1
+          test "${MAIN_DIFF[0]}" = '.github/workflows/phase16-device-browser-resource-session-acceptance.yml'
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check worker/src/phase15-manual-access.js
+          node --check worker/src/index-phase12.js
+          node --check worker/src/index-phase13.js
+          node tests/phase15-master-navigation-regression.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/p16-worker-catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p16-worker-catalogue.log
+
+          STAGE='cloudflare-isolation-guard'
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-worker-settings-before.json
+          jq -e '.success == true' /tmp/p16-worker-settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p16-worker-settings-before.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p16-worker-settings-before.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-worker-settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-worker-settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p16-worker-settings-before.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p16-worker-settings-before.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-worker-namespaces.json
+          LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' /tmp/p16-worker-namespaces.json)"
+          if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p16-worker-secrets-before.txt
+          grep -Fxq 'EXCEL_SYNC_TOKEN' /tmp/p16-worker-secrets-before.txt
+          verify_baseline /tmp/p16-worker-d1-before.json
+
+          STAGE='dry-run-exact-phase16-worker'
+          make_config 'src/index-phase13.js' 'worker/wrangler.phase16.runtime.toml'
+          $W deploy --config worker/wrangler.phase16.runtime.toml --dry-run --outdir /tmp/p16-worker-build >/tmp/p16-worker-dry-run.log
+          test -d /tmp/p16-worker-build
+
+          STAGE='deploy-isolated-development-worker'
+          $W deploy --config worker/wrangler.phase16.runtime.toml --keep-vars \
+            --message 'Phase 16 guarded browser/resource/session development Worker' >/tmp/p16-worker-deploy.log 2>&1
+          DEPLOYED=1
+          sleep 3
+
+          STAGE='post-deploy-isolation-and-baseline'
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-worker-settings-after.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p16-worker-settings-after.json >/dev/null
+          AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p16-worker-settings-after.json)"
+          case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p16-worker-settings-after.json)" = 'fpt-materials-dev'
+          test "$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-worker-settings-after.json)" = "$STUDENTS"
+          test "$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-worker-settings-after.json)" = "$LESSONS"
+          test "$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p16-worker-settings-after.json)" = "$DB"
+          for var in ALLOWED_ORIGINS DEV_LOGIN_ALLOWLIST STUDENT_LOGIN_ENABLED; do
+            test "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p16-worker-settings-after.json)" = \
+                 "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p16-worker-settings-before.json)"
+          done
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p16-worker-secrets-after.txt
+          cmp /tmp/p16-worker-secrets-before.txt /tmp/p16-worker-secrets-after.txt
+          verify_baseline /tmp/p16-worker-d1-after.json
+
+          STAGE='complete'
+          DEPLOYED=0
+          trap - ERR
+          echo "PHASE16_DEVELOPMENT_WORKER_DEPLOY_PASS head=${{ github.event.pull_request.head.sha }}"
 
       - name: Run guarded Phase 16 matrix
         shell: bash
