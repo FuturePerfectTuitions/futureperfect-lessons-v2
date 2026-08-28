@@ -50,6 +50,8 @@ jobs:
           set -Eeuo pipefail
           exec bash tests/phase15-guarded-live-personas.sh
           EOF
+          sed -i 's/[[:space:]]\+$//' tests/phase15-guarded-live-personas.sh tests/phase15-run-guarded-live-personas.sh
+          bash -n tests/phase15-guarded-live-personas.sh
           bash -n tests/phase15-run-guarded-live-personas.sh
           test "$(grep -c '^exec bash tests/phase15-guarded-live-personas.sh$' tests/phase15-run-guarded-live-personas.sh)" = '1'
           ! grep -Fq 's=s.replace' tests/phase15-run-guarded-live-personas.sh
