@@ -184,6 +184,7 @@ assert.ok(levelPreview.blockedLessons.includes(level2Rows[0].lessonId));
 const source = fs.readFileSync(new URL('../worker/src/index-phase12.js', import.meta.url), 'utf8');
 const manualSource = fs.readFileSync(new URL('../worker/src/phase15-manual-access.js', import.meta.url), 'utf8');
 const phase13Source = fs.readFileSync(new URL('../worker/src/index-phase13.js', import.meta.url), 'utf8');
+const browserSource = fs.readFileSync(new URL('./phase11-browser-verification.mjs', import.meta.url), 'utf8');
 for (const text of [source, manualSource]) {
   assert.ok(!text.includes('INSERT INTO lesson_entitlements'));
   assert.ok(!text.includes('DELETE FROM lesson_entitlements'));
@@ -194,5 +195,15 @@ for (const text of [source, manualSource]) {
 }
 assert.ok(phase13Source.includes("import phase12Worker from './phase15-manual-access.js'"));
 assert.ok(manualSource.includes("import phase12Worker from './index-phase12.js'"));
+
+// Phase 15 browser acceptance must exercise the actual current presentation:
+// lesson video stays collapsed until the student deliberately chooses View.
+const videoViewLocator = "page.locator('#video-section').getByRole('button', { name: 'View', exact: true })";
+const viewLocatorAt = browserSource.indexOf(videoViewLocator);
+const viewClickAt = browserSource.indexOf('await viewButton.click()', viewLocatorAt);
+const frameWaitAt = browserSource.indexOf("await frame.waitFor({ state: 'visible'", viewClickAt);
+assert.ok(viewLocatorAt >= 0, 'Chrome harness must scope the Lesson Video View button');
+assert.ok(viewClickAt > viewLocatorAt, 'Chrome harness must click View before inspecting the player');
+assert.ok(frameWaitAt > viewClickAt, 'Chrome harness must wait for the player only after View is clicked');
 
 console.log('Phase 15 Master navigation regression: PASS');
