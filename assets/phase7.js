@@ -57,6 +57,7 @@
 
   const state = {
     session: null,
+    sessionToken: null,
     home: null,
     subjectKey: null,
     subjectLabel: null,
@@ -64,6 +65,46 @@
     lessons: [],
     lesson: null,
     videoLoadSerial: 0
+  };
+
+  const nativeFetch = window.fetch.bind(window);
+  const workerOrigin = (() => {
+    try { return new URL(base).origin; } catch { return ''; }
+  })();
+
+  function validInMemorySessionToken(value) {
+    return /^[A-Za-z0-9_-]{43}$/.test(String(value || ''));
+  }
+
+  function isWorkerStudentApi(input) {
+    if (!workerOrigin) return false;
+    try {
+      const raw = input instanceof Request ? input.url : String(input || '');
+      const url = new URL(raw, window.location.href);
+      return url.origin === workerOrigin && url.pathname.startsWith('/api/v1/student/');
+    } catch {
+      return false;
+    }
+  }
+
+  // Phase 16 Safari/WebKit compatibility. The primary session transport remains
+  // the secure HttpOnly cookie. If WebKit blocks that cross-site cookie, the
+  // Worker returns an opaque token which lives only in this page's JS memory.
+  // It is added only to the exact Worker student API origin and is never placed
+  // in localStorage, sessionStorage, a URL, the DOM, or a third-party request.
+  window.fetch = (input, init = {}) => {
+    if (!state.sessionToken || !isWorkerStudentApi(input)) {
+      return nativeFetch(input, init);
+    }
+    const sourceHeaders = input instanceof Request ? input.headers : undefined;
+    const headers = new Headers(init.headers || sourceHeaders || {});
+    if (!headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${state.sessionToken}`);
+    }
+    if (input instanceof Request) {
+      return nativeFetch(new Request(input, { ...init, headers }));
+    }
+    return nativeFetch(input, { ...init, headers });
   };
 
   function api(path, options = {}) {
@@ -145,6 +186,7 @@
 
   function showLogin() {
     state.session = null;
+    state.sessionToken = null;
     resetNavigation();
     els.portalScreen.hidden = true;
     els.loginScreen.hidden = false;
@@ -197,7 +239,7 @@
     }
   }
 
-  async function readSession() {
+  async function readSession(fallbackToken = '') {
     if (!base) {
       showLogin();
       setLoginError('The student portal is temporarily unavailable. Please try again later.');
@@ -205,14 +247,25 @@
     }
 
     try {
-      const response = await api('/api/v1/student/session', { method: 'GET' });
+      let usedBearerFallback = false;
+      let response = await api('/api/v1/student/session', { method: 'GET' });
       let body = null;
       try { body = await response.json(); } catch (_) {}
+
+      if ((!response.ok || !body?.ok) && validInMemorySessionToken(fallbackToken)) {
+        state.sessionToken = String(fallbackToken);
+        usedBearerFallback = true;
+        response = await api('/api/v1/student/session', { method: 'GET' });
+        body = null;
+        try { body = await response.json(); } catch (_) {}
+      }
+
       if (!response.ok || !body?.ok) {
         showLogin();
         return null;
       }
 
+      if (!usedBearerFallback) state.sessionToken = null;
       resetNavigation();
       showPortal(body);
       await loadHome();
@@ -237,6 +290,7 @@
 
     els.loginButton.disabled = true;
     try {
+      state.sessionToken = null;
       const response = await api('/api/v1/student/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -252,9 +306,11 @@
         return;
       }
 
-      const session = await readSession();
+      const fallbackToken = validInMemorySessionToken(body?.sessionToken) ? body.sessionToken : '';
+      const session = await readSession(fallbackToken);
       if (!session) setLoginError('The login could not be completed in this browser. Please try again.');
     } catch (_) {
+      state.sessionToken = null;
       els.password.value = '';
       resetPasswordVisibility();
       setLoginError('The student portal is temporarily unavailable. Please try again later.');
