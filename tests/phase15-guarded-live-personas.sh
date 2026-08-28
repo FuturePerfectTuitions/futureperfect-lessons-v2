@@ -355,11 +355,21 @@ for attempt in $(seq 1 20); do
   sleep 1
 done
 jq -e '((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) != null' "$TMP/full-11-readback.json" >/dev/null
-JAR="$TMP/full-11.jar"; login_user testy5e "$JAR" "$TMP/full-11-login.json"
 PHASE15_STAGE="p14-full-library-home"
-api_get "$JAR" '/api/v1/student/home' "$TMP/full-11-home.json"
+P14_READY=0
+for attempt in $(seq 1 20); do
+  JAR="$TMP/full-11.jar"
+  rm -f "$JAR"
+  login_user testy5e "$JAR" "$TMP/full-11-login.json"
+  api_get "$JAR" '/api/v1/student/home' "$TMP/full-11-home.json"
+  if jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4-11plus" and .lockedPreview==false)' "$TMP/full-11-home.json" >/dev/null; then
+    P14_READY=1
+    break
+  fi
+  sleep 2
+done
 echo "PHASE15_STAGE p14-full-library-home views=$(jq -c '[.subjects[]|select(.subject=="english")|.views[]|{viewId,lockedPreview}]' "$TMP/full-11-home.json")"
-jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4-11plus" and .lockedPreview==false)' "$TMP/full-11-home.json" >/dev/null
+test "$P14_READY" = '1'
 PHASE15_STAGE="p14-full-library-list"
 echo "PHASE15_STAGE p14-full-library-list"
 api_get "$JAR" '/api/v1/student/views/english-year4-11plus/lessons' "$TMP/full-11-lessons.json"
