@@ -30,6 +30,13 @@ if (!original.includes(probeNeedle)) {
   throw new Error('Phase 16 video-expansion stabilization could not find probeScreenPal.');
 }
 
+const screenPalGateNeedle = `  await frame.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  const video = frame.locator('video').first();`;
+if (!original.includes(screenPalGateNeedle)) {
+  throw new Error('Phase 16 ScreenPal identity-gate probe could not find the post-load player sequence.');
+}
+
 const modalCardNeedle = "const box = await page.locator('.phase8-answer-card').boundingBox();";
 if (!original.includes(modalCardNeedle)) {
   throw new Error('Phase 16 responsive Answer Pack dialog stabilization could not find the expected card selector.');
@@ -97,6 +104,30 @@ ${probeNeedle}`
 );
 stabilized = stabilized.replaceAll(pageVideoWait, 'await expandPhase16LessonVideo(page);');
 stabilized = stabilized.replaceAll(page11VideoWait, 'await expandPhase16LessonVideo(page11);');
+
+stabilized = stabilized.replace(
+  screenPalGateNeedle,
+  `  await frame.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  if (kind === '11plus') {
+    const firstNameInput = frame.locator('input[type="text"], input:not([type])').first();
+    const submitButton = frame.getByRole('button', { name: /submit/i }).first();
+    try {
+      if (await firstNameInput.count() && await firstNameInput.isVisible() && await submitButton.count() && await submitButton.isVisible()) {
+        await firstNameInput.fill('Phase16');
+        await submitButton.click({ timeout: 5000 });
+        result.identityGate = 'FIRST_NAME_SUBMITTED';
+        await firstNameInput.waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
+        await new Promise(resolve => setTimeout(resolve, 1800));
+      } else {
+        result.identityGate = 'NOT_PRESENT';
+      }
+    } catch (_) {
+      result.identityGate = 'SUBMIT_NOT_CONFIRMED';
+    }
+  }
+  const video = frame.locator('video').first();`
+);
 
 stabilized = stabilized.replace(
   modalCardNeedle,
