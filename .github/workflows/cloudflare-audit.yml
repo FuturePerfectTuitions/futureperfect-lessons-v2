@@ -185,6 +185,27 @@ jobs:
           echo "=== lesson_entitlements columns ==="
           npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "PRAGMA table_info('lesson_entitlements');"
 
+      - name: Phase 15 post-merge baseline (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@4.125.0"
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_batches FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_assignments FROM student_batch_assignments WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_releases FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/p15-postmerge-baseline.json 2>/tmp/p15-postmerge-baseline.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p15-postmerge-baseline.json)" = '632'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p15-postmerge-baseline.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p15-postmerge-baseline.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p15-postmerge-baseline.json)" = '0'
+          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p15-postmerge-baseline.json)" = '2'
+          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p15-postmerge-baseline.json)" = '173'
+          for i in 6 7 8 9; do test "$(jq -r ".[${i}].results[0] | to_entries[0].value" /tmp/p15-postmerge-baseline.json)" = '0'; done
+          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p15-postmerge-baseline.json >/dev/null
+          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p15-postmerge-baseline.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/worker-settings.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/worker-settings.json)" = 'fpt-materials-dev'
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/worker-settings.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) exit 1;; esac
+          echo 'PHASE15_POSTMERGE_READONLY_BASELINE_PASS'
+
       - name: Repository deployment config snapshot
         shell: bash
         working-directory: worker
