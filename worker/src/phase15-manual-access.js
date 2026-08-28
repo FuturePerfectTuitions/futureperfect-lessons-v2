@@ -151,6 +151,34 @@ function viewSubject(viewId) {
   return MANUAL_CORE_VIEW_RULES[viewId]?.subject || '';
 }
 
+function findView(body, viewId) {
+  const target = String(viewId || '').trim().toLowerCase();
+  if (!target || !Array.isArray(body?.subjects)) return null;
+  for (const subject of body.subjects) {
+    const found = Array.isArray(subject?.views)
+      ? subject.views.find(view => String(view?.viewId || '').trim().toLowerCase() === target)
+      : null;
+    if (found) return found;
+  }
+  return null;
+}
+
+// The synthetic manual-access overlay exists only to obtain the target Year's
+// presentation metadata. It is not membership and therefore must never promote
+// a historical view into Current. If authoritative Phase 12 already surfaced
+// the same view, preserve that existing D1-derived grouping; otherwise a view
+// surfaced solely by manual access is historical/Previous.
+function manualCandidateWithAuthoritativeGrouping(body, candidate) {
+  if (!candidate) return candidate;
+  const existing = findView(body, candidate.viewId);
+  const isCurrent = Boolean(existing && (existing.current === true || existing.group === 'current'));
+  return {
+    ...candidate,
+    current: isCurrent,
+    group: isCurrent ? 'current' : 'previous'
+  };
+}
+
 function replaceOrAddView(body, viewId, candidate) {
   const subject = viewSubject(viewId);
   if (!subject || !candidate || !Array.isArray(body?.subjects)) return;
@@ -191,7 +219,9 @@ async function mergeManualAccessHome(request, env, ctx) {
       ?.find(item => String(item?.subject || '').toLowerCase() === subject)
       ?.views
       ?.find(item => String(item?.viewId || '').toLowerCase() === viewId);
-    if (candidate) replaceOrAddView(body, viewId, candidate);
+    if (candidate) {
+      replaceOrAddView(body, viewId, manualCandidateWithAuthoritativeGrouping(body, candidate));
+    }
   }
 
   return responseLikeJson(response, body);
@@ -210,6 +240,7 @@ export {
   manualAccessCoversView,
   manualAccessViewIds,
   manualAccessOverlayUserForView,
+  manualCandidateWithAuthoritativeGrouping,
   targetViewIdForRequest
 };
 
