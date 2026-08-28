@@ -11,6 +11,7 @@ on:
       - 'tests/phase11-vr-howto-top-level-static-verification.mjs'
       - 'tests/phase13-excel-sync-verification.mjs'
       - 'tests/phase15-*'
+      - '.github/workflows/phase15-student-persona-acceptance.yml'
       - '.github/workflows/phase15-guarded-development-deploy.yml'
 
 permissions:
