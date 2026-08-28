@@ -11,6 +11,11 @@ import {
   markCurrentViews,
   mergeCanonicalLockedRows
 } from '../worker/src/index-phase12.js';
+import {
+  manualAccessCoversView,
+  manualAccessOverlayUserForView,
+  manualAccessViewIds
+} from '../worker/src/phase15-manual-access.js';
 
 const EXPECTED_CATALOGUE_SHA = '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663';
 
@@ -127,6 +132,36 @@ assert.equal(
   'no explicit Full Library must not receive an overlay'
 );
 
+// Master v3.3 P24: a manual individual core lesson is an independent access
+// source. It can surface that historical ordinary Year view, but the request-
+// local presentation overlay must not mutate the source user or imply D1 batch
+// membership. Only the explicitly manual lesson becomes open downstream.
+const y4ManualLesson = manifest.curricula.ENGLISH_Y4.lessonIds.find(
+  lessonId => manifest.lessons[lessonId]?.active !== false
+);
+assert.ok(y4ManualLesson, 'English Y4 requires an active canonical lesson for P24 regression');
+const manualUser = {
+  firstName: 'Fixture',
+  schoolYear: 5,
+  batches: ['Y5E'],
+  manualAccess: { coreLessons: [y4ManualLesson], vrLessons: [] },
+  fullLibraries: [],
+  blockedLessons: []
+};
+assert.equal(manualAccessCoversView(manualUser, 'english-year4', manifest), true);
+assert.ok(manualAccessViewIds(manualUser, manifest).includes('english-year4'));
+assert.equal(manualAccessCoversView(manualUser, 'english-year3', manifest), false);
+const y4ManualOverlay = manualAccessOverlayUserForView(manualUser, 'english-year4', manifest);
+assert.equal(y4ManualOverlay.schoolYear, 4);
+assert.deepEqual(y4ManualOverlay.batches, ['Y4E']);
+assert.deepEqual(y4ManualOverlay.manualAccess.coreLessons, [y4ManualLesson]);
+assert.deepEqual(manualUser.batches, ['Y5E'], 'manual source user must remain unchanged');
+assert.equal(
+  manualAccessOverlayUserForView({ ...manualUser, manualAccess: { coreLessons: [] } }, 'english-year4', manifest).schoolYear,
+  5,
+  'no manual lesson in the target curriculum must not receive an overlay'
+);
+
 // Locked-detail fallback must remain fail-closed and never create an entitlement.
 const baseUser = {
   firstName: 'Fixture',
@@ -147,11 +182,14 @@ assert.ok(levelPreview.fullLibraries.includes('MATHS_L2_FULL'));
 assert.ok(levelPreview.blockedLessons.includes(level2Rows[0].lessonId));
 
 const source = fs.readFileSync(new URL('../worker/src/index-phase12.js', import.meta.url), 'utf8');
-assert.ok(!source.includes('INSERT INTO lesson_entitlements'));
-assert.ok(!source.includes('DELETE FROM lesson_entitlements'));
-assert.ok(!source.includes('UPDATE lesson_entitlements'));
-assert.ok(!source.includes('INSERT INTO student_batch_assignments'));
-assert.ok(!source.includes('DELETE FROM student_batch_assignments'));
-assert.ok(!source.includes('UPDATE student_batch_assignments'));
+const manualSource = fs.readFileSync(new URL('../worker/src/phase15-manual-access.js', import.meta.url), 'utf8');
+for (const text of [source, manualSource]) {
+  assert.ok(!text.includes('INSERT INTO lesson_entitlements'));
+  assert.ok(!text.includes('DELETE FROM lesson_entitlements'));
+  assert.ok(!text.includes('UPDATE lesson_entitlements'));
+  assert.ok(!text.includes('INSERT INTO student_batch_assignments'));
+  assert.ok(!text.includes('DELETE FROM student_batch_assignments'));
+  assert.ok(!text.includes('UPDATE student_batch_assignments'));
+}
 
 console.log('Phase 15 Master navigation regression: PASS');
