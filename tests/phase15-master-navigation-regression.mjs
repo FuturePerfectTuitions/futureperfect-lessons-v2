@@ -14,7 +14,8 @@ import {
 import {
   manualAccessCoversView,
   manualAccessOverlayUserForView,
-  manualAccessViewIds
+  manualAccessViewIds,
+  manualCandidateWithAuthoritativeGrouping
 } from '../worker/src/phase15-manual-access.js';
 
 const EXPECTED_CATALOGUE_SHA = '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663';
@@ -161,6 +162,46 @@ assert.equal(
   5,
   'no manual lesson in the target curriculum must not receive an overlay'
 );
+
+// Phase 16 regression: the synthetic manual presentation profile may describe
+// its target Year as Current, but manual access itself is not membership. A view
+// surfaced only by manual access must therefore be Previous. If Phase 12 already
+// surfaced the same view, retain the authoritative D1-derived group exactly.
+const manualOnlyCandidate = manualCandidateWithAuthoritativeGrouping(
+  {
+    subjects: [{
+      subject: 'english',
+      views: [{ viewId: 'english-year5', current: true, group: 'current' }]
+    }]
+  },
+  { viewId: 'english-year2', label: 'Year 2', current: true, group: 'current' }
+);
+assert.equal(manualOnlyCandidate.current, false, 'manual-only historical view must not become Current');
+assert.equal(manualOnlyCandidate.group, 'previous', 'manual-only historical view must be Previous');
+
+const existingCurrentCandidate = manualCandidateWithAuthoritativeGrouping(
+  {
+    subjects: [{
+      subject: 'english',
+      views: [{ viewId: 'english-year2', current: true, group: 'current' }]
+    }]
+  },
+  { viewId: 'english-year2', label: 'Year 2', current: false, group: 'previous' }
+);
+assert.equal(existingCurrentCandidate.current, true, 'real current membership must remain Current');
+assert.equal(existingCurrentCandidate.group, 'current');
+
+const existingPreviousCandidate = manualCandidateWithAuthoritativeGrouping(
+  {
+    subjects: [{
+      subject: 'english',
+      views: [{ viewId: 'english-year2', current: false, group: 'previous' }]
+    }]
+  },
+  { viewId: 'english-year2', label: 'Year 2', current: true, group: 'current' }
+);
+assert.equal(existingPreviousCandidate.current, false, 'historical grouping must not be promoted by the synthetic overlay');
+assert.equal(existingPreviousCandidate.group, 'previous');
 
 // Locked-detail fallback must remain fail-closed and never create an entitlement.
 const baseUser = {
