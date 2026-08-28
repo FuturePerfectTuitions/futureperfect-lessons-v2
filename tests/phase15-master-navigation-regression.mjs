@@ -12,6 +12,8 @@ import {
   mergeCanonicalLockedRows
 } from '../worker/src/index-phase12.js';
 import {
+  canonicaliseManualAccessHomeBody,
+  canonicaliseManualAccessLessonListBody,
   manualAccessCoversView,
   manualAccessOverlayUserForView,
   manualAccessViewIds,
@@ -203,6 +205,56 @@ const existingPreviousCandidate = manualCandidateWithAuthoritativeGrouping(
 assert.equal(existingPreviousCandidate.current, false, 'historical grouping must not be promoted by the synthetic overlay');
 assert.equal(existingPreviousCandidate.group, 'previous');
 
+// Phase 16 regression: Phase 15 adds manual-only historical views after the
+// Phase 12 canonical count pass. Re-normalising the outer body must therefore
+// restore full catalogue visibility without turning locked rows into access.
+const y2EnglishCanonical = canonicalCatalogueRowsForView('english-year2', manifest);
+assert.equal(y2EnglishCanonical.length, 29, 'locked Year 2 English canonical count changed unexpectedly');
+const manualHistoryHome = {
+  ok: true,
+  subjects: [{
+    subject: 'english',
+    views: [{
+      viewId: 'english-year2',
+      label: 'Year 2',
+      current: false,
+      group: 'previous',
+      visibleLessonCount: 1,
+      openLessonCount: 1,
+      lockedLessonCount: 0
+    }]
+  }]
+};
+canonicaliseManualAccessHomeBody(manualHistoryHome, manifest);
+const manualHistoryView = manualHistoryHome.subjects[0].views[0];
+assert.equal(manualHistoryView.visibleLessonCount, 29);
+assert.equal(manualHistoryView.openLessonCount, 1);
+assert.equal(manualHistoryView.lockedLessonCount, 28);
+assert.equal(manualHistoryView.current, false);
+assert.equal(manualHistoryView.group, 'previous');
+
+const manualOpenLesson = y2EnglishCanonical[0];
+const manualHistoryList = {
+  ok: true,
+  lessons: [{
+    lessonId: manualOpenLesson.lessonId,
+    displayLessonId: manualOpenLesson.displayLessonId,
+    title: manualOpenLesson.title,
+    state: 'open',
+    locked: false,
+    resourceKey: 'authorised-open-row-marker'
+  }]
+};
+canonicaliseManualAccessLessonListBody(manualHistoryList, 'english-year2', manifest);
+assert.equal(manualHistoryList.lessons.length, 29);
+assert.equal(manualHistoryList.lessons[0].lessonId, manualOpenLesson.lessonId);
+assert.equal(manualHistoryList.lessons[0].locked, false);
+assert.equal(manualHistoryList.lessons[0].resourceKey, 'authorised-open-row-marker');
+assert.equal(manualHistoryList.lessons.filter(row => row.locked === true).length, 28);
+for (const locked of manualHistoryList.lessons.filter(row => row.locked === true)) {
+  assert.equal('resourceKey' in locked, false, 'locked manual-history row exposed a gated resource key');
+}
+
 // Locked-detail fallback must remain fail-closed and never create an entitlement.
 const baseUser = {
   firstName: 'Fixture',
@@ -235,7 +287,7 @@ for (const text of [source, manualSource]) {
   assert.ok(!text.includes('UPDATE student_batch_assignments'));
 }
 assert.ok(phase13Source.includes("import phase12Worker from './phase15-manual-access.js'"));
-assert.ok(manualSource.includes("import phase12Worker from './index-phase12.js'"));
+assert.ok(manualSource.includes("from './index-phase12.js'"));
 
 // Phase 15 browser acceptance must exercise the actual current presentation:
 // lesson video stays collapsed until the student deliberately chooses View.
