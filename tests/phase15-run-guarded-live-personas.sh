@@ -95,6 +95,14 @@ for old,new in repls.items():
         raise SystemExit('missing unique diagnostic marker')
     s=s.replace(old,new,1)
 
+# Diagnose the controlled Full Library persona without printing the user record.
+# Only view identifiers, source labels and locked-preview flags are emitted.
+s=s.replace(
+    'api_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .source=="fullLibrary")\' "$TMP/full-normal-home.json" >/dev/null',
+    'PHASE15_STAGE="p13-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\necho "PHASE15_STAGE p13-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,source,lockedPreview}]\' "$TMP/full-normal-home.json")"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .source=="fullLibrary")\' "$TMP/full-normal-home.json" >/dev/null',
+    1,
+)
+
 p.write_text(s)
 PY
 bash -n "$TMP_SCRIPT"
