@@ -105,7 +105,7 @@ s=s.replace(
 )
 s=s.replace(
     "jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-11.json\"",
-    "jq -e --arg id \"$E4_VR_LESSON\" '(((.fullLibraries // []) | index(\"ENGLISH_Y4_11PLUS_FULL\")) == null) and ((((.manualAccess.vrLessons // []) | index($id)) == null))' \"$TMP/original-testy5e.json\" >/dev/null\njq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-11.json\"",
+    "jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) | map(select(. != $lib)))' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-p14-base.json\"\njq -e --arg id \"$E4_VR_LESSON\" '(((.fullLibraries // []) | index(\"ENGLISH_Y4_11PLUS_FULL\")) == null) and ((((.manualAccess.vrLessons // []) | index($id)) == null))' \"$TMP/testy5e-p14-base.json\" >/dev/null\nkv_put \"$STUDENTS\" 'user:testy5e' \"$TMP/testy5e-p14-base.json\"; cp \"$TMP/testy5e-p14-base.json\" \"$(user_file testy5e)\"\njq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) + [$lib] | unique)' \"$TMP/testy5e-p14-base.json\" >\"$TMP/testy5e-full-11.json\"",
     1,
 )
 s=s.replace(
