@@ -123,6 +123,7 @@ echo "PHASE16_REPOSITORY_RECONCILIATION_PASS current_main=${CURRENT_MAIN}"
 # Static/inherited gates are read-only and run before any Phase 16 mutation.
 node --check tests/phase16-runtime.mjs
 node --check tests/phase16-browser-resource-session.mjs
+node --check tests/phase16-browser-resource-session-runner.mjs
 bash -n tests/phase16-workflow-run.sh
 grep -Fq '369 lessons / 11 curricula' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
 grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
@@ -174,4 +175,4 @@ google-chrome --version
 
 # Only now are development-only controlled mutations authorised.
 MUTATION_ARMED=1
-node tests/phase16-browser-resource-session.mjs
+node tests/phase16-browser-resource-session-runner.mjs
