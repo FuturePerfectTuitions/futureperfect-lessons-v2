@@ -183,6 +183,7 @@ assert.ok(levelPreview.blockedLessons.includes(level2Rows[0].lessonId));
 
 const source = fs.readFileSync(new URL('../worker/src/index-phase12.js', import.meta.url), 'utf8');
 const manualSource = fs.readFileSync(new URL('../worker/src/phase15-manual-access.js', import.meta.url), 'utf8');
+const phase13Source = fs.readFileSync(new URL('../worker/src/index-phase13.js', import.meta.url), 'utf8');
 for (const text of [source, manualSource]) {
   assert.ok(!text.includes('INSERT INTO lesson_entitlements'));
   assert.ok(!text.includes('DELETE FROM lesson_entitlements'));
@@ -191,5 +192,7 @@ for (const text of [source, manualSource]) {
   assert.ok(!text.includes('DELETE FROM student_batch_assignments'));
   assert.ok(!text.includes('UPDATE student_batch_assignments'));
 }
+assert.ok(phase13Source.includes("import phase12Worker from './phase15-manual-access.js'"));
+assert.ok(manualSource.includes("import phase12Worker from './index-phase12.js'"));
 
 console.log('Phase 15 Master navigation regression: PASS');
