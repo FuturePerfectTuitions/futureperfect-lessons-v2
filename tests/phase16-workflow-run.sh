@@ -136,6 +136,7 @@ node --experimental-default-type=module tests/phase11-catalogue-static-verificat
 grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p16-catalogue-static.log
 node scripts/phase11-navigation-manifest.mjs | tee /tmp/p16-navigation-manifest.log
 jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p16-navigation-manifest.log >/dev/null
+! grep -Fq 'const PHASE11_NAVIGATION_MANIFEST = null;' worker/src/phase11-navigation-manifest.generated.js
 node tests/phase15-master-navigation-regression.mjs
 node tests/phase11-session-efficiency-static-verification.mjs
 node tests/phase11-answer-dedup-static-verification.mjs
