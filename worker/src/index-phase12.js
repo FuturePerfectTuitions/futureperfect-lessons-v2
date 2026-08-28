@@ -20,6 +20,41 @@ const LOCKED_PREVIEW_OVERLAYS = Object.freeze({
   'english-year6': Object.freeze({ schoolYear: 6, batches: ['Y6M'] })
 });
 
+// Phase 15: a Full Library is an explicit access source, not batch membership.
+// The historical Phase 6 descriptor dedup keys ordinary and 11+ views by the
+// shared curriculum alone, which can suppress an explicit 11+ Full Library when
+// the student also retains ordinary history for that curriculum. For request-
+// local evaluation only, overlay a synthetic matching batch so the downstream
+// renderer can build the intended 11+ view. The home merger then restores the
+// authoritative Current/Previous grouping from D1 assignments, so this overlay
+// never creates or implies membership.
+const FULL_LIBRARY_VIEW_OVERLAYS = Object.freeze({
+  'english-year4-11plus': Object.freeze({
+    subject: 'english',
+    fullLibrary: 'ENGLISH_Y4_11PLUS_FULL',
+    schoolYear: 4,
+    batches: ['Y4E11']
+  }),
+  'english-year5-11plus': Object.freeze({
+    subject: 'english',
+    fullLibrary: 'ENGLISH_Y5_11PLUS_FULL',
+    schoolYear: 5,
+    batches: ['Y5E11']
+  }),
+  'maths-level2': Object.freeze({
+    subject: 'maths',
+    fullLibrary: 'MATHS_L2_FULL',
+    schoolYear: 4,
+    batches: ['Y4M11']
+  }),
+  'maths-level3': Object.freeze({
+    subject: 'maths',
+    fullLibrary: 'MATHS_L3_FULL',
+    schoolYear: 5,
+    batches: ['Y5M11']
+  })
+});
+
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store'
@@ -132,6 +167,57 @@ function overlayUserForView(user, rows, targetViewId) {
   };
 }
 
+function fullLibraryOverlayUserForView(user, targetViewId) {
+  const rule = FULL_LIBRARY_VIEW_OVERLAYS[String(targetViewId || '').trim().toLowerCase()];
+  if (!user || !rule) return user;
+  const libraries = new Set(
+    Array.isArray(user.fullLibraries)
+      ? user.fullLibraries.map(value => String(value || '').trim().toUpperCase()).filter(Boolean)
+      : []
+  );
+  if (!libraries.has(rule.fullLibrary)) return user;
+  return {
+    ...user,
+    schoolYear: rule.schoolYear,
+    batches: [...rule.batches]
+  };
+}
+
+function fullLibraryAwareEnv(env, targetViewId) {
+  if (!env?.STUDENTS_KV || !targetViewId) return env;
+  const rule = FULL_LIBRARY_VIEW_OVERLAYS[String(targetViewId || '').trim().toLowerCase()];
+  if (!rule) return env;
+  const original = env.STUDENTS_KV;
+  const kv = new Proxy(original, {
+    get(target, prop) {
+      if (prop !== 'get') {
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return async (key, options) => {
+        const value = await target.get(key, options);
+        const portalUserIdNorm = normaliseUserKey(key);
+        if (!portalUserIdNorm || value == null) return value;
+        const wantsJson = options?.type === 'json';
+        let user = value;
+        if (!wantsJson) {
+          try { user = JSON.parse(String(value)); } catch { return value; }
+        }
+        const overlaid = fullLibraryOverlayUserForView(user, targetViewId);
+        return wantsJson ? overlaid : JSON.stringify(overlaid);
+      };
+    }
+  });
+  return new Proxy(env, {
+    get(target, prop) {
+      if (prop === 'STUDENTS_KV') return kv;
+      if (prop === 'PHASE12_BYPASS_SESSION_PROFILE') return true;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
+}
+
 function batchAwareEnv(env, targetViewId, cache) {
   if (!env?.STUDENTS_KV || !env?.DB || !targetViewId) return env;
   const original = env.STUDENTS_KV;
@@ -176,6 +262,10 @@ function batchAwareEnv(env, targetViewId, cache) {
       return typeof value === 'function' ? value.bind(target) : value;
     }
   });
+}
+
+function runtimeEnvForView(env, targetViewId, cache) {
+  return batchAwareEnv(fullLibraryAwareEnv(env, targetViewId), targetViewId, cache);
 }
 
 function lockedPreviewUserForView(user, targetViewId, lessonId) {
@@ -458,7 +548,7 @@ async function mergeBatchAwareHome(request, env, ctx) {
     }
 
     for (const view of uniqueViews.values()) {
-      const overlayEnv = batchAwareEnv(env, view.viewId, cache);
+      const overlayEnv = runtimeEnvForView(env, view.viewId, cache);
       const altResponse = await phase11EfficientWorker.fetch(request, overlayEnv, ctx);
       if (!altResponse.ok) continue;
       const altBody = await parseJson(altResponse);
@@ -468,17 +558,45 @@ async function mergeBatchAwareHome(request, env, ctx) {
         }
       }
     }
-
-    markCurrentViews(body, rows);
   }
 
+  // Explicit 11+ Full Libraries must stay independently visible even where the
+  // student retains ordinary history for the same curriculum. This read-only
+  // overlay is deliberately separate from membership and D1 entitlements.
+  const user = await env.STUDENTS_KV.get(`user:${portalUserIdNorm}`, { type: 'json' });
+  const libraries = new Set(
+    Array.isArray(user?.fullLibraries)
+      ? user.fullLibraries.map(value => String(value || '').trim().toUpperCase()).filter(Boolean)
+      : []
+  );
+  const active = activeViewIdsBySubject(rows);
+  for (const [targetViewId, rule] of Object.entries(FULL_LIBRARY_VIEW_OVERLAYS)) {
+    if (!libraries.has(rule.fullLibrary)) continue;
+    const overlayEnv = runtimeEnvForView(env, targetViewId, cache);
+    const altResponse = await phase11EfficientWorker.fetch(request, overlayEnv, ctx);
+    if (!altResponse.ok) continue;
+    const altBody = await parseJson(altResponse);
+    for (const subject of Array.isArray(altBody?.subjects) ? altBody.subjects : []) {
+      for (const altView of Array.isArray(subject?.views) ? subject.views : []) {
+        if (altView?.viewId !== targetViewId) continue;
+        const current = Boolean(active.get(rule.subject)?.has(targetViewId));
+        mergeView(body, rule.subject, {
+          ...altView,
+          current,
+          group: current ? 'current' : 'previous'
+        });
+      }
+    }
+  }
+
+  if (rows.length) markCurrentViews(body, rows);
   applyCanonicalHomeCounts(body);
   return jsonLike(baseResponse, body);
 }
 
 async function mergeBatchAwareLessonList(request, env, ctx, targetViewId) {
   const cache = new Map();
-  const runtimeEnv = batchAwareEnv(env, targetViewId, cache);
+  const runtimeEnv = runtimeEnvForView(env, targetViewId, cache);
   const response = await phase11EfficientWorker.fetch(request, runtimeEnv, ctx);
   if (!response.ok) return response;
   const body = await parseJson(response);
@@ -504,6 +622,7 @@ async function lockedCanonicalDetailFallback(request, env, ctx, targetViewId, or
 export {
   viewForBatch,
   overlayUserForView,
+  fullLibraryOverlayUserForView,
   highestBySubject,
   activeViewIdsBySubject,
   markCurrentViews,
@@ -530,7 +649,7 @@ export default {
     }
 
     const cache = new Map();
-    const runtimeEnv = batchAwareEnv(env, targetViewId, cache);
+    const runtimeEnv = runtimeEnvForView(env, targetViewId, cache);
     const response = await phase11EfficientWorker.fetch(request, runtimeEnv, ctx);
     if (request.method === 'GET' && lessonIdForDetailRequest(request)) {
       return lockedCanonicalDetailFallback(request, env, ctx, targetViewId, response);
