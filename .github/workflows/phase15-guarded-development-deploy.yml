@@ -7,7 +7,9 @@ on:
       - 'worker/src/phase11-vr-howto.js'
       - 'worker/src/index-phase12.js'
       - 'worker/src/index-phase13.js'
+      - 'worker/src/phase15-manual-access.js'
       - 'tests/phase11-vr-howto-top-level-static-verification.mjs'
+      - 'tests/phase13-excel-sync-verification.mjs'
       - 'tests/phase15-*'
       - '.github/workflows/phase15-guarded-development-deploy.yml'
 
@@ -130,6 +132,7 @@ jobs:
           node --check worker/src/phase11-vr-howto.js
           node --check worker/src/index-phase12.js
           node --check worker/src/index-phase13.js
+          node --check worker/src/phase15-manual-access.js
           node tests/phase11-vr-howto-top-level-static-verification.mjs
           node tests/phase12-batch-aware-worker-verification.mjs
           node tests/phase13-excel-sync-verification.mjs
