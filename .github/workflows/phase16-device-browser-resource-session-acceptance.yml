@@ -86,16 +86,29 @@ jobs:
             local out="$1"
             $W d1 execute fpt_portal_v2_db --remote --json --command \
               "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS p16_batch_fixtures FROM batch_definitions WHERE batch_key LIKE 'P16_%'; SELECT COUNT(*) AS p16_assignment_fixtures FROM student_batch_assignments WHERE batch_key LIKE 'P16_%'; SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >"$out" 2>"$out.err"
-            test "$(jq -r '.[0].results[0].entitlement_count' "$out")" = '632'
-            test "$(jq -r '.[1].results[0].batch_count' "$out")" = '4'
-            test "$(jq -r '.[2].results[0].assignment_count' "$out")" = '4'
-            test "$(jq -r '.[3].results[0].release_count' "$out")" = '0'
-            test "$(jq -r '.[4].results[0].assigned_users' "$out")" = '2'
-            test "$(jq -r '.[5].results[0].assigned_user_entitlements' "$out")" = '173'
-            test "$(jq -r '.[6].results[0].p16_batch_fixtures' "$out")" = '0'
-            test "$(jq -r '.[7].results[0].p16_assignment_fixtures' "$out")" = '0'
-            jq -e '.[8].results[0].name == "trg_student_sessions_single_active"' "$out" >/dev/null
-            jq -e '.[9].results[0].quick_check == "ok"' "$out" >/dev/null
+            local ent batches assignments releases assigned_users assigned_ent p16_batches p16_assignments trigger quick
+            ent="$(jq -r '.[0].results[0].entitlement_count' "$out")"
+            batches="$(jq -r '.[1].results[0].batch_count' "$out")"
+            assignments="$(jq -r '.[2].results[0].assignment_count' "$out")"
+            releases="$(jq -r '.[3].results[0].release_count' "$out")"
+            assigned_users="$(jq -r '.[4].results[0].assigned_users' "$out")"
+            assigned_ent="$(jq -r '.[5].results[0].assigned_user_entitlements' "$out")"
+            p16_batches="$(jq -r '.[6].results[0].p16_batch_fixtures' "$out")"
+            p16_assignments="$(jq -r '.[7].results[0].p16_assignment_fixtures' "$out")"
+            trigger="$(jq -r '.[8].results[0].name // ""' "$out")"
+            quick="$(jq -r '.[9].results[0].quick_check // ""' "$out")"
+            echo "PHASE16_CF_D1_COUNTS entitlements=${ent} batches=${batches} assignments=${assignments} releases=${releases} assigned_users=${assigned_users} assigned_entitlements=${assigned_ent} p16_batches=${p16_batches} p16_assignments=${p16_assignments} trigger_present=$([ "$trigger" = 'trg_student_sessions_single_active' ] && echo true || echo false) quick_check=${quick}"
+            test "$ent" = '632'
+            test "$batches" = '4'
+            test "$assignments" = '4'
+            test "$releases" = '0'
+            test "$assigned_users" = '2'
+            test "$assigned_ent" = '173'
+            test "$p16_batches" = '0'
+            test "$p16_assignments" = '0'
+            test "$trigger" = 'trg_student_sessions_single_active'
+            test "$quick" = 'ok'
+            echo 'PHASE16_CF_D1_BASELINE_PASS'
           }
 
           rollback_worker() {
@@ -144,27 +157,48 @@ jobs:
           ! grep -Fq 'const PHASE11_NAVIGATION_MANIFEST = null;' worker/src/phase11-navigation-manifest.generated.js
           node tests/phase15-master-navigation-regression.mjs
 
-          STAGE='cloudflare-isolation-guard'
+          STAGE='cloudflare-isolation-guard:settings-fetch'
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-worker-settings-before.json
           jq -e '.success == true' /tmp/p16-worker-settings-before.json >/dev/null
+          echo 'PHASE16_CF_SETTINGS_FETCH_PASS'
+
+          STAGE='cloudflare-isolation-guard:environment'
           jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p16-worker-settings-before.json >/dev/null
+          echo 'PHASE16_CF_ENVIRONMENT_PASS'
+
+          STAGE='cloudflare-isolation-guard:login-disabled'
           LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p16-worker-settings-before.json)"
           case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
+          echo 'PHASE16_CF_LOGIN_DISABLED_PASS'
+
+          STAGE='cloudflare-isolation-guard:bindings'
           STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-worker-settings-before.json)"
           LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p16-worker-settings-before.json)"
           DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p16-worker-settings-before.json)"
           R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p16-worker-settings-before.json)"
-          test "$R2" = 'fpt-materials-dev'
           for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          echo 'PHASE16_CF_BINDINGS_PRESENT_PASS'
+
+          STAGE='cloudflare-isolation-guard:r2'
+          test "$R2" = 'fpt-materials-dev'
+          echo 'PHASE16_CF_R2_DEV_PASS'
+
+          STAGE='cloudflare-isolation-guard:legacy-kv'
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p16-worker-namespaces.json
           LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' /tmp/p16-worker-namespaces.json)"
           if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
+          echo 'PHASE16_CF_LEGACY_KV_ISOLATION_PASS'
+
+          STAGE='cloudflare-isolation-guard:secret-names'
           $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p16-worker-secrets-before.txt
           grep -Fxq 'EXCEL_SYNC_TOKEN' /tmp/p16-worker-secrets-before.txt
+          echo 'PHASE16_CF_SECRET_NAME_SET_PASS'
+
+          STAGE='cloudflare-isolation-guard:d1-baseline'
           verify_baseline /tmp/p16-worker-d1-before.json
 
           STAGE='dry-run-exact-phase16-worker'
