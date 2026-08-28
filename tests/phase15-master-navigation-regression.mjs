@@ -6,6 +6,7 @@ import {
   activeViewIdsBySubject,
   applyCanonicalHomeCounts,
   canonicalCatalogueRowsForView,
+  fullLibraryOverlayUserForView,
   lockedPreviewUserForView,
   markCurrentViews,
   mergeCanonicalLockedRows
@@ -104,6 +105,28 @@ const englishById = new Map(grouped.subjects[1].views.map(view => [view.viewId, 
 assert.equal(englishById.get('english-year3').current, false);
 assert.equal(englishById.get('english-year4-11plus').current, true);
 
+// Full Library is an independent access source. A retained ordinary view for the
+// same curriculum must not suppress an explicitly assigned 11+ Full Library.
+// The compatibility overlay is request-local only and must not imply membership.
+const fullLibraryUser = {
+  firstName: 'Fixture',
+  schoolYear: 5,
+  batches: ['Y5E'],
+  fullLibraries: ['ENGLISH_Y4_11PLUS_FULL'],
+  blockedLessons: []
+};
+const y4ElevenLibrary = fullLibraryOverlayUserForView(fullLibraryUser, 'english-year4-11plus');
+assert.equal(y4ElevenLibrary.schoolYear, 4);
+assert.deepEqual(y4ElevenLibrary.batches, ['Y4E11']);
+assert.deepEqual(y4ElevenLibrary.fullLibraries, ['ENGLISH_Y4_11PLUS_FULL']);
+assert.deepEqual(fullLibraryUser.batches, ['Y5E'], 'source user must remain unchanged');
+const noLibraryUser = { ...fullLibraryUser, fullLibraries: [] };
+assert.equal(
+  fullLibraryOverlayUserForView(noLibraryUser, 'english-year4-11plus'),
+  noLibraryUser,
+  'no explicit Full Library must not receive an overlay'
+);
+
 // Locked-detail fallback must remain fail-closed and never create an entitlement.
 const baseUser = {
   firstName: 'Fixture',
@@ -127,5 +150,8 @@ const source = fs.readFileSync(new URL('../worker/src/index-phase12.js', import.
 assert.ok(!source.includes('INSERT INTO lesson_entitlements'));
 assert.ok(!source.includes('DELETE FROM lesson_entitlements'));
 assert.ok(!source.includes('UPDATE lesson_entitlements'));
+assert.ok(!source.includes('INSERT INTO student_batch_assignments'));
+assert.ok(!source.includes('DELETE FROM student_batch_assignments'));
+assert.ok(!source.includes('UPDATE student_batch_assignments'));
 
 console.log('Phase 15 Master navigation regression: PASS');
