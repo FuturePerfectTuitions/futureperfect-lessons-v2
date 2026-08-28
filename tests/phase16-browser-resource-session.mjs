@@ -155,6 +155,22 @@ async function assertNoHorizontalOverflow(page, label) {
   assert.ok(state.bodyWidth <= state.innerWidth + 2, `${label}: body horizontally overflows (${state.bodyWidth} > ${state.innerWidth}).`);
 }
 
+async function waitForPortalHomeReady(page, username = '') {
+  await page.locator('#screen-subjects').waitFor({ state: 'visible', timeout: 90000 });
+  await page.waitForFunction(expectedUsername => {
+    const loginButton = document.getElementById('login-button');
+    const greeting = document.getElementById('student-greeting');
+    const maths = document.getElementById('maths-choice');
+    const english = document.getElementById('english-choice');
+    const greetingText = String(greeting?.textContent || '');
+    return Boolean(
+      loginButton && loginButton.disabled === false &&
+      greeting && (!expectedUsername || greetingText.includes(expectedUsername)) &&
+      maths && !maths.disabled && english && !english.disabled
+    );
+  }, username, { timeout: 90000 });
+}
+
 async function login(page, username = 'TestY5EM', password = SHARED_LOGIN) {
   const start = performance.now();
   await page.goto(PORTAL_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -163,7 +179,7 @@ async function login(page, username = 'TestY5EM', password = SHARED_LOGIN) {
   await page.locator('#login-password').fill(password);
   await page.locator('#login-button').click();
   await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 60000 });
-  await page.locator('#screen-subjects').waitFor({ state: 'visible', timeout: 30000 });
+  await waitForPortalHomeReady(page, username);
   const session = await pageApi(page, '/api/v1/student/session');
   assert.equal(session.status, 200, `Login session was not accepted for controlled persona ${username}.`);
   evidence.performanceMs[`login-${username}-${Object.keys(evidence.performanceMs).length}`] = ms(start);
@@ -189,6 +205,7 @@ async function loginWithEyeCheck(page, username = 'TestY5EM') {
   await page.locator('#username').fill(username);
   await page.locator('#login-button').click();
   await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 60000 });
+  await waitForPortalHomeReady(page, username);
   const session = await pageApi(page, '/api/v1/student/session');
   assert.equal(session.status, 200);
   evidence.navigation.loginPasswordEye = 'PASS';
@@ -196,8 +213,16 @@ async function loginWithEyeCheck(page, username = 'TestY5EM') {
 
 async function openSubject(page, subject) {
   const start = performance.now();
-  await page.locator(subject === 'maths' ? '#maths-choice' : '#english-choice').click();
-  await page.locator('#screen-views').waitFor({ state: 'visible', timeout: 30000 });
+  const selector = subject === 'maths' ? '#maths-choice' : '#english-choice';
+  const choice = page.locator(selector);
+  await choice.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(sel => {
+    const button = document.querySelector(sel);
+    const loginButton = document.getElementById('login-button');
+    return Boolean(button && !button.disabled && loginButton && loginButton.disabled === false);
+  }, selector, { timeout: 90000 });
+  await choice.click();
+  await page.locator('#screen-views').waitFor({ state: 'visible', timeout: 60000 });
   evidence.performanceMs[`subject-${subject}-${Object.keys(evidence.performanceMs).length}`] = ms(start);
 }
 
@@ -336,7 +361,6 @@ async function testDownloadsAndProtected(page, context) {
   assert.ok(homeworkRow, 'Homework UI row was not found for the dynamically discovered resource.');
   evidence.resources.homework = await clickResourceAndAssert(page, homeworkRow, hw.resourceKey, 'Homework');
 
-  // Protected-answer browser UI: hidden password, eye, valid open, PDF.js render, close/re-open.
   answerRow = page.locator('#homework-list .phase7-resource-row').filter({ has: page.locator('.phase7-protected-chip') }).first();
   const answerButton = answerRow.locator('button').last();
   await answerButton.waitFor({ state: 'visible', timeout: 30000 });
@@ -385,7 +409,6 @@ async function testDownloadsAndProtected(page, context) {
   evidence.resources.protectedAnswerPerOpen = 'PASS';
   await page.locator('#phase8-answer-close').click();
 
-  // Issue a fresh viewer capability to prove Answer Pack password change invalidates it.
   await answerButton.click();
   await password.fill(answerPassword);
   const auth2Promise = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/answer/authorize?viewId='), { timeout: 30000 });
@@ -427,7 +450,6 @@ async function testDownloadsAndProtected(page, context) {
   assert.ok([401, 410].includes(oldViewer.status), `Old protected viewer remained valid after Answer Pack password change (${oldViewer.status}).`);
   evidence.resources.protectedAnswerPasswordInvalidation = 'PASS';
 
-  // Exact KV restore and propagation proof.
   await kvPutJson(settings.studentsKv, 'user:testy5em', testY5EMOriginal);
   testY5EMAnswerMutated = false;
   await waitForKvProfile(settings.studentsKv, 'user:testy5em', profile => profile.answerPassword === answerPassword);
@@ -447,7 +469,6 @@ async function testDownloadsAndProtected(page, context) {
   }
   assert.equal(restored, true, 'Original controlled Answer Pack password did not restore at the Worker edge.');
 
-  // Fresh protected capability must be invalidated by session revocation.
   const auth3 = await pageApi(page, authPath, { method: 'POST', body: { password: answerPassword } });
   assert.equal(auth3.status, 200);
   const viewer3 = String(auth3.body?.viewerPath || '');
@@ -471,8 +492,8 @@ async function probeScreenPal(page, kind) {
 
   await frame.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
   await new Promise(resolve => setTimeout(resolve, 1500));
-  let video = frame.locator('video').first();
-  let playButton = frame.locator('button[aria-label*="play" i], button[title*="play" i], [role="button"][aria-label*="play" i]').first();
+  const video = frame.locator('video').first();
+  const playButton = frame.locator('button[aria-label*="play" i], button[title*="play" i], [role="button"][aria-label*="play" i]').first();
   try {
     if (await playButton.count() && await playButton.isVisible()) {
       await playButton.click({ timeout: 5000 });
@@ -622,6 +643,7 @@ async function testResponsiveContext(name, viewport, { mobile = true, protectedD
     await page.locator('#username').fill('TestY5EM');
     await page.locator('#login-button').click();
     await page.locator('#portal-screen').waitFor({ state: 'visible', timeout: 60000 });
+    await waitForPortalHomeReady(page, 'TestY5EM');
     await assertNoHorizontalOverflow(page, `${name} subjects`);
     await openSubject(page, 'maths');
     await assertNoHorizontalOverflow(page, `${name} views`);
@@ -747,7 +769,6 @@ async function testCurrentPreviousLockedNavigation() {
 }
 
 async function testSingleSessionAcrossContexts() {
-  // Chrome desktop -> Chrome mobile.
   const a = await chrome.newContext(browserContextOptions({ width: 1440, height: 1100 }));
   const b = await chrome.newContext(browserContextOptions({ width: 412, height: 915 }, { mobile: true }));
   const pa = await a.newPage();
@@ -764,7 +785,6 @@ async function testSingleSessionAcrossContexts() {
     await a.close(); await b.close();
   }
 
-  // Chrome -> Firefox.
   const c = await chrome.newContext(browserContextOptions({ width: 1440, height: 1100 }));
   const f = await ff.newContext(browserContextOptions({ width: 1440, height: 1100 }));
   const pc = await c.newPage();
@@ -776,7 +796,6 @@ async function testSingleSessionAcrossContexts() {
     assert.equal((await pageApi(pf, '/api/v1/student/session')).status, 200, 'Newest Firefox session was broken.');
     evidence.sessions.chromeToFirefox = 'PASS';
 
-    // Reverse: fresh Chrome must invalidate Firefox without breaking Chrome.
     const c2 = await chrome.newContext(browserContextOptions({ width: 1024, height: 768 }));
     const pc2 = await c2.newPage();
     try {
@@ -793,7 +812,6 @@ async function testSingleSessionAcrossContexts() {
 }
 
 async function testSessionTimeoutAndVideoActivity() {
-  // Navigation expiry.
   let context = await chrome.newContext(browserContextOptions({ width: 1440, height: 1100 }));
   let page = await context.newPage();
   try {
@@ -813,7 +831,6 @@ async function testSessionTimeoutAndVideoActivity() {
     await context.close();
   }
 
-  // Valid video play/activity signal then expiry while video is open.
   context = await chrome.newContext(browserContextOptions({ width: 1440, height: 1100 }));
   page = await context.newPage();
   try {
@@ -844,7 +861,6 @@ async function testSessionTimeoutAndVideoActivity() {
     const afterExpired = sessionStateByHash(hash);
     assert.ok(afterExpired && new Date(afterExpired.idle_expires_at).getTime() <= Date.now(), 'Expired session idle deadline was unexpectedly extended.');
     await page.locator('#back-to-lessons').click();
-    // Back itself is local; opening a lesson forces the next authoritative call.
     await page.locator('#lesson-list .phase6-lesson-row').first().click();
     await page.locator('#login-screen').waitFor({ state: 'visible', timeout: 30000 });
     evidence.sessions.videoCannotResurrectExpired = 'PASS';
@@ -940,7 +956,6 @@ async function main() {
     if (ff) await ff.close().catch(() => {});
     if (chrome) await chrome.close().catch(() => {});
 
-    // Exact restoration for any controlled KV mutation, even after an assertion failure.
     if (settings?.studentsKv && testY5EMAnswerMutated && testY5EMOriginal) {
       await kvPutJson(settings.studentsKv, 'user:testy5em', testY5EMOriginal).catch(() => {});
       testY5EMAnswerMutated = false;
