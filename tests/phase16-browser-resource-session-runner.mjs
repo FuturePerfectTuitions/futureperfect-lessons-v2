@@ -45,16 +45,6 @@ if (!original.includes(historyAssertionNeedle)) {
   throw new Error('Phase 16 history diagnostic could not find the Year 2 Previous assertion.');
 }
 
-const originalOrderNeedle = `    await testDesktopNavigationAndResources();
-    await testResponsiveContext('chromeCompact1024', { width: 1024, height: 768 }, { mobile: false });
-    await testResponsiveContext('chromeMobile412', { width: 412, height: 915 }, { mobile: true, protectedDialog: true });
-    await testResponsiveContext('chromeNarrow360', { width: 360, height: 800 }, { mobile: true });
-    await testResponsiveContext('chromeTablet768', { width: 768, height: 1024 }, { mobile: true });
-    await testCurrentPreviousLockedNavigation();`;
-if (!original.includes(originalOrderNeedle)) {
-  throw new Error('Phase 16 history diagnostic could not find the automated test order.');
-}
-
 // GitHub-hosted headless browsers occasionally report the input type before
 // the click-driven DOM mutation has settled. Preserve the real user click and
 // the original assertions, but allow a short rendering turn after each eye
@@ -152,9 +142,9 @@ stabilized = stabilized.replace(
     }`
 );
 
-// Capture the exact authoritative English view metadata and rendered grouping
-// immediately before the disputed Previous/Year 2 assertion. This is diagnostic
-// evidence only; it does not soften or remove the acceptance assertion.
+// Preserve exact evidence of the Current/Previous grouping at the historical
+// manual-access gate. The assertion remains strict; this diagnostic does not
+// weaken or bypass acceptance.
 stabilized = stabilized.replace(
   historyAssertionNeedle,
   `evidence.navigation.historyGroupingDiagnostic = {
@@ -172,20 +162,6 @@ stabilized = stabilized.replace(
     console.log('PHASE16_HISTORY_GROUPING_DIAGNOSTIC ' + JSON.stringify(evidence.navigation.historyGroupingDiagnostic));
     await shot(page, 'mobile-history-grouping-diagnostic');
     ${historyAssertionNeedle}`
-);
-
-// Put the disputed history/current-grouping test first while diagnosing it so a
-// failure does not spend several extra minutes repeating already-established
-// browser/resource checks. Once this gate passes, the complete matrix still
-// follows in the same run.
-stabilized = stabilized.replace(
-  originalOrderNeedle,
-  `    await testCurrentPreviousLockedNavigation();
-    await testDesktopNavigationAndResources();
-    await testResponsiveContext('chromeCompact1024', { width: 1024, height: 768 }, { mobile: false });
-    await testResponsiveContext('chromeMobile412', { width: 412, height: 915 }, { mobile: true, protectedDialog: true });
-    await testResponsiveContext('chromeNarrow360', { width: 360, height: 800 }, { mobile: true });
-    await testResponsiveContext('chromeTablet768', { width: 768, height: 1024 }, { mobile: true, protectedDialog: false });`
 );
 
 await fs.writeFile(runtimePath, stabilized, 'utf8');
