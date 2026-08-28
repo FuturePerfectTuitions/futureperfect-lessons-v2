@@ -97,6 +97,10 @@ jobs:
             git worktree add --detach /tmp/p15-rollback "$BASE" >/tmp/p15-worktree.log 2>&1
             local rc=$?
             if [ "$rc" -eq 0 ]; then
+              (cd /tmp/p15-rollback && node scripts/phase11-navigation-manifest.mjs >/tmp/p15-rollback-navigation.log 2>&1)
+              rc=$?
+            fi
+            if [ "$rc" -eq 0 ]; then
               make_config 'src/index-phase13.js' '/tmp/p15-rollback/worker/wrangler.phase15.rollback.toml'
               (cd /tmp/p15-rollback && $W deploy --config worker/wrangler.phase15.rollback.toml --keep-vars \
                 --message 'Rollback failed Phase 15 guarded development deployment' >/tmp/p15-rollback.log 2>&1)
@@ -127,6 +131,9 @@ jobs:
           node tests/phase13-excel-sync-verification.mjs
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs >/tmp/p15-catalogue.log
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p15-catalogue.log
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p15-navigation-manifest.log
+          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p15-navigation-manifest.log >/dev/null
+          node tests/phase15-master-navigation-regression.mjs
           grep -Fq 'manualAccess.specialBuckets+open-english-11plus-view' worker/src/phase11-vr-howto.js
           grep -Fq 'SPECIAL_ACCESS_REQUIRED' worker/src/phase11-vr-howto.js
 
