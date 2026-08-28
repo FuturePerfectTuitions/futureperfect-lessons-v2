@@ -124,6 +124,7 @@ echo "PHASE16_REPOSITORY_RECONCILIATION_PASS current_main=${CURRENT_MAIN}"
 node --check tests/phase16-runtime.mjs
 node --check tests/phase16-browser-resource-session.mjs
 node --check tests/phase16-browser-resource-session-runner.mjs
+node --check tests/phase16-session-transport-static-verification.mjs
 bash -n tests/phase16-workflow-run.sh
 grep -Fq '369 lessons / 11 curricula' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
 grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase16/DEVICE_BROWSER_RESOURCE_SESSION_MATRIX.md
@@ -137,6 +138,7 @@ grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp
 node scripts/phase11-navigation-manifest.mjs | tee /tmp/p16-navigation-manifest.log
 jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p16-navigation-manifest.log >/dev/null
 ! grep -Fq 'const PHASE11_NAVIGATION_MANIFEST = null;' worker/src/phase11-navigation-manifest.generated.js
+node tests/phase16-session-transport-static-verification.mjs
 node tests/phase15-master-navigation-regression.mjs
 node tests/phase11-session-efficiency-static-verification.mjs
 node tests/phase11-answer-dedup-static-verification.mjs
