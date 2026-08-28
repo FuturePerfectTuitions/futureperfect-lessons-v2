@@ -1,4 +1,5 @@
-import phase12Worker, {
+import phase12Worker from './index-phase12.js';
+import {
   applyCanonicalHomeCounts,
   mergeCanonicalLockedRows
 } from './index-phase12.js';
