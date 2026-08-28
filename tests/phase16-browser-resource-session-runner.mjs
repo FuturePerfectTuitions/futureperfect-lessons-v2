@@ -19,6 +19,17 @@ if (gotoOccurrences < 3) {
   throw new Error(`Phase 16 startup-session synchronization expected at least 3 portal navigations; found ${gotoOccurrences}.`);
 }
 
+const pageVideoWait = "await page.locator('#video-frame').waitFor({ state: 'visible', timeout: 30000 });";
+const page11VideoWait = "await page11.locator('#video-frame').waitFor({ state: 'visible', timeout: 30000 });";
+if (original.split(pageVideoWait).length - 1 < 2 || original.split(page11VideoWait).length - 1 < 1) {
+  throw new Error('Phase 16 video-expansion stabilization did not find the expected ordinary/session and 11+ video waits.');
+}
+
+const probeNeedle = 'async function probeScreenPal(page, kind) {';
+if (!original.includes(probeNeedle)) {
+  throw new Error('Phase 16 video-expansion stabilization could not find probeScreenPal.');
+}
+
 // GitHub-hosted headless browsers occasionally report the input type before
 // the click-driven DOM mutation has settled. Preserve the real user click and
 // the original assertions, but allow a short rendering turn after each eye
@@ -52,6 +63,29 @@ stabilized = stabilized.replaceAll(
     await page.waitForTimeout(50);
   }`
 );
+
+// Phase 12 deliberately presents Lesson Video in a compact row with a View
+// control. The base renderer resolves the authenticated ScreenPal URL while the
+// player remains collapsed; the accepted Phase 11 browser harness expands that
+// row before asserting the iframe. Mirror the real UI interaction here rather
+// than waiting for a frame that is intentionally hidden by default.
+stabilized = stabilized.replace(
+  probeNeedle,
+  `async function expandPhase16LessonVideo(page) {
+  const frame = page.locator('#video-frame');
+  if (!(await frame.isVisible())) {
+    const viewButton = page.locator('#video-section').getByRole('button', { name: 'View', exact: true }).first();
+    await viewButton.waitFor({ state: 'visible', timeout: 30000 });
+    await viewButton.click();
+  }
+  await frame.waitFor({ state: 'visible', timeout: 30000 });
+  return frame;
+}
+
+${probeNeedle}`
+);
+stabilized = stabilized.replaceAll(pageVideoWait, 'await expandPhase16LessonVideo(page);');
+stabilized = stabilized.replaceAll(page11VideoWait, 'await expandPhase16LessonVideo(page11);');
 
 await fs.writeFile(runtimePath, stabilized, 'utf8');
 
