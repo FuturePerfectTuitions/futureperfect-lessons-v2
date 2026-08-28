@@ -60,9 +60,31 @@ jobs:
           bash -n tests/phase15-run-guarded-live-personas.sh
           for id in $(seq -w 1 25); do grep -Fq "P${id}" docs/data/phase15/PERSONA_MATRIX.md; done
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase15/PERSONA_MATRIX.md
-          for f in tests/phase11-*-static-verification.mjs tests/phase12-*-static-verification.mjs tests/phase13-*-static-verification.mjs tests/phase14-*-static-verification.mjs; do
-            [ -f "$f" ] && node "$f"
-          done
+
+          # Use the exact accepted Phase 14 inherited regression set. Do not
+          # glob historical superseded tests such as the old Change 8 visual
+          # assertion, which no longer describes the accepted Phase 14 UI.
+          node tests/phase14-excel-sync-matrix-verification.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node tests/phase12-batch-schema-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs | tee /tmp/p15-catalogue-static.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p15-catalogue-static.log
+          node tests/phase11-session-efficiency-static-verification.mjs
+          node tests/phase11-answer-dedup-static-verification.mjs
+          node tests/phase11-answer-header-static-verification.mjs
+          node tests/phase11-screenpal-static-verification.mjs
+          node tests/phase11-vr-howto-top-level-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-vr-howto-real-catalogue-static-verification.mjs
+          node tests/phase11-vr-solution-video-policy-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-test-personas-static-verification.mjs
+          node --check worker/src/index-phase10.js
+          node --check worker/src/index-phase10-history.js
+          node --check assets/phase10.js
+          node --check assets/phase10-counts.js
+          node --check assets/phase10-history.js
+          node --check tests/phase10-browser-verification.mjs
+          bash -n tests/phase10-api-verification.sh
 
       - name: Guarded effective-date, Full Library, special, session and protected-answer personas
         shell: bash
