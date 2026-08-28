@@ -1,0 +1,69 @@
+name: Phase 15 consolidate guarded persona harness
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase15-consolidate-harness.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase15-student-persona-testing' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.base.sha == '525a496ef39f43dfd60241e5f031ea96b451151e' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Render the already-proven wrapper corrections into the base harness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          cp tests/phase15-guarded-live-personas.sh /tmp/phase15-consolidated.sh
+          awk '
+            /^python - "\$TMP_SCRIPT" <<'"'"'PY'"'"'$/ { capture=1; next }
+            capture && /^PY$/ { capture=0; exit }
+            capture { print }
+          ' tests/phase15-run-guarded-live-personas.sh > /tmp/phase15-transform.py
+          test -s /tmp/phase15-transform.py
+          python /tmp/phase15-transform.py /tmp/phase15-consolidated.sh
+          bash -n /tmp/phase15-consolidated.sh
+          grep -Fq 'PHASE15_STAGE="preflight"' /tmp/phase15-consolidated.sh
+          grep -Fq 'P06 English 11+ core without VR: PASS.' /tmp/phase15-consolidated.sh
+          grep -Fq "P17 MOCKS locked/no-leak gate re-tested; accepted prior positive/negative password proof is not mutated here." /tmp/phase15-consolidated.sh
+          ! grep -Fq 'DELETE FROM mock_password_rate_limits WHERE session_token_hash' /tmp/phase15-consolidated.sh
+          cp /tmp/phase15-consolidated.sh tests/phase15-guarded-live-personas.sh
+          cat > tests/phase15-run-guarded-live-personas.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          exec bash tests/phase15-guarded-live-personas.sh
+          EOF
+          bash -n tests/phase15-run-guarded-live-personas.sh
+          test "$(grep -c '^exec bash tests/phase15-guarded-live-personas.sh$' tests/phase15-run-guarded-live-personas.sh)" = '1'
+          ! grep -Fq 's=s.replace' tests/phase15-run-guarded-live-personas.sh
+
+      - name: Commit the consolidated harness to the Phase 15 branch
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/phase15-guarded-live-personas.sh tests/phase15-run-guarded-live-personas.sh
+          git diff --cached --check
+          git diff --cached --quiet && { echo 'ERROR: consolidation produced no changes.' >&2; exit 1; }
+          git commit -m 'Phase 15: consolidate guarded persona harness'
+          git push origin "HEAD:${HEAD_BRANCH}"
