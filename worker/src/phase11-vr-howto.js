@@ -59,6 +59,15 @@ function eligibleViewId(value) {
   return ELIGIBLE_ENGLISH_11PLUS_VIEWS.has(viewId) ? viewId : '';
 }
 
+function normalisePortalUserId(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function manualSpecialBuckets(user) {
+  const raw = user?.manualAccess?.specialBuckets;
+  return new Set(Array.isArray(raw) ? raw.map(value => String(value || '').trim()) : []);
+}
+
 function screenpalEmbedUrl(screenpalId) {
   const id = String(screenpalId || '').trim();
   if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
@@ -78,7 +87,28 @@ async function delegatedJson(request, env, pathname) {
   return { response, body };
 }
 
+async function requireManualVrHowToBucket(request, env) {
+  const { response, body } = await delegatedJson(request, env, '/api/v1/student/session');
+  if (!response.ok || !body?.ok) {
+    return { error: body?.error || 'SESSION_INVALID', status: response.status || 401 };
+  }
+  if (body.accountLocked) return { error: 'ACCOUNT_LOCKED', status: 403 };
+
+  const portalUserIdNorm = normalisePortalUserId(body.portalUserId);
+  if (!portalUserIdNorm) return { error: 'SESSION_INVALID', status: 401 };
+  const user = await env.STUDENTS_KV.get(`user:${portalUserIdNorm}`, { type: 'json' });
+  if (!user) return { error: 'SESSION_INVALID', status: 401 };
+  if (!manualSpecialBuckets(user).has(VR_HOWTO_BUCKET)) {
+    return { error: 'SPECIAL_ACCESS_REQUIRED', status: 403 };
+  }
+
+  return { portalUserIdNorm };
+}
+
 async function requireOpenEnglishElevenPlusView(request, env, requestedViewId) {
+  const manual = await requireManualVrHowToBucket(request, env);
+  if (manual.error) return manual;
+
   const viewId = eligibleViewId(requestedViewId);
   if (!viewId) return { error: 'VR_HOWTO_NOT_AVAILABLE', status: 403 };
 
@@ -98,7 +128,7 @@ async function requireOpenEnglishElevenPlusView(request, env, requestedViewId) {
     return { error: 'VR_HOWTO_NOT_AVAILABLE_IN_PREVIEW', status: 403 };
   }
 
-  return { viewId, view: body.view };
+  return { ...manual, viewId, view: body.view };
 }
 
 async function loadVrHowToCatalogue(env) {
@@ -181,7 +211,7 @@ async function handleVrHowToDetail(request, env, url) {
         passwordProtected: false,
         items: safeItems(catalogue)
       },
-      accessSource: 'open-english-11plus-view'
+      accessSource: 'manualAccess.specialBuckets+open-english-11plus-view'
     },
     { status: 200, headers: cors }
   );
@@ -232,8 +262,9 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'GET' && url.pathname === '/api/v1/student/special-areas') {
-      // VR How-To is now a top-level English 11+ destination, not a lesson-list
-      // special-area card. Keep all other Phase 10 special areas unchanged.
+      // VR How-To is a top-level English 11+ destination, not a lesson-list
+      // special-area card. Manual access is still authoritative for whether the
+      // separate destination may be shown/opened.
       return stripLegacyVrHowToListPlacement(request, env);
     }
 

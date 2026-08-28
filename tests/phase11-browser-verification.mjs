@@ -185,7 +185,13 @@ async function assertQuizSectionHidden() {
 }
 
 async function lessonPlayerSrc() {
-  await page.locator('#video-frame').waitFor({ state: 'visible', timeout: 30000 });
+  const frame = page.locator('#video-frame');
+  if (!(await frame.isVisible())) {
+    const viewButton = page.locator('#video-section').getByRole('button', { name: 'View', exact: true }).first();
+    await viewButton.waitFor({ state: 'visible', timeout: 10000 });
+    await viewButton.click();
+  }
+  await frame.waitFor({ state: 'visible', timeout: 30000 });
   return page.locator('#lesson-player').getAttribute('src');
 }
 

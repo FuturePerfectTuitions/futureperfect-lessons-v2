@@ -1,0 +1,188 @@
+name: Phase 15 student persona acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/data/phase15/**'
+      - 'tests/phase15-*'
+      - 'tests/phase13-excel-sync-verification.mjs'
+      - 'worker/src/phase11-vr-howto.js'
+      - 'worker/src/index-phase12.js'
+      - 'worker/src/index-phase13.js'
+      - 'worker/src/phase15-manual-access.js'
+      - '.github/workflows/phase15-student-persona-acceptance.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase15-student-persona-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  FPT_PORTAL_V2_EXCEL_SYNC_TOKEN: ${{ secrets.FPT_PORTAL_V2_EXCEL_SYNC_TOKEN }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  persona-acceptance:
+    name: Guarded Phase 15 student personas
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase15-student-persona-testing' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact Phase 15 head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard Phase 14 closure base and capture test start
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.sha }}" = '525a496ef39f43dfd60241e5f031ea96b451151e'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$FPT_PORTAL_V2_EXCEL_SYNC_TOKEN"
+          echo "P15_RUN_START=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "$GITHUB_ENV"
+
+      - name: Static and inherited regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/phase11-vr-howto.js
+          node --check worker/src/index-phase12.js
+          node --check worker/src/index-phase13.js
+          node --check worker/src/phase15-manual-access.js
+          bash -n tests/phase15-guarded-live-personas.sh
+          bash -n tests/phase15-run-guarded-live-personas.sh
+          for id in $(seq -w 1 25); do grep -Fq "P${id}" docs/data/phase15/PERSONA_MATRIX.md; done
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase15/PERSONA_MATRIX.md
+
+          # Use the exact accepted Phase 14 inherited regression set. Do not
+          # glob historical superseded tests such as the old Change 8 visual
+          # assertion, which no longer describes the accepted Phase 14 UI.
+          node tests/phase14-excel-sync-matrix-verification.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node tests/phase12-batch-schema-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs | tee /tmp/p15-catalogue-static.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p15-catalogue-static.log
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p15-navigation-manifest.log
+          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p15-navigation-manifest.log >/dev/null
+          node tests/phase15-master-navigation-regression.mjs
+          node tests/phase11-session-efficiency-static-verification.mjs
+          node tests/phase11-answer-dedup-static-verification.mjs
+          node tests/phase11-answer-header-static-verification.mjs
+          node tests/phase11-screenpal-static-verification.mjs
+          node tests/phase11-vr-howto-top-level-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-vr-howto-real-catalogue-static-verification.mjs
+          node tests/phase11-vr-solution-video-policy-static-verification.mjs
+          node --experimental-default-type=module tests/phase11-test-personas-static-verification.mjs
+          node --check worker/src/index-phase10.js
+          node --check worker/src/index-phase10-history.js
+          node --check assets/phase10.js
+          node --check assets/phase10-counts.js
+          node --check assets/phase10-history.js
+          node --check tests/phase10-browser-verification.mjs
+          bash -n tests/phase10-api-verification.sh
+
+      - name: Wait for exact guarded Phase 15 Worker deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            state="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/phase15-guarded-development-deploy.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=10" \
+              --jq '.workflow_runs | map(select(.head_sha == env.HEAD_SHA)) | sort_by(.created_at) | reverse | .[0] | [.status, (.conclusion // "")] | @tsv' 2>/dev/null || true)"
+            status="${state%%$'\t'*}"
+            conclusion="${state#*$'\t'}"
+            if [ "$status" = 'completed' ]; then
+              test "$conclusion" = 'success'
+              echo 'PHASE15_EXACT_DEPLOYMENT_READY'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'ERROR: exact Phase 15 guarded deployment did not complete successfully in time.' >&2
+          exit 1
+
+      - name: Guarded effective-date, Full Library, special, session and protected-answer personas
+        shell: bash
+        run: bash tests/phase15-run-guarded-live-personas.sh
+
+      - name: Established deployed persona API regression
+        shell: bash
+        run: bash tests/phase11-api-verification.sh
+
+      - name: Install Playwright driver
+        shell: bash
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+
+      - name: Real Chrome established-persona acceptance
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          set -euo pipefail
+          google-chrome --version
+          node tests/phase11-browser-verification.mjs
+
+      - name: Upload persona browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase15-persona-browser-screenshots
+          path: artifacts/phase11-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Always clean Phase 15-created controlled sessions
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          IDS="'testy2e','testy2m','testy2em','testy4em','testy411m','testy511e','testy5em','testy5e','testy511em','test0505','test0606','test0404'"
+          SQL="DELETE FROM answer_password_rate_limits WHERE session_token_hash IN (SELECT token_hash FROM student_sessions WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}'); DELETE FROM answer_view_tokens WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}'; DELETE FROM student_session_profiles WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}'; DELETE FROM student_sessions WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}';"
+          $W d1 execute fpt_portal_v2_db --remote --json --command "$SQL" >/tmp/p15-final-session-clean.json 2>/tmp/p15-final-session-clean.err
+
+      - name: Final exact read-only baseline gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_batches FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_assignments FROM student_batch_assignments WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_releases FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/p15-final-baseline.json 2>/tmp/p15-final-baseline.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p15-final-baseline.json)" = '632'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p15-final-baseline.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p15-final-baseline.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p15-final-baseline.json)" = '0'
+          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p15-final-baseline.json)" = '2'
+          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p15-final-baseline.json)" = '173'
+          for i in 6 7 8 9; do test "$(jq -r ".[${i}].results[0] | to_entries[0].value" /tmp/p15-final-baseline.json)" = '0'; done
+          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p15-final-baseline.json >/dev/null
+          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p15-final-baseline.json >/dev/null
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p15-settings-final.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p15-settings-final.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p15-settings-final.json)" = 'fpt-materials-dev'
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p15-settings-final.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) exit 1;; esac
+          echo 'PHASE15_FINAL_BASELINE_GUARD_PASS'

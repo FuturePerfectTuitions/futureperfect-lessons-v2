@@ -13,16 +13,50 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+      - name: Wait for same-head Phase 15 acceptance when present
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The Phase 15 acceptance workflow is serialized. Allow up to 15 minutes
+          # for a same-head run to clear the queue and complete before this
+          # redundant standalone browser gate proceeds.
+          for attempt in $(seq 1 180); do
+            state="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/phase15-student-persona-acceptance.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=10" \
+              --jq '.workflow_runs | map(select(.head_sha == env.HEAD_SHA)) | sort_by(.created_at) | reverse | .[0] | if . == null then "none\t" else [.status, (.conclusion // "")] | @tsv end' 2>/dev/null || true)"
+            status="${state%%$'\t'*}"
+            conclusion="${state#*$'\t'}"
+            if [ "$status" = 'none' ] || [ -z "$status" ]; then
+              echo 'No same-head Phase 15 acceptance run; continuing standalone browser gate.'
+              break
+            fi
+            if [ "$status" = 'completed' ]; then
+              test "$conclusion" = 'success'
+              echo 'Same-head Phase 15 acceptance completed successfully; continuing standalone browser gate.'
+              break
+            fi
+            if [ "$attempt" = '180' ]; then
+              echo 'ERROR: timed out waiting for same-head Phase 15 acceptance.' >&2
+              exit 1
+            fi
+            sleep 5
+          done
       - name: Syntax-check Phase 11 browser package
         run: |
           node --check assets/phase11-other.js
