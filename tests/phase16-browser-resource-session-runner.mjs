@@ -51,21 +51,11 @@ if (!original.includes(historyOpenNeedle)) {
   throw new Error('Phase 16 history-list synchronization could not find the Year 2 open sequence.');
 }
 
-// GitHub-hosted headless browsers occasionally report the input type before
-// the click-driven DOM mutation has settled. Preserve the real user click and
-// the original assertions, but allow a short rendering turn after each eye
-// control click. No production source is modified by this runner.
 let stabilized = original.replaceAll(
   eyeNeedle,
   `${eyeNeedle}\n  await page.waitForTimeout(250);`
 );
 
-// The portal performs its own /student/session read as soon as phase7.js loads.
-// Starting a credential submission before that initial read has completed can
-// race the portal's showLogin() path against a newly successful login. The
-// established Phase 11 browser harness waits for this startup read first; do
-// the same here for every Phase 16 login-entry navigation. This synchronizes
-// only the test harness and does not modify production portal behaviour.
 stabilized = stabilized.replaceAll(
   gotoNeedle,
   `{
@@ -85,11 +75,6 @@ stabilized = stabilized.replaceAll(
   }`
 );
 
-// Phase 12 deliberately presents Lesson Video in a compact row with a View
-// control. The base renderer resolves the authenticated ScreenPal URL while the
-// player remains collapsed; the accepted Phase 11 browser harness expands that
-// row before asserting the iframe. Mirror the real UI interaction here rather
-// than waiting for a frame that is intentionally hidden by default.
 stabilized = stabilized.replace(
   probeNeedle,
   `async function expandPhase16LessonVideo(page) {
@@ -108,23 +93,11 @@ ${probeNeedle}`
 stabilized = stabilized.replaceAll(pageVideoWait, 'await expandPhase16LessonVideo(page);');
 stabilized = stabilized.replaceAll(page11VideoWait, 'await expandPhase16LessonVideo(page11);');
 
-// Both the legacy/core Phase 8 viewer and the Phase 11 supplementary protected
-// viewer intentionally use the shared .phase8-answer-card styling class. The
-// responsive check has already opened #phase8-answer-modal, so scope the width
-// assertion to that active modal instead of using an ambiguous global class.
 stabilized = stabilized.replace(
   modalCardNeedle,
   "const box = await modal.locator('.phase8-answer-card').boundingBox();"
 );
 
-// Manual-access test data is written to Workers KV before login. Cloudflare KV
-// propagation can make a later explicit /home probe see the new historical view
-// even when the portal's earlier login-time loadHome() populated its in-memory
-// state from the previous edge value. Once the required projection is observed,
-// reload with the already-authenticated session and require the portal's own
-// reload-time /home response to contain the same fixture state. That makes the
-// subsequent UI assertion test the authoritative projected response rather than
-// a stale in-page snapshot, without changing production code or access rules.
 stabilized = stabilized.replace(
   projectedHomeNeedle,
   `if (home.status === 200 && home.body?.ok && predicate(home.body)) {
@@ -148,9 +121,6 @@ stabilized = stabilized.replace(
     }`
 );
 
-// Preserve exact evidence of the Current/Previous grouping at the historical
-// manual-access gate. The assertion remains strict; this diagnostic does not
-// weaken or bypass acceptance.
 stabilized = stabilized.replace(
   historyAssertionNeedle,
   `evidence.navigation.historyGroupingDiagnostic = {
@@ -158,7 +128,10 @@ stabilized = stabilized.replace(
         viewId: view.viewId,
         label: view.label,
         group: view.group,
-        current: view.current
+        current: view.current,
+        visibleLessonCount: view.visibleLessonCount,
+        openLessonCount: view.openLessonCount,
+        lockedLessonCount: view.lockedLessonCount
       })),
       currentButtons: await current.getByRole('button').allTextContents(),
       previousButtons: await previous.getByRole('button').allTextContents(),
@@ -170,11 +143,6 @@ stabilized = stabilized.replace(
     ${historyAssertionNeedle}`
 );
 
-// Clicking a view makes #screen-lessons visible before its asynchronous Worker
-// response has necessarily rendered rows. Wait for the exact Year 2 lesson-list
-// response and first row before asserting the canonical count. This preserves
-// the real click and strict 29-row assertion while removing a test-only render
-// race; production navigation code is unchanged.
 stabilized = stabilized.replace(
   historyOpenNeedle,
   `{
@@ -190,8 +158,20 @@ stabilized = stabilized.replace(
       await previous.getByRole('button', { name: /Year 2/ }).first().click();
       const historyListResponse = await historyListResponsePromise;
       assert.equal(historyListResponse.status(), 200, 'Historical Year 2 lesson-list request did not succeed.');
+      const historyListBody = await historyListResponse.clone().json().catch(() => null);
+      evidence.navigation.historyLessonListDiagnostic = {
+        responseLessonCount: Array.isArray(historyListBody?.lessons) ? historyListBody.lessons.length : null,
+        responseViewId: historyListBody?.view?.viewId || null,
+        openRows: Array.isArray(historyListBody?.lessons) ? historyListBody.lessons.filter(row => !row?.locked).length : null,
+        lockedRows: Array.isArray(historyListBody?.lessons) ? historyListBody.lessons.filter(row => row?.locked).length : null,
+        firstLessonIds: Array.isArray(historyListBody?.lessons) ? historyListBody.lessons.slice(0, 4).map(row => row?.lessonId) : []
+      };
+      console.log('PHASE16_HISTORY_LIST_RESPONSE_DIAGNOSTIC ' + JSON.stringify(evidence.navigation.historyLessonListDiagnostic));
       await page.locator('#screen-lessons').waitFor({ state: 'visible', timeout: 30000 });
       await page.locator('#lesson-list .phase6-lesson-row').first().waitFor({ state: 'visible', timeout: 60000 });
+      await page.waitForTimeout(250);
+      evidence.navigation.historyLessonListDiagnostic.renderedRows = await page.locator('#lesson-list .phase6-lesson-row').count();
+      console.log('PHASE16_HISTORY_LIST_RENDER_DIAGNOSTIC ' + JSON.stringify(evidence.navigation.historyLessonListDiagnostic));
     }`
 );
 
