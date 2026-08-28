@@ -289,7 +289,14 @@ const baseItem = {
 }
 
 const source = fs.readFileSync(new URL('../worker/src/index-phase13.js', import.meta.url), 'utf8');
-assert.ok(source.includes("import phase12Worker from './index-phase12.js'"));
+const downstreamSource = fs.readFileSync(new URL('../worker/src/phase15-manual-access.js', import.meta.url), 'utf8');
+// Phase 15 may wrap the established Phase 12 student renderer for additional
+// presentation-only persona rules. Preserve the Phase 13 contract by proving the
+// sync entrypoint still delegates every non-sync request through that wrapper and
+// that the wrapper itself delegates to the accepted Phase 12 Worker.
+assert.ok(source.includes("import phase12Worker from './phase15-manual-access.js'"));
+assert.ok(downstreamSource.includes("import phase12Worker from './index-phase12.js'"));
+assert.ok(source.includes('return phase12Worker.fetch(request, env, ctx)'));
 assert.ok(source.includes("'/api/v1/admin/excel-entitlements/sync'"));
 assert.ok(source.includes('EXCEL_SYNC_TOKEN'));
 assert.ok(source.includes("ENVIRONMENT"));
@@ -306,5 +313,11 @@ assert.ok(!source.includes('DELETE FROM lesson_entitlements'));
 assert.ok(!source.includes('DELETE FROM student_batch_assignments'));
 assert.ok(!source.includes('INSERT INTO student_batch_assignments'));
 assert.ok(!source.includes('UPDATE student_batch_assignments'));
+assert.ok(!downstreamSource.includes('INSERT INTO lesson_entitlements'));
+assert.ok(!downstreamSource.includes('DELETE FROM lesson_entitlements'));
+assert.ok(!downstreamSource.includes('UPDATE lesson_entitlements'));
+assert.ok(!downstreamSource.includes('INSERT INTO student_batch_assignments'));
+assert.ok(!downstreamSource.includes('DELETE FROM student_batch_assignments'));
+assert.ok(!downstreamSource.includes('UPDATE student_batch_assignments'));
 
 console.log('Phase 13 Excel entitlement sync Worker verification: PASS');
