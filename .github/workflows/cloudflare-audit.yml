@@ -1,197 +1,94 @@
-name: Cloudflare read-only audit
+name: Phase 15 guarded persona bootstrap
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - ops/cloudflare-audit
-    paths:
-      - .github/workflows/cloudflare-audit.yml
-      - .github/cloudflare-audit-trigger.txt
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - .github/workflows/cloudflare-audit.yml
-      - .github/cloudflare-audit-trigger.txt
 
 permissions:
   contents: read
 
-jobs:
-  audit:
-    name: Audit V2 Cloudflare state
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  FPT_PORTAL_V2_EXCEL_SYNC_TOKEN: ${{ secrets.FPT_PORTAL_V2_EXCEL_SYNC_TOKEN }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+jobs:
+  phase15-personas:
+    name: Guarded Phase 15 persona diagnostic
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase15-student-persona-testing' &&
+      github.event.pull_request.base.sha == '525a496ef39f43dfd60241e5f031ea96b451151e' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact Phase 15 head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
-      - name: Confirm secrets are available
+      - name: Capture guarded-run start
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo "Cloudflare CI credentials are present. Values are not printed."
+          test -n "$FPT_PORTAL_V2_EXCEL_SYNC_TOKEN"
+          echo "P15_RUN_START=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "$GITHUB_ENV"
+          echo 'Phase 15 CI credentials are present and masked; values are not printed.'
 
-      - name: Wrangler identity and version
+      - name: Static syntax and persona-matrix guard
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest --version
-          npx --yes wrangler@latest whoami
+          bash -n tests/phase15-guarded-live-personas.sh
+          bash -n tests/phase15-run-guarded-live-personas.sh
+          for id in $(seq -w 1 25); do grep -Fq "P${id}" docs/data/phase15/PERSONA_MATRIX.md; done
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' docs/data/phase15/PERSONA_MATRIX.md
 
-      - name: Worker deployment status
+      - name: Run guarded Phase 15 persona matrix
+        shell: bash
+        run: bash tests/phase15-run-guarded-live-personas.sh
+
+      - name: Always remove Phase 15-created controlled session rows
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          IDS="'testy2e','testy2m','testy2em','testy4em','testy411m','testy511e','testy5em','testy5e','testy511em','test0505','test0606','test0404'"
+          SQL="DELETE FROM answer_password_rate_limits WHERE session_token_hash IN (SELECT token_hash FROM student_sessions WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}'); DELETE FROM answer_view_tokens WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}'; DELETE FROM student_session_profiles WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}'; DELETE FROM student_sessions WHERE portal_user_id_norm IN (${IDS}) AND created_at >= '${P15_RUN_START}';"
+          $W d1 execute fpt_portal_v2_db --remote --json --command "$SQL" >/tmp/p15-session-clean.json 2>/tmp/p15-session-clean.err
+
+      - name: Always verify exact Phase 14 baseline restored
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Current deployment status ==="
-          npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json
-          echo "=== Recent deployments ==="
-          npx --yes wrangler@latest deployments list --name "$WORKER_NAME" --json
-          echo "=== Secret names only ==="
-          npx --yes wrangler@latest secret list --name "$WORKER_NAME" --format json
-
-      - name: Worker runtime settings and bindings (sanitized)
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/worker-settings.json
-
-          jq '
-            .result as $r |
-            {
-              success,
-              errors,
-              messages,
-              result: {
-                compatibility_date: $r.compatibility_date,
-                compatibility_flags: $r.compatibility_flags,
-                usage_model: $r.usage_model,
-                placement: $r.placement,
-                bindings: [
-                  ($r.bindings // [])[] as $b |
-                  if ($b.type == "plain_text" and ((["ENVIRONMENT","ALLOWED_ORIGINS","DEV_LOGIN_ALLOWLIST","STUDENT_LOGIN_ENABLED"] | index($b.name)) != null)) then
-                    {name: $b.name, type: $b.type, text: $b.text}
-                  elif (($b.type // "") | test("secret"; "i")) then
-                    {name: $b.name, type: $b.type}
-                  else
-                    {
-                      name: $b.name,
-                      type: $b.type,
-                      namespace_id: $b.namespace_id,
-                      bucket_name: $b.bucket_name,
-                      database_name: $b.database_name,
-                      database_id: $b.database_id,
-                      id: $b.id,
-                      service: $b.service,
-                      environment: $b.environment
-                    }
-                  end
-                ]
-              }
-            }
-          ' /tmp/worker-settings.json
-
-      - name: Deployed Worker package inventory (read-only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error \
-            --dump-header /tmp/worker-package-headers.txt \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/worker-package.bin
-
-          python3 - <<'PY'
-          from email.parser import BytesParser
-          from email.policy import default
-          import hashlib
-          import re
-
-          headers = open('/tmp/worker-package-headers.txt', 'rb').read().decode('latin-1', 'replace')
-          body = open('/tmp/worker-package.bin', 'rb').read()
-          match = re.search(r'(?im)^content-type:\s*([^\r\n]+)', headers)
-          content_type = match.group(1).strip() if match else 'unknown'
-          print('Content-Type:', content_type)
-          print('Package SHA256:', hashlib.sha256(body).hexdigest())
-
-          names = []
-          if content_type.lower().startswith('multipart/'):
-              message = BytesParser(policy=default).parsebytes(
-                  ('Content-Type: ' + content_type + '\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1') + body
-              )
-              for part in message.iter_parts():
-                  name = part.get_filename() or part.get_param('name', header='content-disposition') or part.get_param('name')
-                  payload = part.get_payload(decode=True) or b''
-                  names.append((name or '(unnamed)', hashlib.sha256(payload).hexdigest()))
-          else:
-              names.append(('single-script', hashlib.sha256(body).hexdigest()))
-
-          print('Modules:')
-          for name, digest in names:
-              print(f'- {name}: {digest}')
-
-          for marker in ('index-phase8.js', 'index-phase7.js', 'index.js'):
-              print(f'Contains {marker}:', marker.encode() in body)
-          PY
-
-      - name: Account resource inventory (read-only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "=== KV namespaces ==="
-          npx --yes wrangler@latest kv namespace list
-          echo "=== D1 databases ==="
-          npx --yes wrangler@latest d1 list --json
-          echo "=== R2 buckets ==="
-          npx --yes wrangler@latest r2 bucket list
-
-      - name: Phase 9 prerequisite state (read-only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/worker-settings.json)"
-          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV") | .namespace_id' /tmp/worker-settings.json)"
-          test -n "$LESSONS_KV_ID"
-          test -n "$STUDENTS_KV_ID"
-
-          echo "=== ENGLISH_Y5 curriculum ==="
-          npx --yes wrangler@latest kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote
-
-          echo "=== Existing DEV-P9 lesson keys ==="
-          npx --yes wrangler@latest kv key list --namespace-id "$LESSONS_KV_ID" --prefix "lesson:DEV-P9" --remote
-
-          echo "=== test0202 profile, passwords redacted ==="
-          npx --yes wrangler@latest kv key get "user:test0202" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/test0202.json
-          jq 'del(.p, .answerPassword)' /tmp/test0202.json
-
-          echo "=== D1 table definitions ==="
-          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name;"
-
-          echo "=== lesson_entitlements columns ==="
-          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "PRAGMA table_info('lesson_entitlements');"
-
-      - name: Repository deployment config snapshot
-        shell: bash
-        working-directory: worker
-        run: |
-          set -euo pipefail
-          echo "=== worker/wrangler.toml ==="
-          cat wrangler.toml
-
-      - name: Audit completed
-        run: echo "Read-only Cloudflare audit completed. No deploy or write command was executed."
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_batches FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_assignments FROM student_batch_assignments WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_releases FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/p15-final-baseline.json 2>/tmp/p15-final-baseline.err
+          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p15-final-baseline.json)" = '632'
+          test "$(jq -r '.[1].results[0].batch_count' /tmp/p15-final-baseline.json)" = '4'
+          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p15-final-baseline.json)" = '4'
+          test "$(jq -r '.[3].results[0].release_count' /tmp/p15-final-baseline.json)" = '0'
+          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p15-final-baseline.json)" = '2'
+          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p15-final-baseline.json)" = '173'
+          for i in 6 7 8 9; do test "$(jq -r ".[${i}].results[0] | to_entries[0].value" /tmp/p15-final-baseline.json)" = '0'; done
+          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p15-final-baseline.json >/dev/null
+          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p15-final-baseline.json >/dev/null
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p15-settings-final.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p15-settings-final.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p15-settings-final.json)" = 'fpt-materials-dev'
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p15-settings-final.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
+          echo 'PHASE15_FINAL_BASELINE_GUARD_PASS'
