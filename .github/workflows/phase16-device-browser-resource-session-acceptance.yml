@@ -1,0 +1,61 @@
+name: Phase 16 device browser resource session acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/data/phase16/**'
+      - 'tests/phase16-*'
+      - 'assets/**'
+      - 'phase11.html'
+      - 'worker/src/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase16-device-browser-resource-session-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+  P16_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+jobs:
+  phase16-matrix:
+    name: Guarded Phase 16 browser/resource/session matrix
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase16-mobile-browser-resource-session-testing' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout exact Phase 16 head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Run guarded Phase 16 matrix
+        shell: bash
+        run: bash tests/phase16-workflow-run.sh
+
+      - name: Upload Phase 16 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase16-browser-resource-session-evidence
+          path: artifacts/phase16
+          if-no-files-found: warn
+          retention-days: 30
