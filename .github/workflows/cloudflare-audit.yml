@@ -1,4 +1,5 @@
 name: Phase 15 guarded persona bootstrap
+# Temporary Phase 15 diagnostic trigger 2; restore the main audit workflow before merge.
 
 on:
   pull_request:
