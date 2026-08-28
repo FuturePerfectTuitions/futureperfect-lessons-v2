@@ -41,6 +41,14 @@ s=s.replace("DELETE FROM mock_password_rate_limits WHERE session_token_hash IN (
 # two M4 history rows and E411 = eight total assignments.
 s=s.replace("test \"$(jq -r '.[1].results[0].a' \"$TMP/reset-invariants.json\")\" = '7'","test \"$(jq -r '.[1].results[0].a' \"$TMP/reset-invariants.json\")\" = '8'")
 
+# Report only the controlled special-bucket identifiers from the established Y5
+# fixture profile so API-vs-fixture drift can be distinguished safely.
+s=s.replace(
+    "echo 'Preflight PASS: exact baseline, controlled users and authoritative lesson fixtures established.'",
+    "echo 'Preflight PASS: exact baseline, controlled users and authoritative lesson fixtures established.'\necho \"PHASE15_FIXTURE test0505 specialBuckets=$(jq -c '(.manualAccess.specialBuckets // .specialBuckets // []) | sort' \"$(user_file test0505)\")\"",
+    1,
+)
+
 # Unique special-area checkpoints. Only bucket identifiers are printed; no API
 # payload, user profile or credential is emitted.
 repls = {
