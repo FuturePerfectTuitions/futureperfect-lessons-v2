@@ -62,6 +62,31 @@ s=s.replace(
     1,
 )
 
+# Full Library tests prove causation by checking that the controlled user did not
+# already hold the target through the same Full Library or manual per-lesson
+# mechanism, then checking the view/lesson opens while D1 remains unchanged.
+# The home payload is not required to expose an implementation-only source label.
+s=s.replace(
+    "jq --arg lib 'ENGLISH_Y4_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-normal.json\"",
+    "jq -e --arg id \"$E4_LESSON\" '(((.fullLibraries // []) | index(\"ENGLISH_Y4_FULL\")) == null) and ((((.manualAccess.coreLessons // []) | index($id)) == null))' \"$TMP/original-testy5e.json\" >/dev/null\njq --arg lib 'ENGLISH_Y4_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-normal.json\"",
+    1,
+)
+s=s.replace(
+    "jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-11.json\"",
+    "jq -e --arg id \"$E4_VR_LESSON\" '(((.fullLibraries // []) | index(\"ENGLISH_Y4_11PLUS_FULL\")) == null) and ((((.manualAccess.vrLessons // []) | index($id)) == null))' \"$TMP/original-testy5e.json\" >/dev/null\njq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-11.json\"",
+    1,
+)
+s=s.replace(
+    "jq -e '.subjects[]|select(.subject==\"english\")|.views[]|select(.viewId==\"english-year4\" and .source==\"fullLibrary\")' \"$TMP/full-normal-home.json\" >/dev/null",
+    "jq -e '.subjects[]|select(.subject==\"english\")|.views[]|select(.viewId==\"english-year4\" and .lockedPreview==false)' \"$TMP/full-normal-home.json\" >/dev/null",
+    1,
+)
+s=s.replace(
+    "jq -e '.subjects[]|select(.subject==\"english\")|.views[]|select(.viewId==\"english-year4-11plus\" and .source==\"fullLibrary\")' \"$TMP/full-11-home.json\" >/dev/null",
+    "jq -e '.subjects[]|select(.subject==\"english\")|.views[]|select(.viewId==\"english-year4-11plus\" and .lockedPreview==false)' \"$TMP/full-11-home.json\" >/dev/null",
+    1,
+)
+
 # Unique special-area checkpoints. Only bucket identifiers are printed; no API
 # payload, user profile or credential is emitted.
 repls = {
@@ -98,8 +123,8 @@ for old,new in repls.items():
 # Diagnose the controlled Full Library persona without printing the user record.
 # Only view identifiers, source labels and locked-preview flags are emitted.
 s=s.replace(
-    'api_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .source=="fullLibrary")\' "$TMP/full-normal-home.json" >/dev/null',
-    'PHASE15_STAGE="p13-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\necho "PHASE15_STAGE p13-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,source,lockedPreview}]\' "$TMP/full-normal-home.json")"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .source=="fullLibrary")\' "$TMP/full-normal-home.json" >/dev/null',
+    'api_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)\' "$TMP/full-normal-home.json" >/dev/null',
+    'PHASE15_STAGE="p13-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\necho "PHASE15_STAGE p13-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,source,lockedPreview}]\' "$TMP/full-normal-home.json")"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)\' "$TMP/full-normal-home.json" >/dev/null',
     1,
 )
 
