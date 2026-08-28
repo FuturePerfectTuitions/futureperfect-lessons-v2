@@ -190,11 +190,20 @@ jobs:
           cmp /tmp/p15-secrets-before.txt /tmp/p15-secrets-after.txt
 
           STAGE='route-smoke-no-mutation'
-          CODE="$(curl --silent --show-error --output /tmp/p15-vr-noauth.json --write-out '%{http_code}' \
-            --header 'Origin: https://futureperfecttuitions.github.io' \
-            "$WORKER_BASE/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus")"
+          CODE=''; ERROR=''
+          for attempt in 1 2 3 4 5; do
+            CODE="$(curl --silent --show-error --output /tmp/p15-vr-noauth.json --write-out '%{http_code}' \
+              --header 'Origin: https://futureperfecttuitions.github.io' \
+              "$WORKER_BASE/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus")"
+            ERROR="$(jq -r '.error // ""' /tmp/p15-vr-noauth.json 2>/dev/null || true)"
+            if [ "$CODE" = '401' ]; then
+              case "$ERROR" in SESSION_REQUIRED|SESSION_INVALID) break;; esac
+            fi
+            sleep 2
+          done
+          echo "PHASE15_ROUTE_SMOKE status=${CODE} error=${ERROR}"
           test "$CODE" = '401'
-          jq -e '.error == "SESSION_REQUIRED" or .error == "SESSION_INVALID"' /tmp/p15-vr-noauth.json >/dev/null
+          case "$ERROR" in SESSION_REQUIRED|SESSION_INVALID) ;; *) false;; esac
           verify_baseline /tmp/p15-d1-after.json
 
           STAGE='complete'
