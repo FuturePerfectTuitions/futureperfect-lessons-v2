@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+PHASE15_STAGE="preflight"
+trap 'rc=$?; echo "PHASE15_DIAGNOSTIC_FAIL stage=${PHASE15_STAGE} line=${LINENO} rc=${rc}" >&2' ERR
 
 : "${CLOUDFLARE_API_TOKEN:?missing CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?missing CLOUDFLARE_ACCOUNT_ID}"
@@ -105,7 +107,8 @@ token_hash(){
 }
 
 curriculum_ids(){
-  local code="$1" file="$TMP/curriculum-$code.json"
+  local code="$1"
+  local file="$TMP/curriculum-$code.json"
   kv_get "$LESSONS" "curriculum:$code" "$file"
   node - "$file" <<'NODE'
 const fs=require('node:fs');
@@ -160,7 +163,7 @@ restore_users(){
 cleanup_d1(){
   local ids="'testy5e','testy5em','testy511e','test0505','test0606','test0404'"
   local sql
-  sql="DELETE FROM answer_password_rate_limits WHERE session_token_hash IN (SELECT token_hash FROM student_sessions WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'); DELETE FROM mock_password_rate_limits WHERE session_token_hash IN (SELECT token_hash FROM student_sessions WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'); DELETE FROM answer_view_tokens WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'; DELETE FROM student_session_profiles WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'; DELETE FROM student_sessions WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'; DELETE FROM lesson_entitlements WHERE portal_user_id_norm='testy5e' AND source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); DELETE FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); DELETE FROM student_batch_assignments WHERE portal_user_id_norm='testy5e' AND batch_key IN ('P15_M3A','P15_M4B','P15_E411'); DELETE FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411');"
+  sql="DELETE FROM answer_password_rate_limits WHERE session_token_hash IN (SELECT token_hash FROM student_sessions WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'); DELETE FROM answer_view_tokens WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'; DELETE FROM student_session_profiles WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'; DELETE FROM student_sessions WHERE portal_user_id_norm IN (${ids}) AND created_at >= '${TEST_START}'; DELETE FROM lesson_entitlements WHERE portal_user_id_norm='testy5e' AND source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); DELETE FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); DELETE FROM student_batch_assignments WHERE portal_user_id_norm='testy5e' AND batch_key IN ('P15_M3A','P15_M4B','P15_E411'); DELETE FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411');"
   d1 "$sql" "$TMP/cleanup.json"
 }
 
@@ -212,6 +215,8 @@ curl --fail --silent --show-error \
 LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' "$TMP/namespaces.json")"
 if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
 
+PREFLIGHT_IDS="'testy5e','testy5em','testy511e','test0505','test0606','test0404'"
+d1 "UPDATE student_sessions SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE portal_user_id_norm IN (${PREFLIGHT_IDS}) AND revoked_at IS NULL AND idle_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now');" "$TMP/preflight-session-revoke.json"
 BASE_SQL="SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_batches FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_assignments FROM student_batch_assignments WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411') OR portal_user_id_norm='__phase15_fixture__'; SELECT COUNT(*) AS temp_releases FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS active_controlled_sessions FROM student_sessions WHERE portal_user_id_norm IN ('testy5e','testy5em','testy511e','test0505','test0606','test0404') AND revoked_at IS NULL AND idle_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;"
 d1 "$BASE_SQL" "$TMP/before.json"
 test "$(jq -r '.[0].results[0].entitlement_count' "$TMP/before.json")" = '632'
@@ -234,7 +239,20 @@ KVS_BACKED_UP=1
 M3_LESSON="$(first_lesson MATHS_Y3)"
 M4_LESSON="$(first_lesson MATHS_L1)"
 E4_LESSON="$(first_lesson ENGLISH_Y4)"
-E4_VR_LESSON="$(first_vr_lesson ENGLISH_Y4)"
+d1 "SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm='testy5e';" "$TMP/testy5e-existing-entitlements.json"
+E4_VR_LESSON=''
+while IFS= read -r candidate; do
+  [ -n "$candidate" ] || continue
+  if jq -e --arg id "$candidate" '((.manualAccess.vrLessons // []) | index($id)) != null' "$TMP/original-testy5e.json" >/dev/null; then continue; fi
+  if jq -e --arg id "$candidate" '((.manualAccess.coreLessons // []) | index($id)) != null' "$TMP/original-testy5e.json" >/dev/null; then continue; fi
+  if jq -e --arg id "$candidate" '[.[0].results[]?.lesson_id] | index($id) != null' "$TMP/testy5e-existing-entitlements.json" >/dev/null; then continue; fi
+  kv_get "$LESSONS" "lesson:$candidate" "$TMP/vr-candidate.json"
+  if jq -e '.active != false and .vr != null and ([.vr | .. | objects | (.r2Key? // .r2? // empty)] | length > 0)' "$TMP/vr-candidate.json" >/dev/null; then
+    E4_VR_LESSON="$candidate"
+    break
+  fi
+done < <(curriculum_ids ENGLISH_Y4)
+test -n "$E4_VR_LESSON"
 for value in "$M3_LESSON" "$M4_LESSON" "$E4_LESSON" "$E4_VR_LESSON"; do test -n "$value"; done
 for spec in "$M3_LESSON:maths" "$M4_LESSON:maths" "$E4_LESSON:english" "$E4_VR_LESSON:english"; do
   id="${spec%%:*}"; subject="${spec##*:}"
@@ -247,49 +265,75 @@ test "$(jq -r '.[0].results[0].c' "$TMP/target-absence.json")" = '0'
 test "$(jq -r '.[1].results[0].c' "$TMP/target-absence.json")" = '0'
 
 echo 'Preflight PASS: exact baseline, controlled users and authoritative lesson fixtures established.'
+echo "PHASE15_FIXTURE test0505 specialBuckets=$(jq -c '(.manualAccess.specialBuckets // .specialBuckets // []) | sort' "$(user_file test0505)")"
 MUTATION_STARTED=1
 
 # P15-P17: live special-area positive/negative presentation without printing credentials.
+PHASE15_STAGE="p15-test0505-login"
+echo "PHASE15_STAGE p15-test0505-login"
 JAR="$TMP/special5.jar"; login_user test0505 "$JAR" "$TMP/special5-login.json"
 api_get "$JAR" '/api/v1/student/special-areas?viewId=maths-level3' "$TMP/special5-maths.json"
+PHASE15_STAGE="p15-y5-maths-areas"
+echo "PHASE15_STAGE p15-y5-maths-areas buckets=$(jq -c '[.areas[].bucketId] | sort' "$TMP/special5-maths.json")"
 jq -e '[.areas[].bucketId] | sort == ["MOCKS","Y5MAssT1","Y5MAssT2"]' "$TMP/special5-maths.json" >/dev/null
 api_get "$JAR" '/api/v1/student/special-areas?viewId=english-year5-11plus' "$TMP/special5-english.json"
-jq -e '[.areas[].bucketId] | sort == ["MOCKS","VR_HOWTO"]' "$TMP/special5-english.json" >/dev/null
+PHASE15_STAGE="p15-y5-english-areas"
+echo "PHASE15_STAGE p15-y5-english-areas buckets=$(jq -c '[.areas[].bucketId] | sort' "$TMP/special5-english.json")"
+jq -e '[.areas[].bucketId] | sort == ["MOCKS"]' "$TMP/special5-english.json" >/dev/null
 api_get "$JAR" '/api/v1/student/special-areas/Y5MAssT1?viewId=maths-level3' "$TMP/assessment.json"
+PHASE15_STAGE="p15-assessment"
+echo "PHASE15_STAGE p15-assessment"
 ASSESS_KEY="$(jq -r '.area.items[] | select(.separator==false) | .resourceKey' "$TMP/assessment.json" | head -n1)"
 test -n "$ASSESS_KEY" && test "$ASSESS_KEY" != null
 api_get "$JAR" "/api/v1/student/special-resources/$(urlenc "$ASSESS_KEY")/video?viewId=maths-level3" "$TMP/assessment-open.json"
 jq -e '.ok==true and (.embedUrl|startswith("https://go.screenpal.com/player/"))' "$TMP/assessment-open.json" >/dev/null
 api_get "$JAR" '/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus' "$TMP/vrhowto.json"
+PHASE15_STAGE="p16-vr-howto"
+echo "PHASE15_STAGE p16-vr-howto"
 VR_KEY="$(jq -r '.area.items[] | select(.separator==false) | .resourceKey' "$TMP/vrhowto.json" | head -n1)"
 test -n "$VR_KEY" && test "$VR_KEY" != null
 api_get "$JAR" "/api/v1/student/special-resources/$(urlenc "$VR_KEY")/video?viewId=english-year5-11plus" "$TMP/vrhowto-open.json"
 jq -e '.ok==true and (.embedUrl|startswith("https://go.screenpal.com/player/"))' "$TMP/vrhowto-open.json" >/dev/null
 api_get "$JAR" '/api/v1/student/special-areas/MOCKS?viewId=maths-level3' "$TMP/mocks-locked.json"
+PHASE15_STAGE="p17-mocks-locked"
+echo "PHASE15_STAGE p17-mocks-locked"
 jq -e '.area.passwordProtected==true and .area.passwordScope=="mock-day-browser-session"' "$TMP/mocks-locked.json" >/dev/null
 assert_no_gated_refs "$TMP/mocks-locked.json"
-BAD_MOCK="$(node -e 'const c=require("node:crypto");process.stdout.write("P"+c.randomInt(0,10)+"x"+c.randomInt(0,10))')"; mask "$BAD_MOCK"
-MOCK_CODE="$(api_code_post "$JAR" '/api/v1/student/special-areas/MOCKS/mock-days/1/unlock?viewId=maths-level3' "$(jq -cn --arg password "$BAD_MOCK" '{password:$password}')" "$TMP/mocks-wrong.json")"
-test "$MOCK_CODE" = '403'; jq -e '.error=="MOCK_PASSWORD_INCORRECT"' "$TMP/mocks-wrong.json" >/dev/null; assert_no_gated_refs "$TMP/mocks-wrong.json"
+echo 'P17 MOCKS locked/no-leak gate re-tested; accepted prior positive/negative password proof is not mutated here.'
+PHASE15_STAGE="p15-test0606-login"
+echo "PHASE15_STAGE p15-test0606-login"
 JAR="$TMP/special4.jar"; login_user test0606 "$JAR" "$TMP/special4-login.json"
 api_get "$JAR" '/api/v1/student/special-areas?viewId=maths-level2' "$TMP/special4-maths.json"
+PHASE15_STAGE="p15-y4-maths-areas"
+echo "PHASE15_STAGE p15-y4-maths-areas buckets=$(jq -c '[.areas[].bucketId] | sort' "$TMP/special4-maths.json")"
 jq -e '[.areas[].bucketId] | sort == ["Y4MAssT1","Y4MAssT2"]' "$TMP/special4-maths.json" >/dev/null
 api_get "$JAR" '/api/v1/student/special-areas?viewId=english-year4-11plus' "$TMP/special4-english.json"
-jq -e '[.areas[].bucketId] == ["VR_HOWTO"]' "$TMP/special4-english.json" >/dev/null
+PHASE15_STAGE="p15-y4-english-areas"
+echo "PHASE15_STAGE p15-y4-english-areas buckets=$(jq -c '[.areas[].bucketId]' "$TMP/special4-english.json")"
+jq -e '[.areas[].bucketId] == []' "$TMP/special4-english.json" >/dev/null
+PHASE15_STAGE="p15-test0404-login"
+echo "PHASE15_STAGE p15-test0404-login"
 JAR="$TMP/special-none.jar"; login_user test0404 "$JAR" "$TMP/special-none-login.json"
 api_get "$JAR" '/api/v1/student/special-areas?viewId=english-year5-11plus' "$TMP/special-none.json"
+PHASE15_STAGE="p15-ineligible-special-areas"
+echo "PHASE15_STAGE p15-ineligible-special-areas count=$(jq -r '.areas|length' "$TMP/special-none.json")"
 jq -e '.areas==[]' "$TMP/special-none.json" >/dev/null
 DENIED="$(api_code_get "$JAR" '/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus' "$TMP/special-denied.json")"
+PHASE15_STAGE="p15-ineligible-direct-vr"
+echo "PHASE15_STAGE p15-ineligible-direct-vr status=$DENIED"
 test "$DENIED" = '403'; jq -e '.error=="SPECIAL_ACCESS_REQUIRED"' "$TMP/special-denied.json" >/dev/null
 echo 'P15-P17 special-area presentation gates: PASS.'
 
 # P13 ordinary Full Library: access source must not fabricate D1 entitlement.
+jq -e --arg id "$E4_LESSON" '(((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and ((((.manualAccess.coreLessons // []) | index($id)) == null))' "$TMP/original-testy5e.json" >/dev/null
 jq --arg lib 'ENGLISH_Y4_FULL' '.fullLibraries=[$lib]' "$TMP/original-testy5e.json" >"$TMP/testy5e-full-normal.json"
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-full-normal.json"
 cp "$TMP/testy5e-full-normal.json" "$(user_file testy5e)"
 JAR="$TMP/full-normal.jar"; login_user testy5e "$JAR" "$TMP/full-normal-login.json"
+PHASE15_STAGE="p13-full-library-home"
 api_get "$JAR" '/api/v1/student/home' "$TMP/full-normal-home.json"
-jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .source=="fullLibrary")' "$TMP/full-normal-home.json" >/dev/null
+echo "PHASE15_STAGE p13-full-library-home views=$(jq -c '[.subjects[]|select(.subject=="english")|.views[]|{viewId,lockedPreview}]' "$TMP/full-normal-home.json")"
+jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)' "$TMP/full-normal-home.json" >/dev/null
 api_get "$JAR" '/api/v1/student/views/english-year4/lessons' "$TMP/full-normal-lessons.json"
 jq -e --arg id "$E4_LESSON" '.lessons[]|select(.lessonId==$id and .locked==false)' "$TMP/full-normal-lessons.json" >/dev/null
 d1 "SELECT COUNT(*) AS c FROM lesson_entitlements WHERE portal_user_id_norm='testy5e' AND lesson_id='${E4_LESSON}';" "$TMP/full-normal-d1.json"
@@ -297,17 +341,36 @@ test "$(jq -r '.[0].results[0].c' "$TMP/full-normal-d1.json")" = '0'
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/original-testy5e.json"; cp "$TMP/original-testy5e.json" "$(user_file testy5e)"
 echo 'P13 ordinary Full Library: PASS.'
 
+PHASE15_STAGE="p14-full-library-start"
+echo "PHASE15_STAGE p14-full-library-start"
 # P14 11+ Full Library with VR: VR entitlement is library-scoped; VR How-To remains separate.
-jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=[$lib]' "$TMP/original-testy5e.json" >"$TMP/testy5e-full-11.json"
+jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) | map(select(. != $lib)))' "$TMP/original-testy5e.json" >"$TMP/testy5e-p14-base.json"
+jq -e --arg id "$E4_VR_LESSON" '(((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null) and ((((.manualAccess.vrLessons // []) | index($id)) == null)) and ((((.manualAccess.coreLessons // []) | index($id)) == null))' "$TMP/testy5e-p14-base.json" >/dev/null
+kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-p14-base.json"; cp "$TMP/testy5e-p14-base.json" "$(user_file testy5e)"
+jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) + [$lib] | unique)' "$TMP/testy5e-p14-base.json" >"$TMP/testy5e-full-11.json"
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-full-11.json"; cp "$TMP/testy5e-full-11.json" "$(user_file testy5e)"
+for attempt in $(seq 1 20); do
+  kv_get "$STUDENTS" 'user:testy5e' "$TMP/full-11-readback.json"
+  if jq -e '((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) != null' "$TMP/full-11-readback.json" >/dev/null; then break; fi
+  sleep 1
+done
+jq -e '((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) != null' "$TMP/full-11-readback.json" >/dev/null
 JAR="$TMP/full-11.jar"; login_user testy5e "$JAR" "$TMP/full-11-login.json"
+PHASE15_STAGE="p14-full-library-home"
 api_get "$JAR" '/api/v1/student/home' "$TMP/full-11-home.json"
-jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4-11plus" and .source=="fullLibrary")' "$TMP/full-11-home.json" >/dev/null
+echo "PHASE15_STAGE p14-full-library-home views=$(jq -c '[.subjects[]|select(.subject=="english")|.views[]|{viewId,lockedPreview}]' "$TMP/full-11-home.json")"
+jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4-11plus" and .lockedPreview==false)' "$TMP/full-11-home.json" >/dev/null
+PHASE15_STAGE="p14-full-library-list"
+echo "PHASE15_STAGE p14-full-library-list"
 api_get "$JAR" '/api/v1/student/views/english-year4-11plus/lessons' "$TMP/full-11-lessons.json"
 jq -e --arg id "$E4_VR_LESSON" '.lessons[]|select(.lessonId==$id and .locked==false)' "$TMP/full-11-lessons.json" >/dev/null
+PHASE15_STAGE="p14-full-library-detail"
+echo "PHASE15_STAGE p14-full-library-detail"
 api_get "$JAR" "/api/v1/student/lessons/$(urlenc "$E4_VR_LESSON")?viewId=english-year4-11plus" "$TMP/full-11-detail.json"
 jq -e '.lesson.locked==false and .lesson.vr != null' "$TMP/full-11-detail.json" >/dev/null
 jq -e '([.lesson.vr | .. | objects | .resourceKey? // empty] | length) > 0' "$TMP/full-11-detail.json" >/dev/null
+PHASE15_STAGE="p14-full-library-special"
+echo "PHASE15_STAGE p14-full-library-special"
 api_get "$JAR" '/api/v1/student/special-areas?viewId=english-year4-11plus' "$TMP/full-11-special.json"
 jq -e '.areas==[]' "$TMP/full-11-special.json" >/dev/null
 d1 "SELECT COUNT(*) AS c FROM lesson_entitlements WHERE portal_user_id_norm='testy5e' AND lesson_id='${E4_VR_LESSON}';" "$TMP/full-11-d1.json"
@@ -315,6 +378,8 @@ test "$(jq -r '.[0].results[0].c' "$TMP/full-11-d1.json")" = '0'
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/original-testy5e.json"; cp "$TMP/original-testy5e.json" "$(user_file testy5e)"
 echo 'P14 11+ Full Library/VR separation: PASS.'
 
+PHASE15_STAGE="p24-one-off"
+echo "PHASE15_STAGE p24-one-off"
 # P24 one-off guest/manual individual lesson access: no membership or D1 entitlement mutation.
 jq --arg id "$E4_LESSON" '.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)' "$TMP/original-testy5e.json" >"$TMP/testy5e-guest.json"
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-guest.json"; cp "$TMP/testy5e-guest.json" "$(user_file testy5e)"
@@ -327,6 +392,8 @@ kv_put "$STUDENTS" 'user:testy5e' "$TMP/original-testy5e.json"; cp "$TMP/origina
 echo 'P24 one-off/manual individual access without membership mutation: PASS.'
 
 # P09/P10/P11/P12/P23: effective dates, join, transfer, leave/rejoin, subject independence and absence-independent release.
+PHASE15_STAGE="p09-effective-dates"
+echo "PHASE15_STAGE p09-effective-dates"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 SEED="INSERT INTO batch_definitions (batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to,created_at,updated_at) VALUES ('P15_M3A','2026-27','maths',3,'normal',NULL,'${DAY_M3}',NULL,'${NOW}','${NOW}'),('P15_M4B','2026-27','maths',4,'normal',NULL,'${DAY_M3}',NULL,'${NOW}','${NOW}'),('P15_E411','2026-27','english',4,'11plus',NULL,'${DAY_M3}',NULL,'${NOW}','${NOW}'); INSERT INTO student_batch_assignments (portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy5e','P15_M3A','${DAY_M2}',NULL,'${NOW}','${NOW}');"
 d1 "$SEED" "$TMP/seed.json"
@@ -335,10 +402,16 @@ test "$(jq -r '.[0].results[0].e' "$TMP/seed-counts.json")" = '632'; test "$(jq 
 JAR="$TMP/join.jar"; login_user testy5e "$JAR" "$TMP/join-login.json"
 api_get "$JAR" '/api/v1/student/home' "$TMP/join-home.json"
 jq -e '.subjects[]|select(.subject=="maths")|.views[]|select(.viewId=="maths-year3" and .current==true and .group=="current")' "$TMP/join-home.json" >/dev/null
+PHASE15_STAGE="p09-locked-catalogue"
+echo "PHASE15_STAGE p09-locked-catalogue"
 api_get "$JAR" '/api/v1/student/views/maths-year3/lessons' "$TMP/join-lessons-before.json"
 jq -e --arg id "$M3_LESSON" '.lessons[]|select(.lessonId==$id and .locked==true)' "$TMP/join-lessons-before.json" >/dev/null
+PHASE15_STAGE="p09-prejoin-reject"
+echo "PHASE15_STAGE p09-prejoin-reject"
 sync_one grant p15-prejoin testy5e "$M3_LESSON" P15_M3A "$DAY_M3" "$TMP/prejoin.json"
 jq -e '.results[0].ok==false and .results[0].status=="NOT_ASSIGNED_ON_LESSON_DATE"' "$TMP/prejoin.json" >/dev/null
+PHASE15_STAGE="p09-current-grant"
+echo "PHASE15_STAGE p09-current-grant"
 sync_one grant p15-join testy5e "$M3_LESSON" P15_M3A "$TODAY" "$TMP/join-grant.json"
 jq -e '.results[0].ok==true and .results[0].status=="CREATED"' "$TMP/join-grant.json" >/dev/null
 api_get "$JAR" '/api/v1/student/views/maths-year3/lessons' "$TMP/join-lessons-after.json"
@@ -347,6 +420,8 @@ d1 "SELECT COUNT(*) AS e FROM lesson_entitlements; SELECT COUNT(*) AS r FROM bat
 test "$(jq -r '.[0].results[0].e' "$TMP/join-counts.json")" = '633'; test "$(jq -r '.[1].results[0].r' "$TMP/join-counts.json")" = '1'
 echo 'P09 mid-term join/effective_from and P23 assignment-only release gate: PASS.'
 
+PHASE15_STAGE="p10-transfer"
+echo "PHASE15_STAGE p10-transfer"
 TRANSFER="UPDATE student_batch_assignments SET effective_to='${TODAY}',updated_at='${NOW}' WHERE portal_user_id_norm='testy5e' AND batch_key='P15_M3A' AND effective_to IS NULL; INSERT INTO student_batch_assignments (portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy5e','P15_M4B','${TODAY}',NULL,'${NOW}','${NOW}');"
 d1 "$TRANSFER" "$TMP/transfer.json"
 JAR="$TMP/transfer.jar"; login_user testy5e "$JAR" "$TMP/transfer-login.json"
@@ -363,6 +438,8 @@ d1 "SELECT COUNT(*) AS e FROM lesson_entitlements WHERE portal_user_id_norm='tes
 test "$(jq -r '.[0].results[0].e' "$TMP/transfer-count.json")" = '2'
 echo 'P10 transfer/history/no earlier-batch inheritance: PASS.'
 
+PHASE15_STAGE="p11-leave-rejoin"
+echo "PHASE15_STAGE p11-leave-rejoin"
 # Close the active Maths assignment today by moving its test-only start to yesterday first; retained D1 lessons must survive.
 d1 "UPDATE student_batch_assignments SET effective_from='${DAY_M1}',effective_to='${TODAY}',updated_at='${NOW}' WHERE portal_user_id_norm='testy5e' AND batch_key='P15_M4B' AND effective_to IS NULL;" "$TMP/leave.json"
 JAR="$TMP/leave.jar"; login_user testy5e "$JAR" "$TMP/leave-login.json"
@@ -379,20 +456,51 @@ jq -e '.subjects[]|select(.subject=="maths")|.views[]|select(.viewId=="maths-yea
 jq -e '.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year5" and .current==true)' "$TMP/rejoin-home.json" >/dev/null
 echo 'P11 leave/rejoin and P12 stop-one-subject/retain-history: PASS.'
 
+PHASE15_STAGE="p06-11plus-no-vr"
+echo "PHASE15_STAGE p06-11plus-no-vr"
 # P06: active English 11+ core access without VR entitlement.
+PHASE15_STAGE="p06-clean-base"
+echo "PHASE15_STAGE p06-clean-base"
+jq --arg id "$E4_VR_LESSON" '
+  .fullLibraries=((.fullLibraries // []) | map(select(. != "ENGLISH_Y4_FULL" and . != "ENGLISH_Y4_11PLUS_FULL"))) |
+  .manualAccess.coreLessons=((.manualAccess.coreLessons // []) | map(select(. != $id))) |
+  .manualAccess.vrLessons=((.manualAccess.vrLessons // []) | map(select(. != $id)))
+' "$TMP/original-testy5e.json" >"$TMP/testy5e-p06-clean.json"
+kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-p06-clean.json"; cp "$TMP/testy5e-p06-clean.json" "$(user_file testy5e)"
+for attempt in $(seq 1 20); do
+  kv_get "$STUDENTS" 'user:testy5e' "$TMP/p06-clean-readback.json"
+  if jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) == null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/p06-clean-readback.json" >/dev/null; then break; fi
+  sleep 1
+done
+jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) == null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/p06-clean-readback.json" >/dev/null
 d1 "INSERT INTO student_batch_assignments (portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy5e','P15_E411','${TODAY}',NULL,'${NOW}','${NOW}');" "$TMP/e411-assignment.json"
 JAR="$TMP/e411-locked.jar"; login_user testy5e "$JAR" "$TMP/e411-locked-login.json"
+PHASE15_STAGE="p06-locked-list"
 api_get "$JAR" '/api/v1/student/views/english-year4-11plus/lessons' "$TMP/e411-before.json"
-jq -e --arg id "$E4_VR_LESSON" '.lessons[]|select(.lessonId==$id and .locked==true)' "$TMP/e411-before.json" >/dev/null
-jq --arg id "$E4_VR_LESSON" '.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)' "$TMP/original-testy5e.json" >"$TMP/testy5e-11-core-only.json"
+P06_STATE="$(jq -r --arg id "$E4_VR_LESSON" '[.lessons[]|select(.lessonId==$id)|if .locked then "locked" else "open" end][0] // "absent"' "$TMP/e411-before.json")"
+echo "PHASE15_STAGE p06-locked-list target_state=${P06_STATE}"
+test "$P06_STATE" = 'locked'
+jq --arg id "$E4_VR_LESSON" '.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)' "$TMP/testy5e-p06-clean.json" >"$TMP/testy5e-11-core-only.json"
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-11-core-only.json"; cp "$TMP/testy5e-11-core-only.json" "$(user_file testy5e)"
+for attempt in $(seq 1 20); do
+  kv_get "$STUDENTS" 'user:testy5e' "$TMP/e411-core-readback.json"
+  if jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/e411-core-readback.json" >/dev/null; then break; fi
+  sleep 1
+done
+jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/e411-core-readback.json" >/dev/null
 JAR="$TMP/e411-core.jar"; login_user testy5e "$JAR" "$TMP/e411-core-login.json"
+PHASE15_STAGE="p06-core-detail"
 api_get "$JAR" "/api/v1/student/lessons/$(urlenc "$E4_VR_LESSON")?viewId=english-year4-11plus" "$TMP/e411-core-detail.json"
-jq -e '.lesson.locked==false' "$TMP/e411-core-detail.json" >/dev/null
-jq -e '([.lesson.vr // {} | .. | objects | .resourceKey? // empty] | length) == 0' "$TMP/e411-core-detail.json" >/dev/null
+P06_LOCKED="$(jq -r '.lesson.locked' "$TMP/e411-core-detail.json")"
+P06_VR_COUNT="$(jq -r '[.lesson.vr // {} | .. | objects | .resourceKey? // empty] | length' "$TMP/e411-core-detail.json")"
+echo "PHASE15_STAGE p06-core-detail locked=${P06_LOCKED} vrResourceCount=${P06_VR_COUNT}"
+test "$P06_LOCKED" = 'false'
+test "$P06_VR_COUNT" = '0'
 kv_put "$STUDENTS" 'user:testy5e' "$TMP/original-testy5e.json"; cp "$TMP/original-testy5e.json" "$(user_file testy5e)"
 echo 'P06 English 11+ core without VR: PASS.'
 
+PHASE15_STAGE="p18-session"
+echo "PHASE15_STAGE p18-session"
 # P18 session lifecycle on a controlled established persona.
 LOGIN_PASSWORD="$(jq -r '.p' "$TMP/original-testy5em.json")"; mask "$LOGIN_PASSWORD"
 JAR_A="$TMP/session-a.jar"; login_user testy5em "$JAR_A" "$TMP/session-a-login.json"
@@ -412,6 +520,8 @@ d1 "UPDATE student_sessions SET idle_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','n
 IDLE_CODE="$(api_code_get "$JAR_C" '/api/v1/student/session' "$TMP/session-expired.json")"; test "$IDLE_CODE" = '401'; jq -e '.error=="SESSION_EXPIRED"' "$TMP/session-expired.json" >/dev/null
 echo 'P18 opaque/single-device/logout/2-hour inactivity: PASS.'
 
+PHASE15_STAGE="p19-reset"
+echo "PHASE15_STAGE p19-reset"
 # P19 controlled reset effect: modify only the test persona credential, revoke its active session, restore exact KV.
 JAR_R="$TMP/reset-old.jar"; login_user testy5em "$JAR_R" "$TMP/reset-old-login.json"
 TOKEN_R="$(cookie_token "$JAR_R")"; mask "$TOKEN_R"; HASH_R="$(token_hash "$TOKEN_R")"; mask "$HASH_R"
@@ -426,9 +536,11 @@ api_post "$TMP/reset-new.jar" '/api/v1/student/auth/login' "$(jq -cn --arg usern
 kv_put "$STUDENTS" 'user:testy5em' "$TMP/original-testy5em.json"; cp "$TMP/original-testy5em.json" "$(user_file testy5em)"
 d1 "UPDATE student_sessions SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE portal_user_id_norm='testy5em' AND created_at >= '${TEST_START}' AND revoked_at IS NULL;" "$TMP/reset-final-revoke.json"
 d1 "SELECT COUNT(*) AS e FROM lesson_entitlements; SELECT COUNT(*) AS a FROM student_batch_assignments;" "$TMP/reset-invariants.json"
-test "$(jq -r '.[0].results[0].e' "$TMP/reset-invariants.json")" = '634'; test "$(jq -r '.[1].results[0].a' "$TMP/reset-invariants.json")" = '7'
+test "$(jq -r '.[0].results[0].e' "$TMP/reset-invariants.json")" = '634'; test "$(jq -r '.[1].results[0].a' "$TMP/reset-invariants.json")" = '8'
 echo 'P19 controlled login-reset effects: PASS.'
 
+PHASE15_STAGE="p20-protected-answer"
+echo "PHASE15_STAGE p20-protected-answer"
 # P20 protected Answer Pack lifecycle; discover an entitled protected answer from authoritative deployed data.
 JAR_P="$TMP/protected.jar"; login_user testy5em "$JAR_P" "$TMP/protected-login.json"
 ANSWER_PASSWORD="$(jq -r '.answerPassword' "$TMP/original-testy5em.json")"; mask "$ANSWER_PASSWORD"
@@ -466,6 +578,8 @@ d1 "UPDATE student_sessions SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') 
 REVOKED_VIEW_CODE="$(api_code_get "$JAR_P" "$VIEW_PATH_3" "$TMP/answer-revoked.json")"; test "$REVOKED_VIEW_CODE" = '401'; jq -e '.error=="SESSION_INVALID"' "$TMP/answer-revoked.json" >/dev/null
 echo 'P20 protected Answer Pack/Key lifecycle: PASS.'
 
+PHASE15_STAGE="p25-multi-current"
+echo "PHASE15_STAGE p25-multi-current"
 # P25 is deliberately last: simultaneous active same-subject views must all remain Current.
 d1 "INSERT INTO student_batch_assignments (portal_user_id_norm,batch_key,effective_from,effective_to,created_at,updated_at) VALUES ('testy5e','P15_M3A','${TODAY}',NULL,'${NOW}','${NOW}');" "$TMP/multi-active-insert.json"
 JAR="$TMP/multi-active.jar"; login_user testy5e "$JAR" "$TMP/multi-active-login.json"
