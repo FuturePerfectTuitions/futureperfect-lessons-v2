@@ -70,6 +70,9 @@ jobs:
           node tests/phase12-batch-schema-static-verification.mjs
           node --experimental-default-type=module tests/phase11-catalogue-static-verification.mjs | tee /tmp/p15-catalogue-static.log
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p15-catalogue-static.log
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p15-navigation-manifest.log
+          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p15-navigation-manifest.log >/dev/null
+          node tests/phase15-master-navigation-regression.mjs
           node tests/phase11-session-efficiency-static-verification.mjs
           node tests/phase11-answer-dedup-static-verification.mjs
           node tests/phase11-answer-header-static-verification.mjs
