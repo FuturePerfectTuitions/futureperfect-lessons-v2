@@ -45,6 +45,12 @@ if (!original.includes(historyAssertionNeedle)) {
   throw new Error('Phase 16 history diagnostic could not find the Year 2 Previous assertion.');
 }
 
+const historyOpenNeedle = `await previous.getByRole('button', { name: /Year 2/ }).first().click();
+    await page.locator('#screen-lessons').waitFor({ state: 'visible', timeout: 30000 });`;
+if (!original.includes(historyOpenNeedle)) {
+  throw new Error('Phase 16 history-list synchronization could not find the Year 2 open sequence.');
+}
+
 // GitHub-hosted headless browsers occasionally report the input type before
 // the click-driven DOM mutation has settled. Preserve the real user click and
 // the original assertions, but allow a short rendering turn after each eye
@@ -162,6 +168,31 @@ stabilized = stabilized.replace(
     console.log('PHASE16_HISTORY_GROUPING_DIAGNOSTIC ' + JSON.stringify(evidence.navigation.historyGroupingDiagnostic));
     await shot(page, 'mobile-history-grouping-diagnostic');
     ${historyAssertionNeedle}`
+);
+
+// Clicking a view makes #screen-lessons visible before its asynchronous Worker
+// response has necessarily rendered rows. Wait for the exact Year 2 lesson-list
+// response and first row before asserting the canonical count. This preserves
+// the real click and strict 29-row assertion while removing a test-only render
+// race; production navigation code is unchanged.
+stabilized = stabilized.replace(
+  historyOpenNeedle,
+  `{
+      const historyListResponsePromise = page.waitForResponse(response => {
+        try {
+          const url = new URL(response.url());
+          return response.request().method() === 'GET' &&
+            url.pathname.endsWith('/api/v1/student/views/english-year2/lessons');
+        } catch (_) {
+          return false;
+        }
+      }, { timeout: 60000 });
+      await previous.getByRole('button', { name: /Year 2/ }).first().click();
+      const historyListResponse = await historyListResponsePromise;
+      assert.equal(historyListResponse.status(), 200, 'Historical Year 2 lesson-list request did not succeed.');
+      await page.locator('#screen-lessons').waitFor({ state: 'visible', timeout: 30000 });
+      await page.locator('#lesson-list .phase6-lesson-row').first().waitFor({ state: 'visible', timeout: 60000 });
+    }`
 );
 
 await fs.writeFile(runtimePath, stabilized, 'utf8');
