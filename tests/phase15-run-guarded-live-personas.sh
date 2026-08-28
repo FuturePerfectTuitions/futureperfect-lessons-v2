@@ -26,6 +26,17 @@ s=s.replace(
 s=s.replace('  local code="$1" file="$TMP/curriculum-$code.json"',
             '  local code="$1"\n  local file="$TMP/curriculum-$code.json"')
 
+# Establish a clean authentication start for controlled dev personas. Stale
+# active sessions are ephemeral test state, not part of the Phase 14 D1 baseline.
+# Revoke only the named controlled personas; no real-user session is touched.
+marker='BASE_SQL="'
+idx=s.index(marker)
+preflight=(
+    'PREFLIGHT_IDS="\'testy5e\',\'testy5em\',\'testy511e\',\'test0505\',\'test0606\',\'test0404\'"\n'
+    'd1 "UPDATE student_sessions SET revoked_at=strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\') WHERE portal_user_id_norm IN (${PREFLIGHT_IDS}) AND revoked_at IS NULL AND idle_expires_at > strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\');" "$TMP/preflight-session-revoke.json"\n'
+)
+s=s[:idx]+preflight+s[idx:]
+
 # Phase 11 made VR How-To a separate top-level English 11+ destination. It is
 # deliberately removed from the legacy /special-areas list while the direct
 # VR_HOWTO route remains positively/negatively gated. Correct the original
@@ -127,6 +138,26 @@ s=s.replace(
     'PHASE15_STAGE="p13-full-library-home"\napi_get "$JAR" \'/api/v1/student/home\' "$TMP/full-normal-home.json"\necho "PHASE15_STAGE p13-full-library-home views=$(jq -c \'[.subjects[]|select(.subject=="english")|.views[]|{viewId,source,lockedPreview}]\' "$TMP/full-normal-home.json")"\njq -e \'.subjects[]|select(.subject=="english")|.views[]|select(.viewId=="english-year4" and .lockedPreview==false)\' "$TMP/full-normal-home.json" >/dev/null',
     1,
 )
+
+# Major persona checkpoints after the Full Library section. These labels make a
+# failing live assertion identifiable without printing commands or payloads.
+stages = [
+    ('NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"', 'p09-effective-dates'),
+    ('api_get "$JAR" \'/api/v1/student/views/maths-year3/lessons\' "$TMP/join-lessons-before.json"', 'p09-locked-catalogue'),
+    ('sync_one grant p15-prejoin', 'p09-prejoin-reject'),
+    ('sync_one grant p15-join', 'p09-current-grant'),
+    ('TRANSFER="UPDATE student_batch_assignments', 'p10-transfer'),
+    ('# Close the active Maths assignment today', 'p11-leave-rejoin'),
+    ('# P06: active English 11+ core access without VR entitlement.', 'p06-11plus-no-vr'),
+    ('# P18 session lifecycle on a controlled established persona.', 'p18-session'),
+    ('# P19 controlled reset effect:', 'p19-reset'),
+    ('# P20 protected Answer Pack lifecycle;', 'p20-protected-answer'),
+    ('# P25 is deliberately last:', 'p25-multi-current'),
+]
+for marker, stage in stages:
+    if marker not in s:
+        raise SystemExit(f'missing stage marker: {stage}')
+    s=s.replace(marker, f'PHASE15_STAGE="{stage}"\necho "PHASE15_STAGE {stage}"\n'+marker, 1)
 
 p.write_text(s)
 PY
