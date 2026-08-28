@@ -121,6 +121,32 @@ s=s.replace(
     1,
 )
 
+# Controlled STUDENTS_KV writes must be observed before a new login snapshots the
+# profile. This makes the live matrix robust to Cloudflare KV propagation without
+# weakening any authorization assertion or touching real students.
+s=s.replace(
+    'kv_put "$STUDENTS" \'user:testy5e\' "$TMP/testy5e-full-11.json"; cp "$TMP/testy5e-full-11.json" "$(user_file testy5e)"',
+    '''kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-full-11.json"; cp "$TMP/testy5e-full-11.json" "$(user_file testy5e)"
+for attempt in $(seq 1 20); do
+  kv_get "$STUDENTS" 'user:testy5e' "$TMP/full-11-readback.json"
+  if jq -e '((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) != null' "$TMP/full-11-readback.json" >/dev/null; then break; fi
+  sleep 1
+done
+jq -e '((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) != null' "$TMP/full-11-readback.json" >/dev/null''',
+    1,
+)
+s=s.replace(
+    'kv_put "$STUDENTS" \'user:testy5e\' "$TMP/testy5e-11-core-only.json"; cp "$TMP/testy5e-11-core-only.json" "$(user_file testy5e)"',
+    '''kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-11-core-only.json"; cp "$TMP/testy5e-11-core-only.json" "$(user_file testy5e)"
+for attempt in $(seq 1 20); do
+  kv_get "$STUDENTS" 'user:testy5e' "$TMP/e411-core-readback.json"
+  if jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null)' "$TMP/e411-core-readback.json" >/dev/null; then break; fi
+  sleep 1
+done
+jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null)' "$TMP/e411-core-readback.json" >/dev/null''',
+    1,
+)
+
 # Unique special-area checkpoints. Only bucket identifiers are printed; no API
 # payload, user profile or credential is emitted.
 repls = {
