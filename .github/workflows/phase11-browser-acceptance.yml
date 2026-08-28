@@ -32,7 +32,10 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 120); do
+          # The Phase 15 acceptance workflow is serialized. Allow up to 15 minutes
+          # for a same-head run to clear the queue and complete before this
+          # redundant standalone browser gate proceeds.
+          for attempt in $(seq 1 180); do
             state="$(gh api \
               -H 'Accept: application/vnd.github+json' \
               "/repos/${GITHUB_REPOSITORY}/actions/workflows/phase15-student-persona-acceptance.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=10" \
@@ -48,7 +51,7 @@ jobs:
               echo 'Same-head Phase 15 acceptance completed successfully; continuing standalone browser gate.'
               break
             fi
-            if [ "$attempt" = '120' ]; then
+            if [ "$attempt" = '180' ]; then
               echo 'ERROR: timed out waiting for same-head Phase 15 acceptance.' >&2
               exit 1
             fi
