@@ -73,7 +73,7 @@ test -n "$PASSWORD"; mask "$PASSWORD"
 
 kv_get "$LESSONS" 'curriculum:ENGLISH_Y4' "$TMP/curriculum.json"
 d1 "SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm='${USER}';" "$TMP/existing.json"
-LESSON="$(node - "$TMP/curriculum.json" "$TMP/original.json" "$TMP/existing.json" <<'NODE'
+node - "$TMP/curriculum.json" "$TMP/original.json" "$TMP/existing.json" >"$TMP/candidates.txt" <<'NODE'
 const fs=require('node:fs');
 const curriculum=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
 const user=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
@@ -82,12 +82,20 @@ const raw=Array.isArray(curriculum)?curriculum:(curriculum.lessonIds||curriculum
 const ids=raw.map(x=>typeof x==='string'?x:x?.lessonId).filter(Boolean);
 const manual=new Set((user.manualAccess?.coreLessons||[]).map(String));
 const earned=new Set((existing[0]?.results||[]).map(x=>String(x.lesson_id||'')));
-const candidate=ids.find(id=>!manual.has(String(id))&&!earned.has(String(id)));
-if(candidate) process.stdout.write(String(candidate));
+for (const id of ids) if (!manual.has(String(id)) && !earned.has(String(id))) console.log(String(id));
 NODE
-)"
+LESSON=''
+while IFS= read -r candidate; do
+  [ -n "$candidate" ] || continue
+  kv_get "$LESSONS" "lesson:$candidate" "$TMP/candidate.json"
+  if jq -e --arg id "$candidate" '.lessonId==$id and .subject=="english" and .active != false' "$TMP/candidate.json" >/dev/null; then
+    LESSON="$candidate"
+    break
+  fi
+done <"$TMP/candidates.txt"
 test -n "$LESSON"; mask "$LESSON"
 
+echo 'PHASE15_P24_DIAG active_unowned_candidate=1'
 jq --arg id "$LESSON" '.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)' "$TMP/original.json" >"$TMP/manual.json"
 kv_put "$STUDENTS" "user:$USER" "$TMP/manual.json"
 
@@ -106,6 +114,15 @@ curl --fail-with-body --silent --show-error --cookie "$JAR" --cookie-jar "$JAR" 
   --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --header 'Accept: application/json' \
   --request POST --data "$PAYLOAD" "$WORKER_BASE/api/v1/student/auth/login" >"$TMP/login.json"
 jq -e '.ok == true' "$TMP/login.json" >/dev/null
+
+# Confirm the fresh session projection itself contains the new manual lesson.
+# Only boolean/count diagnostics are emitted; no user JSON or lesson identifier is printed.
+d1 "SELECT COUNT(*) AS profile_count, COALESCE(MAX(CASE WHEN EXISTS (SELECT 1 FROM json_each(json_extract(p.user_json,'$.manualAccess.coreLessons')) WHERE CAST(value AS TEXT)='${LESSON}') THEN 1 ELSE 0 END),0) AS manual_target FROM student_session_profiles p WHERE p.portal_user_id_norm='${USER}' AND p.created_at >= '${START}';" "$TMP/profile.json"
+PROFILE_COUNT="$(jq -r '.[0].results[0].profile_count' "$TMP/profile.json")"
+PROFILE_TARGET="$(jq -r '.[0].results[0].manual_target' "$TMP/profile.json")"
+echo "PHASE15_P24_DIAG session_profile_count=${PROFILE_COUNT} session_profile_target=${PROFILE_TARGET}"
+test "$PROFILE_COUNT" -ge 1
+test "$PROFILE_TARGET" = '1'
 
 HOME_CODE=''; HOME_VIEW='0'; LIST_CODE=''; OPEN='0'
 for attempt in $(seq 1 8); do
