@@ -51,6 +51,11 @@ if (!original.includes(historyOpenNeedle)) {
   throw new Error('Phase 16 history-list synchronization could not find the Year 2 open sequence.');
 }
 
+const webkitLoginNeedle = "    await login(webkitPage, 'TestY2EM');";
+if (!original.includes(webkitLoginNeedle)) {
+  throw new Error('Phase 16 WebKit login diagnostic could not find the desktop WebKit login call.');
+}
+
 let stabilized = original.replaceAll(
   eyeNeedle,
   `${eyeNeedle}\n  await page.waitForTimeout(250);`
@@ -172,6 +177,71 @@ stabilized = stabilized.replace(
       await page.waitForTimeout(250);
       evidence.navigation.historyLessonListDiagnostic.renderedRows = await page.locator('#lesson-list .phase6-lesson-row').count();
       console.log('PHASE16_HISTORY_LIST_RENDER_DIAGNOSTIC ' + JSON.stringify(evidence.navigation.historyLessonListDiagnostic));
+    }`
+);
+
+stabilized = stabilized.replace(
+  webkitLoginNeedle,
+  `    {
+      const webkitNetwork = [];
+      const onWebKitResponse = response => {
+        try {
+          const url = new URL(response.url());
+          if (!response.url().startsWith(WORKER_BASE)) return;
+          if (!['/api/v1/student/auth/login', '/api/v1/student/session', '/api/v1/student/home'].includes(url.pathname)) return;
+          webkitNetwork.push({ method: response.request().method(), path: url.pathname, status: response.status() });
+        } catch (_) {}
+      };
+      webkitPage.on('response', onWebKitResponse);
+      try {
+        await login(webkitPage, 'TestY2EM');
+      } catch (error) {
+        const cookies = await webkitContext.cookies(WORKER_BASE).catch(() => []);
+        const sessionCookies = cookies
+          .filter(cookie => cookie.name === 'fpt_v2_session')
+          .map(cookie => ({
+            present: true,
+            domain: cookie.domain,
+            path: cookie.path,
+            httpOnly: cookie.httpOnly,
+            secure: cookie.secure,
+            sameSite: cookie.sameSite,
+            sessionCookie: cookie.expires === -1 || cookie.expires === 0
+          }));
+        const directSession = await pageApi(webkitPage, '/api/v1/student/session').catch(fetchError => ({
+          status: null,
+          ok: false,
+          body: { error: String(fetchError?.message || fetchError).slice(0, 300) }
+        }));
+        const dom = await webkitPage.evaluate(() => ({
+          loginScreenHidden: document.getElementById('login-screen')?.hidden ?? null,
+          portalScreenHidden: document.getElementById('portal-screen')?.hidden ?? null,
+          subjectsHidden: document.getElementById('screen-subjects')?.hidden ?? null,
+          viewsHidden: document.getElementById('screen-views')?.hidden ?? null,
+          lessonsHidden: document.getElementById('screen-lessons')?.hidden ?? null,
+          greeting: String(document.getElementById('student-greeting')?.textContent || '').slice(0, 120),
+          loginError: String(document.getElementById('login-error')?.textContent || '').slice(0, 180),
+          loginErrorHidden: document.getElementById('login-error')?.hidden ?? null,
+          subjectsMessage: String(document.getElementById('phase6-message')?.textContent || '').slice(0, 180),
+          subjectsMessageHidden: document.getElementById('phase6-message')?.hidden ?? null
+        })).catch(() => null);
+        evidence.browsers.webkitLoginDiagnostic = {
+          network: webkitNetwork,
+          cookieCount: sessionCookies.length,
+          cookies: sessionCookies,
+          directSession: {
+            status: directSession?.status ?? null,
+            ok: directSession?.ok ?? false,
+            error: directSession?.body?.error || null
+          },
+          dom
+        };
+        console.log('PHASE16_WEBKIT_LOGIN_DIAGNOSTIC ' + JSON.stringify(evidence.browsers.webkitLoginDiagnostic));
+        await shot(webkitPage, 'webkit-login-diagnostic');
+        throw error;
+      } finally {
+        webkitPage.off('response', onWebKitResponse);
+      }
     }`
 );
 
