@@ -26,9 +26,10 @@ s=s.replace(
 s=s.replace('  local code="$1" file="$TMP/curriculum-$code.json"',
             '  local code="$1"\n  local file="$TMP/curriculum-$code.json"')
 
-# P14 must prove that the 11+ Full Library itself grants the VR lesson. Select a
-# canonical English Y4 VR lesson which this controlled persona does not already
-# hold through manual VR access or D1. The selected lesson ID is never printed.
+# P14/P06 need an English Y4 VR lesson which starts with no independent access.
+# Exclude D1, manual VR and manual core access so P14 proves Full Library causation
+# and P06 genuinely proves core-only access does not leak VR. The lesson ID is
+# never printed.
 s=s.replace(
     'E4_VR_LESSON="$(first_vr_lesson ENGLISH_Y4)"',
     '''d1 "SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm='testy5e';" "$TMP/testy5e-existing-entitlements.json"
@@ -36,6 +37,7 @@ E4_VR_LESSON=''
 while IFS= read -r candidate; do
   [ -n "$candidate" ] || continue
   if jq -e --arg id "$candidate" '((.manualAccess.vrLessons // []) | index($id)) != null' "$TMP/original-testy5e.json" >/dev/null; then continue; fi
+  if jq -e --arg id "$candidate" '((.manualAccess.coreLessons // []) | index($id)) != null' "$TMP/original-testy5e.json" >/dev/null; then continue; fi
   if jq -e --arg id "$candidate" '[.[0].results[]?.lesson_id] | index($id) != null' "$TMP/testy5e-existing-entitlements.json" >/dev/null; then continue; fi
   kv_get "$LESSONS" "lesson:$candidate" "$TMP/vr-candidate.json"
   if jq -e '.active != false and .vr != null and ([.vr | .. | objects | (.r2Key? // .r2? // empty)] | length > 0)' "$TMP/vr-candidate.json" >/dev/null; then
@@ -105,7 +107,7 @@ s=s.replace(
 )
 s=s.replace(
     "jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=[$lib]' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-full-11.json\"",
-    "jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) | map(select(. != $lib)))' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-p14-base.json\"\njq -e --arg id \"$E4_VR_LESSON\" '(((.fullLibraries // []) | index(\"ENGLISH_Y4_11PLUS_FULL\")) == null) and ((((.manualAccess.vrLessons // []) | index($id)) == null))' \"$TMP/testy5e-p14-base.json\" >/dev/null\nkv_put \"$STUDENTS\" 'user:testy5e' \"$TMP/testy5e-p14-base.json\"; cp \"$TMP/testy5e-p14-base.json\" \"$(user_file testy5e)\"\njq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) + [$lib] | unique)' \"$TMP/testy5e-p14-base.json\" >\"$TMP/testy5e-full-11.json\"",
+    "jq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) | map(select(. != $lib)))' \"$TMP/original-testy5e.json\" >\"$TMP/testy5e-p14-base.json\"\njq -e --arg id \"$E4_VR_LESSON\" '(((.fullLibraries // []) | index(\"ENGLISH_Y4_11PLUS_FULL\")) == null) and ((((.manualAccess.vrLessons // []) | index($id)) == null)) and ((((.manualAccess.coreLessons // []) | index($id)) == null))' \"$TMP/testy5e-p14-base.json\" >/dev/null\nkv_put \"$STUDENTS\" 'user:testy5e' \"$TMP/testy5e-p14-base.json\"; cp \"$TMP/testy5e-p14-base.json\" \"$(user_file testy5e)\"\njq --arg lib 'ENGLISH_Y4_11PLUS_FULL' '.fullLibraries=((.fullLibraries // []) + [$lib] | unique)' \"$TMP/testy5e-p14-base.json\" >\"$TMP/testy5e-full-11.json\"",
     1,
 )
 s=s.replace(
