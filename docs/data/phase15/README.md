@@ -12,22 +12,23 @@ Authoritative baseline:
 - Canonical catalogue: 369 lessons / 11 curricula
 - Catalogue SHA-256: `7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663`
 
-## Final acceptance evidence
+## Final functional acceptance evidence
 
-Final exact-head Phase 15 acceptance run: GitHub Actions run `33170735307` on head `983934e9a6c56045a54ccef0765625a1ce006a54` — **SUCCESS**.
+Final functional Phase 15 acceptance run: GitHub Actions run `33184745906` on head `2b28ef259445d3fd45327301d0108c6a21894ad4` — **SUCCESS**.
 
-The final run passed:
+That run passed:
 - static and inherited regression gates;
 - guarded isolated development Worker deployment gate;
-- isolated P24 manual individual access diagnostic;
-- full controlled persona matrix, including effective-dated membership, retained history, Full Library, ordinary/11+, VR eligible/ineligible, VR How-To, Assessments, MOCKS locked/no-leak presentation, one-off/manual individual access, multi-current same-subject assignments, session security and protected Answer Pack lifecycle;
+- the full controlled P01–P25 persona matrix, including effective-dated membership, retained history, Full Library, ordinary/11+, VR eligible/ineligible, VR How-To, Assessments, MOCKS locked/no-leak presentation, one-off/manual individual access, multi-current same-subject assignments, session security and protected Answer Pack lifecycle;
 - established deployed API regression;
 - real Google Chrome acceptance;
 - browser screenshot evidence upload;
 - controlled session cleanup; and
 - final exact read-only baseline verification.
 
-Browser evidence artifact: `phase15-persona-browser-screenshots` from run `33170735307`, artifact id `9685667810`, digest `sha256:96a5883f4d4c5ffc7041e756552647173500a9b213d1a363a3e20efc88dd8824`.
+Browser evidence artifact: `phase15-persona-browser-screenshots` from run `33184745906`, artifact id `9691459979`, digest `sha256:e677793c10cc85186e896a5ecc6d518eb33aa6db00ded4f62e9cf4b91a0554e5`.
+
+The earlier standalone P24 diagnostic was a temporary debugging aid. Its assertions are now covered by the main P24 persona in the guarded matrix, so the diagnostic script and duplicate workflow step were removed before merge. The final closure-record head must still pass the applicable repository checks after this documentation/workflow hygiene.
 
 ## Persona results
 
@@ -55,11 +56,12 @@ The Phase 15 matrix P01–P25 is accepted against the Master rules. Important li
 4. Explicit 11+ Full Library access is no longer suppressed by an ordinary retained view sharing the underlying curriculum.
 5. Manual individual core lesson access can surface the appropriate historical ordinary Year view without fabricating D1 entitlement or batch membership.
 6. Browser acceptance now follows the current lesson-video presentation by selecting the explicit View control before inspecting the player.
-7. The P14 controlled Full Library harness now retries session creation until the isolated Worker edge observes the intended temporary KV value. This removes a Cloudflare KV propagation race from the test itself without weakening the authorisation assertion or changing portal behaviour.
+7. Controlled KV-mutating personas now wait for the intended temporary value to be observed through a fresh Worker session before making assertions that depend on that value. This removes Cloudflare KV edge-propagation races from P06/P14/P20 without weakening the authorization assertions or changing portal behaviour.
+8. Phase 15 workflow path coverage now explicitly includes the Phase 13 entrypoint, manual-access adapter, VR How-To authorization source and inherited Excel-sync regression that participate in the deployed Phase 15 chain.
 
 ## Baseline restored
 
-The final acceptance run restored and re-verified the accepted Phase 14 operational baseline:
+The final functional acceptance run restored and re-verified the accepted Phase 14 operational baseline:
 - `632` lesson entitlements;
 - `4` batch definitions;
 - `4` student batch assignments;
@@ -77,4 +79,4 @@ No production login, DNS/CNAME, production route, cutover, legacy `FPT_LESSONS_T
 
 ## Closure decision
 
-All required Phase 15 static, API, D1, browser and owner-acceptance gates are satisfied. Phase 15 is therefore **CLOSED / PASS** and PR #125 is eligible to be marked ready and merged into `main` after the closure-record head itself passes the applicable repository checks.
+All required Phase 15 static, API, D1, browser and owner-acceptance gates are satisfied. Phase 15 is therefore **CLOSED / PASS**. PR #125 may be marked ready and merged into `main` only after the final closure-record head passes its applicable checks; after merge, a read-only post-merge baseline verification is required before Phase 16 may begin.
