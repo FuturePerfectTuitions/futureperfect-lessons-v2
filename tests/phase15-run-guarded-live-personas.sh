@@ -140,10 +140,59 @@ s=s.replace(
     '''kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-11-core-only.json"; cp "$TMP/testy5e-11-core-only.json" "$(user_file testy5e)"
 for attempt in $(seq 1 20); do
   kv_get "$STUDENTS" 'user:testy5e' "$TMP/e411-core-readback.json"
-  if jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null)' "$TMP/e411-core-readback.json" >/dev/null; then break; fi
+  if jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/e411-core-readback.json" >/dev/null; then break; fi
   sleep 1
 done
-jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null)' "$TMP/e411-core-readback.json" >/dev/null''',
+jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) != null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/e411-core-readback.json" >/dev/null''',
+    1,
+)
+
+# P06 must start from batch-only English 11+ membership. Remove every independent
+# source that could open the chosen lesson, prove it is locked, then add only core
+# manual access and prove VR resources remain unavailable.
+s=s.replace(
+    '# P06: active English 11+ core access without VR entitlement.\nd1 "INSERT INTO student_batch_assignments',
+    '''# P06: active English 11+ core access without VR entitlement.
+PHASE15_STAGE="p06-clean-base"
+echo "PHASE15_STAGE p06-clean-base"
+jq --arg id "$E4_VR_LESSON" '
+  .fullLibraries=((.fullLibraries // []) | map(select(. != "ENGLISH_Y4_FULL" and . != "ENGLISH_Y4_11PLUS_FULL"))) |
+  .manualAccess.coreLessons=((.manualAccess.coreLessons // []) | map(select(. != $id))) |
+  .manualAccess.vrLessons=((.manualAccess.vrLessons // []) | map(select(. != $id)))
+' "$TMP/original-testy5e.json" >"$TMP/testy5e-p06-clean.json"
+kv_put "$STUDENTS" 'user:testy5e' "$TMP/testy5e-p06-clean.json"; cp "$TMP/testy5e-p06-clean.json" "$(user_file testy5e)"
+for attempt in $(seq 1 20); do
+  kv_get "$STUDENTS" 'user:testy5e' "$TMP/p06-clean-readback.json"
+  if jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) == null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/p06-clean-readback.json" >/dev/null; then break; fi
+  sleep 1
+done
+jq -e --arg id "$E4_VR_LESSON" '(((.manualAccess.coreLessons // []) | index($id)) == null) and (((.manualAccess.vrLessons // []) | index($id)) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_FULL")) == null) and (((.fullLibraries // []) | index("ENGLISH_Y4_11PLUS_FULL")) == null)' "$TMP/p06-clean-readback.json" >/dev/null
+d1 "INSERT INTO student_batch_assignments''',
+    1,
+)
+s=s.replace(
+    'api_get "$JAR" \'/api/v1/student/views/english-year4-11plus/lessons\' "$TMP/e411-before.json"\njq -e --arg id "$E4_VR_LESSON" \'.lessons[]|select(.lessonId==$id and .locked==true)\' "$TMP/e411-before.json" >/dev/null',
+    '''PHASE15_STAGE="p06-locked-list"
+api_get "$JAR" '/api/v1/student/views/english-year4-11plus/lessons' "$TMP/e411-before.json"
+P06_STATE="$(jq -r --arg id "$E4_VR_LESSON" '[.lessons[]|select(.lessonId==$id)|if .locked then "locked" else "open" end][0] // "absent"' "$TMP/e411-before.json")"
+echo "PHASE15_STAGE p06-locked-list target_state=${P06_STATE}"
+test "$P06_STATE" = 'locked' ''',
+    1,
+)
+s=s.replace(
+    'jq --arg id "$E4_VR_LESSON" \'.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)\' "$TMP/original-testy5e.json" >"$TMP/testy5e-11-core-only.json"',
+    'jq --arg id "$E4_VR_LESSON" \'.manualAccess.coreLessons=((.manualAccess.coreLessons // []) + [$id] | unique)\' "$TMP/testy5e-p06-clean.json" >"$TMP/testy5e-11-core-only.json"',
+    1,
+)
+s=s.replace(
+    'api_get "$JAR" "/api/v1/student/lessons/$(urlenc "$E4_VR_LESSON")?viewId=english-year4-11plus" "$TMP/e411-core-detail.json"\njq -e \'.lesson.locked==false\' "$TMP/e411-core-detail.json" >/dev/null\njq -e \'([.lesson.vr // {} | .. | objects | .resourceKey? // empty] | length) == 0\' "$TMP/e411-core-detail.json" >/dev/null',
+    '''PHASE15_STAGE="p06-core-detail"
+api_get "$JAR" "/api/v1/student/lessons/$(urlenc "$E4_VR_LESSON")?viewId=english-year4-11plus" "$TMP/e411-core-detail.json"
+P06_LOCKED="$(jq -r '.lesson.locked' "$TMP/e411-core-detail.json")"
+P06_VR_COUNT="$(jq -r '[.lesson.vr // {} | .. | objects | .resourceKey? // empty] | length' "$TMP/e411-core-detail.json")"
+echo "PHASE15_STAGE p06-core-detail locked=${P06_LOCKED} vrResourceCount=${P06_VR_COUNT}"
+test "$P06_LOCKED" = 'false'
+test "$P06_VR_COUNT" = '0' ''',
     1,
 )
 
