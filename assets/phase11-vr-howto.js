@@ -9,6 +9,7 @@
   const ELIGIBLE_VIEW_IDS = new Set(['english-year4-11plus', 'english-year5-11plus']);
   let eligibleViewId = '';
   let eligibleViewLabel = '';
+  let eligibilityProbe = 0;
   let cardTimer = null;
 
   function requestUrl(input) {
@@ -35,14 +36,16 @@
     }
   }
 
-  function rememberEligibility(body) {
+  async function rememberEligibility(body) {
+    const probe = ++eligibilityProbe;
     eligibleViewId = '';
     eligibleViewLabel = '';
+    scheduleCard();
 
     const english = (Array.isArray(body?.subjects) ? body.subjects : [])
       .find(subject => String(subject?.subject || '').toLowerCase() === 'english');
     const views = Array.isArray(english?.views) ? english.views : [];
-    const eligible = views
+    const candidates = views
       .filter(view => {
         const viewId = String(view?.viewId || '').trim().toLowerCase();
         return ELIGIBLE_VIEW_IDS.has(viewId) && view?.lockedPreview !== true;
@@ -54,11 +57,30 @@
         return String(right?.viewId || '').localeCompare(String(left?.viewId || ''));
       });
 
-    if (eligible.length) {
-      eligibleViewId = String(eligible[0].viewId || '').trim();
-      eligibleViewLabel = String(eligible[0].label || '').trim();
+    const candidate = candidates[0];
+    if (!candidate) return;
+
+    const candidateViewId = String(candidate.viewId || '').trim();
+    const candidateViewLabel = String(candidate.label || '').trim();
+    try {
+      const response = await upstreamFetch(
+        `${base}/api/v1/student/special-areas/VR_HOWTO?viewId=${encodeURIComponent(candidateViewId)}`,
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          credentials: 'include',
+          cache: 'no-store'
+        }
+      );
+      const access = await response.json().catch(() => null);
+      if (probe !== eligibilityProbe) return;
+      if (!response.ok || !access?.ok || access?.area?.bucketId !== 'VR_HOWTO') return;
+      eligibleViewId = candidateViewId;
+      eligibleViewLabel = candidateViewLabel;
+      scheduleCard();
+    } catch (_) {
+      if (probe === eligibilityProbe) scheduleCard();
     }
-    scheduleCard();
   }
 
   window.fetch = async (input, init) => {
@@ -66,7 +88,7 @@
     if (!isHomeRequest(input, init) || !response?.ok) return response;
     try {
       const body = await response.clone().json();
-      if (body?.ok) rememberEligibility(body);
+      if (body?.ok) void rememberEligibility(body);
     } catch (_) {}
     return response;
   };
