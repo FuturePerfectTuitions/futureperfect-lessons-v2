@@ -35,6 +35,11 @@ if (!original.includes(modalCardNeedle)) {
   throw new Error('Phase 16 responsive Answer Pack dialog stabilization could not find the expected card selector.');
 }
 
+const projectedHomeNeedle = "if (home.status === 200 && home.body?.ok && predicate(home.body)) return home.body;";
+if (!original.includes(projectedHomeNeedle)) {
+  throw new Error('Phase 16 projected-home synchronization could not find loginUntilHome success return.');
+}
+
 // GitHub-hosted headless browsers occasionally report the input type before
 // the click-driven DOM mutation has settled. Preserve the real user click and
 // the original assertions, but allow a short rendering turn after each eye
@@ -99,6 +104,37 @@ stabilized = stabilized.replaceAll(page11VideoWait, 'await expandPhase16LessonVi
 stabilized = stabilized.replace(
   modalCardNeedle,
   "const box = await modal.locator('.phase8-answer-card').boundingBox();"
+);
+
+// Manual-access test data is written to Workers KV before login. Cloudflare KV
+// propagation can make a later explicit /home probe see the new historical view
+// even when the portal's earlier login-time loadHome() populated its in-memory
+// state from the previous edge value. Once the required projection is observed,
+// reload with the already-authenticated session and require the portal's own
+// reload-time /home response to contain the same fixture state. That makes the
+// subsequent UI assertion test the authoritative projected response rather than
+// a stale in-page snapshot, without changing production code or access rules.
+stabilized = stabilized.replace(
+  projectedHomeNeedle,
+  `if (home.status === 200 && home.body?.ok && predicate(home.body)) {
+      const refreshedHomePromise = page.waitForResponse(response => {
+        try {
+          const url = new URL(response.url());
+          return response.request().method() === 'GET' &&
+            url.pathname.endsWith('/api/v1/student/home');
+        } catch (_) {
+          return false;
+        }
+      }, { timeout: 60000 });
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      const refreshedHomeResponse = await refreshedHomePromise;
+      const refreshedHomeBody = await refreshedHomeResponse.json().catch(() => null);
+      if (refreshedHomeResponse.status() === 200 && refreshedHomeBody?.ok && predicate(refreshedHomeBody)) {
+        await waitForPortalHomeReady(page, username);
+        await page.waitForTimeout(100);
+        return refreshedHomeBody;
+      }
+    }`
 );
 
 await fs.writeFile(runtimePath, stabilized, 'utf8');
