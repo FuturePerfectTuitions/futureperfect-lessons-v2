@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { buildPhase11KvBulk, loadPhase11Catalogue } from '../scripts/phase11-catalogue.mjs';
 
 const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
 const token = String(process.env.CLOUDFLARE_API_TOKEN || '').trim();
@@ -70,6 +71,9 @@ function validExplicitScreenPalUrl(raw) {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+const canonicalKeys = new Set(buildPhase11KvBulk(loadPhase11Catalogue()).map(row => row.key));
+assert.equal(canonicalKeys.size, 380);
+
 const settings = await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
 const environment = String(binding(settings, 'ENVIRONMENT', 'plain_text')?.text || '');
 const loginRaw = String(binding(settings, 'STUDENT_LOGIN_ENABLED', 'plain_text')?.text || '');
@@ -96,10 +100,12 @@ let observed = null;
 for (let attempt = 1; attempt <= 12; attempt += 1) {
   const userKeys = (await listKvKeys(studentsId)).filter(key => /^user:/i.test(key));
   const lessonKeys = await listKvKeys(lessonsId);
-  const extras = lessonKeys.filter(key => !/^lesson:/i.test(key));
+  const lessonKeySet = new Set(lessonKeys);
+  const missingCanonicalKeys = [...canonicalKeys].filter(key => !lessonKeySet.has(key));
+  const extras = lessonKeys.filter(key => !canonicalKeys.has(key));
   let explicitVrHowToUrls = 0;
   let vrValid = false;
-  if (lessonKeys.includes('special:VR_HOWTO')) {
+  if (lessonKeySet.has('special:VR_HOWTO')) {
     const raw = (await bulkGetKv(lessonsId, ['special:VR_HOWTO'])).get('special:VR_HOWTO');
     try {
       const vr = JSON.parse(raw || 'null');
@@ -112,19 +118,21 @@ for (let attempt = 1; attempt <= 12; attempt += 1) {
     attempt,
     userRecords: userKeys.length,
     lessonKvKeys: lessonKeys.length,
-    nonLessonExtras: extras.length,
+    canonicalKeysPresent: canonicalKeys.size - missingCanonicalKeys.length,
+    missingCanonicalKeys: missingCanonicalKeys.length,
+    nonCanonicalExtras: extras.length,
     onlyProductionSpecialExtra: extras.length === 1 && extras[0] === 'special:VR_HOWTO',
     explicitVrHowToUrls,
     vrValid
   };
-  if (observed.userRecords === 2 && observed.lessonKvKeys === 381 && observed.onlyProductionSpecialExtra && observed.vrValid) break;
+  if (observed.userRecords === 2 && observed.lessonKvKeys === 381 && observed.missingCanonicalKeys === 0 && observed.onlyProductionSpecialExtra && observed.vrValid) break;
   if (attempt < 12) await sleep(10000);
 }
 
 const postCleanupExact =
   d1.entitlements === 173 && d1.batches === 4 && d1.assignments === 4 && d1.releases === 0 && d1.realEntitlements === 173 &&
   quickCheck === 'ok' && triggerPresent &&
-  observed?.userRecords === 2 && observed?.lessonKvKeys === 381 && observed?.onlyProductionSpecialExtra === true && observed?.vrValid === true;
+  observed?.userRecords === 2 && observed?.lessonKvKeys === 381 && observed?.missingCanonicalKeys === 0 && observed?.onlyProductionSpecialExtra === true && observed?.vrValid === true;
 
 const preCleanupExact =
   d1.entitlements === 632 && d1.batches === 4 && d1.assignments === 4 && d1.releases === 0 && d1.realEntitlements === 173 &&
