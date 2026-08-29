@@ -15,7 +15,11 @@ body.phase11-change8 .phase6-back-button {
   min-height: 52px;
   padding: 0 17px;
   overflow: hidden;
+  border-color: var(--c8-navy);
   border-radius: 0 999px 999px 0;
+  background: var(--c8-navy);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.18);
   white-space: nowrap;
   font-size: 0;
   transition: width 180ms ease, padding 180ms ease, box-shadow 180ms ease;
@@ -49,6 +53,10 @@ body.phase11-change8 .phase6-back-button:hover,
 body.phase11-change8 .phase6-back-button:focus-visible {
   width: 142px;
   padding-right: 20px;
+  border-color: var(--c8-navy-deep);
+  background: var(--c8-navy-deep);
+  color: #fff;
+  outline: none;
 }
 
 body.phase11-change8 .phase6-back-button:hover::after,
