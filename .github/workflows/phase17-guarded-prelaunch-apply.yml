@@ -1,0 +1,19 @@
+name: Phase 17 Guarded Pre-Launch Backup and Apply (retired one-shot)
+
+# The one-shot pre-clean mutation completed and was independently reconciled
+# as POST_CLEANUP_EXACT. Retained only as an audit marker; do not rerun it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retired-one-shot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: One-shot cleanup is retired
+        run: |
+          echo 'Phase 17 one-shot pre-clean mutation is retired after successful POST_CLEANUP_EXACT reconciliation.'
+          echo 'Use the guarded Phase 17 finalizer for remaining pre-launch work.'
+          exit 1

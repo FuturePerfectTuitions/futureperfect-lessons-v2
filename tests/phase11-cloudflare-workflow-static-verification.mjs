@@ -113,9 +113,15 @@ assert.equal((homePerformance.match(/\/api\/v1\/student\/home/g) || []).length, 
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 assert.ok(
   wrangler.includes('main = "src/index-phase10-history.js"') ||
-    wrangler.includes('main = "src/index-phase12.js"'),
-  'Checked-in Worker entrypoint must be the original guarded baseline or the explicitly progressed Phase 12 entrypoint.'
+    wrangler.includes('main = "src/index-phase12.js"') ||
+    wrangler.includes('main = "src/index-phase17.js"'),
+  'Checked-in Worker entrypoint must be the guarded baseline, Phase 12 progression, or frozen Phase 17 wrapper.'
 );
 assert.ok(!wrangler.includes('STUDENT_LOGIN_ENABLED = "true"'), 'Progressed checked-in Worker configuration must not enable normal student login.');
+if (wrangler.includes('main = "src/index-phase17.js"')) {
+  const phase17 = fs.readFileSync('worker/src/index-phase17.js', 'utf8');
+  assert.ok(phase17.includes("import phase13Worker from './index-phase13.js';"), 'Frozen Phase 17 wrapper must inherit the accepted Phase 13 Worker.');
+  assert.ok(wrangler.includes('DEV_LOGIN_ALLOWLIST = ""'), 'Frozen Phase 17 source must keep the development allowlist empty.');
+}
 
 console.log('Phase 11 guarded Cloudflare workflow static verification: PASS');

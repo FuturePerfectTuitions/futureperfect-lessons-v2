@@ -49,9 +49,15 @@ jobs:
           grep -Fq 'assets/phase10.js' phase10.html
           grep -Fq 'assets/phase10-counts.js' phase10.html
           grep -Fq 'assets/phase10-history.js' phase10.html
-          grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
-          grep -Fq 'MOCK_DAILY_PASSWORDS' worker/wrangler.toml
-          grep -Fq 'must never be committed' worker/wrangler.toml
+          if grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
+            grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
+            ! grep -Fq 'STUDENT_LOGIN_ENABLED = "true"' worker/wrangler.toml
+            grep -Fq "import phase13Worker from './index-phase13.js';" worker/src/index-phase17.js
+          else
+            grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
+            grep -Fq 'MOCK_DAILY_PASSWORDS' worker/wrangler.toml
+            grep -Fq 'must never be committed' worker/wrangler.toml
+          fi
           grep -Fq 'CREATE TABLE IF NOT EXISTS mock_password_rate_limits' worker/migrations/0006_mock_password_rate_limits.sql
           for f in worker/fixtures/phase10/*.json; do jq -e . "$f" >/dev/null; done
           ! grep -R -E '"password"[[:space:]]*:[[:space:]]*".+"' worker/fixtures/phase10/special-MOCKS.json

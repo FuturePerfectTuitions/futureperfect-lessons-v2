@@ -1,0 +1,16 @@
+name: Phase 17 Authoritative Final Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parked-during-launch-blocker-reconciliation:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Phase 17 final acceptance is deliberately parked while the historical 11+ retained-view launch blocker is reconciled.'

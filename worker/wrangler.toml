@@ -1,27 +1,29 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase13.js"
+main = "src/index-phase17.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
 [vars]
 ENVIRONMENT = "development"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
-DEV_LOGIN_ALLOWLIST = "test0101,test0202,test0303,test0404,test0505,test0606,test0707"
+DEV_LOGIN_ALLOWLIST = ""
 
-# Phase 13 development entrypoint. src/index-phase13.js adds one narrow,
-# development-only authenticated Excel entitlement-sync route on top of the
-# completed Phase 12 batch-aware Worker. All ordinary student routes continue
-# to delegate to Phase 12 unchanged.
+# Phase 17 frozen development entrypoint. src/index-phase17.js adds one narrow
+# pre-launch safety guard on top of the accepted Phase 13/15 stack: special-area
+# ScreenPal playback succeeds only when the stored special-content metadata
+# contains the exact explicit approved HTTPS URL returned by the inherited
+# handler. A bare ScreenPal ID is therefore never sufficient at the Phase 17
+# boundary.
 #
-# The Excel route requires the dedicated EXCEL_SYNC_TOKEN Worker secret. The
-# secret is deliberately not present in this file or any repository source.
-# It processes explicit student-level items only, validates exact D1 batch
-# configuration/effective dates, and keeps Student + Lesson as the permanent
+# The Phase 13 Excel route remains unchanged and still requires the dedicated
+# EXCEL_SYNC_TOKEN Worker secret. The secret is deliberately not present in
+# this file or any repository source. Student + Lesson remains the permanent
 # idempotent entitlement identity while Batch + Lesson remains operational
-# release context.
+# release context; Excel does not mutate membership.
 #
-# MOCK_DAILY_PASSWORDS and other sensitive values are Worker secrets/config and
-# must never be committed. Cloudflare binding identifiers remain generated from
-# the audited V2 runtime by guarded deployment workflows rather than hard-coded
-# in this repository file. Normal student login remains disabled; the checked-in
-# DEV_LOGIN_ALLOWLIST contains controlled TestY/development fixtures only.
+# Sensitive values, private student configuration and Cloudflare binding IDs are
+# never committed. Guarded deployment workflows reconstruct the audited isolated
+# development bindings from Cloudflare before deploy. Normal student login
+# remains disabled. The checked-in development allowlist is empty after Phase 17
+# fixture cleanup; any temporary owner-only verification access must be applied
+# privately and removed again before closure.

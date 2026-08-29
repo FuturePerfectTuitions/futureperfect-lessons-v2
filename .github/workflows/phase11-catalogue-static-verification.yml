@@ -8,7 +8,9 @@ on:
       - assets/phase11-*.js
       - worker/src/index-phase11-final.js
       - worker/src/index-phase11-resources.js
+      - worker/src/index-phase17.js
       - worker/src/phase11-*.js
+      - worker/wrangler.toml
       - scripts/phase11-catalogue.mjs
       - tests/phase11-catalogue-static-verification.mjs
       - docs/data/phase11/catalogue_payload/**
@@ -41,6 +43,11 @@ jobs:
           node tests/phase11-catalogue-static-verification.mjs
           jq -e '.status == "CATALOGUE_FINAL_APPLY_READY" and .canonicalLessonCount == 369 and .canonicalCurriculumCount == 11 and .kvWriteKeyCount == 380 and .lessonsWithOwnerConfirmedPendingVideo == 246 and .applyReady == true' docs/data/phase11/catalogue_final_validation.json >/dev/null
           grep -Fq 'Status: **PASS' docs/data/phase11/CATALOGUE_METADATA_GATE.md
-          grep -Eq '^main = "src/(index-phase10-history|index-phase12|index-phase13)\.js"$' worker/wrangler.toml
+          grep -Eq '^main = "src/(index-phase10-history|index-phase12|index-phase13|index-phase17)\.js"$' worker/wrangler.toml
+          if grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
+            grep -Fq "import phase13Worker from './index-phase13.js';" worker/src/index-phase17.js
+            grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
+            ! grep -Fq 'STUDENT_LOGIN_ENABLED = "true"' worker/wrangler.toml
+          fi
           grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' <(node tests/phase11-catalogue-static-verification.mjs)
           echo 'Phase 11 canonical catalogue static gate: PASS'

@@ -1,0 +1,17 @@
+{
+  "source": "phase11-accepted-vr-howto-runtime",
+  "rule": "Exact explicit URLs preserving the already-accepted deployed VR How-To player targets; runtime must not construct a URL from a bare ScreenPal ID.",
+  "items": [
+    {"itemId":"vr-howto-1","screenpal":"cOnF1kn0uLz","embedUrl":"https://go.screenpal.com/player/cOnF1kn0uLz?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-2","screenpal":"cOnF1zn0uM7","embedUrl":"https://go.screenpal.com/player/cOnF1zn0uM7?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-3","screenpal":"cOnFoTn0vHl","embedUrl":"https://go.screenpal.com/player/cOnFoTn0vHl?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-4","screenpal":"cOnqQ2n0ywq","embedUrl":"https://go.screenpal.com/player/cOnqQ2n0ywq?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-5","screenpal":"cOnrjAn0kh3","embedUrl":"https://go.screenpal.com/player/cOnrjAn0kh3?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-6","screenpal":"cOnOivn0Ndc","embedUrl":"https://go.screenpal.com/player/cOnOivn0Ndc?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-7","screenpal":"cOntiAn0RGm","embedUrl":"https://go.screenpal.com/player/cOntiAn0RGm?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-8","screenpal":"cOnuignZcLM","embedUrl":"https://go.screenpal.com/player/cOnuignZcLM?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-9","screenpal":"cOee2ynZQ5T","embedUrl":"https://go.screenpal.com/player/cOee2ynZQ5T?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-10","screenpal":"cOeDjpnZdb7","embedUrl":"https://go.screenpal.com/player/cOeDjpnZdb7?ff=1&title=0&dcc=0&bg=transparent&embedded=1"},
+    {"itemId":"vr-howto-11","screenpal":"cOeFodnZ9WB","embedUrl":"https://go.screenpal.com/player/cOeFodnZ9WB?ff=1&title=0&dcc=0&bg=transparent&embedded=1"}
+  ]
+}

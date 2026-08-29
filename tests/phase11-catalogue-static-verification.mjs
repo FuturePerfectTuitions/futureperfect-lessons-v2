@@ -61,9 +61,14 @@ const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 assert.ok(
   wrangler.includes('main = "src/index-phase10-history.js"') ||
     wrangler.includes('main = "src/index-phase12.js"') ||
-    wrangler.includes('main = "src/index-phase13.js"'),
-  'catalogue lock verification must run against an approved Phase 10, Phase 12 or Phase 13 entrypoint'
+    wrangler.includes('main = "src/index-phase13.js"') ||
+    wrangler.includes('main = "src/index-phase17.js"'),
+  'catalogue lock verification must run against an approved Phase 10/12/13 entrypoint or the frozen Phase 17 wrapper'
 );
+if (wrangler.includes('main = "src/index-phase17.js"')) {
+  const phase17 = fs.readFileSync('worker/src/index-phase17.js', 'utf8');
+  assert.ok(phase17.includes("import phase13Worker from './index-phase13.js';"), 'Frozen Phase 17 wrapper must inherit the approved Phase 13 Worker.');
+}
 
 console.log('Phase 11 canonical catalogue static verification: PASS');
 console.log(JSON.stringify({ ...result, combinedBase64Sha256 }, null, 2));
