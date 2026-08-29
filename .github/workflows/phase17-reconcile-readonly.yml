@@ -13,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: phase17-reconcile-readonly-${{ github.ref }}
+  group: phase17-live-state-audit
   cancel-in-progress: false
 
 jobs:
@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           node tests/phase17-reconcile-readonly.mjs | tee /tmp/phase17-reconcile.json
-          jq -e '.status == "PASS" and (.state == "POST_CLEANUP_EXACT" or .state == "PRE_CLEANUP_EXACT") and .worker.environment == "development" and .worker.normalStudentLoginDisabled == true and .identitiesOrPasswordsExposed == false' /tmp/phase17-reconcile.json >/dev/null
+          jq -e '.status == "PASS" and .state == "POST_CLEANUP_EXACT" and .worker.environment == "development" and .worker.normalStudentLoginDisabled == true and .identitiesOrPasswordsExposed == false' /tmp/phase17-reconcile.json >/dev/null
 
       - name: Upload sanitized reconciliation evidence
         if: always()
