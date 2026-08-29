@@ -143,9 +143,17 @@ jobs:
 
           STAGE='repository-and-source-guard'
           git merge-base --is-ancestor "$PHASE15_CLOSURE" "$CURRENT_MAIN"
-          mapfile -t MAIN_DIFF < <(git diff --name-only "$PHASE15_CLOSURE" "$CURRENT_MAIN")
-          test "${#MAIN_DIFF[@]}" -eq 1
-          test "${MAIN_DIFF[0]}" = '.github/workflows/phase16-device-browser-resource-session-acceptance.yml'
+          mapfile -t MAIN_DIFF < <(git diff --name-only "$PHASE15_CLOSURE" "$CURRENT_MAIN" | sort)
+          EXPECTED_MAIN_DIFF=(
+            '.github/workflows/phase16-device-browser-resource-session-acceptance.yml'
+            'assets/phase16-ui-refinement.css'
+            'assets/phase16-ui-refinement.js'
+            'phase11.html'
+          )
+          printf '%s\n' "${MAIN_DIFF[@]}" > /tmp/phase16-main-diff.txt
+          printf '%s\n' "${EXPECTED_MAIN_DIFF[@]}" | sort > /tmp/phase16-main-diff-expected.txt
+          cmp /tmp/phase16-main-diff-expected.txt /tmp/phase16-main-diff.txt
+          echo 'PHASE16_MAIN_SOURCE_GUARD_PASS'
           test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
           node --check worker/src/phase15-manual-access.js
           node --check worker/src/index-phase12.js
