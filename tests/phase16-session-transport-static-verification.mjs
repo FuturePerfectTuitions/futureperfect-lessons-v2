@@ -23,6 +23,7 @@ assert.match(loginCookie, /;\s*Secure(?:;|$)/i, 'Partitioned session cookie lost
 assert.match(loginCookie, /;\s*SameSite=None(?:;|$)/i, 'Partitioned session cookie lost SameSite=None.');
 assert.match(loginCookie, /;\s*Partitioned(?:;|$)/i, 'Login session cookie is not CHIPS Partitioned.');
 assert.equal((loginCookie.match(/\bPartitioned\b/gi) || []).length, 1, 'Partitioned attribute was duplicated.');
+assert.equal(partitionedLogin.headers.get('X-FPT-Session-Mode'), 'partitioned', 'Non-secret partitioned-session diagnostic marker missing.');
 
 const logoutRequest = new Request('https://example.test/api/v1/student/auth/logout', {
   method: 'POST'
@@ -41,6 +42,7 @@ assert.match(logoutCookie, /;\s*Secure(?:;|$)/i);
 assert.match(logoutCookie, /;\s*SameSite=None(?:;|$)/i);
 assert.match(logoutCookie, /;\s*Partitioned(?:;|$)/i, 'Logout clearing cookie is not partitioned consistently.');
 assert.match(logoutCookie, /;\s*Max-Age=0(?:;|$)/i, 'Logout cookie no longer clears the session.');
+assert.equal(partitionedLogout.headers.get('X-FPT-Session-Mode'), 'partitioned');
 
 const ordinaryRequest = new Request('https://example.test/api/v1/student/session', { method: 'GET' });
 const ordinaryResponse = new Response(JSON.stringify({ ok: true }), {
@@ -56,6 +58,7 @@ assert.equal(
   ordinaryResponse.headers.get('Set-Cookie'),
   'Phase 16 cookie compatibility wrapper mutated an unrelated endpoint.'
 );
+assert.equal(ordinaryResult.headers.get('X-FPT-Session-Mode'), null, 'Session-mode diagnostic marker leaked onto an unrelated endpoint.');
 
 const alreadyPartitioned = new Response(JSON.stringify({ ok: true }), {
   status: 200,
@@ -69,6 +72,7 @@ assert.equal(
   1,
   'Partitioned cookie compatibility is not idempotent.'
 );
+assert.equal(idempotent.headers.get('X-FPT-Session-Mode'), 'partitioned');
 
 const frontend = await fs.readFile('assets/phase7.js', 'utf8');
 const baseWorker = await fs.readFile('worker/src/index.js', 'utf8');
@@ -84,6 +88,7 @@ assert.match(
   /Set-Cookie[\s\S]*Partitioned|Partitioned[\s\S]*Set-Cookie/,
   'Phase 16 outer Worker layer does not apply the Partitioned session-cookie attribute.'
 );
+assert.match(manualWorker, /X-FPT-Session-Mode/, 'Phase 16 non-secret session-mode diagnostic marker is not present in the outer Worker layer.');
 assert.doesNotMatch(
   manualWorker,
   /\bbearerSessionToken\b|\bwithBearerSessionCookie\b|\bwebKitBearerFallbackEligible\b|\bsessionTokenFromSetCookie\b|\bexposeWebKitLoginFallback\b/,
