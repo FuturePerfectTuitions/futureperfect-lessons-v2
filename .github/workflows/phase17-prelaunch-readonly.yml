@@ -1,0 +1,108 @@
+name: Phase 17 Pre-Launch Read-Only Verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase17-prelaunch-readonly.yml'
+      - 'tests/phase17-prelaunch-readonly.mjs'
+      - 'docs/data/phase17/**'
+      - 'IMPLEMENTATION_HANDOVER.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase17-prelaunch-readonly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prelaunch-readonly:
+    if: github.event_name != 'pull_request' || github.head_ref == 'phase17-prelaunch-freeze-production-verification'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      PHASE17_EXPECTED_MAIN: 05f9c23bdb3e599ef0c641490822e9d63e5728fe
+      PHASE17_REPORT_FILE: phase17-readonly-report.json
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard Phase 16 base
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.sha }}" = "$PHASE17_EXPECTED_MAIN"
+          git merge-base --is-ancestor "$PHASE17_EXPECTED_MAIN" HEAD
+          echo "Phase 17 base guard PASS."
+
+      - name: Syntax check Phase 17 audit
+        run: node --check tests/phase17-prelaunch-readonly.mjs
+
+      - name: Credit inherited static acceptance gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/phase11-catalogue-static-verification.mjs
+          node tests/phase11-change7-owner-homeworks-static-verification.mjs
+          node tests/phase11-shared-maths-answer-pdf-static-verification.mjs
+          node tests/phase11-screenpal-static-verification.mjs
+          node tests/phase11-vr-howto-real-catalogue-static-verification.mjs
+          node tests/phase11-vr-solution-video-policy-static-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase14-excel-sync-matrix-verification.mjs
+          node tests/phase15-master-navigation-regression.mjs
+          node tests/phase16-session-transport-static-verification.mjs
+          node tests/phase16-ui-refinement-static-verification.mjs
+
+      - name: Confirm Excel sync secret name only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.125.0 secret list --name "$WORKER_NAME" --json > /tmp/phase17-secret-names.json
+          jq -e 'map(.name) | index("EXCEL_SYNC_TOKEN") != null' /tmp/phase17-secret-names.json >/dev/null
+          rm -f /tmp/phase17-secret-names.json
+          echo "Excel sync secret-name gate PASS."
+
+      - name: Confirm normal login stays disabled at runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /tmp/phase17-login.json --write-out '%{http_code}' \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"username":"__phase17_not_authorised__","password":"Aa1x"}' \
+            "$WORKER_BASE/api/v1/student/auth/login")"
+          test "$status" = '401'
+          jq -e '.error == "INVALID_LOGIN"' /tmp/phase17-login.json >/dev/null
+          rm -f /tmp/phase17-login.json
+          echo "Normal-login-disabled runtime gate PASS."
+
+      - name: Run Phase 17 read-only production verification
+        run: node tests/phase17-prelaunch-readonly.mjs
+
+      - name: Upload sanitized Phase 17 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-prelaunch-readonly-report
+          path: phase17-readonly-report.json
+          if-no-files-found: warn
+          retention-days: 14
