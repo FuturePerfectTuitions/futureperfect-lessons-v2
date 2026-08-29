@@ -110,7 +110,12 @@ jobs:
           sed -i '/^# Selected real Y3/i PHASE17_STAGE=y3-real' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Selected real Y5/i PHASE17_STAGE=y5-real' tests/phase17-final-live-acceptance.sh
           sed -i '/current==true and \.group=="current"/d' tests/phase17-final-live-acceptance.sh
+          sed -i '/y3-current.json/d' tests/phase17-final-live-acceptance.sh
+          sed -i '/y5-current.json/d' tests/phase17-final-live-acceptance.sh
+          sed -i '/api_get .*y3-home.json/a jq -e '\''[.. | objects | select((.viewId?=="english-year3" or .viewId?=="maths-year3") and .current?==true)] | length==0'\'' "$TMP/y3-home.json" >/dev/null\nPRE_Y3_CODE="$(api_code_get "$TMP/y3.jar" '\''/api/v1/student/views/english-year3/lessons'\'' "$TMP/y3-pre-effective.json")"; test "$PRE_Y3_CODE" = '\''404'\''' tests/phase17-final-live-acceptance.sh
+          sed -i '/api_get .*y5-home.json/a jq -e '\''[.. | objects | select((.viewId?=="english-year5-11plus" or .viewId?=="maths-level3") and .current?==true)] | length==0'\'' "$TMP/y5-home.json" >/dev/null\nPRE_Y5_CODE="$(api_code_get "$TMP/y5.jar" '\''/api/v1/student/views/english-year5-11plus/lessons'\'' "$TMP/y5-pre-effective.json")"; test "$PRE_Y5_CODE" = '\''404'\''' tests/phase17-final-live-acceptance.sh
           sed -i 's/current_views=4/effective_dated_views_pre_start=true/' tests/phase17-final-live-acceptance.sh
+          sed -i 's/current_catalogues_locked=true/pre_effective_future_views_inactive=true/' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Protected Answer Pack/i PHASE17_STAGE=protected-answer' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Controlled dummy exercises/i PHASE17_STAGE=dummy-vr-howto' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Normal logout path/i PHASE17_STAGE=logout' tests/phase17-final-live-acceptance.sh
