@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: phase17-final-live-acceptance
+  group: phase17-live-state-audit
   cancel-in-progress: false
 
 env:
@@ -65,10 +65,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Preserve the temporary directory through the script's explicit cleanup so
-          # the before/after secret-name comparison remains available. A failed job
-          # is isolated to the runner and the script trap still restores portal state.
           sed -i '0,/^  rm -rf "\$TMP"$/s//  :/' tests/phase17-final-live-acceptance.sh
+          sed -i '2a PHASE17_STAGE=preflight\ntrap '\''rc=$?; echo "PHASE17_LIVE_DIAGNOSTIC_FAIL stage=${PHASE17_STAGE} line=${LINENO} rc=${rc}" >&2'\'' ERR' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Resolve the two production-intended records/i PHASE17_STAGE=resolve-real' tests/phase17-final-live-acceptance.sh
+          sed -i '/^DUMMY_P=/i PHASE17_STAGE=dummy-create' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Temporarily allow exactly/i PHASE17_STAGE=allowlist-deploy' tests/phase17-final-live-acceptance.sh
+          sed -i '/^FAKE_CODE=/i PHASE17_STAGE=fake-login' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Selected real Y3/i PHASE17_STAGE=y3-real' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Selected real Y5/i PHASE17_STAGE=y5-real' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Protected Answer Pack/i PHASE17_STAGE=protected-answer' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Controlled dummy exercises/i PHASE17_STAGE=dummy-vr-howto' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Normal logout path/i PHASE17_STAGE=logout' tests/phase17-final-live-acceptance.sh
+          sed -i '/^# Explicit cleanup now/i PHASE17_STAGE=explicit-cleanup' tests/phase17-final-live-acceptance.sh
+          sed -i '/^cf_get "\$SETTINGS_URL" "\$TMP\/settings-after.json"/i PHASE17_STAGE=final-proof' tests/phase17-final-live-acceptance.sh
           bash tests/phase17-final-live-acceptance.sh
       - name: Final read-only postcheck
         shell: bash
