@@ -1,0 +1,3 @@
+Phase 11 guarded apply after targeted navigation prefetch and fail-closed Cloudflare snapshot retry.
+Base main: 8f783259fc02306ae0045e7a5cdbcfe1be64536d
+Purpose: deploy final Phase 11 navigation-performance build and re-run exact API/Chrome acceptance.
