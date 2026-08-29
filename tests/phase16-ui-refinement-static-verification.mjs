@@ -23,7 +23,10 @@ assert.match(css, /#video-section\s+\.phase12-video-toggle-row\s+\.phase7-resour
 assert.match(css, /#video-section\s+\.phase12-video-toggle\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?right:\s*22px;/, 'Existing View/Hide video control must be retained at the heading side.');
 
 assert.match(js, /ready to download/i, 'Redundant Ready to download copy must be explicitly suppressed.');
-assert.match(js, /available[\\s\\S]*locked/i, 'Mixed availability copy must be normalized without losing locked-count information.');
+assert.ok(
+  js.includes('available\\s+·\\s+') && js.includes('locked$/i') && js.includes('${openCount} open · ${lockedCount} locked'),
+  'Mixed availability copy must be normalized without losing locked-count information.'
+);
 assert.match(js, /\$\{count\} lesson/, 'Fully open view cards must reduce to a neutral lesson count.');
 
 assert.doesNotMatch(js, /fetch\s*\(|XMLHttpRequest|localStorage|sessionStorage|document\.cookie|Authorization|Bearer/i, 'UI refinement must not add network, storage or session transport behaviour.');
