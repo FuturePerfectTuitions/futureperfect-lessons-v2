@@ -1,0 +1,106 @@
+name: Phase 18 read-only rollback backup diagnostic
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-r2-backup-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+  WRANGLER_VERSION: 4.125.0
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  EXPECTED_PRE_SHA: fb214cb3abc5802b300cab00ad071e7bfcc459b10bbc1d1177d4efeb126c1a88
+  EXPECTED_REAL_SHA: e610cf71cd03804264739912e277459ef3e83c4a35aa08bb2dc34eca10b26c58
+  EXPECTED_HIST_SHA: 7d45b4ec24b57f92aff61f8f38a522536e57ce0378919d2ad53caa8961524f72
+
+jobs:
+  diagnose:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard Phase 17 closure main
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse origin/main)"
+          echo "PHASE18_MAIN_SHA=${ACTUAL}"
+          test "$ACTUAL" = "$EXPECTED_MAIN"
+
+      - name: List rollback object metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects"
+          for spec in 'internal:_internal/phase17-backup/' 'history:__phase17_backups/'; do
+            label="${spec%%:*}"
+            prefix="${spec#*:}"
+            curl --fail --silent --show-error --get "$URL" \
+              --header "$AUTH" \
+              --data-urlencode "prefix=${prefix}" \
+              --data-urlencode 'per_page=1000' \
+              --output "/tmp/${label}.json"
+            jq -e '.success==true' "/tmp/${label}.json" >/dev/null
+            echo "PHASE18_R2_LIST label=${label} count=$(jq '.result|length' "/tmp/${label}.json")"
+            jq -r '.result[]? | "PHASE18_R2_OBJECT key=\(.key) size=\(.size // -1) etag=\(.etag // .httpEtag // "") uploaded=\(.uploaded // .lastModified // "")"' "/tmp/${label}.json"
+          done
+
+      - name: Hash each rollback candidate without exposing contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          jq -r '.result[]?.key // empty' /tmp/internal.json | sort -u >/tmp/internal-keys.txt
+          jq -r '.result[]?.key // empty' /tmp/history.json | sort -u >/tmp/history-keys.txt
+          cat /tmp/internal-keys.txt /tmp/history-keys.txt | sort -u >/tmp/all-keys.txt
+          : >/tmp/accepted-real.tsv
+          : >/tmp/preclean.tsv
+          : >/tmp/history-match.tsv
+          i=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            i=$((i+1))
+            out="/tmp/p18-backup-${i}.bin"
+            rm -f "$out"
+            set +e
+            $W r2 object get "$R2_BUCKET/$key" --file="$out" --remote >/tmp/p18-get-${i}.log 2>&1
+            rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              echo "PHASE18_R2_GET key=${key} rc=${rc} status=FAILED"
+              continue
+            fi
+            if [ ! -e "$out" ]; then
+              echo "PHASE18_R2_GET key=${key} rc=0 status=NO_FILE"
+              continue
+            fi
+            bytes="$(stat -c '%s' "$out")"
+            sha="$(sha256sum "$out" | awk '{print $1}')"
+            echo "PHASE18_R2_HASH key=${key} bytes=${bytes} sha256=${sha}"
+            [ "$sha" = "$EXPECTED_REAL_SHA" ] && printf '%s\t%s\t%s\n' "$key" "$bytes" "$sha" >>/tmp/accepted-real.tsv
+            [ "$sha" = "$EXPECTED_PRE_SHA" ] && printf '%s\t%s\t%s\n' "$key" "$bytes" "$sha" >>/tmp/preclean.tsv
+            [ "$sha" = "$EXPECTED_HIST_SHA" ] && printf '%s\t%s\t%s\n' "$key" "$bytes" "$sha" >>/tmp/history-match.tsv
+          done </tmp/all-keys.txt
+          echo "PHASE18_EXPECTED_PRE_MATCHES=$(wc -l </tmp/preclean.tsv | tr -d ' ')"
+          echo "PHASE18_EXPECTED_REAL_MATCHES=$(wc -l </tmp/accepted-real.tsv | tr -d ' ')"
+          echo "PHASE18_EXPECTED_HISTORY_MATCHES=$(wc -l </tmp/history-match.tsv | tr -d ' ')"
+          if [ -s /tmp/preclean.tsv ]; then while IFS=$'\t' read -r key bytes sha; do echo "PHASE18_EXPECTED_PRE key=${key} bytes=${bytes} sha256=${sha}"; done </tmp/preclean.tsv; fi
+          if [ -s /tmp/accepted-real.tsv ]; then while IFS=$'\t' read -r key bytes sha; do echo "PHASE18_EXPECTED_REAL key=${key} bytes=${bytes} sha256=${sha}"; done </tmp/accepted-real.tsv; fi
+          if [ -s /tmp/history-match.tsv ]; then while IFS=$'\t' read -r key bytes sha; do echo "PHASE18_EXPECTED_HISTORY key=${key} bytes=${bytes} sha256=${sha}"; done </tmp/history-match.tsv; fi
+
+      - name: Read-only diagnostic completion
+        shell: bash
+        run: |
+          echo 'PHASE18_R2_DIAGNOSTIC_COMPLETE public_mutations=0 cloudflare_writes=0 login_enablements=0 dns_changes=0 route_changes=0 real_syncs=0'
