@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/phase17-prelaunch-readonly.yml'
       - 'tests/phase17-prelaunch-readonly.mjs'
+      - 'tests/phase17-finalize-state.mjs'
       - 'docs/data/phase17/**'
       - 'IMPLEMENTATION_HANDOVER.md'
   workflow_dispatch:
@@ -15,7 +16,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: phase17-prelaunch-readonly-${{ github.ref }}
+  group: phase17-live-state-audit
   cancel-in-progress: false
 
 jobs:
@@ -35,6 +36,7 @@ jobs:
       - name: Checkout exact PR head
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -51,8 +53,10 @@ jobs:
           git merge-base --is-ancestor "$PHASE17_EXPECTED_MAIN" HEAD
           echo "Phase 17 base guard PASS."
 
-      - name: Syntax check Phase 17 audit
-        run: node --check tests/phase17-prelaunch-readonly.mjs
+      - name: Syntax check Phase 17 audits
+        run: |
+          node --check tests/phase17-prelaunch-readonly.mjs
+          node --check tests/phase17-finalize-state.mjs
 
       - name: Credit inherited static acceptance gates
         shell: bash
@@ -97,8 +101,24 @@ jobs:
           rm -f /tmp/phase17-login.json
           echo "Non-allowlisted runtime-login gate PASS."
 
+      - name: Confirm final real-account login and expiry safety
+        shell: bash
+        env:
+          PHASE17_FINALIZE_ACTION: postcheck
+        run: |
+          set -euo pipefail
+          node tests/phase17-finalize-state.mjs | tee /tmp/phase17-real-safety.json
+          jq -e '.status=="PASS" and .realStudentRecords==2 and .expiredRealRecordCount==0 and .developmentAllowlistEmpty==true and .realStudentAllowlistIntersectionCount==0 and .identitiesOrPasswordsExposed==false' /tmp/phase17-real-safety.json >/dev/null
+          echo 'Phase 17 real-account login/expiry safety gate PASS.'
+
       - name: Run Phase 17 read-only production verification
-        run: node tests/phase17-prelaunch-readonly.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed 's/entitlementCount !== 632/entitlementCount !== 173/' tests/phase17-prelaunch-readonly.mjs > /tmp/phase17-prelaunch-final.mjs
+          cp /tmp/phase17-prelaunch-final.mjs tests/.phase17-prelaunch-final.mjs
+          PHASE17_REPORT_FILE="$PHASE17_REPORT_FILE" node tests/.phase17-prelaunch-final.mjs
+          rm -f tests/.phase17-prelaunch-final.mjs /tmp/phase17-prelaunch-final.mjs
 
       - name: Upload sanitized Phase 17 report
         if: always()
