@@ -64,8 +64,8 @@ jobs:
           node --check tests/phase17-state-transition.mjs
           node --check worker/src/index-phase17.js
           node tests/phase17-explicit-special-screenpal-static.mjs
-          node tests/phase11-catalogue-static-verification.mjs >/tmp/p17-catalogue.log
-          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p17-catalogue.log
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-navigation.json
+          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p17-navigation.json >/dev/null
           node tests/phase13-excel-sync-verification.mjs
           node tests/phase15-master-navigation-regression.mjs
           node tests/phase16-session-transport-static-verification.mjs
@@ -115,16 +115,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v sqlite3 >/dev/null
-          rm -f /tmp/phase17-restore-check.sqlite
-          sqlite3 /tmp/phase17-restore-check.sqlite < /tmp/phase17-d1.sql
-          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM lesson_entitlements;')" = '632'
-          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM batch_definitions;')" = '4'
-          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM student_batch_assignments;')" = '4'
-          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM batch_lesson_releases;')" = '0'
-          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments);')" = '173'
-          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'PRAGMA quick_check;')" = 'ok'
-          echo 'D1 local restore proof PASS.'
+          python - <<'PY'
+          import sqlite3
+          sql = open('/tmp/phase17-d1.sql', encoding='utf-8').read()
+          con = sqlite3.connect('/tmp/phase17-restore-check.sqlite')
+          con.executescript(sql)
+          checks = {
+              'entitlements': con.execute('SELECT COUNT(*) FROM lesson_entitlements').fetchone()[0],
+              'batches': con.execute('SELECT COUNT(*) FROM batch_definitions').fetchone()[0],
+              'assignments': con.execute('SELECT COUNT(*) FROM student_batch_assignments').fetchone()[0],
+              'releases': con.execute('SELECT COUNT(*) FROM batch_lesson_releases').fetchone()[0],
+              'real_entitlements': con.execute('SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments)').fetchone()[0],
+              'quick': con.execute('PRAGMA quick_check').fetchone()[0],
+          }
+          assert checks == {'entitlements': 632, 'batches': 4, 'assignments': 4, 'releases': 0, 'real_entitlements': 173, 'quick': 'ok'}, checks
+          con.close()
+          print('D1 local restore proof PASS.')
+          PY
 
       - name: Store and re-download private pre-launch backup in isolated R2
         shell: bash
@@ -138,17 +145,16 @@ jobs:
           cp -R /tmp/phase17-r2-fixtures /tmp/phase17-backup-bundle/r2-confirmed-development-fixtures
           cat >/tmp/phase17-backup-bundle/RESTORE.txt <<'EOF'
           FPT Portal V2 Phase 17 private pre-launch backup.
-          Restore only under an explicit owner-authorised rollback while ENVIRONMENT=development and normal student login is disabled.
-          D1: verify target identity, then use the guarded Phase 17 restore path to replace relevant D1 state from d1-precleanup.sql.
-          KV/manual configuration: restore exact stored key/value pairs from kv-manual-config-precleanup.json through the guarded restore path.
+          Restore only under explicit owner-authorised rollback while ENVIRONMENT=development and normal student login is disabled.
+          Restore D1 from d1-precleanup.sql only through a guarded target-identity-checked path.
+          Restore exact STUDENTS_KV/LESSONS_KV key-value pairs from kv-manual-config-precleanup.json through a guarded path.
           Confirmed development R2 fixture bytes are mapped by r2-confirmed-development-fixtures/manifest.tsv.
-          Re-run catalogue/hash, D1 quick_check, single-session trigger, bindings, login-disabled and resource gates after any restore.
+          After any restore, re-run catalogue/hash, D1 quick_check, single-session trigger, bindings, login-disabled and resource gates.
           EOF
           tar -C /tmp/phase17-backup-bundle -czf /tmp/phase17-prelaunch-private-backup.tar.gz .
           chmod 600 /tmp/phase17-prelaunch-private-backup.tar.gz
           sha256sum /tmp/phase17-prelaunch-private-backup.tar.gz | awk '{print $1}' > /tmp/phase17-backup.sha256
           BACKUP_KEY="_internal/phase17-backup/prelaunch-${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.tar.gz"
-          printf '%s' "$BACKUP_KEY" > /tmp/phase17-backup-key.txt
           $W r2 object put "$R2_BUCKET/$BACKUP_KEY" --file=/tmp/phase17-prelaunch-private-backup.tar.gz --content-type=application/gzip --remote >/tmp/phase17-r2-put.log 2>&1
           $W r2 object get "$R2_BUCKET/$BACKUP_KEY" --file=/tmp/phase17-backup-redownload.tar.gz --remote >/tmp/phase17-r2-redownload.log 2>&1
           test "$(sha256sum /tmp/phase17-backup-redownload.tar.gz | awk '{print $1}')" = "$(cat /tmp/phase17-backup.sha256)"
@@ -182,7 +188,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           W="npx --yes wrangler@${WRANGLER_VERSION}"
-          STUDENTS=''; LESSONS=''; DB=''; R2=''
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p17-settings-before.json
@@ -194,6 +199,7 @@ jobs:
           LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-before.json)"
           DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p17-settings-before.json)"
           R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p17-settings-before.json)"
+          ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // "https://futureperfecttuitions.github.io"' /tmp/p17-settings-before.json)"
           test "$R2" = "$R2_BUCKET"
           for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
           curl --fail --silent --show-error \
@@ -209,6 +215,10 @@ jobs:
           compatibility_date = "2026-08-20"
           keep_vars = true
           workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "${ORIGINS}"
+          DEV_LOGIN_ALLOWLIST = ""
           [[kv_namespaces]]
           binding = "STUDENTS_KV"
           id = "${STUDENTS}"
@@ -233,14 +243,11 @@ jobs:
           jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p17-settings-after.json >/dev/null
           AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-after.json)"
           case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          test "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-after.json)" = ''
           test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p17-settings-after.json)" = "$R2_BUCKET"
           test "$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-after.json)" = "$STUDENTS"
           test "$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-after.json)" = "$LESSONS"
           test "$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p17-settings-after.json)" = "$DB"
-          for var in ALLOWED_ORIGINS DEV_LOGIN_ALLOWLIST STUDENT_LOGIN_ENABLED; do
-            test "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-after.json)" = \
-                 "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-before.json)"
-          done
           $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p17-secrets-after.txt
           cmp /tmp/p17-secrets-before.txt /tmp/p17-secrets-after.txt
           echo 'PHASE17_FROZEN_WORKER_DEPLOY_PASS'
