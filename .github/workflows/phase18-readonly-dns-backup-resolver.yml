@@ -1,0 +1,219 @@
+name: Phase 18 read-only DNS and backup resolver
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-dns-backup-resolver.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  EXPECTED_PRE_SHA: fb214cb3abc5802b300cab00ad071e7bfcc459b10bbc1d1177d4efeb126c1a88
+  EXPECTED_REAL_SHA: e610cf71cd03804264739912e277459ef3e83c4a35aa08bb2dc34eca10b26c58
+  EXPECTED_HIST_SHA: 7d45b4ec24b57f92aff61f8f38a522536e57ce0378919d2ad53caa8961524f72
+
+jobs:
+  verify:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard frozen Phase 17 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse origin/main)"
+          echo "PHASE18_MAIN_SHA=${ACTUAL}"
+          test "$ACTUAL" = "$EXPECTED_MAIN"
+          echo 'PHASE18_MAIN_GUARD=PASS'
+
+      - name: Read exact current Cloudflare DNS and Worker-route control plane
+        id: dns
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo FAIL >/tmp/dns.status
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          ZURL="https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}&status=active&per_page=50"
+          if ! curl --fail --silent --show-error "$ZURL" -H "$AUTH" -o /tmp/zones.json; then
+            echo 'PHASE18_DNS_ERROR=zone_lookup_failed'
+            exit 1
+          fi
+          if ! jq -e '.success==true and (.result|length)==1' /tmp/zones.json >/dev/null; then
+            echo 'PHASE18_DNS_ERROR=zone_lookup_not_unique'
+            jq -c '{success,errors,result_count:(.result|length)}' /tmp/zones.json
+            exit 1
+          fi
+          ZID="$(jq -r '.result[0].id' /tmp/zones.json)"
+          echo "PHASE18_ZONE_ID=${ZID}"
+
+          DURL="https://api.cloudflare.com/client/v4/zones/${ZID}/dns_records?name=lessons.futureperfect.education&per_page=100"
+          if ! curl --fail --silent --show-error "$DURL" -H "$AUTH" -o /tmp/dns.json; then
+            echo 'PHASE18_DNS_ERROR=dns_record_lookup_failed'
+            exit 1
+          fi
+          if ! jq -e '.success==true and (.result|length)>=1' /tmp/dns.json >/dev/null; then
+            echo 'PHASE18_DNS_ERROR=live_dns_record_not_found'
+            jq -c '{success,errors,result_count:(.result|length)}' /tmp/dns.json
+            exit 1
+          fi
+          jq -r '.result[]|"PHASE18_DNS_RECORD id=\(.id) type=\(.type) name=\(.name) content=\(.content) proxied=\(.proxied) ttl=\(.ttl)"' /tmp/dns.json
+
+          RURL="https://api.cloudflare.com/client/v4/zones/${ZID}/workers/routes"
+          if ! curl --fail --silent --show-error "$RURL" -H "$AUTH" -o /tmp/routes.json; then
+            echo 'PHASE18_DNS_ERROR=worker_route_lookup_failed'
+            exit 1
+          fi
+          if ! jq -e '.success==true' /tmp/routes.json >/dev/null; then
+            echo 'PHASE18_DNS_ERROR=worker_route_api_unsuccessful'
+            jq -c '{success,errors}' /tmp/routes.json
+            exit 1
+          fi
+          COUNT="$(jq '[.result[]|select((.pattern//"")|contains("lessons.futureperfect.education"))]|length' /tmp/routes.json)"
+          echo "PHASE18_RELEVANT_WORKER_ROUTE_COUNT=${COUNT}"
+          jq -r '.result[]|select((.pattern//"")|contains("lessons.futureperfect.education"))|"PHASE18_WORKER_ROUTE id=\(.id) pattern=\(.pattern) script=\(.script//"")"' /tmp/routes.json
+          echo PASS >/tmp/dns.status
+          echo 'PHASE18_DNS_CONTROLPLANE=PASS'
+
+      - name: Verify current public old-live and isolated V2 targets
+        id: public
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo FAIL >/tmp/public.status
+          if ! curl -fsSL https://lessons.futureperfect.education/ -o /tmp/live.html; then
+            echo 'PHASE18_PUBLIC_ERROR=old_live_fetch_failed'
+            exit 1
+          fi
+          if ! grep -Fq 'https://fpt-lessons-api.futureperfectlessons.workers.dev' /tmp/live.html; then
+            echo 'PHASE18_PUBLIC_ERROR=old_live_worker_reference_not_found'
+            exit 1
+          fi
+          echo 'PHASE18_OLD_LIVE=PASS domain=https://lessons.futureperfect.education worker=https://fpt-lessons-api.futureperfectlessons.workers.dev'
+
+          ROOT_CODE="$(curl -sS -L -o /tmp/v2root.html -w '%{http_code}' https://futureperfecttuitions.github.io/futureperfect-lessons-v2/)"
+          APP_CODE="$(curl -sS -L -o /tmp/v2app.html -w '%{http_code}' https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase11.html)"
+          echo "PHASE18_V2_ROOT_HTTP=${ROOT_CODE}"
+          echo "PHASE18_V2_APP_HTTP=${APP_CODE}"
+          if [ "$ROOT_CODE" = 200 ]; then
+            if grep -Fq 'Portal V2 Development' /tmp/v2root.html; then
+              echo 'PHASE18_V2_ROOT_IS_DEVELOPMENT_LANDING=true'
+            else
+              echo 'PHASE18_V2_ROOT_IS_DEVELOPMENT_LANDING=false'
+            fi
+          fi
+          if [ "$APP_CODE" = 200 ]; then
+            echo 'PHASE18_V2_PHASE11_PUBLIC=true'
+          else
+            echo 'PHASE18_V2_PHASE11_PUBLIC=false'
+          fi
+          echo PASS >/tmp/public.status
+          echo 'PHASE18_PUBLIC_TARGETS=PASS'
+
+      - name: Verify exact Phase 17 rollback backup objects and resolve accepted real-config key
+        id: backups
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo FAIL >/tmp/backups.status
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects"
+
+          fetch_and_hash() {
+            local key="$1" out="$2" expected="$3" label="$4"
+            if ! curl --fail --silent --show-error "${BASE}/${key}" -H "$AUTH" -o "$out"; then
+              echo "PHASE18_BACKUP_ERROR label=${label} reason=object_get_failed key=${key}"
+              return 1
+            fi
+            local actual
+            actual="$(sha256sum "$out" | awk '{print $1}')"
+            echo "PHASE18_BACKUP_HASH label=${label} key=${key} sha256=${actual}"
+            if [ "$actual" != "$expected" ]; then
+              echo "PHASE18_BACKUP_ERROR label=${label} reason=hash_mismatch"
+              return 1
+            fi
+            return 0
+          }
+
+          PRE='_internal/phase17-backup/prelaunch-33251109750-9bace406a04b.tar.gz'
+          HIST='__phase17_backups/retained-history-preapply-33259502392.json'
+          FIXED_OK=1
+          fetch_and_hash "$PRE" /tmp/pre.tar.gz "$EXPECTED_PRE_SHA" preclean || FIXED_OK=0
+          fetch_and_hash "$HIST" /tmp/hist.json "$EXPECTED_HIST_SHA" retained_history || FIXED_OK=0
+
+          : >/tmp/finalizer-runs.tsv
+          for page in $(seq 1 40); do
+            URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&page=${page}"
+            if ! curl --fail --silent --show-error "$URL" -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -o /tmp/runs.json; then
+              echo "PHASE18_BACKUP_ERROR reason=github_runs_query_failed page=${page}"
+              exit 1
+            fi
+            jq -r '.workflow_runs[]|select(.path==".github/workflows/phase17-guarded-finalize.yml")|[.id,.head_sha,.created_at,(.conclusion//"")]|@tsv' /tmp/runs.json >>/tmp/finalizer-runs.tsv
+            N="$(jq '.workflow_runs|length' /tmp/runs.json)"
+            [ "$N" -lt 100 ] && break
+          done
+          sort -u /tmp/finalizer-runs.tsv -o /tmp/finalizer-runs.tsv
+          echo "PHASE18_FINALIZER_RUN_CANDIDATES=$(wc -l </tmp/finalizer-runs.tsv | tr -d ' ')"
+
+          : >/tmp/real-matches.tsv
+          while IFS=$'\t' read -r run sha created conclusion; do
+            [ -n "$run" ] || continue
+            key="_internal/phase17-backup/finalize-${run}-${sha:0:12}.json"
+            out="/tmp/finalize-${run}.json"
+            code="$(curl --silent --show-error -o "$out" -w '%{http_code}' "${BASE}/${key}" -H "$AUTH" || true)"
+            if [ "$code" = 200 ]; then
+              actual="$(sha256sum "$out" | awk '{print $1}')"
+              if [ "$actual" = "$EXPECTED_REAL_SHA" ]; then
+                printf '%s\t%s\t%s\t%s\t%s\n' "$key" "$actual" "$run" "$created" "$conclusion" >>/tmp/real-matches.tsv
+              fi
+            fi
+          done </tmp/finalizer-runs.tsv
+
+          MATCHES="$(wc -l </tmp/real-matches.tsv | tr -d ' ')"
+          echo "PHASE18_ACCEPTED_REAL_BACKUP_MATCHES=${MATCHES}"
+          if [ "$MATCHES" = 1 ]; then
+            IFS=$'\t' read -r key actual run created conclusion </tmp/real-matches.tsv
+            echo "PHASE18_BACKUP_HASH label=real_config key=${key} sha256=${actual} source_run=${run} created=${created} conclusion=${conclusion}"
+          else
+            echo 'PHASE18_BACKUP_ERROR label=real_config reason=expected_hash_match_count_not_one'
+          fi
+
+          if [ "$FIXED_OK" = 1 ] && [ "$MATCHES" = 1 ]; then
+            echo PASS >/tmp/backups.status
+            echo 'PHASE18_BACKUPS=PASS count=3'
+          else
+            exit 1
+          fi
+
+      - name: Final read-only gate result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          DNS="$(cat /tmp/dns.status 2>/dev/null || echo FAIL)"
+          PUBLIC="$(cat /tmp/public.status 2>/dev/null || echo FAIL)"
+          BACKUPS="$(cat /tmp/backups.status 2>/dev/null || echo FAIL)"
+          echo "PHASE18_READONLY_DNS=${DNS}"
+          echo "PHASE18_READONLY_PUBLIC=${PUBLIC}"
+          echo "PHASE18_READONLY_BACKUPS=${BACKUPS}"
+          test "$DNS" = PASS
+          test "$PUBLIC" = PASS
+          test "$BACKUPS" = PASS
+          echo 'PHASE18_READONLY_RESOLUTION=PASS public_mutations=0 login_enablements=0 dns_changes=0 route_changes=0 real_syncs=0 old_live_retained=true'
