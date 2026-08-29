@@ -50,7 +50,11 @@ jobs:
         run: |
           set -euo pipefail
           probe_get() {
-            local label="$1" origin="$2" path="$3" out="/tmp/${label}.json" code err
+            local label="$1"
+            local origin="$2"
+            local path="$3"
+            local out="/tmp/${label}.json"
+            local code err
             if [ -n "$origin" ]; then
               code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header "Origin: $origin" "$WORKER_BASE$path")"
             else
@@ -60,7 +64,10 @@ jobs:
             echo "PHASE17_RUNTIME_PROBE label=$label http=$code error=${err:-none}"
           }
           probe_login() {
-            local label="$1" origin="$2" out="/tmp/${label}.json" code err
+            local label="$1"
+            local origin="$2"
+            local out="/tmp/${label}.json"
+            local code err
             if [ -n "$origin" ]; then
               code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header "Origin: $origin" --header 'Content-Type: application/json' --request POST --data '{"username":"__phase17_not_authorised__","password":"Aa1x"}' "$WORKER_BASE/api/v1/student/auth/login")"
             else
@@ -75,4 +82,4 @@ jobs:
           probe_get home_no_origin '' '/api/v1/student/home'
           probe_get session_pages 'https://futureperfecttuitions.github.io' '/api/v1/student/session'
           probe_get session_no_origin '' '/api/v1/student/session'
-          test "$(awk '/label=login_pages/{for(i=1;i<=NF;i++)if($i~/^http=/){sub("http=","",$i);print $i}}' <(grep PHASE17_RUNTIME_PROBE <(true)) 2>/dev/null || true)" != impossible
+          echo 'PHASE17_RUNTIME_DIAGNOSTIC_COMPLETE'
