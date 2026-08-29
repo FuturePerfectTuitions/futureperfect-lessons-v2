@@ -1,0 +1,150 @@
+/* Phase 16 owner refinement — presentation only.
+   Keeps the tested navigation/resource/session behaviour intact while reducing visual clutter. */
+
+body.phase11-change8 .phase6-back-button {
+  position: fixed;
+  left: 0;
+  bottom: 24px;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
+  min-height: 52px;
+  padding: 0 17px;
+  overflow: hidden;
+  border-color: var(--c8-navy);
+  border-radius: 0 999px 999px 0;
+  background: var(--c8-navy);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.18);
+  white-space: nowrap;
+  font-size: 0;
+  transition: width 180ms ease, padding 180ms ease, box-shadow 180ms ease;
+}
+
+body.phase11-change8 .phase6-back-button::before {
+  content: "←";
+  flex: 0 0 auto;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+body.phase11-change8 .phase6-back-button::after {
+  flex: 0 0 auto;
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  opacity: 0;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 900;
+  transition: max-width 180ms ease, margin-left 180ms ease, opacity 140ms ease;
+}
+
+body.phase11-change8 #back-to-subjects::after { content: "Subjects"; }
+body.phase11-change8 #back-to-views::after { content: "Back"; }
+body.phase11-change8 #back-to-lessons::after { content: "Lessons"; }
+
+body.phase11-change8 .phase6-back-button:hover,
+body.phase11-change8 .phase6-back-button:focus-visible {
+  width: 142px;
+  padding-right: 20px;
+  border-color: var(--c8-navy-deep);
+  background: var(--c8-navy-deep);
+  color: #fff;
+  outline: none;
+}
+
+body.phase11-change8 .phase6-back-button:hover::after,
+body.phase11-change8 .phase6-back-button:focus-visible::after {
+  max-width: 82px;
+  margin-left: 9px;
+  opacity: 1;
+}
+
+/* Unlocked is the normal state; only exceptional locked state needs a badge. */
+body.phase11-change8 .phase7-state:not(.locked),
+body.phase11-change8 .phase6-lesson-state:not(.locked) {
+  display: none !important;
+}
+
+/* The video section should read as one professional control, not a heading plus a duplicate card. */
+body.phase11-change8 #video-section {
+  position: relative;
+}
+
+body.phase11-change8 #video-section .phase7-section-heading {
+  min-height: 52px;
+  margin-bottom: 0;
+  padding-right: 104px;
+}
+
+body.phase11-change8 #video-section .phase12-video-toggle-row {
+  min-height: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+body.phase11-change8 #video-section .phase12-video-toggle-row .phase7-resource-copy {
+  display: none;
+}
+
+body.phase11-change8 #video-section .phase12-video-toggle {
+  position: absolute;
+  top: 48px;
+  right: 22px;
+  z-index: 2;
+  min-width: 76px;
+  min-height: 40px;
+  padding: 8px 17px;
+}
+
+body.phase11-change8 #video-section #video-frame:not([hidden]),
+body.phase11-change8 #video-section #video-loading:not([hidden]),
+body.phase11-change8 #video-section #video-error:not([hidden]) {
+  margin-top: 16px;
+}
+
+@media (max-width: 760px) {
+  body.phase11-change8 .phase6-back-button {
+    bottom: 18px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0 15px;
+  }
+
+  body.phase11-change8 .phase6-back-button:hover,
+  body.phase11-change8 .phase6-back-button:focus-visible {
+    width: 132px;
+  }
+
+  body.phase11-change8 #video-section .phase7-section-heading {
+    min-height: 48px;
+    padding-right: 88px;
+  }
+
+  body.phase11-change8 #video-section .phase12-video-toggle {
+    top: 46px;
+    right: 18px;
+    min-width: 68px;
+    min-height: 38px;
+    padding: 7px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.phase11-change8 .phase6-back-button,
+  body.phase11-change8 .phase6-back-button::after {
+    transition: none;
+  }
+}
