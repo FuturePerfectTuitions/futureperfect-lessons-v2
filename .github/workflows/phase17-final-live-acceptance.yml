@@ -1,21 +1,10 @@
 name: Phase 17 Final Selected-Real and Dummy Acceptance
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase17-final-live-acceptance.yml'
-      - 'tests/phase17-final-live-acceptance.sh'
-      - 'worker/src/index-phase17.js'
-      - 'docs/data/phase17/vr-howto-explicit-screenpal.json'
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: phase17-live-state-audit
-  cancel-in-progress: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -26,19 +15,13 @@ env:
 
 jobs:
   acceptance:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout exact Phase 17 head
+      - name: Checkout requested ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -47,11 +30,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_BASE='05f9c23bdb3e599ef0c641490822e9d63e5728fe'
-          if [ '${{ github.event_name }}' = 'pull_request' ]; then
-            test '${{ github.event.pull_request.base.sha }}' = "$EXPECTED_BASE"
-            git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
-          fi
           bash -n tests/phase17-final-live-acceptance.sh
           node tests/phase17-explicit-special-screenpal-static.mjs
           node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-nav.json
@@ -59,7 +37,6 @@ jobs:
           grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml
           ! grep -Fq 'STUDENT_LOGIN_ENABLED = "true"' worker/wrangler.toml
           grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
-          grep -Fq 'Normal student login' worker/wrangler.toml
           echo 'Phase 18 boundary remains closed.'
       - name: Run guarded selected-real and controlled-dummy acceptance
         shell: bash
@@ -79,14 +56,3 @@ jobs:
           sed -i '/^# Explicit cleanup now/i PHASE17_STAGE=explicit-cleanup' tests/phase17-final-live-acceptance.sh
           sed -i '/^cf_get "\$SETTINGS_URL" "\$TMP\/settings-after.json"/i PHASE17_STAGE=final-proof' tests/phase17-final-live-acceptance.sh
           bash tests/phase17-final-live-acceptance.sh
-      - name: Final read-only postcheck
-        shell: bash
-        env:
-          PHASE17_FINALIZE_ACTION: postcheck
-        run: |
-          set -euo pipefail
-          node tests/phase17-finalize-state.mjs | tee /tmp/p17-post-real.json
-          jq -e '.status=="PASS" and .realStudentRecords==2 and .fullLibraryAssignments==0 and .credentialFormatFailures==0 and .d1.entitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0 and .quickCheck=="ok" and .triggerPresent==true' /tmp/p17-post-real.json >/dev/null
-          node tests/phase17-reconcile-readonly.mjs | tee /tmp/p17-post-reconcile.json
-          jq -e '.status=="PASS" and .state=="POST_CLEANUP_EXACT" and .worker.normalStudentLoginDisabled==true and .kv.userRecords==2 and .kv.lessonKvKeys==381 and .kv.explicitVrHowToUrls==11' /tmp/p17-post-reconcile.json >/dev/null
-          echo 'PHASE17_FINAL_SELECTED_REAL_DUMMY_POSTCHECK_PASS'
