@@ -10,6 +10,7 @@ set -Eeuo pipefail
 W="npx --yes wrangler@${WRANGLER_VERSION}"
 ORIGIN='https://futureperfecttuitions.github.io'
 TMP="$(mktemp -d)"
+RUNTIME_CONFIG="$PWD/.phase17-wrangler.runtime.toml"
 TEST_START="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 DUMMY="__phase17final_${GITHUB_RUN_ID:-local}"
 STUDENTS=''; LESSONS=''; DB=''; R2=''; ORIGINS=''; Y3=''; Y5=''
@@ -52,7 +53,7 @@ api_code_post(){
 
 runtime_config(){
   local allow="$1"
-  cat > "$TMP/wrangler.runtime.toml" <<EOF
+  cat > "$RUNTIME_CONFIG" <<EOF
 name = "fpt-portal-v2-worker"
 main = "worker/src/index-phase17.js"
 compatibility_date = "2026-08-20"
@@ -81,7 +82,7 @@ EOF
 
 deploy_allowlist(){
   runtime_config "$1"
-  $W deploy --config "$TMP/wrangler.runtime.toml" --keep-vars --message 'Phase 17 guarded selected-real acceptance' >"$TMP/deploy.log" 2>&1
+  $W deploy --config "$RUNTIME_CONFIG" --keep-vars --message 'Phase 17 guarded selected-real acceptance' >"$TMP/deploy.log" 2>&1
   sleep 4
 }
 
@@ -108,6 +109,7 @@ cleanup(){
   fi
   if [ "$DUMMY_CREATED" -eq 1 ] && [ -n "$STUDENTS" ]; then kv_delete "$STUDENTS" "user:$DUMMY" || rc=1; fi
   if [ "$ALLOWLIST_CHANGED" -eq 1 ] && [ -n "$STUDENTS" ] && [ -n "$LESSONS" ] && [ -n "$DB" ] && [ -n "$R2" ]; then deploy_allowlist '' || rc=1; fi
+  rm -f "$RUNTIME_CONFIG"
   rm -rf "$TMP"
   set -e
   return "$rc"
@@ -251,4 +253,5 @@ test "$(jq -r '.[0].results[0].e' "$TMP/final-d1.json")" = '173'; test "$(jq -r 
 
 echo 'PHASE17_SELECTED_REAL_DUMMY_CLEANUP_PASS normal_login=false allowlist_empty=true dummy_removed=true d1=173/4/4/0 secrets_preserved=true'
 trap - EXIT
+rm -f "$RUNTIME_CONFIG"
 rm -rf "$TMP"
