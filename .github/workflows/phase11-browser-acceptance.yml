@@ -34,7 +34,8 @@ jobs:
           set -euo pipefail
           # The Phase 15 acceptance workflow is serialized. Allow up to 15 minutes
           # for a same-head run to clear the queue and complete before this
-          # redundant standalone browser gate proceeds.
+          # redundant standalone browser gate proceeds. A skipped Phase 15 job is
+          # explicitly non-applicable to later-phase branches, not a failed gate.
           for attempt in $(seq 1 180); do
             state="$(gh api \
               -H 'Accept: application/vnd.github+json' \
@@ -47,8 +48,18 @@ jobs:
               break
             fi
             if [ "$status" = 'completed' ]; then
-              test "$conclusion" = 'success'
-              echo 'Same-head Phase 15 acceptance completed successfully; continuing standalone browser gate.'
+              case "$conclusion" in
+                success)
+                  echo 'Same-head Phase 15 acceptance completed successfully; continuing standalone browser gate.'
+                  ;;
+                skipped)
+                  echo 'Same-head Phase 15 acceptance is not applicable to this branch; continuing standalone browser gate.'
+                  ;;
+                *)
+                  echo "ERROR: same-head Phase 15 acceptance concluded ${conclusion}." >&2
+                  exit 1
+                  ;;
+              esac
               break
             fi
             if [ "$attempt" = '180' ]; then
