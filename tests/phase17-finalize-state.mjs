@@ -81,10 +81,23 @@ function credentialValid(value) {
 function array(value) { return Array.isArray(value) ? value : []; }
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+function londonDateStamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const get = type => parts.find(part => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function parseAllowlist(value) {
+  return String(value || '').split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
+}
+
 async function getContext() {
   const settings = await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
   const environment = String(binding(settings, 'ENVIRONMENT', 'plain_text')?.text || '');
   const login = String(binding(settings, 'STUDENT_LOGIN_ENABLED', 'plain_text')?.text || '');
+  const allowlist = parseAllowlist(binding(settings, 'DEV_LOGIN_ALLOWLIST', 'plain_text')?.text || '');
   const r2Bucket = String(binding(settings, 'MATERIALS_R2', 'r2_bucket')?.bucket_name || '');
   const studentsId = String(binding(settings, 'STUDENTS_KV', 'kv_namespace')?.namespace_id || '');
   const lessonsId = String(binding(settings, 'LESSONS_KV', 'kv_namespace')?.namespace_id || '');
@@ -93,7 +106,7 @@ async function getContext() {
   assert.ok(!login || login.toLowerCase() === 'false');
   assert.equal(r2Bucket, 'fpt-materials-dev');
   assert.ok(studentsId && lessonsId && databaseId);
-  return { settings, studentsId, lessonsId, databaseId, r2Bucket };
+  return { settings, studentsId, lessonsId, databaseId, r2Bucket, allowlist };
 }
 
 async function loadRealState(ctx) {
@@ -111,9 +124,19 @@ async function loadRealState(ctx) {
   assert.deepEqual(schoolYears, [3, 5], 'Expected one Year 3 and one Year 5 real profile.');
   assert.equal(records.filter(({ record }) => record?.vrEligible === true).length, 1, 'Exactly one real profile must be VR eligible.');
   assert.equal(records.filter(({ record }) => String(record?.status || '').toLowerCase() === 'active').length, 2);
-  assert.equal(records.filter(({ record }) => record?.expires == null).length, 2);
+  const londonToday = londonDateStamp();
+  const expiredRecords = records.filter(({ record }) => {
+    const expires = String(record?.expires || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(expires) && expires < londonToday;
+  });
+  assert.equal(expiredRecords.length, 0, 'A production-intended account is expired in Europe/London.');
   assert.equal(records.filter(({ record }) => credentialValid(record?.p)).length, 2, 'Login credential composition drift.');
   assert.equal(records.filter(({ record }) => credentialValid(record?.answerPassword)).length, 2, 'Answer-password composition drift.');
+
+  const realIdSet = new Set(realIds);
+  const realStudentAllowlistIntersection = ctx.allowlist.filter(id => realIdSet.has(id));
+  assert.equal(realStudentAllowlistIntersection.length, 0, 'A real student remains in DEV_LOGIN_ALLOWLIST.');
+  if (action === 'postcheck') assert.equal(ctx.allowlist.length, 0, 'Final Phase 17 development allowlist must be empty.');
 
   const manualCore = records.reduce((n, { record }) => n + array(record?.manualAccess?.coreLessons).length, 0);
   const manualVr = records.reduce((n, { record }) => n + array(record?.manualAccess?.vrLessons).length, 0);
@@ -140,7 +163,12 @@ async function loadRealState(ctx) {
   const trigger = await d1Query(ctx.databaseId, "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'");
   assert.equal(trigger.length, 1);
 
-  return { realIds, userKeys, records, fullLibraryAssignments, d1, quickCheck: quick, triggerPresent: true };
+  return {
+    realIds, userKeys, records, fullLibraryAssignments, d1, quickCheck: quick, triggerPresent: true,
+    londonToday, expiredRealRecordCount: expiredRecords.length,
+    developmentAllowlistEmpty: ctx.allowlist.length === 0,
+    realStudentAllowlistIntersectionCount: realStudentAllowlistIntersection.length
+  };
 }
 
 const ctx = await getContext();
@@ -177,6 +205,10 @@ console.log(JSON.stringify({
   worker: { environment: 'development', normalStudentLoginDisabled: true, r2Bucket: ctx.r2Bucket },
   realStudentRecords: finalState.records.length,
   credentialFormatFailures: 0,
+  expiredRealRecordCount: finalState.expiredRealRecordCount,
+  londonDateEvaluated: finalState.londonToday,
+  developmentAllowlistEmpty: finalState.developmentAllowlistEmpty,
+  realStudentAllowlistIntersectionCount: finalState.realStudentAllowlistIntersectionCount,
   fullLibraryAssignments: finalState.fullLibraryAssignments,
   manualCoreAssignments: 0,
   manualVrAssignments: 0,
