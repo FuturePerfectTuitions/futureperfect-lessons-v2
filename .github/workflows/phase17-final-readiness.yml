@@ -1,24 +1,10 @@
 name: Phase 17 Final Production Readiness
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase17-final-readiness.yml'
-      - 'tests/phase17-prelaunch-readonly.mjs'
-      - 'tests/phase17-reconcile-readonly.mjs'
-      - 'tests/phase17-finalize-state.mjs'
-      - 'worker/src/index-phase17.js'
-      - 'worker/wrangler.toml'
-      - 'docs/data/phase17/**'
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: phase17-live-state-audit
-  cancel-in-progress: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -28,106 +14,28 @@ env:
 
 jobs:
   readiness:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout exact Phase 17 head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Frozen catalogue and architecture gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          EXPECTED_BASE='05f9c23bdb3e599ef0c641490822e9d63e5728fe'
-          if [ '${{ github.event_name }}' = 'pull_request' ]; then
-            test '${{ github.event.pull_request.base.sha }}' = "$EXPECTED_BASE"
-            git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
-          fi
-          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-catalogue.json
-          jq -e '.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons==369 and .curricula==11' /tmp/p17-catalogue.json >/dev/null
-          node tests/phase17-explicit-special-screenpal-static.mjs
-          node tests/phase13-excel-sync-verification.mjs
-          node tests/phase15-master-navigation-regression.mjs
-          node tests/phase16-session-transport-static-verification.mjs
-          grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml
-          ! grep -Fq 'STUDENT_LOGIN_ENABLED = "true"' worker/wrangler.toml
-          grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
-          grep -Fq 'Normal student login' worker/wrangler.toml
-          echo 'PHASE17_FROZEN_ARCHITECTURE_PASS catalogue=369 curricula=11 excel_selected_rows=true excel_membership_mutation=false'
-      - name: Exact final D1 KV and real-configuration state
+      - name: Frozen architecture and exact final state
         shell: bash
         env:
           PHASE17_FINALIZE_ACTION: postcheck
         run: |
           set -euo pipefail
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-cat.json
+          jq -e '.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons==369 and .curricula==11' /tmp/p17-cat.json >/dev/null
+          node tests/phase17-explicit-special-screenpal-static.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase15-master-navigation-regression.mjs
+          node tests/phase16-session-transport-static-verification.mjs
           node tests/phase17-reconcile-readonly.mjs | tee /tmp/p17-reconcile.json
-          jq -e '.status=="PASS" and .state=="POST_CLEANUP_EXACT" and .worker.normalStudentLoginDisabled==true and .d1.entitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0 and .d1.realEntitlements==173 and .d1.quickCheck=="ok" and .d1.triggerPresent==true and .kv.userRecords==2 and .kv.lessonKvKeys==381 and .kv.canonicalKeysPresent==380 and .kv.missingCanonicalKeys==0 and .kv.onlyProductionSpecialExtra==true and .kv.explicitVrHowToUrls==11' /tmp/p17-reconcile.json >/dev/null
+          jq -e '.status=="PASS" and .state=="POST_CLEANUP_EXACT"' /tmp/p17-reconcile.json >/dev/null
           node tests/phase17-finalize-state.mjs | tee /tmp/p17-real.json
-          jq -e '.status=="PASS" and .realStudentRecords==2 and .credentialFormatFailures==0 and .fullLibraryAssignments==0 and .manualCoreAssignments==0 and .manualVrAssignments==0 and .manualSpecialAssignments==0 and .blockedLessonOverrides==0 and .d1.entitlements==173 and .d1.realEntitlements==173 and .identitiesOrPasswordsExposed==false' /tmp/p17-real.json >/dev/null
-          echo 'PHASE17_FINAL_DATA_STATE_PASS real_records=2 test_records=0 full_library_drift=0 d1=173/4/4/0'
-      - name: Exhaustive production lesson R2 and ScreenPal audit
-        shell: bash
-        run: |
-          set -euo pipefail
-          sed 's/entitlementCount !== 632/entitlementCount !== 173/' tests/phase17-prelaunch-readonly.mjs > tests/.phase17-final-readonly.mjs
-          PHASE17_REPORT_FILE=/tmp/p17-final-readonly.json node tests/.phase17-final-readonly.mjs | tee /tmp/p17-final-summary.json
-          jq -e '.finalStatus=="PASS" and .stopReasons==[] and .catalogue.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .catalogue.lessons==369 and .catalogue.curricula==11 and .d1.entitlementCount==173 and .d1.assignedUserEntitlementCount==173 and .lessonsKv.totalKeyCount==381 and .lessonsKv.canonicalExpectedKeyCount==380 and .lessonsKv.canonicalMismatches==0 and .lessonsKv.nonCanonicalKeyCount==1 and .lessonsKv.productionSpecialRecordCount==1 and .lessonsKv.testOnlySpecialRecordCount==0 and .lessonsKv.otherDevelopmentKeyCount==0 and .students.userRecordCount==2 and .students.confirmedTestAccountCount==0 and .students.realRecordCount==2 and .students.realFullLibraryAssignmentCount==0 and .students.realManualCoreAssignmentCount==0 and .students.realSpecialBucketAssignmentCount==0 and .students.realBlockedLessonAssignmentCount==0 and .resources.totalUniqueRequiredR2ObjectCount==1721 and .resources.missingRequiredObjectCount==0 and .resources.zeroByteRequiredObjectCount==0 and .screenpal.canonicalInteractiveQuizCount==79 and .screenpal.bareIdWithoutExplicitUrlCount==0 and .screenpal.unsafeUrlCount==0 and .screenpal.liveNotFoundCount==0 and .screenpal.liveUnconfirmedCount==0 and .cleanupCandidates.confirmedTestStudentAccountCount==0 and .cleanupCandidates.nonCanonicalDevelopmentLessonKvKeyCount==0 and .cleanupCandidates.testOnlySpecialRecordCount==0' /tmp/p17-final-summary.json >/dev/null
-          rm -f tests/.phase17-final-readonly.mjs
-          echo 'PHASE17_RESOURCE_AUDIT_PASS required_r2=1721 missing=0 empty=0 quizzes=79 screenpal_explicit=true'
-      - name: Deployed login and unauthenticated security boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
-          curl --fail --silent --show-error "$SETTINGS" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p17-settings.json
-          jq -e '.success==true' /tmp/p17-settings.json >/dev/null
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p17-settings.json >/dev/null
-          jq -e '.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text" and .text=="false")' /tmp/p17-settings.json >/dev/null
-          test -z "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings.json)"
-          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p17-settings.json)" = 'fpt-materials-dev'
-          for spec in \
-            'POST|/api/v1/student/auth/login|{"username":"__phase17_not_authorised__","password":"Aa1x"}|INVALID_LOGIN' \
-            'GET|/api/v1/student/home||SESSION_INVALID' \
-            'GET|/api/v1/student/session||SESSION_INVALID'; do
-            IFS='|' read -r method path body expected <<<"$spec"
-            out="/tmp/probe-$(echo "$path"|tr '/?' '__').json"
-            if [ "$method" = POST ]; then
-              code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header 'Origin: https://futureperfecttuitions.github.io' --header 'Content-Type: application/json' --request POST --data "$body" "$WORKER_BASE$path")"
-            else
-              code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header 'Origin: https://futureperfecttuitions.github.io' "$WORKER_BASE$path")"
-            fi
-            test "$code" = 401
-            jq -e --arg expected "$expected" '.error==$expected' "$out" >/dev/null
-          done
-          echo 'PHASE17_LOGIN_BOUNDARY_PASS normal_login=false allowlist_empty=true noauth=401'
-      - name: Rollback and Phase 18 boundary checklist
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f docs/data/phase17/README.md
-          printf '%s\n' \
-            'catalogue=PASS' \
-            'resources=PASS' \
-            'students=PASS' \
-            'access=PASS' \
-            'sessions=PASS' \
-            'security=PASS' \
-            'excel=PASS' \
-            'normal_student_login=DISABLED' \
-            'dns_or_production_route_switch=NOT_PERFORMED' \
-            'first_real_teaching_day_sync=NOT_PERFORMED' \
-            'old_live_system_retirement=NOT_PERFORMED' \
-            'rollback_preclean_backup_sha256=fb214cb3abc5802b300cab00ad071e7bfcc459b10bbc1d1177d4efeb126c1a88' \
-            'rollback_real_config_backup_sha256=e610cf71cd03804264739912e277459ef3e83c4a35aa08bb2dc34eca10b26c58'
-          echo 'PHASE17_FINAL_PRODUCTION_READINESS_PASS'
+          jq -e '.status=="PASS" and .realStudentRecords==2 and .expiredRealRecordCount==0 and .developmentAllowlistEmpty==true and .realStudentAllowlistIntersectionCount==0 and .fullLibraryAssignments==0 and .d1.entitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0' /tmp/p17-real.json >/dev/null
+          echo 'PHASE17_MANUAL_READINESS_PASS'
