@@ -1,0 +1,82 @@
+name: Phase 17 Final Selected-Real and Dummy Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase17-final-live-acceptance.yml'
+      - 'tests/phase17-final-live-acceptance.sh'
+      - 'worker/src/index-phase17.js'
+      - 'docs/data/phase17/vr-howto-explicit-screenpal.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase17-final-live-acceptance
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  acceptance:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact Phase 17 head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Guard frozen source and Phase 18 boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE='05f9c23bdb3e599ef0c641490822e9d63e5728fe'
+          if [ '${{ github.event_name }}' = 'pull_request' ]; then
+            test '${{ github.event.pull_request.base.sha }}' = "$EXPECTED_BASE"
+            git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
+          fi
+          bash -n tests/phase17-final-live-acceptance.sh
+          node tests/phase17-explicit-special-screenpal-static.mjs
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-nav.json
+          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons == 369 and .curricula == 11' /tmp/p17-nav.json >/dev/null
+          grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml
+          grep -Fq 'STUDENT_LOGIN_ENABLED = "false"' worker/wrangler.toml
+          grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
+          echo 'Phase 18 boundary remains closed.'
+      - name: Run guarded selected-real and controlled-dummy acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Preserve the temporary directory through the script's explicit cleanup so
+          # the before/after secret-name comparison remains available. A failed job
+          # is isolated to the runner and the script trap still restores portal state.
+          sed -i '0,/^  rm -rf "\$TMP"$/s//  :/' tests/phase17-final-live-acceptance.sh
+          bash tests/phase17-final-live-acceptance.sh
+      - name: Final read-only postcheck
+        shell: bash
+        env:
+          PHASE17_FINALIZE_ACTION: postcheck
+        run: |
+          set -euo pipefail
+          node tests/phase17-finalize-state.mjs | tee /tmp/p17-post-real.json
+          jq -e '.status=="PASS" and .realStudentRecords==2 and .fullLibraryAssignments==0 and .credentialFormatFailures==0 and .d1.entitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0 and .quickCheck=="ok" and .triggerPresent==true' /tmp/p17-post-real.json >/dev/null
+          node tests/phase17-reconcile-readonly.mjs | tee /tmp/p17-post-reconcile.json
+          jq -e '.status=="PASS" and .state=="POST_CLEANUP_EXACT" and .worker.normalStudentLoginDisabled==true and .kv.userRecords==2 and .kv.lessonKvKeys==381 and .kv.explicitVrHowToUrls==11' /tmp/p17-post-reconcile.json >/dev/null
+          echo 'PHASE17_FINAL_SELECTED_REAL_DUMMY_POSTCHECK_PASS'
