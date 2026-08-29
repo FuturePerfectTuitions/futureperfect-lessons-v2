@@ -36,8 +36,14 @@ jobs:
           node --check tests/phase10-history-browser-verification.mjs
           bash -n tests/phase10-history-api-verification.sh
           grep -Fq 'assets/phase10-history.js' phase10.html
-          grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
-          grep -Fq 'test0707' worker/wrangler.toml
+          if grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
+            grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
+            ! grep -Fq 'STUDENT_LOGIN_ENABLED = "true"' worker/wrangler.toml
+            grep -Fq "import phase13Worker from './index-phase13.js';" worker/src/index-phase17.js
+          else
+            grep -Eq '^main = "src/(index-phase10-history|index-phase12)\.js"$' worker/wrangler.toml
+            grep -Fq 'test0707' worker/wrangler.toml
+          fi
           for f in worker/fixtures/phase10/user-test0707.json worker/fixtures/phase10/lesson-DEV-HISTORY-*.json worker/fixtures/phase10/curriculum-*.json; do jq -e . "$f" >/dev/null; done
           jq -e '.batches == ["Y5MDEVHIST","Y5EDEVHIST"] and .schoolYear == 5' worker/fixtures/phase10/user-test0707.json >/dev/null
           echo 'Phase 10 history navigation static verification: PASS'
