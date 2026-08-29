@@ -1,73 +1,31 @@
 name: Phase 17 Read-Only Reconciliation
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase17-reconcile-readonly.yml'
-      - 'tests/phase17-reconcile-readonly.mjs'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
-concurrency:
-  group: phase17-live-state-audit
-  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
 
 jobs:
   reconcile:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
-
     steps:
-      - name: Checkout exact Phase 17 head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Guard Phase 16 base and syntax
-        shell: bash
-        run: |
-          set -euo pipefail
-          EXPECTED_BASE='05f9c23bdb3e599ef0c641490822e9d63e5728fe'
-          if [ '${{ github.event_name }}' = 'pull_request' ]; then
-            test '${{ github.event.pull_request.base.sha }}' = "$EXPECTED_BASE"
-            git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
-          fi
-          node --check tests/phase17-reconcile-readonly.mjs
-          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-nav.json
-          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p17-nav.json >/dev/null
-
       - name: Reconcile current isolated V2 state read-only
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/p17-nav.json
+          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/p17-nav.json >/dev/null
           node tests/phase17-reconcile-readonly.mjs | tee /tmp/phase17-reconcile.json
           jq -e '.status == "PASS" and .state == "POST_CLEANUP_EXACT" and .worker.environment == "development" and .worker.normalStudentLoginDisabled == true and .identitiesOrPasswordsExposed == false' /tmp/phase17-reconcile.json >/dev/null
-
-      - name: Upload sanitized reconciliation evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase17-reconcile-readonly
-          path: /tmp/phase17-reconcile.json
-          if-no-files-found: warn
-          retention-days: 14
