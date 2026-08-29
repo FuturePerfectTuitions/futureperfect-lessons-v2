@@ -1361,7 +1361,14 @@ async function loadStudentAccessState(env, auth) {
       : []
   );
 
-  return { d1Core, d1Vr, batchByLesson, manualCore, manualVr, blocked, fullLibraries };
+  // Phase 17: presentation-only marker for retained programme history when
+  // legacy entitlement rows predate source_batch_code audit metadata.
+  const historicalViews = new Set(
+    Array.isArray(auth.user?.historicalViews)
+      ? auth.user.historicalViews.map(value => String(value || '').trim().toLowerCase()).filter(Boolean)
+      : []
+  );
+  return { d1Core, d1Vr, batchByLesson, manualCore, manualVr, blocked, fullLibraries, historicalViews };
 }
 
 function fullLibraryCoversLesson(access, lesson) {
@@ -1395,18 +1402,20 @@ function historicalDescriptorForCurriculum(curriculumCode, access, lessonIds) {
   }
   const had11Maths = sourceBatches.some(code => /^Y[45]M11/.test(code));
   const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));
+  const historicalViews = access.historicalViews instanceof Set ? access.historicalViews : new Set();
+  const explicitlyRetained = viewId => historicalViews.has(viewId);
 
   switch (curriculumCode) {
     case 'MATHS_Y2': return mathsNormalDescriptor(2);
     case 'MATHS_Y3': return mathsNormalDescriptor(3);
-    case 'MATHS_L1': return mathsNormalDescriptor(4);
-    case 'MATHS_L2': return had11Maths ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);
-    case 'MATHS_L3': return had11Maths ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);
+    case 'MATHS_L1': return (had11Maths || explicitlyRetained('maths-level1')) ? mathsLevelDescriptor(1) : mathsNormalDescriptor(4);
+    case 'MATHS_L2': return (had11Maths || explicitlyRetained('maths-level2')) ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);
+    case 'MATHS_L3': return (had11Maths || explicitlyRetained('maths-level3')) ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);
     case 'MATHS_Y6_EXTRA': return mathsNormalDescriptor(6);
     case 'ENGLISH_Y2': return englishDescriptor(2);
     case 'ENGLISH_Y3': return englishDescriptor(3);
-    case 'ENGLISH_Y4': return englishDescriptor(4, had11English);
-    case 'ENGLISH_Y5': return englishDescriptor(5, had11English);
+    case 'ENGLISH_Y4': return englishDescriptor(4, had11English || explicitlyRetained('english-year4-11plus'));
+    case 'ENGLISH_Y5': return englishDescriptor(5, had11English || explicitlyRetained('english-year5-11plus'));
     case 'ENGLISH_Y6': return englishDescriptor(6);
     default: return null;
   }
