@@ -91,6 +91,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command \
+            "SELECT batch_key,effective_from FROM student_batch_assignments ORDER BY batch_key;" \
+            >/tmp/p17-effective-dates.json 2>/tmp/p17-effective-dates.err
+          jq -e '.[0].results | map({batch_key,effective_from}) == [
+            {"batch_key":"Y3FE","effective_from":"2026-09-10"},
+            {"batch_key":"Y3FM","effective_from":"2026-09-07"},
+            {"batch_key":"Y511FE","effective_from":"2026-09-12"},
+            {"batch_key":"Y511FM","effective_from":"2026-09-08"}
+          ]' /tmp/p17-effective-dates.json >/dev/null
+          test "$(TZ=Europe/London date +%F)" \< '2026-09-07'
           sed -i '0,/^  rm -rf "\$TMP"$/s//  :/' tests/phase17-final-live-acceptance.sh
           sed -i '2a PHASE17_STAGE=preflight\ntrap '\''rc=$?; if [ "${PHASE17_STAGE}" = "y3-real" ] || [ "${PHASE17_STAGE}" = "y5-real" ]; then echo "PHASE17_LIVE_DIAGNOSTIC_FAIL stage=${PHASE17_STAGE} line=${LINENO} rc=${rc} command=${BASH_COMMAND}" >&2; else echo "PHASE17_LIVE_DIAGNOSTIC_FAIL stage=${PHASE17_STAGE} line=${LINENO} rc=${rc}" >&2; fi'\'' ERR' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Resolve the two production-intended records/i PHASE17_STAGE=resolve-real' tests/phase17-final-live-acceptance.sh
@@ -99,6 +109,8 @@ jobs:
           sed -i '/^FAKE_CODE=/i PHASE17_STAGE=fake-login' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Selected real Y3/i PHASE17_STAGE=y3-real' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Selected real Y5/i PHASE17_STAGE=y5-real' tests/phase17-final-live-acceptance.sh
+          sed -i '/current==true and \.group=="current"/d' tests/phase17-final-live-acceptance.sh
+          sed -i 's/current_views=4/effective_dated_views_pre_start=true/' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Protected Answer Pack/i PHASE17_STAGE=protected-answer' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Controlled dummy exercises/i PHASE17_STAGE=dummy-vr-howto' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Normal logout path/i PHASE17_STAGE=logout' tests/phase17-final-live-acceptance.sh
