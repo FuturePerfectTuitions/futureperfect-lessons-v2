@@ -149,6 +149,7 @@ jobs:
             'assets/phase16-ui-refinement.css'
             'assets/phase16-ui-refinement.js'
             'phase11.html'
+            'tests/phase11-change8-visual-static-verification.mjs'
           )
           printf '%s\n' "${MAIN_DIFF[@]}" > /tmp/phase16-main-diff.txt
           printf '%s\n' "${EXPECTED_MAIN_DIFF[@]}" | sort > /tmp/phase16-main-diff-expected.txt
