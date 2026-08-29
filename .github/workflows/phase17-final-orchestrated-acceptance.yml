@@ -92,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           sed -i '0,/^  rm -rf "\$TMP"$/s//  :/' tests/phase17-final-live-acceptance.sh
-          sed -i '2a PHASE17_STAGE=preflight\ntrap '\''rc=$?; echo "PHASE17_LIVE_DIAGNOSTIC_FAIL stage=${PHASE17_STAGE} line=${LINENO} rc=${rc}" >&2'\'' ERR' tests/phase17-final-live-acceptance.sh
+          sed -i '2a PHASE17_STAGE=preflight\ntrap '\''rc=$?; if [ "${PHASE17_STAGE}" = "y3-real" ] || [ "${PHASE17_STAGE}" = "y5-real" ]; then echo "PHASE17_LIVE_DIAGNOSTIC_FAIL stage=${PHASE17_STAGE} line=${LINENO} rc=${rc} command=${BASH_COMMAND}" >&2; else echo "PHASE17_LIVE_DIAGNOSTIC_FAIL stage=${PHASE17_STAGE} line=${LINENO} rc=${rc}" >&2; fi'\'' ERR' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Resolve the two production-intended records/i PHASE17_STAGE=resolve-real' tests/phase17-final-live-acceptance.sh
           sed -i '/^DUMMY_P=/i PHASE17_STAGE=dummy-create' tests/phase17-final-live-acceptance.sh
           sed -i '/^# Temporarily allow exactly/i PHASE17_STAGE=allowlist-deploy' tests/phase17-final-live-acceptance.sh
