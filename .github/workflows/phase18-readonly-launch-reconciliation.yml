@@ -1,0 +1,163 @@
+name: Phase 18 read-only launch reconciliation
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-launch-reconciliation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  R2_BUCKET: fpt-materials-dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  reconcile:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout isolated Phase 18 audit branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove audit branch starts from frozen Phase 17 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='3c63a49ef0d679318e8c6901b12e82c007b56271'
+          git merge-base --is-ancestor "$BASE" HEAD
+          test "$(git rev-list --count "$BASE"..HEAD)" = '1'
+          test "$(git diff --name-only "$BASE"..HEAD)" = '.github/workflows/phase18-readonly-launch-reconciliation.yml'
+          node scripts/phase11-navigation-manifest.mjs >/tmp/nav.json
+          jq -e '.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons==369 and .curricula==11' /tmp/nav.json >/dev/null
+          echo "PHASE18_SOURCE_BASE_PASS main=${BASE} tree=$(git show -s --format=%T "$BASE")"
+
+      - name: Fresh exhaustive Phase 17 production-resource baseline
+        shell: bash
+        env:
+          PHASE17_FINALIZE_ACTION: postcheck
+        run: |
+          set -euo pipefail
+          node tests/phase17-finalize-state.mjs >/tmp/finalize.json
+          jq -e '.status=="PASS" and .realStudentRecords==2 and .credentialFormatFailures==0 and .expiredRealRecordCount==0 and .developmentAllowlistEmpty==true and .realStudentAllowlistIntersectionCount==0 and .fullLibraryAssignments==0 and .manualCoreAssignments==0 and .manualVrAssignments==0 and .manualSpecialAssignments==0 and .blockedLessonOverrides==0 and .d1.entitlements==173 and .d1.realEntitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0 and .quickCheck=="ok" and .triggerPresent==true and .identitiesOrPasswordsExposed==false' /tmp/finalize.json >/dev/null
+          node tests/phase17-prelaunch-readonly.mjs >/tmp/prelaunch-summary.json
+          jq -e '.finalStatus=="PASS" and .catalogue.lessons==369 and .catalogue.curricula==11 and .catalogue.sha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .d1.lessonEntitlements==173 and .d1.batchDefinitions==4 and .d1.studentBatchAssignments==4 and .d1.batchLessonReleases==0 and .lessonsKv.totalKeyCount==381 and .students.userRecordCount==2 and .students.realRecordCount==2 and .students.realFullLibraryAssignmentCount==0 and .students.realManualCoreAssignmentCount==0 and .students.realSpecialBucketAssignmentCount==0 and .students.realBlockedLessonAssignmentCount==0 and .resources.totalUniqueRequiredR2ObjectCount==1721 and .resources.missingRequiredObjectCount==0 and .resources.zeroByteRequiredObjectCount==0 and .screenpal.canonicalInteractiveQuizCount==79 and .screenpal.unsafeUrlCount==0 and .screenpal.bareIdWithoutExplicitUrlCount==0 and .screenpal.liveNotFoundCount==0 and .screenpal.liveUnconfirmedCount==0' /tmp/prelaunch-summary.json >/dev/null
+          node tests/phase17-reconcile-readonly.mjs >/tmp/reconcile.json
+          jq -e '.status=="PASS" and .state=="POST_CLEANUP_EXACT" and .worker.environment=="development" and .worker.normalStudentLoginDisabled==true and .d1.entitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0 and .kv.userRecords==2 and .kv.lessonKvKeys==381 and .kv.explicitVrHowToUrls==11' /tmp/reconcile.json >/dev/null
+          echo 'PHASE18_EXHAUSTIVE_BASELINE_PASS lessons=369 curricula=11 d1=173/4/4/0 students=2 real_entitlements=173 lessons_kv=381 r2_required=1721 r2_missing=0 r2_empty=0 quizzes=79 vr_howto_urls=11'
+
+      - name: Fresh deployed Worker settings, bindings and deployment identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          SETTINGS_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.success==true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text" and .text=="false")' /tmp/settings.json >/dev/null
+          test -z "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)" = 'fpt-materials-dev'
+          echo "PHASE18_WORKER=${WORKER_NAME}"
+          echo "PHASE18_WORKER_BASE=${WORKER_BASE}"
+          echo "PHASE18_ENVIRONMENT=$(jq -r '.result.bindings[]|select(.name=="ENVIRONMENT")|.text' /tmp/settings.json)"
+          echo "PHASE18_STUDENT_LOGIN_ENABLED=$(jq -r '.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED")|.text' /tmp/settings.json)"
+          echo "PHASE18_DEV_LOGIN_ALLOWLIST_EMPTY=true"
+          echo "PHASE18_ALLOWED_ORIGINS=$(jq -r '.result.bindings[]|select(.name=="ALLOWED_ORIGINS")|.text' /tmp/settings.json)"
+          echo "PHASE18_STUDENTS_KV_ID=$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          echo "PHASE18_LESSONS_KV_ID=$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          echo "PHASE18_D1_ID=$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings.json)"
+          echo "PHASE18_R2_BUCKET=$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
+          echo 'PHASE18_SECRET_NAMES_ONLY:'
+          jq -r '.result.bindings[]|select(.type=="secret_text")|.name' /tmp/settings.json | sort
+          echo 'PHASE18_DEPLOYMENT_STATUS:'
+          npx --yes wrangler@${WRANGLER_VERSION} deployments status --name "$WORKER_NAME" --json
+          echo 'PHASE18_RECENT_DEPLOYMENTS:'
+          npx --yes wrangler@${WRANGLER_VERSION} deployments list --name "$WORKER_NAME" --json
+
+      - name: Verify all recorded Phase 17 rollback backups still exist and hash-match
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          PRE_KEY='_internal/phase17-backup/prelaunch-33251109750-9bace406a04b.tar.gz'
+          $W r2 object get "$R2_BUCKET/$PRE_KEY" --remote --file=/tmp/preclean.tar.gz >/tmp/pre-get.log 2>&1
+          test "$(sha256sum /tmp/preclean.tar.gz | awk '{print $1}')" = 'fb214cb3abc5802b300cab00ad071e7bfcc459b10bbc1d1177d4efeb126c1a88'
+          echo "PHASE18_BACKUP_PRE_CLEAN_PASS key=${PRE_KEY} sha256=fb214cb3abc5802b300cab00ad071e7bfcc459b10bbc1d1177d4efeb126c1a88"
+
+          HISTORY_KEY='__phase17_backups/retained-history-preapply-33259502392.json'
+          $W r2 object get "$R2_BUCKET/$HISTORY_KEY" --remote --file=/tmp/history.json >/tmp/history-get.log 2>&1
+          test "$(sha256sum /tmp/history.json | awk '{print $1}')" = '7d45b4ec24b57f92aff61f8f38a522536e57ce0378919d2ad53caa8961524f72'
+          echo "PHASE18_BACKUP_HISTORY_PASS key=${HISTORY_KEY} sha256=7d45b4ec24b57f92aff61f8f38a522536e57ce0378919d2ad53caa8961524f72"
+
+          LIST_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects"
+          curl --fail --silent --show-error --get "$LIST_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --data-urlencode 'prefix=_internal/phase17-backup/finalize-' --data-urlencode 'per_page=100' --output /tmp/finalize-list.json
+          jq -e '.success==true' /tmp/finalize-list.json >/dev/null
+          found=0
+          : > /tmp/finalize-match-key.txt
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            rm -f /tmp/finalize.json
+            if $W r2 object get "$R2_BUCKET/$key" --remote --file=/tmp/finalize.json >/tmp/finalize-get.log 2>&1; then
+              if [ "$(sha256sum /tmp/finalize.json | awk '{print $1}')" = 'e610cf71cd03804264739912e277459ef3e83c4a35aa08bb2dc34eca10b26c58' ]; then
+                printf '%s\n' "$key" > /tmp/finalize-match-key.txt
+                found=$((found+1))
+              fi
+            fi
+          done < <(jq -r '.result[]?.key // empty' /tmp/finalize-list.json)
+          test "$found" = '1'
+          REAL_KEY="$(cat /tmp/finalize-match-key.txt)"
+          echo "PHASE18_BACKUP_REAL_CONFIG_PASS key=${REAL_KEY} sha256=e610cf71cd03804264739912e277459ef3e83c4a35aa08bb2dc34eca10b26c58"
+
+      - name: Verify current production domain, Cloudflare DNS and Worker routes read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZONES_URL="https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}&status=active&per_page=50"
+          curl --fail --silent --show-error "$ZONES_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/zones.json
+          jq -e '.success==true and (.result|length)==1' /tmp/zones.json >/dev/null
+          ZONE_ID="$(jq -r '.result[0].id' /tmp/zones.json)"
+          test -n "$ZONE_ID"
+          DNS_URL="https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?name=lessons.futureperfect.education&per_page=100"
+          curl --fail --silent --show-error "$DNS_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/dns.json
+          jq -e '.success==true and (.result|length)>=1' /tmp/dns.json >/dev/null
+          echo "PHASE18_ZONE_ID=${ZONE_ID}"
+          jq -r '.result[] | "PHASE18_DNS_RECORD id=\(.id) type=\(.type) name=\(.name) content=\(.content) proxied=\(.proxied) ttl=\(.ttl)"' /tmp/dns.json
+          ROUTES_URL="https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes"
+          curl --fail --silent --show-error "$ROUTES_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/routes.json
+          jq -e '.success==true' /tmp/routes.json >/dev/null
+          echo 'PHASE18_RELEVANT_WORKER_ROUTES:'
+          jq -r '.result[] | select((.pattern // "") | contains("lessons.futureperfect.education")) | "id=\(.id) pattern=\(.pattern) script=\(.script // "")"' /tmp/routes.json
+          echo 'PHASE18_PUBLIC_DNS:'
+          if command -v dig >/dev/null 2>&1; then
+            echo "CNAME=$(dig +short CNAME lessons.futureperfect.education | tr '\n' ',' | sed 's/,$//')"
+            echo "A=$(dig +short A lessons.futureperfect.education | tr '\n' ',' | sed 's/,$//')"
+          fi
+          curl --fail --silent --show-error --location https://lessons.futureperfect.education/ --output /tmp/live.html
+          grep -Fq 'Future Perfect' /tmp/live.html
+          grep -Fq 'https://fpt-lessons-api.futureperfectlessons.workers.dev' /tmp/live.html
+          echo 'PHASE18_OLD_LIVE_HTTP_PASS domain=https://lessons.futureperfect.education worker=https://fpt-lessons-api.futureperfectlessons.workers.dev'
+
+      - name: Verify V2 public frontend targets without changing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase11.html --output /tmp/v2-phase11.html
+          grep -Fq 'Future Perfect' /tmp/v2-phase11.html
+          curl --fail --silent --show-error --location https://futureperfecttuitions.github.io/futureperfect-lessons-v2/ --output /tmp/v2-root.html
+          grep -Fq 'Portal V2 Development' /tmp/v2-root.html
+          echo 'PHASE18_V2_FRONTEND_PASS accepted_app=https://futureperfecttuitions.github.io/futureperfect-lessons-v2/phase11.html root=https://futureperfecttuitions.github.io/futureperfect-lessons-v2/ root_is_development_landing=true'
+          echo 'PHASE18_READONLY_LAUNCH_RECONCILIATION_PASS no_public_mutation=true no_login_enablement=true no_dns_change=true no_route_change=true no_real_sync=true old_live_retained=true'
