@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 PHASE15_MAIN='e9f1085c6797d51a9a14b2d6b118a4fb94576f38'
-FOUNDATION_PATH='.github/workflows/phase16-device-browser-resource-session-acceptance.yml'
 : "${CLOUDFLARE_API_TOKEN:?missing CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?missing CLOUDFLARE_ACCOUNT_ID}"
 : "${WORKER_NAME:=fpt-portal-v2-worker}"
@@ -115,9 +114,17 @@ trap on_exit EXIT
 # it is not used as proof of the live repository state.
 CURRENT_MAIN="$(git rev-parse origin/main)"
 git merge-base --is-ancestor "$PHASE15_MAIN" "$CURRENT_MAIN" || fail 'Current main is not descended from the Phase 15 closure SHA.'
-mapfile -t base_changes < <(git diff --name-only "$PHASE15_MAIN" "$CURRENT_MAIN")
-test "${#base_changes[@]}" -eq 1 || fail 'Unexpected repository changes exist on current main after Phase 15 closure.'
-test "${base_changes[0]}" = "$FOUNDATION_PATH" || fail 'Unexpected non-foundation change exists on current main after Phase 15 closure.'
+mapfile -t base_changes < <(git diff --name-only "$PHASE15_MAIN" "$CURRENT_MAIN" | sort)
+expected_main_changes=(
+  '.github/workflows/phase16-device-browser-resource-session-acceptance.yml'
+  'assets/phase16-ui-refinement.css'
+  'assets/phase16-ui-refinement.js'
+  'phase11.html'
+  'tests/phase11-change8-visual-static-verification.mjs'
+)
+printf '%s\n' "${base_changes[@]}" > /tmp/p16-workflow-main-diff.txt
+printf '%s\n' "${expected_main_changes[@]}" | sort > /tmp/p16-workflow-main-diff-expected.txt
+cmp /tmp/p16-workflow-main-diff-expected.txt /tmp/p16-workflow-main-diff.txt || fail 'Unexpected repository changes exist on current main after Phase 15 closure.'
 echo "PHASE16_REPOSITORY_RECONCILIATION_PASS current_main=${CURRENT_MAIN}"
 
 # Static/inherited gates are read-only and run before any Phase 16 mutation.
