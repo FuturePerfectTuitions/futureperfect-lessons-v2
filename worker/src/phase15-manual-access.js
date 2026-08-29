@@ -74,10 +74,15 @@ function withPartitionedSessionCookie(request, response) {
 
   const raw = String(response.headers.get('Set-Cookie') || '');
   if (!new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=`).test(raw)) return response;
-  if (/(?:^|;\s*)Partitioned(?:;|$)/i.test(raw)) return response;
 
   const headers = new Headers(response.headers);
-  headers.set('Set-Cookie', `${raw}; Partitioned`);
+  if (!/(?:^|;\s*)Partitioned(?:;|$)/i.test(raw)) {
+    headers.set('Set-Cookie', `${raw}; Partitioned`);
+  }
+  // Non-secret diagnostic marker. It confirms that the outer Phase 16 Worker
+  // compatibility layer handled the login/logout response without disclosing
+  // the opaque session value or weakening HttpOnly cookie transport.
+  headers.set('X-FPT-Session-Mode', 'partitioned');
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
