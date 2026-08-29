@@ -45,7 +45,6 @@ const MANUAL_CORE_VIEW_RULES = Object.freeze({
 });
 
 const SESSION_COOKIE = 'fpt_v2_session';
-const OPAQUE_SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
 function responseLikeJson(response, body) {
   const headers = new Headers(response.headers);
@@ -59,67 +58,30 @@ function responseLikeJson(response, body) {
   });
 }
 
-// Phase 16 browser compatibility: WebKit can reject the cross-site
-// HttpOnly/SameSite=None cookie used by the development GitHub Pages -> Worker
-// topology. Keep the secure cookie as the primary transport. For Safari/WebKit
-// and iOS only, the login response may also expose the same opaque session token
-// for an in-memory Authorization fallback. The frontend must never persist it.
-function bearerSessionToken(request) {
-  const raw = String(request?.headers?.get('Authorization') || '').trim();
-  const match = raw.match(/^Bearer\s+([A-Za-z0-9_-]{43})$/i);
-  return match && OPAQUE_SESSION_TOKEN.test(match[1]) ? match[1] : '';
-}
-
-function requestHasSessionCookie(request) {
-  const cookie = String(request?.headers?.get('Cookie') || '');
-  return new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=`).test(cookie);
-}
-
-function withBearerSessionCookie(request) {
-  if (!request || requestHasSessionCookie(request)) return request;
-  const token = bearerSessionToken(request);
-  if (!token) return request;
-
-  const headers = new Headers(request.headers);
-  const existing = String(headers.get('Cookie') || '').trim();
-  headers.set('Cookie', `${existing ? `${existing}; ` : ''}${SESSION_COOKIE}=${token}`);
-  return new Request(request, { headers });
-}
-
-function webKitBearerFallbackEligible(request) {
-  const ua = String(request?.headers?.get('User-Agent') || '');
-  if (!ua) return false;
-  const ios = /\b(iPad|iPhone|iPod)\b/i.test(ua);
-  const safari = /Safari\//i.test(ua) && !/(Chrome\/|Chromium\/|CriOS\/|Edg\/|EdgiOS\/|OPR\/|FxiOS\/)/i.test(ua);
-  return ios || safari;
-}
-
-function sessionTokenFromSetCookie(response) {
-  const raw = String(response?.headers?.get('Set-Cookie') || '');
-  const match = raw.match(/(?:^|;\s*)fpt_v2_session=([A-Za-z0-9_-]{43})(?=;|$)/);
-  return match && OPAQUE_SESSION_TOKEN.test(match[1]) ? match[1] : '';
-}
-
-async function exposeWebKitLoginFallback(request, response) {
+// Phase 16 WebKit/Safari compatibility for the current GitHub Pages -> Worker
+// cross-site development topology. Preserve the opaque secure HttpOnly cookie
+// transport and opt that same cookie into CHIPS partitioning. No session token
+// is exposed to JavaScript or copied into Authorization/local storage.
+function withPartitionedSessionCookie(request, response) {
   let url;
   try { url = new URL(request.url); } catch { return response; }
   if (
-    request.method !== 'POST' ||
-    url.pathname !== '/api/v1/student/auth/login' ||
-    !response.ok ||
-    !webKitBearerFallbackEligible(request)
+    !response ||
+    !['/api/v1/student/auth/login', '/api/v1/student/auth/logout'].includes(url.pathname)
   ) {
     return response;
   }
 
-  const token = sessionTokenFromSetCookie(response);
-  if (!token) return response;
-  const body = await response.clone().json().catch(() => null);
-  if (!body?.ok) return response;
-  return responseLikeJson(response, {
-    ...body,
-    sessionToken: token,
-    sessionTransportFallback: 'in-memory-bearer'
+  const raw = String(response.headers.get('Set-Cookie') || '');
+  if (!new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=`).test(raw)) return response;
+  if (/(?:^|;\s*)Partitioned(?:;|$)/i.test(raw)) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set('Set-Cookie', `${raw}; Partitioned`);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
   });
 }
 
@@ -354,23 +316,18 @@ export {
   canonicaliseManualAccessHomeBody,
   canonicaliseManualAccessLessonListBody,
   targetViewIdForRequest,
-  bearerSessionToken,
-  withBearerSessionCookie,
-  webKitBearerFallbackEligible,
-  sessionTokenFromSetCookie,
-  exposeWebKitLoginFallback
+  withPartitionedSessionCookie
 };
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const sessionRequest = withBearerSessionCookie(request);
-    if (sessionRequest.method === 'GET' && url.pathname === '/api/v1/student/home') {
-      return mergeManualAccessHome(sessionRequest, env, ctx);
+    if (request.method === 'GET' && url.pathname === '/api/v1/student/home') {
+      return mergeManualAccessHome(request, env, ctx);
     }
-    const response = await phase12Worker.fetch(sessionRequest, env, ctx);
-    const retried = await retryManualAccessRoute(sessionRequest, env, ctx, response);
-    const canonical = await canonicaliseManualAccessLessonListResponse(sessionRequest, retried);
-    return exposeWebKitLoginFallback(request, canonical);
+    const response = await phase12Worker.fetch(request, env, ctx);
+    const retried = await retryManualAccessRoute(request, env, ctx, response);
+    const canonical = await canonicaliseManualAccessLessonListResponse(request, retried);
+    return withPartitionedSessionCookie(request, canonical);
   }
 };
