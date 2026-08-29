@@ -75,12 +75,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4.125.0 secret list --name "$WORKER_NAME" --json > /tmp/phase17-secret-names.json
-          jq -e 'map(.name) | index("EXCEL_SYNC_TOKEN") != null' /tmp/phase17-secret-names.json >/dev/null
-          rm -f /tmp/phase17-secret-names.json
+          npx --yes wrangler@4.125.0 secret list --name "$WORKER_NAME" > /tmp/phase17-secret-names.txt
+          grep -q 'EXCEL_SYNC_TOKEN' /tmp/phase17-secret-names.txt
+          rm -f /tmp/phase17-secret-names.txt
           echo "Excel sync secret-name gate PASS."
 
-      - name: Confirm normal login stays disabled at runtime
+      - name: Confirm non-allowlisted login remains unavailable
         shell: bash
         run: |
           set -euo pipefail
@@ -93,7 +93,7 @@ jobs:
           test "$status" = '401'
           jq -e '.error == "INVALID_LOGIN"' /tmp/phase17-login.json >/dev/null
           rm -f /tmp/phase17-login.json
-          echo "Normal-login-disabled runtime gate PASS."
+          echo "Non-allowlisted runtime-login gate PASS."
 
       - name: Run Phase 17 read-only production verification
         run: node tests/phase17-prelaunch-readonly.mjs
