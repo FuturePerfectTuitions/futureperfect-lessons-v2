@@ -57,8 +57,9 @@ jobs:
           node tests/phase15-master-navigation-regression.mjs
           node tests/phase16-session-transport-static-verification.mjs
           grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml
-          grep -Fq 'STUDENT_LOGIN_ENABLED = "false"' worker/wrangler.toml
+          ! grep -Fq 'STUDENT_LOGIN_ENABLED = "true"' worker/wrangler.toml
           grep -Fq 'DEV_LOGIN_ALLOWLIST = ""' worker/wrangler.toml
+          grep -Fq 'Normal student login' worker/wrangler.toml
           echo 'PHASE17_FROZEN_ARCHITECTURE_PASS catalogue=369 curricula=11 excel_selected_rows=true excel_membership_mutation=false'
       - name: Exact final D1 KV and real-configuration state
         shell: bash
@@ -75,9 +76,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The Phase 17 pre-launch audit was written against the pre-clean total of
-          # 632. Run the same exhaustive catalogue/R2/ScreenPal audit against the
-          # final production-intended D1 total of 173 without changing repository source.
           sed 's/entitlementCount !== 632/entitlementCount !== 173/' tests/phase17-prelaunch-readonly.mjs > tests/.phase17-final-readonly.mjs
           PHASE17_REPORT_FILE=/tmp/p17-final-readonly.json node tests/.phase17-final-readonly.mjs | tee /tmp/p17-final-summary.json
           jq -e '.finalStatus=="PASS" and .stopReasons==[] and .catalogue.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .catalogue.lessons==369 and .catalogue.curricula==11 and .d1.entitlementCount==173 and .d1.assignedUserEntitlementCount==173 and .lessonsKv.totalKeyCount==381 and .lessonsKv.canonicalExpectedKeyCount==380 and .lessonsKv.canonicalMismatches==0 and .lessonsKv.nonCanonicalKeyCount==1 and .lessonsKv.productionSpecialRecordCount==1 and .lessonsKv.testOnlySpecialRecordCount==0 and .lessonsKv.otherDevelopmentKeyCount==0 and .students.userRecordCount==2 and .students.confirmedTestAccountCount==0 and .students.realRecordCount==2 and .students.realFullLibraryAssignmentCount==0 and .students.realManualCoreAssignmentCount==0 and .students.realSpecialBucketAssignmentCount==0 and .students.realBlockedLessonAssignmentCount==0 and .resources.totalUniqueRequiredR2ObjectCount==1721 and .resources.missingRequiredObjectCount==0 and .resources.zeroByteRequiredObjectCount==0 and .screenpal.canonicalInteractiveQuizCount==79 and .screenpal.bareIdWithoutExplicitUrlCount==0 and .screenpal.unsafeUrlCount==0 and .screenpal.liveNotFoundCount==0 and .screenpal.liveUnconfirmedCount==0 and .cleanupCandidates.confirmedTestStudentAccountCount==0 and .cleanupCandidates.nonCanonicalDevelopmentLessonKvKeyCount==0 and .cleanupCandidates.testOnlySpecialRecordCount==0' /tmp/p17-final-summary.json >/dev/null
@@ -114,8 +112,6 @@ jobs:
         run: |
           set -euo pipefail
           test -f docs/data/phase17/README.md
-          # Backup hashes were independently upload/redownload verified during the
-          # guarded Phase 17 transition and real-configuration correction.
           printf '%s\n' \
             'catalogue=PASS' \
             'resources=PASS' \
