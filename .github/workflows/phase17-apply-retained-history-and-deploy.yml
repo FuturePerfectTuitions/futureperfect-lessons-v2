@@ -1,0 +1,137 @@
+name: Phase 17 guarded retained-history apply and deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase17-apply-retained-history-and-deploy.yml'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  guarded-apply:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard exact Phase 16 base and frozen catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ github.event.pull_request.base.sha }}' = '05f9c23bdb3e599ef0c641490822e9d63e5728fe'
+          node scripts/phase11-navigation-manifest.mjs >/tmp/p17-nav.json
+          jq -e '.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons==369 and .curricula==11' /tmp/p17-nav.json >/dev/null
+          grep -Fq "const historicalViews = new Set(" worker/src/index.js
+          grep -Fq "explicitlyRetained('maths-level1')" worker/src/index.js
+          grep -Fq "explicitlyRetained('english-year4-11plus')" worker/src/index.js
+          echo 'PHASE17_HISTORY_SOURCE_GUARD_PASS'
+
+      - name: Backup and apply exact private retained-history presentation marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          SETTINGS_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-before.json
+          jq -e '.success==true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text" and .text=="false")' /tmp/settings-before.json >/dev/null
+          test -z "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings-before.json)" = 'fpt-materials-dev'
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-before.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings-before.json)"
+          ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // "https://futureperfecttuitions.github.io"' /tmp/settings-before.json)"
+          test -n "$STUDENTS" && test -n "$LESSONS" && test -n "$DB" && test "$R2" = 'fpt-materials-dev'
+
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json --command "SELECT portal_user_id_norm,batch_key FROM student_batch_assignments ORDER BY portal_user_id_norm,batch_key;" >/tmp/assignments.json 2>/tmp/assignments.err
+          TARGET="$(jq -r '.[0].results | group_by(.portal_user_id_norm)[] | select(([.[].batch_key]|sort)==["Y511FE","Y511FM"]) | .[0].portal_user_id_norm' /tmp/assignments.json)"
+          test -n "$TARGET"
+          echo "::add-mask::$TARGET"
+          ENC_TARGET="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$TARGET")"
+          KV_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/user%3A${ENC_TARGET}"
+          curl --fail --silent --show-error "$KV_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/real-before.json
+          jq -e '.schoolYear==5 and .vrEligible==true and .status=="active" and (.fullLibraries//[])==[] and (.manualAccess.coreLessons//[])==[] and (.manualAccess.vrLessons//[])==[] and (.manualAccess.specialBuckets//[])==[] and (.blockedLessons//[])==[]' /tmp/real-before.json >/dev/null
+          jq -e '(.p|type=="string" and length==4 and test("[A-Z]") and test("[a-z]") and test("[0-9]")) and (.answerPassword|type=="string" and length==4 and test("[A-Z]") and test("[a-z]") and test("[0-9]"))' /tmp/real-before.json >/dev/null
+          BEFORE_SHA="$(sha256sum /tmp/real-before.json | awk '{print $1}')"
+          echo "PHASE17_PRIVATE_HISTORY_BACKUP_SHA256=${BEFORE_SHA}"
+          BACKUP_KEY="__phase17_backups/retained-history-preapply-${GITHUB_RUN_ID}.json"
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object put "${R2}/${BACKUP_KEY}" --remote --file /tmp/real-before.json >/tmp/backup-put.log 2>&1
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${R2}/${BACKUP_KEY}" --remote --file /tmp/real-backup-read.json >/tmp/backup-get.log 2>&1
+          test "$(sha256sum /tmp/real-backup-read.json | awk '{print $1}')" = "$BEFORE_SHA"
+
+          jq '.historicalViews=["english-year4-11plus","maths-level1","maths-level2"]' /tmp/real-before.json >/tmp/real-after.json
+          curl --fail --silent --show-error --request PUT "$KV_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --header 'Content-Type: application/json' --data-binary @/tmp/real-after.json >/dev/null
+          observed=0
+          for attempt in $(seq 1 20); do
+            curl --fail --silent --show-error "$KV_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/real-observed.json
+            if jq -e '(.historicalViews//[])==["english-year4-11plus","maths-level1","maths-level2"] and (.fullLibraries//[])==[] and (.manualAccess.coreLessons//[])==[] and (.manualAccess.vrLessons//[])==[] and (.manualAccess.specialBuckets//[])==[] and (.blockedLessons//[])==[]' /tmp/real-observed.json >/dev/null; then observed=1; break; fi
+            sleep 2
+          done
+          test "$observed" = 1
+          echo 'PHASE17_PRIVATE_HISTORY_MARKER_APPLIED'
+
+          cat > .phase17-retained-history-runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "worker/src/index-phase17.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "${ORIGINS}"
+          STUDENT_LOGIN_ENABLED = "false"
+          DEV_LOGIN_ALLOWLIST = ""
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config .phase17-retained-history-runtime.toml --keep-vars --message 'Phase 17 retained-history presentation correction' >/tmp/deploy.log 2>&1
+          rm -f .phase17-retained-history-runtime.toml
+          sleep 4
+
+          curl --fail --silent --show-error "$SETTINGS_URL" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-after.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text" and .text=="false")' /tmp/settings-after.json >/dev/null
+          test -z "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings-after.json)"
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings-after.json)" = 'fpt-materials-dev'
+          echo 'PHASE17_RETAINED_HISTORY_DEPLOY_PASS'
+
+      - name: Reconfirm clean D1 and private configuration shape
+        shell: bash
+        env:
+          PHASE17_FINALIZE_ACTION: postcheck
+        run: |
+          set -euo pipefail
+          node tests/phase17-finalize-state.mjs >/tmp/finalize.json
+          jq -e '.status=="PASS" and .realStudentRecords==2 and .credentialFormatFailures==0 and .expiredRealRecordCount==0 and .developmentAllowlistEmpty==true and .realStudentAllowlistIntersectionCount==0 and .fullLibraryAssignments==0 and .manualCoreAssignments==0 and .manualVrAssignments==0 and .manualSpecialAssignments==0 and .blockedLessonOverrides==0 and .d1.entitlements==173 and .d1.realEntitlements==173 and .d1.batches==4 and .d1.assignments==4 and .d1.releases==0 and .quickCheck=="ok" and .triggerPresent==true and .identitiesOrPasswordsExposed==false' /tmp/finalize.json >/dev/null
+          echo 'PHASE17_RETAINED_HISTORY_FINAL_STATE_PASS'
