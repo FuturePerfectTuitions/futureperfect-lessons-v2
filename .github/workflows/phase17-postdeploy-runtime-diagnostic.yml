@@ -1,18 +1,10 @@
 name: Phase 17 Post-Deploy Runtime Diagnostic
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase17-postdeploy-runtime-diagnostic.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: phase17-live-state-audit
-  cancel-in-progress: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -22,68 +14,26 @@ env:
 
 jobs:
   diagnostic:
-    if: >-
-      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify isolated deployment settings
+      - name: Verify isolated deployment and unauthenticated boundary
         shell: bash
         run: |
           set -euo pipefail
           SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
           curl --fail --silent --show-error "$SETTINGS" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
-          jq -e '.success == true' /tmp/settings.json >/dev/null
-          ENV="$(jq -r '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text' /tmp/settings.json)"
-          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
-          ALLOW="$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
-          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)"
-          test "$ENV" = development
-          test "$LOGIN" = false
-          test -z "$ALLOW"
-          test "$R2" = fpt-materials-dev
-          echo 'PHASE17_POSTDEPLOY_SETTINGS_PASS environment=development normal_login=false allowlist_empty=true r2_dev=true'
-      - name: Probe unauthenticated runtime boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          probe_get() {
-            local label="$1"
-            local origin="$2"
-            local path="$3"
-            local out="/tmp/${label}.json"
-            local code err
-            if [ -n "$origin" ]; then
-              code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header "Origin: $origin" "$WORKER_BASE$path")"
-            else
-              code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' "$WORKER_BASE$path")"
-            fi
-            err="$(jq -r '.error // empty' "$out" 2>/dev/null || true)"
-            echo "PHASE17_RUNTIME_PROBE label=$label http=$code error=${err:-none}"
-          }
-          probe_login() {
-            local label="$1"
-            local origin="$2"
-            local out="/tmp/${label}.json"
-            local code err
-            if [ -n "$origin" ]; then
-              code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header "Origin: $origin" --header 'Content-Type: application/json' --request POST --data '{"username":"__phase17_not_authorised__","password":"Aa1x"}' "$WORKER_BASE/api/v1/student/auth/login")"
-            else
-              code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}' --header 'Content-Type: application/json' --request POST --data '{"username":"__phase17_not_authorised__","password":"Aa1x"}' "$WORKER_BASE/api/v1/student/auth/login")"
-            fi
-            err="$(jq -r '.error // empty' "$out" 2>/dev/null || true)"
-            echo "PHASE17_RUNTIME_PROBE label=$label http=$code error=${err:-none}"
-          }
-          probe_login login_pages 'https://futureperfecttuitions.github.io'
-          probe_login login_no_origin ''
-          probe_get home_pages 'https://futureperfecttuitions.github.io' '/api/v1/student/home'
-          probe_get home_no_origin '' '/api/v1/student/home'
-          probe_get session_pages 'https://futureperfecttuitions.github.io' '/api/v1/student/session'
-          probe_get session_no_origin '' '/api/v1/student/session'
-          echo 'PHASE17_RUNTIME_DIAGNOSTIC_COMPLETE'
+          jq -e '.success==true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text" and .text=="false")' /tmp/settings.json >/dev/null
+          test -z "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)" = fpt-materials-dev
+          for path in /api/v1/student/home /api/v1/student/session; do
+            code="$(curl --silent --show-error --output /tmp/probe.json --write-out '%{http_code}' --header 'Origin: https://futureperfecttuitions.github.io' "$WORKER_BASE$path")"
+            test "$code" = 401
+          done
+          code="$(curl --silent --show-error --output /tmp/login.json --write-out '%{http_code}' --header 'Origin: https://futureperfecttuitions.github.io' --header 'Content-Type: application/json' --request POST --data '{"username":"__phase17_not_authorised__","password":"Aa1x"}' "$WORKER_BASE/api/v1/student/auth/login")"
+          test "$code" = 401
+          jq -e '.error=="INVALID_LOGIN"' /tmp/login.json >/dev/null
+          echo 'PHASE17_MANUAL_RUNTIME_DIAGNOSTIC_PASS'
