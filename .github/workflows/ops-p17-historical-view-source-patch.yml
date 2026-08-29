@@ -36,58 +36,45 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
-          path = Path('worker/src/index.js')
-          text = path.read_text(encoding='utf-8')
-
-          if 'const historicalViews = new Set(' not in text:
+          p = Path('worker/src/index.js')
+          s = p.read_text(encoding='utf-8')
+          if 'const historicalViews = new Set(' not in s:
               pat = re.compile(r"(\s+const fullLibraries = new Set\(\n\s+Array\.isArray\(auth\.user\?\.fullLibraries\)\n\s+\? auth\.user\.fullLibraries\.map\(value => String\(value\)\.toUpperCase\(\)\)\n\s+: \[\]\n\s+\);\n)(\n\s+return \{ d1Core, d1Vr, batchByLesson, manualCore, manualVr, blocked, fullLibraries \};)")
-              m = pat.search(text)
-              if not m:
-                  raise SystemExit('STOP: access-state anchor not found')
-              insert = m.group(1) + "\n  // Phase 17 launch-blocker correction: retained 11+ programme presentation\n  // may use explicit private historical view markers when retained entitlements\n  // predate source_batch_code audit metadata. Markers are presentation-only.\n  const historicalViews = new Set(\n    Array.isArray(auth.user?.historicalViews)\n      ? auth.user.historicalViews\n          .map(value => String(value || '').trim().toLowerCase())\n          .filter(Boolean)\n      : []\n  );" + m.group(2).replace('fullLibraries };', 'fullLibraries, historicalViews };')
-              text = text[:m.start()] + insert + text[m.end():]
-
-          if "explicitlyRetained('maths-level1')" not in text:
-              start = text.find('function historicalDescriptorForCurriculum(curriculumCode, access, lessonIds) {')
-              end = text.find('\nasync function safeCurriculumStartPoint', start)
-              if start < 0 or end < 0:
-                  raise SystemExit('STOP: historical descriptor function anchors not found')
-              old = text[start:end]
-              required = ["case 'MATHS_L1': return mathsNormalDescriptor(4);", "case 'ENGLISH_Y4': return englishDescriptor(4, had11English);"]
-              if not all(x in old for x in required):
+              m = pat.search(s)
+              if not m: raise SystemExit('STOP: access-state anchor not found')
+              add = m.group(1) + "\n  // Phase 17: presentation-only marker for retained programme history when\n  // legacy entitlement rows predate source_batch_code audit metadata.\n  const historicalViews = new Set(\n    Array.isArray(auth.user?.historicalViews)\n      ? auth.user.historicalViews.map(value => String(value || '').trim().toLowerCase()).filter(Boolean)\n      : []\n  );" + m.group(2).replace('fullLibraries };', 'fullLibraries, historicalViews };')
+              s = s[:m.start()] + add + s[m.end():]
+          if "explicitlyRetained('maths-level1')" not in s:
+              a = s.find('function historicalDescriptorForCurriculum(curriculumCode, access, lessonIds) {')
+              b = s.find('\nasync function safeCurriculumStartPoint', a)
+              if a < 0 or b < 0: raise SystemExit('STOP: historical descriptor anchors not found')
+              x = s[a:b]
+              if "case 'MATHS_L1': return mathsNormalDescriptor(4);" not in x or "case 'ENGLISH_Y4': return englishDescriptor(4, had11English);" not in x:
                   raise SystemExit('STOP: historical descriptor signature changed')
-              new = old.replace(
-                  '  const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));\n',
-                  "  const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));\n  const historicalViews = access.historicalViews instanceof Set ? access.historicalViews : new Set();\n  const explicitlyRetained = viewId => historicalViews.has(viewId);\n"
-              )
-              new = new.replace("case 'MATHS_L1': return mathsNormalDescriptor(4);", "case 'MATHS_L1': return (had11Maths || explicitlyRetained('maths-level1')) ? mathsLevelDescriptor(1) : mathsNormalDescriptor(4);")
-              new = new.replace("case 'MATHS_L2': return had11Maths ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);", "case 'MATHS_L2': return (had11Maths || explicitlyRetained('maths-level2')) ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);")
-              new = new.replace("case 'MATHS_L3': return had11Maths ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);", "case 'MATHS_L3': return (had11Maths || explicitlyRetained('maths-level3')) ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);")
-              new = new.replace("case 'ENGLISH_Y4': return englishDescriptor(4, had11English);", "case 'ENGLISH_Y4': return englishDescriptor(4, had11English || explicitlyRetained('english-year4-11plus'));")
-              new = new.replace("case 'ENGLISH_Y5': return englishDescriptor(5, had11English);", "case 'ENGLISH_Y5': return englishDescriptor(5, had11English || explicitlyRetained('english-year5-11plus'));")
-              text = text[:start] + new + text[end:]
-
-          path.write_text(text, encoding='utf-8')
+              x = x.replace('  const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));\n', "  const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));\n  const historicalViews = access.historicalViews instanceof Set ? access.historicalViews : new Set();\n  const explicitlyRetained = viewId => historicalViews.has(viewId);\n")
+              x = x.replace("case 'MATHS_L1': return mathsNormalDescriptor(4);", "case 'MATHS_L1': return (had11Maths || explicitlyRetained('maths-level1')) ? mathsLevelDescriptor(1) : mathsNormalDescriptor(4);")
+              x = x.replace("case 'MATHS_L2': return had11Maths ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);", "case 'MATHS_L2': return (had11Maths || explicitlyRetained('maths-level2')) ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);")
+              x = x.replace("case 'MATHS_L3': return had11Maths ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);", "case 'MATHS_L3': return (had11Maths || explicitlyRetained('maths-level3')) ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);")
+              x = x.replace("case 'ENGLISH_Y4': return englishDescriptor(4, had11English);", "case 'ENGLISH_Y4': return englishDescriptor(4, had11English || explicitlyRetained('english-year4-11plus'));")
+              x = x.replace("case 'ENGLISH_Y5': return englishDescriptor(5, had11English);", "case 'ENGLISH_Y5': return englishDescriptor(5, had11English || explicitlyRetained('english-year5-11plus'));")
+              s = s[:a] + x + s[b:]
+          p.write_text(s, encoding='utf-8')
           PY
           node --check worker/src/index.js
-          node --check worker/src/index-phase12.js
-          node --check worker/src/index-phase13.js
-          node --check worker/src/index-phase17.js
-          grep -Fq "const historicalViews = new Set(" worker/src/index.js
           grep -Fq "explicitlyRetained('maths-level1')" worker/src/index.js
           grep -Fq "explicitlyRetained('english-year4-11plus')" worker/src/index.js
+          node tests/phase15-master-navigation-regression.mjs
           node scripts/phase11-navigation-manifest.mjs >/tmp/p17-nav.json
           jq -e '.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons==369 and .curricula==11' /tmp/p17-nav.json >/dev/null
-          node tests/phase15-master-navigation-regression.mjs
-      - name: Commit exact source correction
+      - name: Commit only the intended source file
         shell: bash
         run: |
           set -euo pipefail
           if git diff --quiet -- worker/src/index.js; then
-            echo 'Historical-view source correction already present; no commit required.'
+            echo 'Historical-view source correction already present.'
             exit 0
           fi
-          test "$(git diff --name-only | paste -sd, -)" = 'worker/src/index.js'
+          test "$(git diff --name-only -- worker/src/index.js)" = 'worker/src/index.js'
           git config user.name 'FuturePerfectTuitions Phase 17 Guard'
           git config user.email 'futureperfectlessons@gmail.com'
           git add worker/src/index.js
