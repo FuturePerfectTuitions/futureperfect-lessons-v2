@@ -1,0 +1,90 @@
+name: Phase 18 read-only rollback backup hash verification
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-r2-backup-hash.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+  WRANGLER_VERSION: 4.125.0
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  EXPECTED_PRE_SHA: fb214cb3abc5802b300cab00ad071e7bfcc459b10bbc1d1177d4efeb126c1a88
+  EXPECTED_REAL_SHA: e610cf71cd03804264739912e277459ef3e83c4a35aa08bb2dc34eca10b26c58
+  EXPECTED_HIST_SHA: 7d45b4ec24b57f92aff61f8f38a522536e57ce0378919d2ad53caa8961524f72
+
+jobs:
+  verify:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Guard frozen main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          echo 'PHASE18_BACKUP_MAIN_GUARD=PASS'
+      - name: Verify documented exact backups and locate accepted real-config backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          LIST="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects"
+
+          get_hash() {
+            local key="$1" out="$2"
+            rm -f "$out"
+            $W r2 object get "$R2_BUCKET/$key" --file="$out" --remote >/tmp/p18-r2-get.log 2>&1
+            sha256sum "$out" | awk '{print $1}'
+          }
+
+          PRE='_internal/phase17-backup/prelaunch-33251109750-9bace406a04b.tar.gz'
+          HIST='__phase17_backups/retained-history-preapply-33259502392.json'
+          PRE_SHA="$(get_hash "$PRE" /tmp/p18-pre.tar.gz)"
+          HIST_SHA="$(get_hash "$HIST" /tmp/p18-hist.json)"
+          echo "PHASE18_BACKUP label=preclean key=${PRE} sha256=${PRE_SHA}"
+          echo "PHASE18_BACKUP label=retained_history key=${HIST} sha256=${HIST_SHA}"
+          test "$PRE_SHA" = "$EXPECTED_PRE_SHA"
+          test "$HIST_SHA" = "$EXPECTED_HIST_SHA"
+
+          curl --fail --silent --show-error --get "$LIST" -H "$AUTH" \
+            --data-urlencode 'prefix=_internal/phase17-backup/' \
+            --data-urlencode 'per_page=1000' -o /tmp/p18-list.json
+          jq -e '.success==true' /tmp/p18-list.json >/dev/null
+          jq -r '.result[]?.key // empty' /tmp/p18-list.json | sort -u >/tmp/p18-keys.txt
+          echo "PHASE18_INTERNAL_BACKUP_OBJECT_COUNT=$(wc -l </tmp/p18-keys.txt | tr -d ' ')"
+
+          : >/tmp/p18-real-match.tsv
+          i=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              *_internal*) continue ;;
+            esac
+            i=$((i+1))
+            out="/tmp/p18-obj-${i}.bin"
+            if $W r2 object get "$R2_BUCKET/$key" --file="$out" --remote >/tmp/p18-r2-candidate.log 2>&1; then
+              sha="$(sha256sum "$out" | awk '{print $1}')"
+              if [ "$sha" = "$EXPECTED_REAL_SHA" ]; then
+                printf '%s\t%s\n' "$key" "$sha" >>/tmp/p18-real-match.tsv
+              fi
+            fi
+          done </tmp/p18-keys.txt
+          MATCHES="$(wc -l </tmp/p18-real-match.tsv | tr -d ' ')"
+          echo "PHASE18_REAL_CONFIG_BACKUP_MATCH_COUNT=${MATCHES}"
+          test "$MATCHES" = 1
+          IFS=$'\t' read -r REAL_KEY REAL_SHA </tmp/p18-real-match.tsv
+          echo "PHASE18_BACKUP label=real_config key=${REAL_KEY} sha256=${REAL_SHA}"
+          echo 'PHASE18_ROLLBACK_BACKUPS=PASS count=3'
