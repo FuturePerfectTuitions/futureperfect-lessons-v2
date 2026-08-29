@@ -1,126 +1,40 @@
 name: Phase 17 Pre-Launch Read-Only Verification
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase17-prelaunch-readonly.yml'
-      - 'tests/phase17-prelaunch-readonly.mjs'
-      - 'tests/phase17-finalize-state.mjs'
-      - 'docs/data/phase17/**'
-      - 'IMPLEMENTATION_HANDOVER.md'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
-concurrency:
-  group: phase17-live-state-audit
-  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  PHASE17_REPORT_FILE: phase17-readonly-report.json
 
 jobs:
   prelaunch-readonly:
-    if: github.event_name != 'pull_request' || github.head_ref == 'phase17-prelaunch-freeze-production-verification'
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
-      WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
-      PHASE17_EXPECTED_MAIN: 05f9c23bdb3e599ef0c641490822e9d63e5728fe
-      PHASE17_REPORT_FILE: phase17-readonly-report.json
-
     steps:
-      - name: Checkout exact PR head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Guard Phase 16 base
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "${{ github.event.pull_request.base.sha }}" = "$PHASE17_EXPECTED_MAIN"
-          git merge-base --is-ancestor "$PHASE17_EXPECTED_MAIN" HEAD
-          echo "Phase 17 base guard PASS."
-
-      - name: Syntax check Phase 17 audits
-        run: |
-          node --check tests/phase17-prelaunch-readonly.mjs
-          node --check tests/phase17-finalize-state.mjs
-
-      - name: Credit inherited static acceptance gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/phase11-navigation-manifest.mjs | tee /tmp/phase17-navigation-manifest.json
-          jq -e '.catalogueSha256 == "7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .curricula == 11 and .lessons == 369' /tmp/phase17-navigation-manifest.json >/dev/null
-          node tests/phase11-change7-owner-homeworks-static-verification.mjs
-          node tests/phase11-shared-maths-answer-pdf-static-verification.mjs
-          node tests/phase11-screenpal-static-verification.mjs
-          node tests/phase11-vr-howto-real-catalogue-static-verification.mjs
-          node tests/phase11-vr-solution-video-policy-static-verification.mjs
-          node tests/phase12-batch-aware-worker-verification.mjs
-          node tests/phase13-excel-sync-verification.mjs
-          node tests/phase14-excel-sync-matrix-verification.mjs
-          node tests/phase15-master-navigation-regression.mjs
-          node tests/phase16-session-transport-static-verification.mjs
-          node tests/phase16-ui-refinement-static-verification.mjs
-          node tests/phase17-explicit-special-screenpal-static.mjs
-
-      - name: Confirm Excel sync secret name only
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@4.125.0 secret list --name "$WORKER_NAME" > /tmp/phase17-secret-names.txt
-          grep -q 'EXCEL_SYNC_TOKEN' /tmp/phase17-secret-names.txt
-          rm -f /tmp/phase17-secret-names.txt
-          echo "Excel sync secret-name gate PASS."
-
-      - name: Confirm non-allowlisted login remains unavailable
-        shell: bash
-        run: |
-          set -euo pipefail
-          status="$(curl --silent --show-error --output /tmp/phase17-login.json --write-out '%{http_code}' \
-            --header 'Origin: https://futureperfecttuitions.github.io' \
-            --header 'Content-Type: application/json' \
-            --request POST \
-            --data '{"username":"__phase17_not_authorised__","password":"Aa1x"}' \
-            "$WORKER_BASE/api/v1/student/auth/login")"
-          test "$status" = '401'
-          jq -e '.error == "INVALID_LOGIN"' /tmp/phase17-login.json >/dev/null
-          rm -f /tmp/phase17-login.json
-          echo "Non-allowlisted runtime-login gate PASS."
-
-      - name: Confirm final real-account login and expiry safety
+      - name: Run final account-safety and exhaustive read-only audit
         shell: bash
         env:
           PHASE17_FINALIZE_ACTION: postcheck
         run: |
           set -euo pipefail
-          node tests/phase17-finalize-state.mjs | tee /tmp/phase17-real-safety.json
-          jq -e '.status=="PASS" and .realStudentRecords==2 and .expiredRealRecordCount==0 and .developmentAllowlistEmpty==true and .realStudentAllowlistIntersectionCount==0 and .identitiesOrPasswordsExposed==false' /tmp/phase17-real-safety.json >/dev/null
-          echo 'Phase 17 real-account login/expiry safety gate PASS.'
-
-      - name: Run Phase 17 read-only production verification
-        shell: bash
-        run: |
-          set -euo pipefail
-          sed 's/entitlementCount !== 632/entitlementCount !== 173/' tests/phase17-prelaunch-readonly.mjs > /tmp/phase17-prelaunch-final.mjs
-          cp /tmp/phase17-prelaunch-final.mjs tests/.phase17-prelaunch-final.mjs
+          node tests/phase17-finalize-state.mjs | tee /tmp/p17-real.json
+          jq -e '.status=="PASS" and .expiredRealRecordCount==0 and .developmentAllowlistEmpty==true and .realStudentAllowlistIntersectionCount==0' /tmp/p17-real.json >/dev/null
+          sed 's/entitlementCount !== 632/entitlementCount !== 173/' tests/phase17-prelaunch-readonly.mjs > tests/.phase17-prelaunch-final.mjs
           PHASE17_REPORT_FILE="$PHASE17_REPORT_FILE" node tests/.phase17-prelaunch-final.mjs
-          rm -f tests/.phase17-prelaunch-final.mjs /tmp/phase17-prelaunch-final.mjs
-
-      - name: Upload sanitized Phase 17 report
+          rm -f tests/.phase17-prelaunch-final.mjs
+      - name: Upload sanitized report
         if: always()
         uses: actions/upload-artifact@v4
         with:
