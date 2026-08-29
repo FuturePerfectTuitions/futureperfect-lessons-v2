@@ -6,6 +6,7 @@ on:
     paths:
       - worker/src/index-phase11.js
       - worker/src/phase11-screenpal.js
+      - worker/src/index-phase17.js
       - worker/wrangler.toml
       - tests/phase11-screenpal-static-verification.mjs
       - docs/data/PHASE11_SCREENPAL_URL_RULES.md
@@ -31,17 +32,22 @@ jobs:
           node --check worker/src/phase11-screenpal.js
           node --experimental-default-type=module tests/phase11-screenpal-static-verification.mjs
           if ! grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml && \
-             ! grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml; then
+             ! grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml && \
+             ! grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
             echo 'Unexpected checked-in Worker entrypoint.' >&2
             exit 1
           fi
           grep -Fq "import phase10HistoryWorker from './index-phase10-history.js';" worker/src/index-phase11.js
-          if grep -Eq 'go\.screenpal\.com/(player|watch)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js; then
-            echo 'Phase 11 runtime code contains a synthesized ScreenPal URL.' >&2
+          if grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
+            grep -Fq "import phase13Worker from './index-phase13.js';" worker/src/index-phase17.js
+            node tests/phase17-explicit-special-screenpal-static.mjs
+          fi
+          if grep -Eq 'go\.screenpal\.com/(player|watch)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js worker/src/index-phase17.js; then
+            echo 'Runtime code contains a synthesized ScreenPal URL.' >&2
             exit 1
           fi
-          if grep -Eq 'screenpal\.com/content/(video|quizzes)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js; then
-            echo 'Phase 11 runtime code contains a synthesized ScreenPal content URL.' >&2
+          if grep -Eq 'screenpal\.com/content/(video|quizzes)/\$\{' worker/src/index-phase11.js worker/src/phase11-screenpal.js worker/src/index-phase17.js; then
+            echo 'Runtime code contains a synthesized ScreenPal content URL.' >&2
             exit 1
           fi
           echo 'Phase 11 ScreenPal explicit URL static verification: PASS'
