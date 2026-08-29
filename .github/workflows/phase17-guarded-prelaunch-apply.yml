@@ -1,0 +1,278 @@
+name: Phase 17 Guarded Pre-Launch Backup and Apply
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase17-guarded-prelaunch-apply.yml'
+      - 'tests/phase17-state-transition.mjs'
+      - 'tests/phase17-explicit-special-screenpal-static.mjs'
+      - 'worker/src/index-phase17.js'
+      - 'worker/wrangler.toml'
+      - 'docs/data/phase17/vr-howto-explicit-screenpal.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase17-guarded-prelaunch-apply
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  R2_BUCKET: fpt-materials-dev
+  WRANGLER_VERSION: 4.125.0
+  PHASE17_PLAN_FILE: /tmp/phase17-private-plan.json
+  PHASE17_KV_BACKUP_FILE: /tmp/phase17-private-kv-backup.json
+
+jobs:
+  guarded-prelaunch-apply:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout exact Phase 17 head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard source, baseline and freeze boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE='05f9c23bdb3e599ef0c641490822e9d63e5728fe'
+          if [ '${{ github.event_name }}' = 'pull_request' ]; then
+            test '${{ github.event.pull_request.base.sha }}' = "$EXPECTED_BASE"
+            git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
+          fi
+          node --check tests/phase17-state-transition.mjs
+          node --check worker/src/index-phase17.js
+          node tests/phase17-explicit-special-screenpal-static.mjs
+          node tests/phase11-catalogue-static-verification.mjs >/tmp/p17-catalogue.log
+          grep -Fq '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663' /tmp/p17-catalogue.log
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase15-master-navigation-regression.mjs
+          node tests/phase16-session-transport-static-verification.mjs
+          echo 'Phase 17 source/freeze guard PASS.'
+
+      - name: Build exact private cleanup plan and live-verify VR How-To targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE17_ACTION=plan node tests/phase17-state-transition.mjs | tee /tmp/phase17-plan-summary.json
+          jq -e '.status == "PASS" and .counts.realStudentRecords == 2 and .counts.realEntitlements == 173 and .counts.testStudentRecords == 16 and .counts.testEntitlements == 459 and .counts.testSpecialRecords == 5 and .counts.developmentLessonRecords == 13 and .counts.liveVerifiedVrHowToUrls == 11' /tmp/phase17-plan-summary.json >/dev/null
+          test -s "$PHASE17_PLAN_FILE"
+          chmod 600 "$PHASE17_PLAN_FILE"
+          echo 'Private cleanup plan PASS; candidate names not printed.'
+
+      - name: Export private KV/manual configuration backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE17_ACTION=backup node tests/phase17-state-transition.mjs | tee /tmp/phase17-backup-summary.json
+          jq -e '.status == "PASS" and .studentsKvKeys >= 18 and .lessonsKvKeys >= 399 and .sensitiveBackupContentsPrinted == false' /tmp/phase17-backup-summary.json >/dev/null
+          test -s "$PHASE17_KV_BACKUP_FILE"
+          chmod 600 "$PHASE17_KV_BACKUP_FILE"
+
+      - name: Export D1 and confirmed development R2 fixture bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 export fpt_portal_v2_db --remote --skip-confirmation --output=/tmp/phase17-d1.sql >/tmp/phase17-d1-export.log 2>&1
+          test -s /tmp/phase17-d1.sql
+          mkdir -p /tmp/phase17-r2-fixtures
+          : > /tmp/phase17-r2-fixtures/manifest.tsv
+          i=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            i=$((i+1))
+            file="$(printf '%04d.bin' "$i")"
+            $W r2 object get "$R2_BUCKET/$key" --file="/tmp/phase17-r2-fixtures/$file" --remote >/tmp/phase17-r2-get.log 2>&1
+            test -s "/tmp/phase17-r2-fixtures/$file"
+            printf '%s\t%s\n' "$file" "$key" >> /tmp/phase17-r2-fixtures/manifest.tsv
+          done < <(jq -r '.developmentR2Keys[]' "$PHASE17_PLAN_FILE")
+          echo "$i" > /tmp/phase17-r2-fixture-count.txt
+          echo 'Private D1/R2 backup material prepared; object names not printed.'
+
+      - name: Verify D1 export can restore to local SQLite
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v sqlite3 >/dev/null
+          rm -f /tmp/phase17-restore-check.sqlite
+          sqlite3 /tmp/phase17-restore-check.sqlite < /tmp/phase17-d1.sql
+          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM lesson_entitlements;')" = '632'
+          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM batch_definitions;')" = '4'
+          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM student_batch_assignments;')" = '4'
+          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM batch_lesson_releases;')" = '0'
+          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments);')" = '173'
+          test "$(sqlite3 /tmp/phase17-restore-check.sqlite 'PRAGMA quick_check;')" = 'ok'
+          echo 'D1 local restore proof PASS.'
+
+      - name: Store and re-download private pre-launch backup in isolated R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          mkdir -p /tmp/phase17-backup-bundle
+          cp /tmp/phase17-d1.sql /tmp/phase17-backup-bundle/d1-precleanup.sql
+          cp "$PHASE17_KV_BACKUP_FILE" /tmp/phase17-backup-bundle/kv-manual-config-precleanup.json
+          cp "$PHASE17_PLAN_FILE" /tmp/phase17-backup-bundle/private-cleanup-plan.json
+          cp -R /tmp/phase17-r2-fixtures /tmp/phase17-backup-bundle/r2-confirmed-development-fixtures
+          cat >/tmp/phase17-backup-bundle/RESTORE.txt <<'EOF'
+          FPT Portal V2 Phase 17 private pre-launch backup.
+          Restore only under an explicit owner-authorised rollback while ENVIRONMENT=development and normal student login is disabled.
+          D1: verify target identity, then use the guarded Phase 17 restore path to replace relevant D1 state from d1-precleanup.sql.
+          KV/manual configuration: restore exact stored key/value pairs from kv-manual-config-precleanup.json through the guarded restore path.
+          Confirmed development R2 fixture bytes are mapped by r2-confirmed-development-fixtures/manifest.tsv.
+          Re-run catalogue/hash, D1 quick_check, single-session trigger, bindings, login-disabled and resource gates after any restore.
+          EOF
+          tar -C /tmp/phase17-backup-bundle -czf /tmp/phase17-prelaunch-private-backup.tar.gz .
+          chmod 600 /tmp/phase17-prelaunch-private-backup.tar.gz
+          sha256sum /tmp/phase17-prelaunch-private-backup.tar.gz | awk '{print $1}' > /tmp/phase17-backup.sha256
+          BACKUP_KEY="_internal/phase17-backup/prelaunch-${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.tar.gz"
+          printf '%s' "$BACKUP_KEY" > /tmp/phase17-backup-key.txt
+          $W r2 object put "$R2_BUCKET/$BACKUP_KEY" --file=/tmp/phase17-prelaunch-private-backup.tar.gz --content-type=application/gzip --remote >/tmp/phase17-r2-put.log 2>&1
+          $W r2 object get "$R2_BUCKET/$BACKUP_KEY" --file=/tmp/phase17-backup-redownload.tar.gz --remote >/tmp/phase17-r2-redownload.log 2>&1
+          test "$(sha256sum /tmp/phase17-backup-redownload.tar.gz | awk '{print $1}')" = "$(cat /tmp/phase17-backup.sha256)"
+          tar -tzf /tmp/phase17-backup-redownload.tar.gz >/dev/null
+          echo "PHASE17_PRIVATE_BACKUP_VERIFIED sha256=$(cat /tmp/phase17-backup.sha256)"
+
+      - name: Apply only confirmed fixture cleanup and explicit VR How-To metadata
+        shell: bash
+        env:
+          PHASE17_ACTION: apply
+          PHASE17_MUTATION_CONFIRM: PHASE17_CONFIRMED_FIXTURE_CLEANUP_AND_VR_METADATA
+        run: |
+          set -euo pipefail
+          node tests/phase17-state-transition.mjs | tee /tmp/phase17-apply-summary.json
+          jq -e '.status == "PASS" and .postCleanup.userRecords == 2 and .postCleanup.entitlements == 173 and .postCleanup.batches == 4 and .postCleanup.assignments == 4 and .postCleanup.releases == 0 and .postCleanup.lessonKvKeys == 381 and .postCleanup.quickCheck == "ok" and .postCleanup.triggerPresent == true and .postCleanup.explicitVrHowToUrls == 11' /tmp/phase17-apply-summary.json >/dev/null
+          echo 'Confirmed fixture cleanup and explicit special metadata PASS.'
+
+      - name: Remove only backed-up confirmed development R2 fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          while IFS=$'\t' read -r file key; do
+            [ -n "$key" ] || continue
+            $W r2 object delete "$R2_BUCKET/$key" --remote >/tmp/phase17-r2-delete.log 2>&1
+          done < /tmp/phase17-r2-fixtures/manifest.tsv
+          echo "PHASE17_CONFIRMED_R2_FIXTURES_REMOVED count=$(cat /tmp/phase17-r2-fixture-count.txt)"
+
+      - name: Guard and deploy frozen Phase 17 Worker entrypoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          STUDENTS=''; LESSONS=''; DB=''; R2=''
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p17-settings-before.json
+          jq -e '.success == true' /tmp/p17-settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p17-settings-before.json >/dev/null
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-before.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p17-settings-before.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p17-settings-before.json)"
+          test "$R2" = "$R2_BUCKET"
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p17-namespaces.json
+          LEGACY="$(jq -r '[.result[]|select(.title=="FPT_LESSONS_TEST")|.id][0] // ""' /tmp/p17-namespaces.json)"
+          if [ -n "$LEGACY" ]; then test "$LESSONS" != "$LEGACY"; fi
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p17-secrets-before.txt
+          grep -Fxq 'EXCEL_SYNC_TOKEN' /tmp/p17-secrets-before.txt
+          cat >worker/wrangler.phase17.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase17.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+          $W deploy --config worker/wrangler.phase17.runtime.toml --dry-run --outdir /tmp/p17-build >/tmp/p17-dry-run.log
+          test -d /tmp/p17-build
+          $W deploy --config worker/wrangler.phase17.runtime.toml --keep-vars --message 'Phase 17 frozen pre-launch development Worker' >/tmp/p17-deploy.log 2>&1
+          sleep 3
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/p17-settings-after.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/p17-settings-after.json >/dev/null
+          AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-after.json)"
+          case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/p17-settings-after.json)" = "$R2_BUCKET"
+          test "$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-after.json)" = "$STUDENTS"
+          test "$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/p17-settings-after.json)" = "$LESSONS"
+          test "$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/p17-settings-after.json)" = "$DB"
+          for var in ALLOWED_ORIGINS DEV_LOGIN_ALLOWLIST STUDENT_LOGIN_ENABLED; do
+            test "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-after.json)" = \
+                 "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/p17-settings-before.json)"
+          done
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/p17-secrets-after.txt
+          cmp /tmp/p17-secrets-before.txt /tmp/p17-secrets-after.txt
+          echo 'PHASE17_FROZEN_WORKER_DEPLOY_PASS'
+
+      - name: Post-apply state and no-auth route verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE17_ACTION=postcheck node tests/phase17-state-transition.mjs | tee /tmp/phase17-postcheck.json
+          jq -e '.status == "PASS" and .userRecords == 2 and .entitlements == 173 and .batches == 4 and .assignments == 4 and .releases == 0 and .lessonKvKeys == 381 and .quickCheck == "ok" and .triggerPresent == true and .explicitVrHowToUrls == 11' /tmp/phase17-postcheck.json >/dev/null
+          CODE="$(curl --silent --show-error --output /tmp/p17-noauth.json --write-out '%{http_code}' \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            "$WORKER_BASE/api/v1/student/special-areas/VR_HOWTO?viewId=english-year5-11plus")"
+          test "$CODE" = '401'
+          jq -e '.error == "SESSION_REQUIRED" or .error == "SESSION_INVALID"' /tmp/p17-noauth.json >/dev/null
+          node tests/phase17-explicit-special-screenpal-static.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          node tests/phase15-master-navigation-regression.mjs
+          node tests/phase16-session-transport-static-verification.mjs
+          echo 'PHASE17_GUARDED_PRELAUNCH_APPLY_PASS'
+
+      - name: Upload sanitized backup/apply evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-guarded-prelaunch-evidence
+          path: |
+            /tmp/phase17-plan-summary.json
+            /tmp/phase17-backup-summary.json
+            /tmp/phase17-apply-summary.json
+            /tmp/phase17-postcheck.json
+            /tmp/phase17-backup.sha256
+            /tmp/phase17-r2-fixture-count.txt
+          if-no-files-found: warn
+          retention-days: 14
