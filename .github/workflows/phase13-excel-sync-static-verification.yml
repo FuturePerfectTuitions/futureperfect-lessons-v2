@@ -6,6 +6,7 @@ on:
     paths:
       - worker/src/index-phase13.js
       - worker/src/index-phase12.js
+      - worker/src/index-phase17.js
       - worker/wrangler.toml
       - tests/phase13-excel-sync-verification.mjs
       - tests/phase12-batch-aware-worker-verification.mjs
@@ -17,6 +18,7 @@ on:
     paths:
       - worker/src/index-phase13.js
       - worker/src/index-phase12.js
+      - worker/src/index-phase17.js
       - worker/wrangler.toml
       - tests/phase13-excel-sync-verification.mjs
       - tests/phase12-batch-aware-worker-verification.mjs
@@ -48,7 +50,12 @@ jobs:
           node --check worker/src/index-phase12.js
           node tests/phase12-batch-aware-worker-verification.mjs
           node tests/phase13-excel-sync-verification.mjs
-          grep -Fq 'main = "src/index-phase13.js"' worker/wrangler.toml
+          if grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
+            node --check worker/src/index-phase17.js
+            grep -Fq "import phase13Worker from './index-phase13.js';" worker/src/index-phase17.js
+          else
+            grep -Fq 'main = "src/index-phase13.js"' worker/wrangler.toml
+          fi
           grep -Fq 'EXCEL_SYNC_TOKEN' worker/src/index-phase13.js
           grep -Fq 'ENVIRONMENT' worker/src/index-phase13.js
           grep -Fq 'student_batch_assignments' worker/src/index-phase13.js
