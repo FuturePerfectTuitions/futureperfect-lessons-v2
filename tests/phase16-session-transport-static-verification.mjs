@@ -1,85 +1,128 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import {
-  bearerSessionToken,
-  withBearerSessionCookie,
-  webKitBearerFallbackEligible,
-  sessionTokenFromSetCookie,
-  exposeWebKitLoginFallback
-} from '../worker/src/phase15-manual-access.js';
+import { withPartitionedSessionCookie } from '../worker/src/phase15-manual-access.js';
 
 const token = 'Ab1_' + 'x'.repeat(39);
 assert.equal(token.length, 43);
 
-const bearerRequest = new Request('https://example.test/api/v1/student/session', {
-  headers: { Authorization: `Bearer ${token}` }
+const loginRequest = new Request('https://example.test/api/v1/student/auth/login', {
+  method: 'POST'
 });
-assert.equal(bearerSessionToken(bearerRequest), token, 'Exact opaque bearer token was not accepted.');
-assert.equal(
-  bearerSessionToken(new Request('https://example.test/', { headers: { Authorization: 'Bearer too-short' } })),
-  '',
-  'Malformed bearer token was accepted.'
-);
-
-const adapted = withBearerSessionCookie(bearerRequest);
-assert.match(adapted.headers.get('Cookie') || '', new RegExp(`fpt_v2_session=${token}`));
-assert.equal(adapted.headers.get('Authorization'), `Bearer ${token}`);
-
-const cookiePrimary = withBearerSessionCookie(new Request('https://example.test/api/v1/student/session', {
-  headers: {
-    Authorization: `Bearer ${token}`,
-    Cookie: 'fpt_v2_session=COOKIE_PRIMARY; other=1'
-  }
-}));
-assert.match(cookiePrimary.headers.get('Cookie') || '', /fpt_v2_session=COOKIE_PRIMARY/);
-assert.equal((cookiePrimary.headers.get('Cookie') || '').includes(token), false, 'Bearer fallback overwrote primary cookie transport.');
-
-const safariUa = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15';
-const ipadUa = 'Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
-const chromeUa = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
-const firefoxUa = 'Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0';
-const loginRequest = ua => new Request('https://example.test/api/v1/student/auth/login', {
-  method: 'POST',
-  headers: { 'User-Agent': ua, 'Content-Type': 'application/json' },
-  body: '{"username":"test","password":"Te12"}'
-});
-assert.equal(webKitBearerFallbackEligible(loginRequest(safariUa)), true);
-assert.equal(webKitBearerFallbackEligible(loginRequest(ipadUa)), true);
-assert.equal(webKitBearerFallbackEligible(loginRequest(chromeUa)), false);
-assert.equal(webKitBearerFallbackEligible(loginRequest(firefoxUa)), false);
-
-const loginResponse = new Response(JSON.stringify({ ok: true, firstName: 'Test' }), {
+const loginResponse = new Response(JSON.stringify({ ok: true }), {
   status: 200,
   headers: {
     'Content-Type': 'application/json',
     'Set-Cookie': `fpt_v2_session=${token}; Path=/; HttpOnly; Secure; SameSite=None`
   }
 });
-assert.equal(sessionTokenFromSetCookie(loginResponse), token);
+const partitionedLogin = withPartitionedSessionCookie(loginRequest, loginResponse);
+const loginCookie = partitionedLogin.headers.get('Set-Cookie') || '';
+assert.match(loginCookie, /^fpt_v2_session=/, 'Phase 16 changed the authoritative session cookie name.');
+assert.match(loginCookie, /;\s*HttpOnly(?:;|$)/i, 'Partitioned session cookie lost HttpOnly.');
+assert.match(loginCookie, /;\s*Secure(?:;|$)/i, 'Partitioned session cookie lost Secure.');
+assert.match(loginCookie, /;\s*SameSite=None(?:;|$)/i, 'Partitioned session cookie lost SameSite=None.');
+assert.match(loginCookie, /;\s*Partitioned(?:;|$)/i, 'Login session cookie is not CHIPS Partitioned.');
+assert.equal((loginCookie.match(/\bPartitioned\b/gi) || []).length, 1, 'Partitioned attribute was duplicated.');
 
-const safariResponse = await exposeWebKitLoginFallback(loginRequest(safariUa), loginResponse);
-const safariBody = await safariResponse.clone().json();
-assert.equal(safariBody.sessionToken, token, 'Safari/WebKit login did not receive controlled in-memory fallback token.');
-assert.equal(safariBody.sessionTransportFallback, 'in-memory-bearer');
-assert.match(safariResponse.headers.get('Set-Cookie') || '', /HttpOnly; Secure; SameSite=None/);
+const logoutRequest = new Request('https://example.test/api/v1/student/auth/logout', {
+  method: 'POST'
+});
+const logoutResponse = new Response(JSON.stringify({ ok: true }), {
+  status: 200,
+  headers: {
+    'Content-Type': 'application/json',
+    'Set-Cookie': 'fpt_v2_session=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0'
+  }
+});
+const partitionedLogout = withPartitionedSessionCookie(logoutRequest, logoutResponse);
+const logoutCookie = partitionedLogout.headers.get('Set-Cookie') || '';
+assert.match(logoutCookie, /;\s*HttpOnly(?:;|$)/i);
+assert.match(logoutCookie, /;\s*Secure(?:;|$)/i);
+assert.match(logoutCookie, /;\s*SameSite=None(?:;|$)/i);
+assert.match(logoutCookie, /;\s*Partitioned(?:;|$)/i, 'Logout clearing cookie is not partitioned consistently.');
+assert.match(logoutCookie, /;\s*Max-Age=0(?:;|$)/i, 'Logout cookie no longer clears the session.');
 
-const chromeResponse = await exposeWebKitLoginFallback(loginRequest(chromeUa), loginResponse);
-const chromeBody = await chromeResponse.clone().json();
-assert.equal(Object.prototype.hasOwnProperty.call(chromeBody, 'sessionToken'), false, 'Chrome login unnecessarily exposed bearer fallback token.');
+const ordinaryRequest = new Request('https://example.test/api/v1/student/session', { method: 'GET' });
+const ordinaryResponse = new Response(JSON.stringify({ ok: true }), {
+  status: 200,
+  headers: {
+    'Content-Type': 'application/json',
+    'Set-Cookie': `fpt_v2_session=${token}; Path=/; HttpOnly; Secure; SameSite=None`
+  }
+});
+const ordinaryResult = withPartitionedSessionCookie(ordinaryRequest, ordinaryResponse);
+assert.equal(
+  ordinaryResult.headers.get('Set-Cookie'),
+  ordinaryResponse.headers.get('Set-Cookie'),
+  'Phase 16 cookie compatibility wrapper mutated an unrelated endpoint.'
+);
+
+const alreadyPartitioned = new Response(JSON.stringify({ ok: true }), {
+  status: 200,
+  headers: {
+    'Set-Cookie': `fpt_v2_session=${token}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`
+  }
+});
+const idempotent = withPartitionedSessionCookie(loginRequest, alreadyPartitioned);
+assert.equal(
+  (String(idempotent.headers.get('Set-Cookie') || '').match(/\bPartitioned\b/gi) || []).length,
+  1,
+  'Partitioned cookie compatibility is not idempotent.'
+);
 
 const frontend = await fs.readFile('assets/phase7.js', 'utf8');
 const baseWorker = await fs.readFile('worker/src/index.js', 'utf8');
-assert.match(baseWorker, /HttpOnly; Secure; SameSite=None/, 'Primary secure HttpOnly cookie contract changed.');
-assert.match(frontend, /sessionToken:\s*null/, 'Frontend has no explicit in-memory session state.');
-assert.match(frontend, /url\.origin === workerOrigin && url\.pathname\.startsWith\('\/api\/v1\/student\/'\)/, 'Bearer fallback is not restricted to the exact Worker student API origin/path.');
-assert.match(frontend, /headers\.set\('Authorization', `Bearer \$\{state\.sessionToken\}`\)/, 'Frontend does not attach the in-memory bearer token to guarded student API requests.');
-assert.match(frontend, /state\.sessionToken = null;/, 'Frontend does not clear the in-memory bearer token.');
+const manualWorker = await fs.readFile('worker/src/phase15-manual-access.js', 'utf8');
 
-// Inspect executable persistence/write patterns rather than merely searching for
-// security terminology that may legitimately appear in comments.
-assert.doesNotMatch(frontend, /\blocalStorage\s*\.\s*(?:setItem|getItem|removeItem|clear)\s*\(/, 'Session bearer fallback must never be persisted in localStorage.');
-assert.doesNotMatch(frontend, /\bsessionStorage\s*\.\s*(?:setItem|getItem|removeItem|clear)\s*\(/, 'Session bearer fallback must never be persisted in sessionStorage.');
-assert.doesNotMatch(frontend, /\bdocument\s*\.\s*cookie\s*=/, 'Frontend must not downgrade session security to a script-readable cookie.');
-assert.doesNotMatch(frontend, /[?&]sessionToken\s*=/, 'Session bearer token must never be placed in a URL query string.');
+assert.match(
+  baseWorker,
+  /HttpOnly; Secure; SameSite=None/,
+  'Primary secure HttpOnly session-cookie contract changed unexpectedly.'
+);
+assert.match(
+  manualWorker,
+  /Set-Cookie[\s\S]*Partitioned|Partitioned[\s\S]*Set-Cookie/,
+  'Phase 16 outer Worker layer does not apply the Partitioned session-cookie attribute.'
+);
+assert.doesNotMatch(
+  manualWorker,
+  /\bbearerSessionToken\b|\bwithBearerSessionCookie\b|\bwebKitBearerFallbackEligible\b|\bsessionTokenFromSetCookie\b|\bexposeWebKitLoginFallback\b/,
+  'Obsolete JavaScript bearer fallback remains in the Worker layer.'
+);
+assert.doesNotMatch(
+  manualWorker,
+  /sessionTransportFallback\s*:|sessionToken\s*:/,
+  'Worker must not expose the opaque session token in a JSON response.'
+);
+assert.doesNotMatch(
+  frontend,
+  /\bsessionToken\s*:/,
+  'Frontend must not hold the opaque session token in JavaScript state.'
+);
+assert.doesNotMatch(
+  frontend,
+  /headers\s*\.\s*set\s*\(\s*['"]Authorization['"]/,
+  'Frontend must not attach a session bearer token.'
+);
+assert.doesNotMatch(
+  frontend,
+  /\blocalStorage\s*\.\s*(?:setItem|getItem|removeItem|clear)\s*\(/,
+  'Session transport must never be persisted in localStorage.'
+);
+assert.doesNotMatch(
+  frontend,
+  /\bsessionStorage\s*\.\s*(?:setItem|getItem|removeItem|clear)\s*\(/,
+  'Session transport must never be persisted in sessionStorage.'
+);
+assert.doesNotMatch(
+  frontend,
+  /\bdocument\s*\.\s*cookie\s*=/,
+  'Frontend must not downgrade session security to a script-readable cookie.'
+);
+assert.doesNotMatch(
+  frontend,
+  /[?&]sessionToken\s*=/,
+  'Session token must never be placed in a URL query string.'
+);
 
-console.log('PHASE16_SESSION_TRANSPORT_STATIC_PASS');
+console.log('PHASE16_SESSION_TRANSPORT_STATIC_PASS mode=partitioned-http-only-cookie');
