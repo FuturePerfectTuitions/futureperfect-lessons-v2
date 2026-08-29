@@ -1,0 +1,65 @@
+name: Phase 18 read-only R2 rollback key search
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-r2-backup-search.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+
+jobs:
+  search:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Guard frozen main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+      - name: Search all R2 object metadata for rollback-like keys only
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const bucket = process.env.R2_BUCKET;
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/objects`;
+          const seen = new Map();
+          for (let page = 1; page <= 10; page++) {
+            const u = new URL(base);
+            u.searchParams.set('per_page', '1000');
+            u.searchParams.set('page', String(page));
+            const r = await fetch(u, {headers:{Authorization:`Bearer ${token}`}});
+            if (!r.ok) throw new Error(`R2 list HTTP ${r.status} page=${page}`);
+            const body = await r.json();
+            if (!body?.success || !Array.isArray(body.result)) throw new Error(`R2 list unsuccessful page=${page}`);
+            console.log(`PHASE18_R2_PAGE page=${page} count=${body.result.length}`);
+            for (const obj of body.result) {
+              const key = String(obj?.key || '');
+              if (!key) continue;
+              seen.set(key, Number(obj?.size ?? -1));
+            }
+            if (body.result.length < 1000) break;
+          }
+          const matches = [...seen.entries()].filter(([k]) => /(phase.?17|backup|finalize|retained.?history|rollback)/i.test(k)).sort((a,b)=>a[0].localeCompare(b[0]));
+          console.log(`PHASE18_R2_UNIQUE_OBJECTS_SCANNED=${seen.size}`);
+          console.log(`PHASE18_R2_ROLLBACK_LIKE_KEY_COUNT=${matches.length}`);
+          for (const [key,size] of matches) console.log(`PHASE18_R2_ROLLBACK_LIKE key=${key} size=${size}`);
+          NODE
+      - name: Completion
+        run: echo 'PHASE18_R2_KEY_SEARCH_COMPLETE cloudflare_writes=0 public_mutations=0'
