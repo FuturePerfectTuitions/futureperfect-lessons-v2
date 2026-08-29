@@ -5,9 +5,16 @@
   const viewGrid = document.getElementById('view-grid');
   if (!portal) return;
 
-  function simplifyAvailabilityCopy() {
+  function simplifyResourceCopy() {
     for (const state of portal.querySelectorAll('.phase7-state:not(.locked), .phase6-lesson-state:not(.locked)')) {
       state.setAttribute('aria-hidden', 'true');
+    }
+
+    for (const meta of portal.querySelectorAll('.phase7-resource-meta')) {
+      if (/^ready to download$/i.test(String(meta.textContent || '').trim())) {
+        meta.hidden = true;
+        meta.setAttribute('aria-hidden', 'true');
+      }
     }
 
     if (!viewGrid) return;
@@ -29,7 +36,7 @@
     }
   }
 
-  const observer = new MutationObserver(simplifyAvailabilityCopy);
+  const observer = new MutationObserver(simplifyResourceCopy);
   observer.observe(portal, { childList: true, subtree: true });
-  simplifyAvailabilityCopy();
+  simplifyResourceCopy();
 })();
