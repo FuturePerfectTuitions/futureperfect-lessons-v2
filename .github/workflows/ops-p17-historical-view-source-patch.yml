@@ -1,0 +1,158 @@
+name: P17 guarded historical-view source correction
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-p17-historical-view-source-patch.yml'
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: phase17-prelaunch-freeze-production-verification
+
+jobs:
+  patch-source:
+    if: >-
+      github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2' &&
+      github.event.pull_request.head.ref == 'phase17-prelaunch-freeze-production-verification' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase17-prelaunch-freeze-production-verification
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact launch-blocker correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('worker/src/index.js')
+          text = path.read_text(encoding='utf-8')
+
+          old_access = '''  const fullLibraries = new Set(
+            Array.isArray(auth.user?.fullLibraries)
+              ? auth.user.fullLibraries.map(value => String(value).toUpperCase())
+              : []
+          );
+
+          return { d1Core, d1Vr, batchByLesson, manualCore, manualVr, blocked, fullLibraries };
+          '''
+          new_access = '''  const fullLibraries = new Set(
+            Array.isArray(auth.user?.fullLibraries)
+              ? auth.user.fullLibraries.map(value => String(value).toUpperCase())
+              : []
+          );
+          // Phase 17 launch-blocker correction: retained 11+ programme presentation
+          // may need an explicit private view marker when legacy retained entitlements
+          // predate source_batch_code audit metadata. This marker is presentation-only;
+          // the normal D1/manual/full-library access checks still decide which lessons open.
+          const historicalViews = new Set(
+            Array.isArray(auth.user?.historicalViews)
+              ? auth.user.historicalViews
+                  .map(value => String(value || '').trim().toLowerCase())
+                  .filter(Boolean)
+              : []
+          );
+
+          return { d1Core, d1Vr, batchByLesson, manualCore, manualVr, blocked, fullLibraries, historicalViews };
+          '''
+          if old_access not in text:
+              if 'historicalViews, historicalViews' in text:
+                  raise SystemExit('invalid duplicate historicalViews patch')
+              if 'const historicalViews = new Set(' not in text:
+                  raise SystemExit('STOP: expected access-state block not found')
+          else:
+              text = text.replace(old_access, new_access, 1)
+
+          old_hist = '''function historicalDescriptorForCurriculum(curriculumCode, access, lessonIds) {
+            const sourceBatches = [];
+            for (const [lessonId, batches] of access.batchByLesson.entries()) {
+              if (!lessonIds.has(lessonId) || !hasDirectOrManualCore(access, lessonId)) continue;
+              sourceBatches.push(...batches);
+            }
+            const had11Maths = sourceBatches.some(code => /^Y[45]M11/.test(code));
+            const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));
+
+            switch (curriculumCode) {
+              case 'MATHS_Y2': return mathsNormalDescriptor(2);
+              case 'MATHS_Y3': return mathsNormalDescriptor(3);
+              case 'MATHS_L1': return mathsNormalDescriptor(4);
+              case 'MATHS_L2': return had11Maths ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);
+              case 'MATHS_L3': return had11Maths ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);
+              case 'MATHS_Y6_EXTRA': return mathsNormalDescriptor(6);
+              case 'ENGLISH_Y2': return englishDescriptor(2);
+              case 'ENGLISH_Y3': return englishDescriptor(3);
+              case 'ENGLISH_Y4': return englishDescriptor(4, had11English);
+              case 'ENGLISH_Y5': return englishDescriptor(5, had11English);
+              case 'ENGLISH_Y6': return englishDescriptor(6);
+              default: return null;
+            }
+          }
+          '''
+          new_hist = '''function historicalDescriptorForCurriculum(curriculumCode, access, lessonIds) {
+            const sourceBatches = [];
+            for (const [lessonId, batches] of access.batchByLesson.entries()) {
+              if (!lessonIds.has(lessonId) || !hasDirectOrManualCore(access, lessonId)) continue;
+              sourceBatches.push(...batches);
+            }
+            const had11Maths = sourceBatches.some(code => /^Y[45]M11/.test(code));
+            const had11English = sourceBatches.some(code => /^Y[45]E11/.test(code));
+            const historicalViews = access.historicalViews instanceof Set ? access.historicalViews : new Set();
+            const explicitlyRetained = viewId => historicalViews.has(viewId);
+
+            switch (curriculumCode) {
+              case 'MATHS_Y2': return mathsNormalDescriptor(2);
+              case 'MATHS_Y3': return mathsNormalDescriptor(3);
+              case 'MATHS_L1': return (had11Maths || explicitlyRetained('maths-level1')) ? mathsLevelDescriptor(1) : mathsNormalDescriptor(4);
+              case 'MATHS_L2': return (had11Maths || explicitlyRetained('maths-level2')) ? mathsLevelDescriptor(2) : mathsNormalDescriptor(5);
+              case 'MATHS_L3': return (had11Maths || explicitlyRetained('maths-level3')) ? mathsLevelDescriptor(3) : mathsNormalDescriptor(6);
+              case 'MATHS_Y6_EXTRA': return mathsNormalDescriptor(6);
+              case 'ENGLISH_Y2': return englishDescriptor(2);
+              case 'ENGLISH_Y3': return englishDescriptor(3);
+              case 'ENGLISH_Y4': return englishDescriptor(4, had11English || explicitlyRetained('english-year4-11plus'));
+              case 'ENGLISH_Y5': return englishDescriptor(5, had11English || explicitlyRetained('english-year5-11plus'));
+              case 'ENGLISH_Y6': return englishDescriptor(6);
+              default: return null;
+            }
+          }
+          '''
+          if old_hist not in text:
+              if "explicitlyRetained('maths-level1')" not in text:
+                  raise SystemExit('STOP: expected historical descriptor block not found')
+          else:
+              text = text.replace(old_hist, new_hist, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+          node --check worker/src/index.js
+          node --check worker/src/index-phase12.js
+          node --check worker/src/index-phase13.js
+          node --check worker/src/index-phase17.js
+          grep -Fq "explicitlyRetained('maths-level1')" worker/src/index.js
+          grep -Fq "explicitlyRetained('english-year4-11plus')" worker/src/index.js
+          node scripts/phase11-navigation-manifest.mjs >/tmp/p17-nav.json
+          jq -e '.catalogueSha256=="7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663" and .lessons==369 and .curricula==11' /tmp/p17-nav.json >/dev/null
+          node tests/phase15-master-navigation-regression.mjs
+      - name: Commit exact source correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- worker/src/index.js; then
+            echo 'Historical-view source correction already present; no commit required.'
+            exit 0
+          fi
+          test "$(git diff --name-only | paste -sd, -)" = 'worker/src/index.js'
+          git config user.name 'FuturePerfectTuitions Phase 17 Guard'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/index.js
+          git commit -m 'Phase 17: preserve explicit retained 11+ historical views'
+          git push origin HEAD:${TARGET_BRANCH}
