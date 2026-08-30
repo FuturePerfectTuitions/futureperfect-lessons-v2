@@ -1,0 +1,37 @@
+name: Phase 18 read-only canonical title map
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-canonical-title-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Print requested canonical IDs/titles
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          node --input-type=module <<'NODE'
+          import {loadPhase11Catalogue} from './scripts/phase11-catalogue.mjs';
+          const c=loadPhase11Catalogue();
+          for(const code of Object.keys(c.curricula).sort()) console.log(`PHASE18_CURRICULUM ${code} count=${c.curricula[code].lessonIds.length}`);
+          for(const prefix of ['Y2E','Y2M','Y3E','Y3M','Y4E','Y4M','Y5E','Y5M','Y6E','Y6M']){
+            const rows=Object.entries(c.lessons).filter(([id,l])=>id.startsWith(prefix)||String(l?.displayIds?.ordinary||'').startsWith(prefix));
+            console.log(`PHASE18_CANONICAL_GROUP ${prefix} count=${rows.length}`);
+            for(const [id,l] of rows)console.log(`PHASE18_CANONICAL ${prefix} id=${id} order=${l.order} title=${l.title}`);
+          }
+          NODE
