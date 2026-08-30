@@ -1,0 +1,242 @@
+name: Phase 18 guarded Admin demo fast path
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - 'worker/src/index-phase18-admin-demo.js'
+      - '.github/workflows/phase18-guarded-admin-demo-fastpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  ADMIN_PASSWORD: ${{ secrets.FPT_ADMIN_DEMO_PASSWORD }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  ORIGIN: https://futureperfecttuitions.github.io
+  WRANGLER_VERSION: 4.125.0
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  EXPECTED_CATALOGUE_SHA: 7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_D1: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+
+jobs:
+  apply-and-accept:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard exact frozen source and isolated development state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"; test -n "$ADMIN_PASSWORD"
+          test "${#ADMIN_PASSWORD}" -eq 4
+          [[ "$ADMIN_PASSWORD" =~ [A-Z] && "$ADMIN_PASSWORD" =~ [a-z] && "$ADMIN_PASSWORD" =~ [0-9] ]]
+          git fetch origin main --quiet
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          git diff --quiet "$EXPECTED_MAIN"..HEAD -- worker/src ':!worker/src/index-phase18-admin-demo.js' scripts/phase11-navigation-manifest.mjs scripts/phase11-catalogue.mjs
+          node --check worker/src/index-phase18-admin-demo.js
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/admin-nav-summary.json
+          jq -e --arg h "$EXPECTED_CATALOGUE_SHA" '.catalogueSha256 == $h and .curricula == 11 and .lessons == 369' /tmp/admin-nav-summary.json >/dev/null
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/admin-settings-before.json
+          jq -e '.success == true' /tmp/admin-settings-before.json >/dev/null
+          test "$(jq -r '[.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)" = development
+          test "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json | tr '[:upper:]' '[:lower:]')" = admin
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) false;; esac
+          test "$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)" = "$ORIGIN"
+          test "$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/admin-settings-before.json)" = "$EXPECTED_STUDENTS_KV"
+          test "$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/admin-settings-before.json)" = "$EXPECTED_LESSONS_KV"
+          test "$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/admin-settings-before.json)" = "$EXPECTED_D1"
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/admin-settings-before.json)" = "$EXPECTED_R2"
+
+          CODE="$(curl --silent --show-error --output /tmp/admin-before.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${EXPECTED_STUDENTS_KV}/values/user%3Aadmin" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          test "$CODE" = 200; chmod 600 /tmp/admin-before.json
+          jq -e '.firstName == "Admin" and .status == "active"' /tmp/admin-before.json >/dev/null
+
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --json \
+            --command "SELECT COUNT(*) AS n FROM lesson_entitlements; SELECT COUNT(*) AS n FROM student_batch_assignments; SELECT COUNT(*) AS n FROM batch_lesson_releases;" >/tmp/admin-d1-before.json 2>/tmp/admin-d1-before.err
+          test "$(jq -r '.[0].results[0].n' /tmp/admin-d1-before.json)" = 173
+          test "$(jq -r '.[1].results[0].n' /tmp/admin-d1-before.json)" = 4
+          test "$(jq -r '.[2].results[0].n' /tmp/admin-d1-before.json)" = 0
+          echo 'ADMIN_FASTPATH_PREFLIGHT=PASS'
+
+      - name: Apply fast Admin record, deploy wrapper, and accept
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          APPLIED=0
+
+          rollback() {
+            local rc=$?
+            trap - ERR
+            set +e
+            if [ "$APPLIED" -eq 1 ]; then
+              curl --silent --show-error --request PUT \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${EXPECTED_STUDENTS_KV}/values/user%3Aadmin" \
+                --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                --header 'Content-Type: application/json' --data-binary @/tmp/admin-before.json >/tmp/admin-fast-rollback-kv.log 2>&1
+              cat > worker/wrangler.admin-fast.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase17.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "admin"
+          STUDENT_LOGIN_ENABLED = "false"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${EXPECTED_STUDENTS_KV}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${EXPECTED_LESSONS_KV}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${EXPECTED_R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${EXPECTED_D1}"
+          EOF
+              $W deploy --config worker/wrangler.admin-fast.rollback.toml --keep-vars \
+                --message 'Rollback Phase 18 Admin demo fast path' >/tmp/admin-fast-rollback-worker.log 2>&1
+            fi
+            echo 'ADMIN_FASTPATH_ROLLBACK_ATTEMPTED' >&2
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const p = String(process.env.ADMIN_PASSWORD || '');
+          if (!(p.length === 4 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p))) throw new Error('bad private password');
+          const record = {
+            firstName: 'Admin', p, answerPassword: p, schoolYear: 6,
+            vrEligible: true, status: 'active', expires: null,
+            batches: [], fullLibraries: [], historicalViews: [],
+            manualAccess: {
+              coreLessons: [], vrLessons: [],
+              specialBuckets: ['Y4MAssT1','Y4MAssT2','Y5MAssT1','Y5MAssT2','VR_HOWTO','MOCKS']
+            },
+            blockedLessons: [], demoAdminAllAccess: true
+          };
+          fs.writeFileSync('/tmp/admin-fast.json', JSON.stringify(record), { mode: 0o600 });
+          NODE
+
+          curl --fail --silent --show-error --request PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${EXPECTED_STUDENTS_KV}/values/user%3Aadmin" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header 'Content-Type: application/json' --data-binary @/tmp/admin-fast.json >/tmp/admin-fast-put.json
+          APPLIED=1
+
+          cat > worker/wrangler.admin-fast.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase18-admin-demo.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "admin"
+          STUDENT_LOGIN_ENABLED = "false"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${EXPECTED_STUDENTS_KV}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${EXPECTED_LESSONS_KV}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${EXPECTED_R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${EXPECTED_D1}"
+          EOF
+          $W deploy --config worker/wrangler.admin-fast.runtime.toml --keep-vars \
+            --message 'Phase 18 owner Admin demo fast path' >/tmp/admin-fast-deploy.log 2>&1
+          sleep 4
+
+          rm -f /tmp/admin-cookies.txt
+          LOGIN_CODE="$(curl --silent --show-error --max-time 12 --output /tmp/admin-login.json --write-out '%{http_code}' \
+            --cookie-jar /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg u Admin --arg p "$ADMIN_PASSWORD" '{username:$u,password:$p}')" \
+            "$WORKER_BASE/api/v1/student/auth/login")"
+          test "$LOGIN_CODE" = 200; jq -e '.ok == true and (.portalUserId|ascii_downcase) == "admin"' /tmp/admin-login.json >/dev/null
+
+          START="$(date +%s%3N)"
+          HOME_CODE="$(curl --silent --show-error --max-time 8 --output /tmp/admin-home.json --write-out '%{http_code}' \
+            --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" "$WORKER_BASE/api/v1/student/home")"
+          END="$(date +%s%3N)"; HOME_MS=$((END-START))
+          test "$HOME_CODE" = 200
+          jq -e '.ok == true and .diagnostics.demoAdminAllAccess == true' /tmp/admin-home.json >/dev/null
+          test "$(jq '[.subjects[].views[]] | length' /tmp/admin-home.json)" = 15
+          jq -e '[.subjects[].views[]] | all(.openLessonCount > 0 and .lockedLessonCount == 0 and .current == true)' /tmp/admin-home.json >/dev/null
+          echo "ADMIN_FASTPATH_HOME_MS=${HOME_MS}"
+          test "$HOME_MS" -lt 8000
+
+          VIEWS=(maths-year2 maths-year3 maths-year4 maths-year5 maths-year6 maths-level1 maths-level2 maths-level3 english-year2 english-year3 english-year4 english-year4-11plus english-year5 english-year5-11plus english-year6)
+          for view in "${VIEWS[@]}"; do
+            CODE="$(curl --silent --show-error --max-time 12 --output "/tmp/admin-${view}.json" --write-out '%{http_code}' \
+              --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" \
+              "$WORKER_BASE/api/v1/student/views/${view}/lessons")"
+            test "$CODE" = 200
+            jq -e '.ok == true and (.lessons|length) > 0 and ([.lessons[]|select(.locked != false)]|length) == 0' "/tmp/admin-${view}.json" >/dev/null
+            echo "ADMIN_VIEW_PASS=${view}:$(jq '.lessons|length' "/tmp/admin-${view}.json")"
+          done
+
+          for spec in 'VR_HOWTO|english-year5-11plus' 'Y4MAssT1|maths-level2' 'Y4MAssT2|maths-level2' 'Y5MAssT1|maths-level3' 'Y5MAssT2|maths-level3' 'MOCKS|maths-level3'; do
+            bucket="${spec%%|*}"; view="${spec#*|}"
+            CODE="$(curl --silent --show-error --max-time 12 --output "/tmp/admin-special-${bucket}.json" --write-out '%{http_code}' \
+              --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" \
+              "$WORKER_BASE/api/v1/student/special-areas/${bucket}?viewId=${view}")"
+            test "$CODE" = 200
+            jq -e --arg b "$bucket" '.ok == true and .area.bucketId == $b' "/tmp/admin-special-${bucket}.json" >/dev/null
+            echo "ADMIN_SPECIAL_PASS=${bucket}"
+          done
+
+          curl --silent --show-error --max-time 10 --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" \
+            --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null || true
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/admin-settings-after.json
+          test "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-after.json | tr '[:upper:]' '[:lower:]')" = admin
+          AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-after.json)"
+          case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+
+          $W d1 execute fpt_portal_v2_db --remote --json \
+            --command "SELECT COUNT(*) AS n FROM lesson_entitlements; SELECT COUNT(*) AS n FROM student_batch_assignments; SELECT COUNT(*) AS n FROM batch_lesson_releases;" >/tmp/admin-d1-after.json 2>/tmp/admin-d1-after.err
+          test "$(jq -r '.[0].results[0].n' /tmp/admin-d1-after.json)" = 173
+          test "$(jq -r '.[1].results[0].n' /tmp/admin-d1-after.json)" = 4
+          test "$(jq -r '.[2].results[0].n' /tmp/admin-d1-after.json)" = 0
+
+          APPLIED=0
+          trap - ERR
+          echo 'ADMIN_DEMO_FASTPATH_ACCEPTANCE=PASS'
+          echo 'ADMIN_DEMO_STATE student_login_enabled=false dev_allowlist=admin d1_entitlements=173 d1_assignments=4 d1_releases=0 public_cutover_changes=0'
