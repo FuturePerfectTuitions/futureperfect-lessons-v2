@@ -1,0 +1,52 @@
+name: Phase 18 read-only video KV shape diagnostic
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-video-kv-shape-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Diagnose Y3E Y3M Y5E safely and read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          ns='80e5015aeb7046aa917189304a093a7c'
+          mkdir -p /tmp/shape
+          cat >/tmp/shape/diag.mjs <<'NODE'
+          import fs from 'node:fs';
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const ns='80e5015aeb7046aa917189304a093a7c'; const headers={Authorization:`Bearer ${token}`};
+          const keys=['Y3E','Y3M','Y5E'];
+          async function get(k){const r=await fetch(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k)}`,{headers});if(!r.ok)throw new Error(`${k} HTTP ${r.status}`);return Buffer.from(await r.arrayBuffer())}
+          function tryJson(s){try{return {ok:true,value:JSON.parse(s)}}catch(e){return {ok:false,error:e.message}}}
+          const out=[];
+          for(const k of keys){const b=await get(k);const raw=b.toString('utf8');const trimmed=raw.replace(/^\uFEFF/,'').trim();let p=tryJson(trimmed);let second=null;if(p.ok&&typeof p.value==='string')second=tryJson(p.value.replace(/^\uFEFF/,'').trim());const info={key:k,bytes:b.length,firstBytes:[...b.subarray(0,12)],startsWith:trimmed.slice(0,80).replace(/[A-Za-z0-9]{10,}/g,'<token>'),jsonParse:p.ok,jsonError:p.ok?null:p.error,parsedType:p.ok?(Array.isArray(p.value)?'array':typeof p.value):null,parsedKeys:p.ok&&p.value&&typeof p.value==='object'&&!Array.isArray(p.value)?Object.keys(p.value).slice(0,20):[],secondParse:second?second.ok:null,secondType:second?.ok?(Array.isArray(second.value)?'array':typeof second.value):null,braces:(raw.match(/\{/g)||[]).length,brackets:(raw.match(/\[/g)||[]).length,spFields:(raw.match(/"sp"\s*:/g)||[]).length,titleFields:(raw.match(/"title"\s*:/g)||[]).length,nFields:(raw.match(/"n"\s*:/g)||[]).length};out.push(info);console.log('PHASE18_VIDEO_SHAPE '+JSON.stringify(info))}
+          fs.writeFileSync('/tmp/shape/diagnostic.json',JSON.stringify(out,null,2));
+          NODE
+          node /tmp/shape/diag.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase18-video-kv-shape-diagnostic
+          path: /tmp/shape/
+          retention-days: 7
+      - run: echo 'PHASE18_VIDEO_SHAPE_DIAGNOSTIC_COMPLETE writes=0'
