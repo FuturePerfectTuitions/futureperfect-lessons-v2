@@ -1,0 +1,133 @@
+name: Phase 18 read-only live portal/V2 video KV comparison
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-live-video-kv-compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  LIVE_WORKER_NAME: fpt-lessons-api
+  V2_WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Guard frozen Phase 17 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Resolve live and V2 lesson KV namespaces read-only
+        id: kv
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          live="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LIVE_WORKER_NAME}/settings")"
+          v2="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER_NAME}/settings")"
+          jq -e '.success==true' <<<"$live" >/dev/null
+          jq -e '.success==true' <<<"$v2" >/dev/null
+          echo 'PHASE18_LIVE_WORKER_KV_BINDINGS:'
+          jq -r '.result.bindings[]?|select(.type=="kv_namespace")|"  name=\(.name) namespace_id=\(.namespace_id)"' <<<"$live"
+          live_id="$(jq -r '.result.bindings[]?|select(.name=="FPT_LESSONS" and .type=="kv_namespace")|.namespace_id' <<<"$live")"
+          v2_id="$(jq -r '.result.bindings[]?|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$v2")"
+          for x in "$live_id" "$v2_id"; do test -n "$x"; test "$x" != null; done
+          echo "live=$live_id" >> "$GITHUB_OUTPUT"
+          echo "v2=$v2_id" >> "$GITHUB_OUTPUT"
+          echo 'PHASE18_LIVE_VIDEO_NAMESPACES_RESOLVED'
+      - name: Compare current live video buckets to current V2 lesson records
+        env:
+          LIVE_KV_ID: ${{ steps.kv.outputs.live }}
+          V2_KV_ID: ${{ steps.kv.outputs.v2 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/live-video-compare
+          cat >/tmp/live-video-compare/compare.mjs <<'NODE'
+          import fs from 'node:fs';
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const liveNs=process.env.LIVE_KV_ID, v2Ns=process.env.V2_KV_ID;
+          const headers={Authorization:`Bearer ${token}`};
+          async function cfJson(url){const r=await fetch(url,{headers});if(!r.ok)throw new Error(`CF ${r.status} ${url}`);const j=await r.json();if(!j.success)throw new Error(`CF API failure ${url}`);return j}
+          async function listKeys(ns){const out=[];let cursor='';do{const u=new URL(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/keys`);u.searchParams.set('limit','1000');if(cursor)u.searchParams.set('cursor',cursor);const j=await cfJson(u);out.push(...(j.result||[]).map(x=>x.name));cursor=j.result_info?.cursor||''}while(cursor);return out.sort()}
+          async function getValue(ns,key){const u=`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`;const r=await fetch(u,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV ${r.status} ${key}`);return await r.text()}
+          function parse(t){try{return JSON.parse(t)}catch{return null}}
+          function lessonLike(x){return x&&typeof x==='object'&&!Array.isArray(x)&&(x.n!=null||x.title||x.lessonId||x.id||x.code||x.sp||x.video||x.videoUrl)}
+          function findLessons(data){
+            if(Array.isArray(data)) return data.filter(lessonLike);
+            if(!data||typeof data!=='object') return [];
+            for(const k of ['lessons','items','videos','data','records']) if(Array.isArray(data[k])) return data[k].filter(lessonLike);
+            const vals=Object.values(data);
+            if(vals.length&&vals.every(v=>lessonLike(v))) return vals;
+            let best=[];
+            for(const v of vals){if(Array.isArray(v)){const a=v.filter(lessonLike);if(a.length>best.length)best=a}else if(v&&typeof v==='object'){const a=findLessons(v);if(a.length>best.length)best=a}}
+            return best;
+          }
+          function legacyVideo(item){for(const k of ['sp','screenpal','screenPal','video','videoId','videoUrl','url']){const v=item?.[k];if(typeof v==='string'&&v.trim())return v.trim()}return ''}
+          function lessonId(bucket,item){for(const c of [item?.lessonId,item?.id,item?.code,item?.title]){const m=String(c??'').match(/\b(Y[2-6][ME]\d+)\b/i);if(m)return m[1].toUpperCase()}if(/^Y[2-6][ME]$/i.test(bucket)&&Number(item?.n)>0)return `${bucket.toUpperCase()}${Number(item.n)}`;return ''}
+          function v2Videos(rec){const v=rec?.core?.video;if(!v)return [];return [v.embedUrl,v.contentUrl,v.watchUrl,v.id,v.videoId].filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim())}
+          function tokenise(s){if(!s)return '';try{const u=new URL(s);return u.pathname.split('/').filter(Boolean).at(-1)||s}catch{return String(s).trim()}}
+          function csv(s){s=String(s??'');return `"${s.replaceAll('"','""')}"`}
+          const liveKeys=await listKeys(liveNs);
+          fs.writeFileSync('/tmp/live-video-compare/live-key-names.txt',liveKeys.join('\n')+'\n');
+          const candidates=liveKeys.filter(k=>/^Y[2-6][A-Za-z0-9+_-]*$/.test(k));
+          const rows=[], summary=[], unresolved=[];
+          for(const bucket of candidates){
+            const raw=await getValue(liveNs,bucket);
+            if(/"(password|expires|portalUserId|username|manualAccess)"\s*:/.test(raw||'')) throw new Error(`Refusing user-shaped value at ${bucket}`);
+            const data=parse(raw); const arr=findLessons(data);
+            if(!arr.length){unresolved.push({bucket,shape:data==null?'non-json':Array.isArray(data)?'array-no-lessons':typeof data,topKeys:data&&typeof data==='object'&&!Array.isArray(data)?Object.keys(data):[]});continue}
+            let liveVideos=0,v2Count=0,match=0,liveOnly=0,v2Only=0,differ=0,noVideoBoth=0,unmapped=0;
+            for(const item of arr){
+              const id=lessonId(bucket,item), lv=legacyVideo(item); if(lv)liveVideos++;
+              if(!id){unmapped++;rows.push({bucket,lessonId:'',n:item?.n??'',liveTitle:item?.title??'',liveVideo:lv,status:'UNMAPPED',v2Title:'',v2Video:''});continue}
+              const rec=parse(await getValue(v2Ns,`lesson:${id}`)); const vv=v2Videos(rec); if(vv.length)v2Count++;
+              let status;
+              if(lv&&vv.length){const tok=tokenise(lv).toLowerCase(), corpus=vv.join('\n').toLowerCase();if((tok&&corpus.includes(tok))||vv.includes(lv)){status='MATCH';match++}else{status='BOTH_DIFFER';differ++}}
+              else if(lv&&!vv.length){status='LIVE_ONLY';liveOnly++}
+              else if(!lv&&vv.length){status='V2_ONLY';v2Only++}
+              else{status='NO_VIDEO_BOTH';noVideoBoth++}
+              rows.push({bucket,lessonId:id,n:item?.n??'',liveTitle:item?.title??'',liveVideo:lv,status,v2Title:rec?.title??'',v2Video:vv.join(' | ')});
+            }
+            summary.push({bucket,lessons:arr.length,liveVideos,v2Videos:v2Count,match,liveOnly,v2Only,differ,noVideoBoth,unmapped});
+          }
+          fs.writeFileSync('/tmp/live-video-compare/summary.json',JSON.stringify(summary,null,2));
+          fs.writeFileSync('/tmp/live-video-compare/unresolved.json',JSON.stringify(unresolved,null,2));
+          fs.writeFileSync('/tmp/live-video-compare/comparison.json',JSON.stringify(rows,null,2));
+          const h=['bucket','lessonId','n','liveTitle','liveVideo','status','v2Title','v2Video'];
+          fs.writeFileSync('/tmp/live-video-compare/comparison.csv',h.join(',')+'\n'+rows.map(r=>h.map(k=>csv(r[k])).join(',')).join('\n')+'\n');
+          console.log(`PHASE18_LIVE_VIDEO_KEYS=${liveKeys.join(',')}`);
+          console.log(`PHASE18_LIVE_VIDEO_CANDIDATES=${candidates.join(',')}`);
+          for(const s of summary)console.log(`PHASE18_LIVE_VIDEO_BUCKET ${s.bucket} lessons=${s.lessons} liveVideos=${s.liveVideos} v2Videos=${s.v2Videos} match=${s.match} liveOnly=${s.liveOnly} v2Only=${s.v2Only} differ=${s.differ} noVideoBoth=${s.noVideoBoth} unmapped=${s.unmapped}`);
+          for(const u of unresolved)console.log(`PHASE18_LIVE_VIDEO_UNRESOLVED ${u.bucket} shape=${u.shape} topKeys=${u.topKeys.join('|')}`);
+          const diffs=rows.filter(r=>['LIVE_ONLY','V2_ONLY','BOTH_DIFFER','UNMAPPED'].includes(r.status));
+          console.log(`PHASE18_LIVE_VIDEO_DIFF_COUNT=${diffs.length}`);
+          for(const r of diffs)console.log(`PHASE18_LIVE_VIDEO_DIFF ${r.bucket} ${r.lessonId||'(unmapped)'} status=${r.status} live=${r.liveVideo||'(none)'} v2=${r.v2Video||'(none)'}`);
+          NODE
+          node /tmp/live-video-compare/compare.mjs
+      - name: Upload read-only comparison artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase18-live-video-kv-comparison
+          path: /tmp/live-video-compare/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Completion
+        run: echo 'PHASE18_LIVE_VIDEO_KV_READONLY_COMPLETE cloudflare_writes=0 kv_writes=0'
