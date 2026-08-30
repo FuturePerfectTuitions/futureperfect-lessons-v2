@@ -1,0 +1,86 @@
+name: Phase 18 Admin demo acceptance diagnostic
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-admin-demo-acceptance-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ADMIN_PASSWORD: ${{ secrets.FPT_ADMIN_DEMO_PASSWORD }}
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  ORIGIN: https://futureperfecttuitions.github.io
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Admin read-only acceptance diagnostic
+        shell: bash
+        run: |
+          set -u
+          FAIL=0
+          rm -f /tmp/admin-cookies.txt
+          LOGIN_CODE="$(curl --silent --show-error --max-time 20 --output /tmp/login.json --write-out '%{http_code}' \
+            --cookie-jar /tmp/admin-cookies.txt \
+            --header "Origin: ${ORIGIN}" \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg u 'Admin' --arg p "$ADMIN_PASSWORD" '{username:$u,password:$p}')" \
+            "$WORKER_BASE/api/v1/student/auth/login")"
+          LOGIN_OK="$(jq -r '.ok // false' /tmp/login.json 2>/dev/null || echo false)"
+          echo "ADMIN_DIAG login_http=${LOGIN_CODE} ok=${LOGIN_OK}"
+          if [ "$LOGIN_CODE" != 200 ] || [ "$LOGIN_OK" != true ]; then exit 10; fi
+
+          HOME_CODE="$(curl --silent --show-error --max-time 20 --output /tmp/home.json --write-out '%{http_code}' \
+            --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" \
+            "$WORKER_BASE/api/v1/student/home")"
+          echo "ADMIN_DIAG home_http=${HOME_CODE}"
+          if [ "$HOME_CODE" != 200 ]; then exit 11; fi
+          jq -r '.subjects[]?.views[]?.viewId // empty' /tmp/home.json | sort -u > /tmp/home-views.txt
+
+          EXPECTED_VIEWS=(
+            maths-year2 maths-year3 maths-year4 maths-year5 maths-year6
+            maths-level1 maths-level2 maths-level3
+            english-year2 english-year3 english-year4 english-year4-11plus
+            english-year5 english-year5-11plus english-year6
+          )
+          for view in "${EXPECTED_VIEWS[@]}"; do
+            HOME_PRESENT=no; grep -Fxq "$view" /tmp/home-views.txt && HOME_PRESENT=yes
+            CODE="$(curl --silent --show-error --max-time 20 --output "/tmp/view-${view}.json" --write-out '%{http_code}' \
+              --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" \
+              "$WORKER_BASE/api/v1/student/views/${view}/lessons" || echo CURL_FAIL)"
+            OK="$(jq -r '.ok // false' "/tmp/view-${view}.json" 2>/dev/null || echo false)"
+            LOCKED="$(jq -r '.view.lockedPreview // null' "/tmp/view-${view}.json" 2>/dev/null || echo null)"
+            COUNT="$(jq -r '(.lessons // []) | length' "/tmp/view-${view}.json" 2>/dev/null || echo 0)"
+            ERROR="$(jq -r '.error // ""' "/tmp/view-${view}.json" 2>/dev/null || true)"
+            echo "ADMIN_DIAG view=${view} home=${HOME_PRESENT} http=${CODE} ok=${OK} locked=${LOCKED} lessons=${COUNT} error=${ERROR}"
+            if [ "$HOME_PRESENT" != yes ] || [ "$CODE" != 200 ] || [ "$OK" != true ] || [ "$LOCKED" = true ] || [ "$COUNT" = 0 ]; then FAIL=1; fi
+          done
+
+          for spec in \
+            'VR_HOWTO|english-year5-11plus' \
+            'Y4MAssT1|maths-level2' \
+            'Y4MAssT2|maths-level2' \
+            'Y5MAssT1|maths-level3' \
+            'Y5MAssT2|maths-level3' \
+            'MOCKS|maths-level3'; do
+            bucket="${spec%%|*}"; view="${spec#*|}"
+            CODE="$(curl --silent --show-error --max-time 20 --output "/tmp/special-${bucket}.json" --write-out '%{http_code}' \
+              --cookie /tmp/admin-cookies.txt --header "Origin: ${ORIGIN}" \
+              "$WORKER_BASE/api/v1/student/special-areas/${bucket}?viewId=${view}" || echo CURL_FAIL)"
+            OK="$(jq -r '.ok // false' "/tmp/special-${bucket}.json" 2>/dev/null || echo false)"
+            RETURNED="$(jq -r '.area.bucketId // ""' "/tmp/special-${bucket}.json" 2>/dev/null || true)"
+            ERROR="$(jq -r '.error // ""' "/tmp/special-${bucket}.json" 2>/dev/null || true)"
+            echo "ADMIN_DIAG special=${bucket} view=${view} http=${CODE} ok=${OK} returned=${RETURNED} error=${ERROR}"
+            if [ "$CODE" != 200 ] || [ "$OK" != true ] || [ "$RETURNED" != "$bucket" ]; then FAIL=1; fi
+          done
+
+          curl --silent --show-error --max-time 20 --cookie /tmp/admin-cookies.txt \
+            --header "Origin: ${ORIGIN}" --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null || true
+          echo "ADMIN_DIAG_RESULT fail=${FAIL}"
+          exit "$FAIL"
