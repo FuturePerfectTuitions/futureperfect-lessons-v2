@@ -1,0 +1,57 @@
+name: Phase 18 read-only concatenated video KV comparison
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-video-kv-concat-compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  SOURCE_NS: 80e5015aeb7046aa917189304a093a7c
+  V2_NS: 49619b1a24b244bc8aaa6223fcd24e80
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare concatenated source objects to V2 read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          mkdir -p /tmp/concat
+          cat >/tmp/concat/compare.mjs <<'NODE'
+          import fs from 'node:fs';
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const src=process.env.SOURCE_NS,v2=process.env.V2_NS,headers={Authorization:`Bearer ${token}`};
+          async function get(ns,key){const r=await fetch(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(!r.ok)throw new Error(`${key} HTTP ${r.status}`);return await r.text()}
+          function splitObjects(raw){const out=[];let depth=0,start=-1,inStr=false,esc=false;for(let i=0;i<raw.length;i++){const c=raw[i];if(inStr){if(esc){esc=false;continue}if(c==='\\'){esc=true;continue}if(c==='"')inStr=false;continue}if(c==='"'){inStr=true;continue}if(c==='{'){if(depth===0)start=i;depth++}else if(c==='}'){depth--;if(depth===0&&start>=0){const s=raw.slice(start,i+1);out.push(JSON.parse(s));start=-1}if(depth<0)throw new Error('negative brace depth')}}if(depth!==0)throw new Error(`unbalanced braces depth=${depth}`);return out}
+          function video(item){for(const k of ['sp','screenpal','screenPal','video','videoId','videoUrl','url']){const v=item?.[k];if(typeof v==='string'&&v.trim())return v.trim()}return ''}
+          function id(bucket,item){for(const c of [item?.lessonId,item?.id,item?.code,item?.title]){const m=String(c??'').match(/\b(Y[2-6][ME]\d+)\b/i);if(m)return m[1].toUpperCase()}if(Number(item?.n)>0)return `${bucket}${Number(item.n)}`;return ''}
+          function v2videos(rec){const v=rec?.core?.video;if(!v)return [];return [v.embedUrl,v.contentUrl,v.watchUrl,v.id,v.videoId].filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim())}
+          function tok(s){if(!s)return '';try{return new URL(s).pathname.split('/').filter(Boolean).at(-1)||s}catch{return String(s).trim()}}
+          function csv(s){s=String(s??'');return `"${s.replaceAll('"','""')}"`}
+          const rows=[];const sums=[];
+          for(const bucket of ['Y3E','Y3M','Y5E']){const raw=await get(src,bucket);const items=splitObjects(raw);let match=0,sourceOnly=0,v2Only=0,differ=0,no=0;for(const item of items){const lesson=id(bucket,item),sv=video(item);const rec=JSON.parse(await get(v2,`lesson:${lesson}`));const vv=v2videos(rec);let status;if(sv&&vv.length){const t=tok(sv).toLowerCase(),corp=vv.join('\n').toLowerCase();if((t&&corp.includes(t))||vv.includes(sv)){status='MATCH';match++}else{status='BOTH_DIFFER';differ++}}else if(sv&&!vv.length){status='SOURCE_ONLY';sourceOnly++}else if(!sv&&vv.length){status='V2_ONLY';v2Only++}else{status='NO_VIDEO_BOTH';no++}rows.push({bucket,lessonId:lesson,n:item.n??'',sourceTitle:item.title??'',sourceVideo:sv,status,v2Title:rec.title??'',v2Video:vv.join(' | ')})}sums.push({bucket,objects:items.length,sourceVideos:items.filter(x=>video(x)).length,v2Videos:rows.filter(r=>r.bucket===bucket&&r.v2Video).length,match,sourceOnly,v2Only,differ,noVideoBoth:no})}
+          fs.writeFileSync('/tmp/concat/summary.json',JSON.stringify(sums,null,2));fs.writeFileSync('/tmp/concat/comparison.json',JSON.stringify(rows,null,2));const h=['bucket','lessonId','n','sourceTitle','sourceVideo','status','v2Title','v2Video'];fs.writeFileSync('/tmp/concat/comparison.csv',h.join(',')+'\n'+rows.map(r=>h.map(k=>csv(r[k])).join(',')).join('\n')+'\n');for(const s of sums)console.log(`PHASE18_CONCAT_SUMMARY ${s.bucket} objects=${s.objects} sourceVideos=${s.sourceVideos} v2Videos=${s.v2Videos} match=${s.match} sourceOnly=${s.sourceOnly} v2Only=${s.v2Only} differ=${s.differ} noVideoBoth=${s.noVideoBoth}`);for(const r of rows.filter(r=>r.status!=='MATCH'&&r.status!=='NO_VIDEO_BOTH'))console.log(`PHASE18_CONCAT_DIFF ${r.bucket} ${r.lessonId} status=${r.status} source=${r.sourceVideo||'(none)'} v2=${r.v2Video||'(none)'}`)
+          NODE
+          node /tmp/concat/compare.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase18-concat-video-kv-comparison
+          path: /tmp/concat/
+          retention-days: 7
+      - run: echo 'PHASE18_CONCAT_VIDEO_COMPARE_COMPLETE writes=0'
