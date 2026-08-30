@@ -1,0 +1,354 @@
+name: Phase 18 guarded Admin demo user
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-guarded-admin-demo-user.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  ADMIN_PASSWORD: ${{ secrets.FPT_ADMIN_DEMO_PASSWORD }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  EXPECTED_CATALOGUE_SHA: 7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_D1: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+
+jobs:
+  provision-admin:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require privately stored Admin password
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ADMIN_PASSWORD" || { echo 'FPT_ADMIN_DEMO_PASSWORD repository secret is required.' >&2; exit 2; }
+          test "${#ADMIN_PASSWORD}" -eq 4 || { echo 'Admin password must be exactly four characters.' >&2; exit 2; }
+          [[ "$ADMIN_PASSWORD" =~ [A-Z] ]] || { echo 'Admin password requires an uppercase letter.' >&2; exit 2; }
+          [[ "$ADMIN_PASSWORD" =~ [a-z] ]] || { echo 'Admin password requires a lowercase letter.' >&2; exit 2; }
+          [[ "$ADMIN_PASSWORD" =~ [0-9] ]] || { echo 'Admin password requires a digit.' >&2; exit 2; }
+          echo 'ADMIN_PASSWORD_SECRET_FORMAT=PASS'
+
+      - name: Guard exact code and isolated Worker baseline
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          git fetch origin main --quiet
+          ACTUAL_MAIN="$(git rev-parse origin/main)"
+          echo "MAIN_SHA=${ACTUAL_MAIN}"
+          test "$ACTUAL_MAIN" = "$EXPECTED_MAIN"
+          git diff --quiet "$EXPECTED_MAIN"..HEAD -- worker scripts/phase11-navigation-manifest.mjs scripts/phase11-catalogue.mjs
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/admin-settings-before.json
+          jq -e '.success == true' /tmp/admin-settings-before.json >/dev/null
+
+          ENVIRONMENT="$(jq -r '[.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)"
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)"
+          ORIGINS="$(jq -r '[.result.bindings[]|select(.name=="ALLOWED_ORIGINS" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)"
+          ALLOWLIST="$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-before.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/admin-settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/admin-settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/admin-settings-before.json)"
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/admin-settings-before.json)"
+
+          test "$ENVIRONMENT" = 'development'
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'Normal student login is not disabled.' >&2; exit 3;; esac
+          test "$ORIGINS" = 'https://futureperfecttuitions.github.io'
+          case "${ALLOWLIST,,}" in ''|'admin') ;; *) echo 'Unexpected existing DEV_LOGIN_ALLOWLIST; refusing to overwrite.' >&2; exit 3;; esac
+          test "$STUDENTS" = "$EXPECTED_STUDENTS_KV"
+          test "$LESSONS" = "$EXPECTED_LESSONS_KV"
+          test "$DB" = "$EXPECTED_D1"
+          test "$R2" = "$EXPECTED_R2"
+
+          echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
+          echo "lessons=$LESSONS" >> "$GITHUB_OUTPUT"
+          echo "db=$DB" >> "$GITHUB_OUTPUT"
+          echo "pre_allowlist=$ALLOWLIST" >> "$GITHUB_OUTPUT"
+          echo 'ADMIN_ISOLATION_GUARD=PASS'
+
+      - name: Build exact Admin access record without logging credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/fpt-admin-main
+          git worktree add --detach /tmp/fpt-admin-main "$EXPECTED_MAIN" >/dev/null
+          cd /tmp/fpt-admin-main
+          node scripts/phase11-navigation-manifest.mjs | tee /tmp/admin-nav-summary.json
+          jq -e --arg h "$EXPECTED_CATALOGUE_SHA" '.catalogueSha256 == $h and .curricula == 11 and .lessons == 369' /tmp/admin-nav-summary.json >/dev/null
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { pathToFileURL } from 'node:url';
+          const moduleUrl = pathToFileURL('/tmp/fpt-admin-main/worker/src/phase11-navigation-manifest.generated.js').href;
+          const { PHASE11_NAVIGATION_MANIFEST: m } = await import(moduleUrl);
+          if (!m || !m.lessons || !m.curricula) throw new Error('Navigation manifest unavailable');
+          const allLessonIds = Object.keys(m.lessons).sort();
+          if (allLessonIds.length !== 369) throw new Error(`Expected 369 lesson IDs, got ${allLessonIds.length}`);
+          const vrIds = [...new Set([
+            ...(m.curricula.ENGLISH_Y4?.lessonIds || []),
+            ...(m.curricula.ENGLISH_Y5?.lessonIds || [])
+          ])].sort();
+          const password = String(process.env.ADMIN_PASSWORD || '');
+          if (!(password.length === 4 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /\d/.test(password))) {
+            throw new Error('Invalid private Admin password');
+          }
+          const record = {
+            firstName: 'Admin',
+            p: password,
+            answerPassword: password,
+            schoolYear: 6,
+            vrEligible: true,
+            status: 'active',
+            expires: null,
+            batches: [],
+            fullLibraries: [
+              'MATHS_L1_FULL',
+              'MATHS_L2_FULL',
+              'MATHS_L3_FULL',
+              'MATHS_Y6_FULL',
+              'ENGLISH_Y4_FULL',
+              'ENGLISH_Y4_11PLUS_FULL',
+              'ENGLISH_Y5_FULL',
+              'ENGLISH_Y5_11PLUS_FULL'
+            ],
+            manualAccess: {
+              coreLessons: allLessonIds,
+              vrLessons: vrIds,
+              specialBuckets: ['Y4MAssT1','Y4MAssT2','Y5MAssT1','Y5MAssT2','VR_HOWTO','MOCKS']
+            },
+            blockedLessons: []
+          };
+          fs.writeFileSync('/tmp/admin-user.json', JSON.stringify(record), { mode: 0o600 });
+          console.log(`ADMIN_ACCESS_RECORD core=${allLessonIds.length} vr=${vrIds.length} fullLibraries=${record.fullLibraries.length} specialBuckets=${record.manualAccess.specialBuckets.length}`);
+          NODE
+          test -s /tmp/admin-user.json
+
+      - name: Provision Admin and enable only Admin development login
+        id: apply
+        shell: bash
+        env:
+          STUDENTS: ${{ steps.guard.outputs.students }}
+          PRE_ALLOWLIST: ${{ steps.guard.outputs.pre_allowlist }}
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          USER_CREATED=0
+          WORKER_CHANGED=0
+
+          rollback() {
+            local rc=$?
+            trap - ERR
+            set +e
+            if [ "$WORKER_CHANGED" -eq 1 ]; then
+              cd /tmp/fpt-admin-main
+              cat > worker/wrangler.admin.rollback.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase17.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "${PRE_ALLOWLIST}"
+          STUDENT_LOGIN_ENABLED = "false"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${EXPECTED_STUDENTS_KV}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${EXPECTED_LESSONS_KV}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${EXPECTED_R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${EXPECTED_D1}"
+          EOF
+              $W deploy --config worker/wrangler.admin.rollback.toml --keep-vars --message 'Rollback failed Admin demo-user provisioning' >/tmp/admin-rollback-worker.log 2>&1
+            fi
+            if [ "$USER_CREATED" -eq 1 ]; then
+              curl --silent --show-error --request DELETE \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/user%3Aadmin" \
+                --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" >/tmp/admin-rollback-kv.log 2>&1
+            fi
+            echo 'ADMIN_PROVISION_ROLLBACK_ATTEMPTED' >&2
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          EXISTING_CODE="$(curl --silent --show-error --output /tmp/admin-existing.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/user%3Aadmin" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          if [ "$EXISTING_CODE" = '200' ]; then
+            cmp -s /tmp/admin-existing.json /tmp/admin-user.json || { echo 'A different user:admin record already exists; refusing to overwrite.' >&2; exit 4; }
+            echo 'ADMIN_KV_RECORD=ALREADY_EXACT'
+          elif [ "$EXISTING_CODE" = '404' ]; then
+            PUT_CODE="$(curl --silent --show-error --output /tmp/admin-put-response --write-out '%{http_code}' \
+              --request PUT \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/user%3Aadmin" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data-binary @/tmp/admin-user.json)"
+            test "$PUT_CODE" = '200'
+            USER_CREATED=1
+            echo 'ADMIN_KV_RECORD=CREATED'
+          else
+            echo "Unexpected Admin KV preflight HTTP ${EXISTING_CODE}." >&2
+            exit 4
+          fi
+
+          READBACK_CODE="$(curl --silent --show-error --output /tmp/admin-readback.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS}/values/user%3Aadmin" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          test "$READBACK_CODE" = '200'
+          cmp -s /tmp/admin-readback.json /tmp/admin-user.json
+
+          cd /tmp/fpt-admin-main
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/admin-secrets-before.txt
+          grep -Fxq 'EXCEL_SYNC_TOKEN' /tmp/admin-secrets-before.txt
+          grep -Fxq 'MOCK_DAILY_PASSWORDS' /tmp/admin-secrets-before.txt
+
+          if [ "${PRE_ALLOWLIST,,}" != 'admin' ]; then
+            cat > worker/wrangler.admin.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase17.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "development"
+          ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+          DEV_LOGIN_ALLOWLIST = "admin"
+          STUDENT_LOGIN_ENABLED = "false"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${EXPECTED_STUDENTS_KV}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${EXPECTED_LESSONS_KV}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${EXPECTED_R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${EXPECTED_D1}"
+          EOF
+            $W deploy --config worker/wrangler.admin.runtime.toml --keep-vars --message 'Phase 18 owner Admin demo login only' >/tmp/admin-deploy.log 2>&1
+            WORKER_CHANGED=1
+            sleep 3
+          fi
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/admin-settings-after.json
+          jq -e '.success == true' /tmp/admin-settings-after.json >/dev/null
+          test "$(jq -r '[.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-after.json)" = 'development'
+          test "$(jq -r '[.result.bindings[]|select(.name=="DEV_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-after.json | tr '[:upper:]' '[:lower:]')" = 'admin'
+          AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/admin-settings-after.json)"
+          case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          test "$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/admin-settings-after.json)" = "$EXPECTED_STUDENTS_KV"
+          test "$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/admin-settings-after.json)" = "$EXPECTED_LESSONS_KV"
+          test "$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/admin-settings-after.json)" = "$EXPECTED_D1"
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/admin-settings-after.json)" = "$EXPECTED_R2"
+
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/admin-secrets-after.txt
+          cmp /tmp/admin-secrets-before.txt /tmp/admin-secrets-after.txt
+
+          echo "user_created=$USER_CREATED" >> "$GITHUB_OUTPUT"
+          echo "worker_changed=$WORKER_CHANGED" >> "$GITHUB_OUTPUT"
+          echo 'ADMIN_APPLY_GUARD=PASS'
+          trap - ERR
+
+      - name: Browser/API acceptance for Admin-only demo access
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/admin-cookies.txt
+          LOGIN_CODE="$(curl --silent --show-error --output /tmp/admin-login.json --write-out '%{http_code}' \
+            --cookie-jar /tmp/admin-cookies.txt \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg u 'Admin' --arg p "$ADMIN_PASSWORD" '{username:$u,password:$p}')" \
+            "$WORKER_BASE/api/v1/student/auth/login")"
+          test "$LOGIN_CODE" = '200'
+          jq -e '.ok == true and (.portalUserId|ascii_downcase) == "admin" and .accountLocked == false' /tmp/admin-login.json >/dev/null
+
+          HOME_CODE="$(curl --silent --show-error --output /tmp/admin-home.json --write-out '%{http_code}' \
+            --cookie /tmp/admin-cookies.txt \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            "$WORKER_BASE/api/v1/student/home")"
+          test "$HOME_CODE" = '200'
+          jq -e '.ok == true' /tmp/admin-home.json >/dev/null
+
+          EXPECTED_VIEWS=(
+            maths-year2 maths-year3 maths-year4 maths-year5 maths-year6
+            maths-level1 maths-level2 maths-level3
+            english-year2 english-year3 english-year4 english-year4-11plus
+            english-year5 english-year5-11plus english-year6
+          )
+          jq -r '.subjects[]?.views[]?.viewId // empty' /tmp/admin-home.json | sort -u > /tmp/admin-home-views.txt
+          for view in "${EXPECTED_VIEWS[@]}"; do
+            grep -Fxq "$view" /tmp/admin-home-views.txt || { echo "Admin home missing ${view}." >&2; exit 5; }
+            CODE="$(curl --silent --show-error --output "/tmp/admin-view-${view}.json" --write-out '%{http_code}' \
+              --cookie /tmp/admin-cookies.txt \
+              --header 'Origin: https://futureperfecttuitions.github.io' \
+              "$WORKER_BASE/api/v1/student/views/${view}/lessons")"
+            test "$CODE" = '200'
+            jq -e '.ok == true and (.view.lockedPreview != true) and (.lessons|length) > 0' "/tmp/admin-view-${view}.json" >/dev/null
+          done
+
+          for spec in \
+            'VR_HOWTO|english-year5-11plus' \
+            'Y4MAssT1|maths-level2' \
+            'Y4MAssT2|maths-level2' \
+            'Y5MAssT1|maths-level3' \
+            'Y5MAssT2|maths-level3' \
+            'MOCKS|maths-level3'; do
+            bucket="${spec%%|*}"; view="${spec#*|}"
+            CODE="$(curl --silent --show-error --output "/tmp/admin-special-${bucket}.json" --write-out '%{http_code}' \
+              --cookie /tmp/admin-cookies.txt \
+              --header 'Origin: https://futureperfecttuitions.github.io' \
+              "$WORKER_BASE/api/v1/student/special-areas/${bucket}?viewId=${view}")"
+            test "$CODE" = '200'
+            jq -e --arg b "$bucket" '.ok == true and .area.bucketId == $b' "/tmp/admin-special-${bucket}.json" >/dev/null
+          done
+
+          curl --silent --show-error --output /tmp/admin-logout.json \
+            --cookie /tmp/admin-cookies.txt \
+            --header 'Origin: https://futureperfecttuitions.github.io' \
+            --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null
+
+          echo 'ADMIN_DEMO_ACCEPTANCE=PASS ordinary_views=15 special_areas=6 normal_student_login=false'
+
+      - name: Final safety declaration
+        run: |
+          echo 'PHASE18_ADMIN_DEMO_USER_COMPLETE username=Admin access=all_current_catalogue login_scope=admin-only environment=development normal_student_login=false dns_changes=0 route_changes=0 real_excel_syncs=0 old_live_changes=0'
