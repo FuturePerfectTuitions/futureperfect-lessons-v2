@@ -1,0 +1,63 @@
+name: Phase 18 read-only locate video KV buckets
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-find-video-kvs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Guard frozen Phase 17 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Locate target video bucket keys across all account KV namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kv-locate
+          cat >/tmp/kv-locate/locate.mjs <<'NODE'
+          import fs from 'node:fs';
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const headers={Authorization:`Bearer ${token}`};
+          const targets=['Y2E','Y2M','Y3E','Y3M','Y4E','Y4M','Y5E','Y5M','Y6E','Y6M'];
+          async function cf(url){const r=await fetch(url,{headers});if(!r.ok)throw new Error(`HTTP ${r.status} ${url}`);const j=await r.json();if(!j.success)throw new Error(`API failure ${url}`);return j}
+          async function namespaces(){const all=[];let page=1;while(true){const u=new URL(`${API}/accounts/${account}/storage/kv/namespaces`);u.searchParams.set('per_page','100');u.searchParams.set('page',String(page));const j=await cf(u);all.push(...(j.result||[]));if(page>=(j.result_info?.total_pages||1))break;page++}return all}
+          async function keys(ns){const out=[];let cursor='';do{const u=new URL(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/keys`);u.searchParams.set('limit','1000');if(cursor)u.searchParams.set('cursor',cursor);const j=await cf(u);out.push(...(j.result||[]).map(x=>x.name));cursor=j.result_info?.cursor||''}while(cursor);return out}
+          const nss=await namespaces(); const findings=[];
+          console.log(`PHASE18_KV_NAMESPACE_COUNT=${nss.length}`);
+          for(const ns of nss){const ks=await keys(ns.id);const hits=targets.filter(t=>ks.includes(t));if(hits.length){findings.push({namespaceId:ns.id,title:ns.title,targetKeys:hits,allMatchingYearSubjectKeys:ks.filter(k=>/^Y[2-6][ME](?:11plus)?$/i.test(k)).sort()});console.log(`PHASE18_VIDEO_KV_NAMESPACE title=${ns.title} id=${ns.id} targets=${hits.join(',')} allYearSubject=${findings.at(-1).allMatchingYearSubjectKeys.join(',')}`)}}
+          for(const t of targets){const owners=findings.filter(f=>f.targetKeys.includes(t));console.log(`PHASE18_VIDEO_KV_KEY ${t} namespaces=${owners.length} ${owners.map(o=>`${o.title}:${o.namespaceId}`).join(' | ')}`)}
+          fs.writeFileSync('/tmp/kv-locate/findings.json',JSON.stringify(findings,null,2));
+          NODE
+          node /tmp/kv-locate/locate.mjs
+      - name: Upload locator artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase18-video-kv-locator
+          path: /tmp/kv-locate/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Completion
+        run: echo 'PHASE18_VIDEO_KV_LOCATOR_COMPLETE cloudflare_writes=0 kv_writes=0 values_read=0'
