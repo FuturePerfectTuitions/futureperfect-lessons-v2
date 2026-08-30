@@ -1,0 +1,42 @@
+name: Phase 18 read-only video status shape
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-video-status-shape.yml'
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  V2_NS: 49619b1a24b244bc8aaa6223fcd24e80
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Print safe content status shapes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          node --input-type=module <<'NODE'
+          const api=process.env.CF_API,acct=process.env.CLOUDFLARE_ACCOUNT_ID,ns=process.env.V2_NS;
+          const headers={Authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`};
+          for (const id of ['Y4M14','Y3E1','Y3M14']) {
+            const r=await fetch(`${api}/accounts/${acct}/storage/kv/namespaces/${ns}/values/${encodeURIComponent('lesson:'+id)}`,{headers});
+            if(!r.ok) throw new Error(`${id} HTTP ${r.status}`);
+            const rec=JSON.parse(await r.text());
+            console.log(`PHASE18_VIDEO_STATUS id=${id} contentStatus=${JSON.stringify(rec.contentStatus)} videoPresent=${!!rec?.core?.video}`);
+          }
+          console.log('PHASE18_VIDEO_STATUS_COMPLETE writes=0');
+          NODE
