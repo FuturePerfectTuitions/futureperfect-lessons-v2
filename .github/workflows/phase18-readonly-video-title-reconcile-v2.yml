@@ -1,0 +1,98 @@
+name: Phase 18 read-only video KV title reconciliation v2
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-video-title-reconcile-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  SOURCE_NS: 80e5015aeb7046aa917189304a093a7c
+  V2_NS: 49619b1a24b244bc8aaa6223fcd24e80
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconcile source video buckets to canonical V2 by title/topic
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          mkdir -p /tmp/reconcile
+          cat >.phase18-reconcile.mjs <<'NODE'
+          import fs from 'node:fs';
+          import {loadPhase11Catalogue} from './scripts/phase11-catalogue.mjs';
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const src=process.env.SOURCE_NS,v2=process.env.V2_NS,headers={Authorization:`Bearer ${token}`};
+          const cat=loadPhase11Catalogue();
+          async function listKeys(ns){const out=[];let cursor='';do{const u=new URL(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/keys`);u.searchParams.set('limit','1000');if(cursor)u.searchParams.set('cursor',cursor);const r=await fetch(u,{headers});if(!r.ok)throw new Error(`keys HTTP ${r.status}`);const j=await r.json();out.push(...(j.result||[]).map(x=>x.name));cursor=j.result_info?.cursor||''}while(cursor);return out.sort()}
+          async function get(ns,key){const r=await fetch(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`${key} HTTP ${r.status}`);return await r.text()}
+          function lessonLike(x){return x&&typeof x==='object'&&!Array.isArray(x)&&(x.n!=null||x.title||x.lessonId||x.id||x.code||x.sp||x.video||x.videoUrl)}
+          function collect(x,out=[]){if(Array.isArray(x)){for(const v of x)lessonLike(v)?out.push(v):collect(v,out);return out}if(!x||typeof x!=='object')return out;if(lessonLike(x)){out.push(x);return out}for(const v of Object.values(x))collect(v,out);return out}
+          function splitObjects(raw){const out=[];let depth=0,start=-1,inStr=false,esc=false;for(let i=0;i<raw.length;i++){const c=raw[i];if(inStr){if(esc){esc=false;continue}if(c==='\\'){esc=true;continue}if(c==='"')inStr=false;continue}if(c==='"'){inStr=true;continue}if(c==='{'){if(depth===0)start=i;depth++}else if(c==='}'){depth--;if(depth===0&&start>=0){try{out.push(JSON.parse(raw.slice(start,i+1)))}catch{}start=-1}}}return out}
+          function parseSource(raw){if(raw==null)return [];try{return collect(JSON.parse(raw),[])}catch{return splitObjects(raw).flatMap(x=>collect(x,[]))}}
+          function sourceVideo(x){for(const k of ['sp','screenpal','screenPal','video','videoId','videoUrl','url']){const v=x?.[k];if(typeof v==='string'&&v.trim())return v.trim()}return ''}
+          function videoToken(v){if(!v)return '';try{return new URL(v).pathname.split('/').filter(Boolean).at(-1)||v}catch{return String(v).trim()}}
+          function v2VideoToken(rec){const v=rec?.core?.video;if(!v)return '';for(const x of [v.id,v.videoId,v.embedUrl,v.contentUrl,v.watchUrl]){if(typeof x==='string'&&x.trim()){const t=videoToken(x);if(t)return t}}return ''}
+          function stripPrefix(s){return String(s??'').replace(/^\s*Y[2-6](?:M|E)(?:11PLUS)?(?:\d+(?:\.\d+)*)?\s*/i,'').replace(/^\s*LESSON\s+\d+(?:\.\d+)*\s*/i,'').trim()}
+          function romanTail(s){return s.replace(/\bVIII\b/g,'8').replace(/\bVII\b/g,'7').replace(/\bVI\b/g,'6').replace(/\bV\b/g,'5').replace(/\bIV\b/g,'4').replace(/\bIII\b/g,'3').replace(/\bII\b/g,'2').replace(/\bI\b/g,'1')}
+          function norm(s){return romanTail(stripPrefix(s).toUpperCase().replace(/&/g,' AND ').replace(/[^A-Z0-9]+/g,' ').replace(/\bTHE\b/g,' ').replace(/\s+/g,' ').trim())}
+          function tokens(s){return new Set(norm(s).split(' ').filter(Boolean))}
+          function dice(a,b){const A=tokens(a),B=tokens(b);if(!A.size||!B.size)return 0;let i=0;for(const x of A)if(B.has(x))i++;return 2*i/(A.size+B.size)}
+          function sim(a,b){const na=norm(a),nb=norm(b);if(!na||!nb)return 0;if(na===nb)return 1;let d=dice(a,b);if(na.includes(nb)||nb.includes(na))d=Math.max(d,0.9);return d}
+          function targetPrefix(bucket){return bucket.replace(/11plus$/i,'').toUpperCase()}
+          function csv(v){const s=String(v??'');return `"${s.replaceAll('"','""')}"`}
+          const sourceKeys=(await listKeys(src)).filter(k=>/^Y[2-6][ME](?:11plus)?$/i.test(k));
+          const rows=[], summaries=[];
+          for(const bucket of sourceKeys){
+            const raw=await get(src,bucket), items=parseSource(raw), prefix=targetPrefix(bucket);
+            const candidates=Object.entries(cat.lessons).filter(([id])=>id.toUpperCase().startsWith(prefix));
+            let exactVideo=0,differentVideo=0,sourceOnly=0,v2Only=0,noVideo=0,ambiguous=0,unmatched=0;
+            for(const item of items){
+              const st=item?.title??'';
+              const scored=candidates.map(([id,l])=>({id,l,score:sim(st,l.title)})).sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));
+              const best=scored[0],second=scored[1]; let mapping='',mapStatus='';
+              if(best?.score===1){const exacts=scored.filter(x=>x.score===1);if(exacts.length===1){mapping=best.id;mapStatus='EXACT_TITLE'}else{mapStatus='AMBIGUOUS_TITLE';ambiguous++}}
+              else if(best&&best.score>=0.72&&(best.score-(second?.score??0)>=0.12)){mapping=best.id;mapStatus='FUZZY_TITLE'}
+              else{mapStatus=best?.score>=0.55?'AMBIGUOUS_TITLE':'UNMATCHED_TITLE';if(mapStatus==='AMBIGUOUS_TITLE')ambiguous++;else unmatched++}
+              const sv=sourceVideo(item),stok=videoToken(sv);let rec=null,v2tok='';
+              if(mapping){const vr=await get(v2,`lesson:${mapping}`);rec=vr?JSON.parse(vr):null;v2tok=v2VideoToken(rec)}
+              let videoStatus='NOT_COMPARED';
+              if(mapping){if(stok&&v2tok){if(stok.toLowerCase()===v2tok.toLowerCase()){videoStatus='VIDEO_MATCH';exactVideo++}else{videoStatus='VIDEO_DIFFER';differentVideo++}}else if(stok&&!v2tok){videoStatus='SOURCE_VIDEO_ONLY';sourceOnly++}else if(!stok&&v2tok){videoStatus='V2_VIDEO_ONLY';v2Only++}else{videoStatus='NO_VIDEO_BOTH';noVideo++}}
+              rows.push({bucket,sourceN:item?.n??'',sourceTitle:st,sourceVideoToken:stok,mappedLessonId:mapping,mappedTitle:best?.l?.title??'',matchScore:best?.score?.toFixed(3)??'',secondCandidate:second?`${second.id} ${second.l.title}`:'',secondScore:second?.score?.toFixed(3)??'',mapStatus,videoStatus,v2VideoToken:v2tok});
+            }
+            summaries.push({bucket,items:items.length,exactVideo,differentVideo,sourceOnly,v2Only,noVideo,ambiguous,unmatched});
+          }
+          const missing=['Y2E','Y2M','Y3E','Y3M','Y4E','Y4M','Y5E','Y5M','Y6E','Y6M'].filter(k=>!sourceKeys.includes(k));
+          fs.writeFileSync('/tmp/reconcile/summary.json',JSON.stringify(summaries,null,2));
+          fs.writeFileSync('/tmp/reconcile/missing-source-keys.json',JSON.stringify(missing,null,2));
+          fs.writeFileSync('/tmp/reconcile/mapping.json',JSON.stringify(rows,null,2));
+          const h=['bucket','sourceN','sourceTitle','sourceVideoToken','mappedLessonId','mappedTitle','matchScore','secondCandidate','secondScore','mapStatus','videoStatus','v2VideoToken'];
+          fs.writeFileSync('/tmp/reconcile/mapping.csv',h.join(',')+'\n'+rows.map(r=>h.map(k=>csv(r[k])).join(',')).join('\n')+'\n');
+          console.log(`PHASE18_VIDEO_SOURCE_KEYS=${sourceKeys.join(',')}`);
+          console.log(`PHASE18_VIDEO_MISSING_KEYS=${missing.join(',')}`);
+          for(const s of summaries)console.log(`PHASE18_VIDEO_RECON ${s.bucket} items=${s.items} videoMatch=${s.exactVideo} videoDiffer=${s.differentVideo} sourceOnly=${s.sourceOnly} v2Only=${s.v2Only} noVideoBoth=${s.noVideo} ambiguous=${s.ambiguous} unmatched=${s.unmatched}`);
+          for(const r of rows.filter(r=>r.mapStatus!=='EXACT_TITLE'||r.videoStatus!=='VIDEO_MATCH'))console.log(`PHASE18_VIDEO_RECON_ROW bucket=${r.bucket} n=${r.sourceN} title=${r.sourceTitle} map=${r.mappedLessonId||'(none)'} mapStatus=${r.mapStatus} score=${r.matchScore} videoStatus=${r.videoStatus} sourceVideo=${r.sourceVideoToken||'(none)'} v2Video=${r.v2VideoToken||'(none)'}`);
+          NODE
+          node .phase18-reconcile.mjs
+          rm -f .phase18-reconcile.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase18-video-title-reconciliation-v2
+          path: /tmp/reconcile/
+          retention-days: 7
+      - run: echo 'PHASE18_VIDEO_TITLE_RECON_V2_COMPLETE cloudflare_writes=0 kv_writes=0'
