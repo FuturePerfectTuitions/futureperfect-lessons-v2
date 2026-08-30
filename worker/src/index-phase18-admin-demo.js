@@ -1,6 +1,10 @@
 import phase17Worker from './index-phase17.js';
 import { PHASE11_NAVIGATION_MANIFEST } from './phase11-navigation-manifest.generated.js';
-import { VIEW_CURRICULA, validBundledManifest } from './phase11-navigation-cache.js';
+import {
+  VIEW_CURRICULA,
+  validBundledManifest,
+  phase11NavigationEnv
+} from './phase11-navigation-cache.js';
 
 const ADMIN_ID = 'admin';
 
@@ -196,6 +200,8 @@ export default {
     }
 
     const viewId = targetViewId(request);
-    return phase17Worker.fetch(request, scopedAdminEnv(env, viewId), ctx);
+    const scoped = scopedAdminEnv(env, viewId);
+    const runtime = await phase11NavigationEnv(scoped, request);
+    return phase17Worker.fetch(request, runtime, ctx);
   }
 };
