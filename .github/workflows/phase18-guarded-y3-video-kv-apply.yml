@@ -1,0 +1,123 @@
+name: Phase 18 guarded Y3 video KV apply
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-guarded-y3-video-kv-apply.yml'
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  SOURCE_NS: 80e5015aeb7046aa917189304a093a7c
+  V2_NS: 49619b1a24b244bc8aaa6223fcd24e80
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard, backup in-memory, apply and verify ten authorised Y3 videos
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          node --input-type=module <<'NODE'
+          const API=process.env.CF_API;
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const src=process.env.SOURCE_NS;
+          const v2=process.env.V2_NS;
+          const headers={Authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`};
+
+          const plan=[
+            {bucket:'Y3E',n:1,target:'Y3E1', title:'Y3E1 Comprehension with Transitioning Exercises', token:'cOj3XznvPtK'},
+            {bucket:'Y3E',n:2,target:'Y3E3', title:'Y3T1E02 Similes and Metaphors', token:'cOjTo4nwVMj'},
+            {bucket:'Y3E',n:3,target:'Y3E4', title:'Y3T1E03 Present Perfect Tense', token:'cOjTrJnwnLG'},
+            {bucket:'Y3E',n:4,target:'Y3E5', title:'Y3T1E04 Articles A, AN & THE', token:'cOjt6BnwiqH'},
+            {bucket:'Y3E',n:5,target:'Y3E6', title:'Y3T1E05 Word Families', token:'cOjuQpnwQNG'},
+            {bucket:'Y3M',n:1,target:'Y3M14',title:'Y3M1 Advanced Fractions', token:'cOj3bFnvPmr'},
+            {bucket:'Y3M',n:2,target:'Y3M2', title:'Y3M2 Number and Place Value', token:'cOjTIXnwVv8'},
+            {bucket:'Y3M',n:3,target:'Y3M3', title:'Y3M3 Partitioning', token:'cOjTrInwndE'},
+            {bucket:'Y3M',n:4,target:'Y3M5', title:'Y3T1M04 Statistics and Measurements', token:'cOjtI4nwixU'},
+            {bucket:'Y3M',n:5,target:'Y3M6', title:'Y3T1M05 Number Bonds', token:'cOjuQxnwQN2'}
+          ];
+
+          function splitObjects(raw){const out=[];let depth=0,start=-1,inStr=false,esc=false;for(let i=0;i<raw.length;i++){const c=raw[i];if(inStr){if(esc){esc=false;continue}if(c==='\\'){esc=true;continue}if(c==='"')inStr=false;continue}if(c==='"'){inStr=true;continue}if(c==='{'){if(depth===0)start=i;depth++}else if(c==='}'){depth--;if(depth===0&&start>=0){try{out.push(JSON.parse(raw.slice(start,i+1)))}catch{}start=-1}}}return out}
+          function collect(x,out=[]){if(Array.isArray(x)){for(const v of x)collect(v,out);return out}if(!x||typeof x!=='object')return out;if(x.n!=null||x.title||x.sp){out.push(x);return out}for(const v of Object.values(x))collect(v,out);return out}
+          function parseSource(raw){try{return collect(JSON.parse(raw),[])}catch{return splitObjects(raw).flatMap(x=>collect(x,[]))}}
+          function vidToken(v){if(!v)return '';try{return new URL(v).pathname.split('/').filter(Boolean).at(-1)||v}catch{return String(v).trim()}}
+          function sourceToken(item){return vidToken(item?.sp||item?.video||item?.videoUrl||item?.url||'')}
+          function videoObject(id){return {
+            contentUrl:`https://screenpal.com/content/video/${id}`,
+            embedUrl:`https://go.screenpal.com/player/${id}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+            screenpal:id,
+            watchUrl:`https://go.screenpal.com/watch/${id}`
+          }}
+          async function get(ns,key){const r=await fetch(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(!r.ok)throw new Error(`GET ${key} HTTP ${r.status}`);return await r.text()}
+          async function put(ns,key,value){const r=await fetch(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:value});if(!r.ok)throw new Error(`PUT ${key} HTTP ${r.status}: ${await r.text()}`)}
+
+          const sourceByBucket={};
+          for(const bucket of ['Y3E','Y3M']) sourceByBucket[bucket]=parseSource(await get(src,bucket));
+
+          const originals=new Map();
+          for(const p of plan){
+            const srcItem=sourceByBucket[p.bucket].find(x=>Number(x?.n)===p.n);
+            if(!srcItem) throw new Error(`SOURCE_ITEM_MISSING ${p.bucket} n=${p.n}`);
+            if(String(srcItem.title||'').trim()!==p.title) throw new Error(`SOURCE_TITLE_DRIFT ${p.bucket} n=${p.n} expected=${p.title} actual=${srcItem.title||''}`);
+            const actualToken=sourceToken(srcItem);
+            if(actualToken!==p.token) throw new Error(`SOURCE_VIDEO_DRIFT ${p.bucket} n=${p.n} expected=${p.token} actual=${actualToken}`);
+
+            const key=`lesson:${p.target}`;
+            const raw=await get(v2,key);
+            originals.set(key,raw);
+            const rec=JSON.parse(raw);
+            if(rec?.lessonId!==p.target) throw new Error(`TARGET_ID_DRIFT ${key}`);
+            if(!rec?.core || typeof rec.core!=='object') throw new Error(`TARGET_CORE_MISSING ${key}`);
+            if(rec.core.video!=null) throw new Error(`TARGET_VIDEO_NOT_EMPTY ${key}`);
+            if(rec?.contentStatus?.mainVideo!=='in_production') throw new Error(`TARGET_VIDEO_STATUS_DRIFT ${key} status=${rec?.contentStatus?.mainVideo}`);
+            console.log(`PHASE18_Y3_VIDEO_PRECHECK target=${p.target} source=${p.bucket}:${p.n} token=${p.token} status=${rec.contentStatus.mainVideo}`);
+          }
+
+          const written=[];
+          try {
+            for(const p of plan){
+              const key=`lesson:${p.target}`;
+              const rec=JSON.parse(originals.get(key));
+              rec.core.video=videoObject(p.token);
+              rec.contentStatus={...(rec.contentStatus||{}),mainVideo:'available'};
+              await put(v2,key,JSON.stringify(rec));
+              written.push(key);
+              console.log(`PHASE18_Y3_VIDEO_WRITE target=${p.target} token=${p.token}`);
+            }
+
+            for(const p of plan){
+              const key=`lesson:${p.target}`;
+              const rec=JSON.parse(await get(v2,key));
+              const v=rec?.core?.video;
+              if(v?.screenpal!==p.token) throw new Error(`VERIFY_TOKEN_FAIL ${key}`);
+              if(v?.contentUrl!==`https://screenpal.com/content/video/${p.token}`) throw new Error(`VERIFY_CONTENT_URL_FAIL ${key}`);
+              if(v?.embedUrl!==`https://go.screenpal.com/player/${p.token}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`) throw new Error(`VERIFY_EMBED_URL_FAIL ${key}`);
+              if(v?.watchUrl!==`https://go.screenpal.com/watch/${p.token}`) throw new Error(`VERIFY_WATCH_URL_FAIL ${key}`);
+              if(rec?.contentStatus?.mainVideo!=='available') throw new Error(`VERIFY_STATUS_FAIL ${key}`);
+              console.log(`PHASE18_Y3_VIDEO_VERIFY target=${p.target} token=${p.token} mainVideo=${rec.contentStatus.mainVideo} ownerConfirmedPending=${rec.contentStatus.ownerConfirmedPending}`);
+            }
+          } catch (err) {
+            console.error(`PHASE18_Y3_VIDEO_APPLY_ERROR ${err?.message||err}`);
+            for(const key of written.reverse()){
+              try{await put(v2,key,originals.get(key));console.error(`PHASE18_Y3_VIDEO_ROLLBACK_OK key=${key}`)}catch(e){console.error(`PHASE18_Y3_VIDEO_ROLLBACK_FAILED key=${key} error=${e?.message||e}`)}
+            }
+            throw err;
+          }
+
+          console.log(`PHASE18_Y3_VIDEO_APPLY_COMPLETE writes=${written.length} verified=${plan.length} public_cutover_changes=0 dns_changes=0 login_changes=0 entitlement_changes=0`);
+          NODE
