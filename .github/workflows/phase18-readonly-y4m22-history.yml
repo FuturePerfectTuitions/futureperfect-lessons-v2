@@ -1,0 +1,44 @@
+name: Phase 18 read-only Y4M22 history diagnostic
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths: ['.github/workflows/phase18-readonly-y4m22-history.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect canonical Y4 sequence and git history
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          git checkout --detach "$EXPECTED_MAIN"
+          node --input-type=module <<'NODE'
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c=loadPhase11Catalogue();
+          const code=Object.keys(c.curricula).find(k=>/MATHS_L1/i.test(k)) || 'MATHS_L1';
+          const cur=c.curricula[code];
+          console.log(`PHASE18_Y4_CANONICAL curriculum=${code} count=${cur?.lessonIds?.length||0}`);
+          for(const id of cur?.lessonIds||[]){
+            const r=c.lessons[id];
+            console.log(`PHASE18_Y4_CANONICAL_ROW id=${id} order=${r?.order} title=${r?.title||''} displayIds=${JSON.stringify(r?.displayIds||{})} provenance=${JSON.stringify(r?.metadataProvenance||{})}`);
+          }
+          const matches=Object.values(c.lessons).filter(r=>/fractions?\s*5/i.test(String(r?.title||'')) || Object.values(r?.displayIds||{}).some(v=>String(v).includes('Y4M22')));
+          console.log(`PHASE18_Y4_CANONICAL_SEARCH matches=${matches.length}`);
+          for(const r of matches) console.log(`PHASE18_Y4_CANONICAL_MATCH id=${r.lessonId} title=${r.title} displayIds=${JSON.stringify(r.displayIds||{})}`);
+          NODE
+          echo 'PHASE18_GIT_LOG_Y4M22_BEGIN'
+          git log --all --oneline -S'Y4M22' -- . ':!docs/data/phase11/catalogue_payload/*' | head -80 || true
+          echo 'PHASE18_GIT_LOG_FRACTIONS5_BEGIN'
+          git log --all --oneline -S'Fractions 5' -- . ':!docs/data/phase11/catalogue_payload/*' | head -80 || true
+          echo 'PHASE18_Y4M22_HISTORY_COMPLETE writes=0'
