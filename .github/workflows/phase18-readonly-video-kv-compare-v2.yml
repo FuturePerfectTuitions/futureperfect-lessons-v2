@@ -1,0 +1,101 @@
+name: Phase 18 read-only normalized video KV comparison
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-video-kv-compare-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+  V2_WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Guard and resolve namespaces read-only
+        id: ns
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          all="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100&page=1")"
+          jq -e '.success==true' <<<"$all" >/dev/null
+          source="$(jq -r '.result[]?|select(.title=="FPT_LESSONS_TEST")|.id' <<<"$all")"
+          v2s="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER_NAME}/settings")"
+          jq -e '.success==true' <<<"$v2s" >/dev/null
+          v2="$(jq -r '.result.bindings[]?|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$v2s")"
+          for x in "$source" "$v2"; do test -n "$x"; test "$x" != null; done
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "v2=$v2" >> "$GITHUB_OUTPUT"
+          echo "PHASE18_VIDEO_COMPARE_SOURCE title=FPT_LESSONS_TEST id=$source"
+          echo "PHASE18_VIDEO_COMPARE_V2 id=$v2"
+      - name: Normalize source buckets and compare to V2
+        env:
+          SOURCE_NS: ${{ steps.ns.outputs.source }}
+          V2_NS: ${{ steps.ns.outputs.v2 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/video-v2
+          cat >/tmp/video-v2/compare.mjs <<'NODE'
+          import fs from 'node:fs';
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const src=process.env.SOURCE_NS, v2=process.env.V2_NS, headers={Authorization:`Bearer ${token}`};
+          const requested=['Y2E','Y2M','Y3E','Y3M','Y4E','Y4M','Y4M11plus','Y5E','Y5M','Y5M11plus','Y6E','Y6M'];
+          async function get(ns,key){const u=`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`;const r=await fetch(u,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`HTTP ${r.status} ${key}`);return await r.text()}
+          function parse(t){try{return JSON.parse(t)}catch{return null}}
+          function hasLessonFields(x){return x&&typeof x==='object'&&!Array.isArray(x)&&(x.n!=null||x.title||x.lessonId||x.id||x.code||x.sp||x.video||x.videoUrl)}
+          function collectLessonObjects(x,out=[]){
+            if(Array.isArray(x)){for(const v of x)hasLessonFields(v)?out.push(v):collectLessonObjects(v,out);return out}
+            if(!x||typeof x!=='object')return out;
+            if(hasLessonFields(x)){out.push(x);return out}
+            for(const v of Object.values(x))collectLessonObjects(v,out);
+            return out;
+          }
+          function lv(item){for(const k of ['sp','screenpal','screenPal','video','videoId','videoUrl','url']){const v=item?.[k];if(typeof v==='string'&&v.trim())return v.trim()}return ''}
+          function id(bucket,item){for(const c of [item?.lessonId,item?.id,item?.code,item?.title]){const m=String(c??'').match(/\b(Y[2-6][ME]\d+)\b/i);if(m)return m[1].toUpperCase()}if(/^Y[2-6][ME]$/i.test(bucket)&&Number(item?.n)>0)return `${bucket.toUpperCase()}${Number(item.n)}`;return ''}
+          function v2vs(rec){const v=rec?.core?.video;if(!v)return [];return [v.embedUrl,v.contentUrl,v.watchUrl,v.id,v.videoId].filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim())}
+          function tok(s){if(!s)return '';try{return new URL(s).pathname.split('/').filter(Boolean).at(-1)||s}catch{return String(s).trim()}}
+          function shape(x){if(x==null)return 'missing';if(Array.isArray(x))return `array(${x.length})`;if(typeof x==='object')return `object{${Object.keys(x).join(',')}}`;return typeof x}
+          function csv(s){s=String(s??'');return `"${s.replaceAll('"','""')}"`}
+          const rows=[], sums=[], shapes=[];
+          for(const bucket of requested){
+            const raw=await get(src,bucket);const data=parse(raw);if(raw&&/"(password|expires|portalUserId|username|manualAccess)"\s*:/.test(raw))throw new Error(`Refusing user-shaped source ${bucket}`);
+            const items=collectLessonObjects(data,[]); shapes.push({bucket,present:raw!==null,shape:shape(data),normalizedItems:items.length});
+            let srcVideos=0,v2Videos=0,match=0,srcOnly=0,v2Only=0,diff=0,no=0,unmapped=0;
+            for(const item of items){const lesson=id(bucket,item),sourceVideo=lv(item);if(sourceVideo)srcVideos++;if(!lesson){unmapped++;rows.push({bucket,lessonId:'',n:item?.n??'',sourceTitle:item?.title??'',sourceVideo,status:'UNMAPPED',v2Title:'',v2Video:''});continue}const rec=parse(await get(v2,`lesson:${lesson}`));const vv=v2vs(rec);if(vv.length)v2Videos++;let status;if(sourceVideo&&vv.length){const t=tok(sourceVideo).toLowerCase(),corp=vv.join('\n').toLowerCase();if((t&&corp.includes(t))||vv.includes(sourceVideo)){status='MATCH';match++}else{status='BOTH_DIFFER';diff++}}else if(sourceVideo&&!vv.length){status='SOURCE_ONLY';srcOnly++}else if(!sourceVideo&&vv.length){status='V2_ONLY';v2Only++}else{status='NO_VIDEO_BOTH';no++}rows.push({bucket,lessonId:lesson,n:item?.n??'',sourceTitle:item?.title??'',sourceVideo,status,v2Title:rec?.title??'',v2Video:vv.join(' | ')})}
+            sums.push({bucket,present:raw!==null,items:items.length,sourceVideos:srcVideos,v2Videos,match,sourceOnly:srcOnly,v2Only,differ:diff,noVideoBoth:no,unmapped});
+          }
+          fs.writeFileSync('/tmp/video-v2/shapes.json',JSON.stringify(shapes,null,2));
+          fs.writeFileSync('/tmp/video-v2/summary.json',JSON.stringify(sums,null,2));
+          fs.writeFileSync('/tmp/video-v2/comparison.json',JSON.stringify(rows,null,2));
+          const h=['bucket','lessonId','n','sourceTitle','sourceVideo','status','v2Title','v2Video'];fs.writeFileSync('/tmp/video-v2/comparison.csv',h.join(',')+'\n'+rows.map(r=>h.map(k=>csv(r[k])).join(',')).join('\n')+'\n');
+          console.log('PHASE18_VIDEO_SHAPES '+shapes.map(s=>`${s.bucket}:${s.shape}:items=${s.normalizedItems}`).join(' | '));
+          for(const s of sums)console.log(`PHASE18_VIDEO_SUMMARY ${s.bucket} present=${s.present} items=${s.items} sourceVideos=${s.sourceVideos} v2Videos=${s.v2Videos} match=${s.match} sourceOnly=${s.sourceOnly} v2Only=${s.v2Only} differ=${s.differ} noVideoBoth=${s.noVideoBoth} unmapped=${s.unmapped}`);
+          const actionable=rows.filter(r=>['SOURCE_ONLY','V2_ONLY','BOTH_DIFFER','UNMAPPED'].includes(r.status));console.log(`PHASE18_VIDEO_ACTIONABLE=${actionable.length}`);for(const r of actionable)console.log(`PHASE18_VIDEO_DIFF ${r.bucket} ${r.lessonId||'(unmapped)'} status=${r.status} source=${r.sourceVideo||'(none)'} v2=${r.v2Video||'(none)'}`);
+          NODE
+          node /tmp/video-v2/compare.mjs
+      - name: Upload comparison artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase18-normalized-video-kv-comparison
+          path: /tmp/video-v2/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Completion
+        run: echo 'PHASE18_NORMALIZED_VIDEO_KV_READONLY_COMPLETE cloudflare_writes=0 kv_writes=0'
