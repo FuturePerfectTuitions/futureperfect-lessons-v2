@@ -62,15 +62,10 @@ async function adminSession(request, env, ctx) {
   });
   const response = await phase17Worker.fetch(sessionRequest, env, ctx);
   const body = await response.clone().json().catch(() => null);
-  if (!response.ok || !body?.ok || normalise(body.portalUserId) !== ADMIN_ID) {
-    return { admin: false, response, body };
-  }
-  const user = await env.STUDENTS_KV.get('user:admin', { type: 'json' });
   return {
-    admin: Boolean(user?.demoAdminAllAccess === true),
+    admin: Boolean(response.ok && body?.ok && normalise(body.portalUserId) === ADMIN_ID),
     response,
-    body,
-    user
+    body
   };
 }
 
@@ -112,7 +107,6 @@ function scopedAdminEnv(env, viewId) {
         if (!wantsJson) {
           try { user = JSON.parse(String(value)); } catch { return value; }
         }
-        if (user?.demoAdminAllAccess !== true) return value;
         const scoped = scopedAdminUser(user, target);
         return wantsJson ? scoped : JSON.stringify(scoped);
       };
