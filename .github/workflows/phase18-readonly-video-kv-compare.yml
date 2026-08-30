@@ -1,0 +1,186 @@
+name: Phase 18 read-only legacy/V2 video KV comparison
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths:
+      - '.github/workflows/phase18-readonly-video-kv-compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  LEGACY_WORKER_NAME: frosty-rain-828e
+  V2_WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard frozen Phase 17 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Resolve lesson KV namespaces read-only
+        id: kv
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          legacy="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER_NAME}/settings")"
+          v2="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER_NAME}/settings")"
+          jq -e '.success==true' <<<"$legacy" >/dev/null
+          jq -e '.success==true' <<<"$v2" >/dev/null
+          legacy_id="$(jq -r '.result.bindings[]?|select(.name=="FPT_LESSONS" and .type=="kv_namespace")|.namespace_id' <<<"$legacy")"
+          v2_id="$(jq -r '.result.bindings[]?|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$v2")"
+          for x in "$legacy_id" "$v2_id"; do test -n "$x"; test "$x" != null; done
+          echo "legacy=$legacy_id" >> "$GITHUB_OUTPUT"
+          echo "v2=$v2_id" >> "$GITHUB_OUTPUT"
+          echo "PHASE18_VIDEO_COMPARE_NAMESPACES_RESOLVED legacy_binding=FPT_LESSONS v2_binding=LESSONS_KV"
+
+      - name: Compare current legacy video buckets with current V2 lesson records
+        env:
+          LEGACY_KV_ID: ${{ steps.kv.outputs.legacy }}
+          V2_KV_ID: ${{ steps.kv.outputs.v2 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/video-compare
+          cat >/tmp/video-compare/compare.mjs <<'NODE'
+          import fs from 'node:fs';
+          const API = process.env.CF_API;
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const legacyNs = process.env.LEGACY_KV_ID;
+          const v2Ns = process.env.V2_KV_ID;
+          const headers = {Authorization:`Bearer ${token}`};
+
+          async function cfJson(url) {
+            const r = await fetch(url,{headers});
+            if (!r.ok) throw new Error(`Cloudflare HTTP ${r.status} for ${url}`);
+            const j = await r.json();
+            if (!j.success) throw new Error(`Cloudflare API failure for ${url}`);
+            return j;
+          }
+          async function listKeys(ns) {
+            const out=[]; let cursor='';
+            do {
+              const u = new URL(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/keys`);
+              u.searchParams.set('limit','1000');
+              if (cursor) u.searchParams.set('cursor',cursor);
+              const j=await cfJson(u);
+              out.push(...(j.result||[]).map(x=>x.name));
+              cursor=j.result_info?.cursor||'';
+            } while(cursor);
+            return out.sort();
+          }
+          async function getValue(ns,key) {
+            const u=`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`;
+            const r=await fetch(u,{headers});
+            if (r.status===404) return null;
+            if (!r.ok) throw new Error(`KV value HTTP ${r.status} ${key}`);
+            return await r.text();
+          }
+          function json(text){try{return JSON.parse(text)}catch{return null}}
+          function csv(v){const s=String(v??''); return `"${s.replaceAll('"','""')}"`}
+          function extractLegacyVideo(item){
+            for (const k of ['sp','screenpal','screenPal','video','videoId','videoUrl','url']) {
+              const v=item?.[k]; if (typeof v==='string' && v.trim()) return v.trim();
+            }
+            return '';
+          }
+          function normalizeToken(v){
+            if (!v) return '';
+            const s=String(v).trim();
+            try {
+              const u=new URL(s);
+              const parts=u.pathname.split('/').filter(Boolean);
+              return parts.at(-1)||s;
+            } catch { return s; }
+          }
+          function v2VideoStrings(rec){
+            const v=rec?.core?.video;
+            if (!v) return [];
+            return [v.embedUrl,v.contentUrl,v.watchUrl,v.id,v.videoId].filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim());
+          }
+          function deriveLessonId(bucket,item){
+            const candidates=[item?.lessonId,item?.id,item?.code,item?.title];
+            for (const c of candidates) {
+              const m=String(c??'').match(/\b(Y[2-6][ME]\d+)\b/i);
+              if (m) return m[1].toUpperCase();
+            }
+            if (/^Y[2-6][ME]$/i.test(bucket) && Number.isInteger(Number(item?.n)) && Number(item.n)>0) return `${bucket.toUpperCase()}${Number(item.n)}`;
+            return '';
+          }
+
+          const legacyKeys=await listKeys(legacyNs);
+          const bucketKeys=legacyKeys.filter(k=>/^Y[2-6][ME](?:11PLUS)?$/i.test(k));
+          const rows=[]; const bucketSummary=[]; const unresolved=[];
+          for (const bucket of bucketKeys) {
+            const raw=await getValue(legacyNs,bucket); const data=json(raw);
+            const arr=Array.isArray(data)?data:(Array.isArray(data?.lessons)?data.lessons:null);
+            if (!arr) { unresolved.push({bucket,reason:'legacy value is not an array/lessons array'}); continue; }
+            let legacyVideos=0,v2Videos=0,match=0,legacyOnly=0,v2Only=0,differ=0,noVideoBoth=0,unmapped=0;
+            for (const item of arr) {
+              const lessonId=deriveLessonId(bucket,item);
+              const legacyVideo=extractLegacyVideo(item);
+              if (legacyVideo) legacyVideos++;
+              if (!lessonId) {unmapped++; rows.push({bucket,lessonId:'',n:item?.n??'',legacyTitle:item?.title??'',legacyVideo,status:'UNMAPPED',v2Title:'',v2Video:''}); continue;}
+              const v2raw=await getValue(v2Ns,`lesson:${lessonId}`); const rec=json(v2raw);
+              const v2vs=v2VideoStrings(rec); const v2Has=v2vs.length>0;
+              if (v2Has) v2Videos++;
+              let status='';
+              if (legacyVideo && v2Has) {
+                const tok=normalizeToken(legacyVideo).toLowerCase();
+                const corpus=v2vs.join('\n').toLowerCase();
+                if ((tok && corpus.includes(tok)) || v2vs.some(x=>x===legacyVideo)) {status='MATCH'; match++;}
+                else {status='BOTH_DIFFER'; differ++;}
+              } else if (legacyVideo && !v2Has) {status='LEGACY_ONLY'; legacyOnly++;}
+              else if (!legacyVideo && v2Has) {status='V2_ONLY'; v2Only++;}
+              else {status='NO_VIDEO_BOTH'; noVideoBoth++;}
+              rows.push({bucket,lessonId,n:item?.n??'',legacyTitle:item?.title??'',legacyVideo,status,v2Title:rec?.title??'',v2Video:v2vs.join(' | ')});
+            }
+            bucketSummary.push({bucket,legacyLessons:arr.length,legacyVideos,v2Videos,match,legacyOnly,v2Only,differ,noVideoBoth,unmapped});
+          }
+          fs.writeFileSync('/tmp/video-compare/legacy-key-names.txt',legacyKeys.join('\n')+'\n');
+          fs.writeFileSync('/tmp/video-compare/bucket-summary.json',JSON.stringify(bucketSummary,null,2));
+          fs.writeFileSync('/tmp/video-compare/unresolved.json',JSON.stringify(unresolved,null,2));
+          fs.writeFileSync('/tmp/video-compare/comparison.json',JSON.stringify(rows,null,2));
+          const hdr=['bucket','lessonId','n','legacyTitle','legacyVideo','status','v2Title','v2Video'];
+          fs.writeFileSync('/tmp/video-compare/comparison.csv',hdr.join(',')+'\n'+rows.map(r=>hdr.map(h=>csv(r[h])).join(',')).join('\n')+'\n');
+          const sh=['bucket','legacyLessons','legacyVideos','v2Videos','match','legacyOnly','v2Only','differ','noVideoBoth','unmapped'];
+          fs.writeFileSync('/tmp/video-compare/bucket-summary.csv',sh.join(',')+'\n'+bucketSummary.map(r=>sh.map(h=>csv(r[h])).join(',')).join('\n')+'\n');
+          console.log(`PHASE18_VIDEO_COMPARE_BUCKETS=${bucketKeys.join(',')}`);
+          console.log(`PHASE18_VIDEO_COMPARE_ROWS=${rows.length}`);
+          for (const s of bucketSummary) console.log(`PHASE18_VIDEO_BUCKET ${s.bucket} lessons=${s.legacyLessons} legacyVideos=${s.legacyVideos} v2Videos=${s.v2Videos} match=${s.match} legacyOnly=${s.legacyOnly} v2Only=${s.v2Only} differ=${s.differ} noVideoBoth=${s.noVideoBoth} unmapped=${s.unmapped}`);
+          const actionable=rows.filter(r=>['LEGACY_ONLY','BOTH_DIFFER','V2_ONLY','UNMAPPED'].includes(r.status));
+          console.log(`PHASE18_VIDEO_ACTIONABLE=${actionable.length}`);
+          for (const r of actionable) console.log(`PHASE18_VIDEO_DIFF ${r.bucket} ${r.lessonId||'(unmapped)'} status=${r.status} legacy=${r.legacyVideo||'(none)'} v2=${r.v2Video||'(none)'}`);
+          NODE
+          node /tmp/video-compare/compare.mjs
+
+      - name: Upload comparison artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase18-video-kv-comparison
+          path: /tmp/video-compare/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Completion
+        run: echo 'PHASE18_VIDEO_KV_READONLY_COMPLETE cloudflare_writes=0 kv_writes=0'
