@@ -1,0 +1,59 @@
+name: Phase 18 read-only deep video discrepancy diagnostic
+
+on:
+  push:
+    branches: [phase18-readonly-launch-reconciliation]
+    paths: ['.github/workflows/phase18-readonly-video-discrepancy-deep-diagnostic.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      EXPECTED_MAIN: 3c63a49ef0d679318e8c6901b12e82c007b56271
+      SOURCE_NS: 80e5015aeb7046aa917189304a093a7c
+      V2_NS: 49619b1a24b244bc8aaa6223fcd24e80
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect unresolved video mappings read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          node --input-type=module <<'NODE'
+          const API=process.env.CF_API, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const src=process.env.SOURCE_NS, v2=process.env.V2_NS;
+          const headers={Authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`};
+          async function get(ns,key){const r=await fetch(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`GET ${key} HTTP ${r.status}`);return await r.text()}
+          async function list(ns,prefix){let cursor='';const out=[];do{const u=new URL(`${API}/accounts/${account}/storage/kv/namespaces/${ns}/keys`);u.searchParams.set('limit','1000');u.searchParams.set('prefix',prefix);if(cursor)u.searchParams.set('cursor',cursor);const r=await fetch(u,{headers});if(!r.ok)throw new Error(`LIST ${prefix} HTTP ${r.status}`);const j=await r.json();out.push(...(j.result||[]));cursor=j.result_info?.cursor||''}while(cursor);return out}
+          function splitObjects(raw){const out=[];let depth=0,start=-1,inStr=false,esc=false;for(let i=0;i<raw.length;i++){const c=raw[i];if(inStr){if(esc){esc=false;continue}if(c==='\\'){esc=true;continue}if(c==='"')inStr=false;continue}if(c==='"'){inStr=true;continue}if(c==='{'){if(depth===0)start=i;depth++}else if(c==='}'){depth--;if(depth===0&&start>=0){try{out.push(JSON.parse(raw.slice(start,i+1)))}catch{}start=-1}}}return out}
+          function collect(x,out=[]){if(Array.isArray(x)){for(const v of x)collect(v,out);return out}if(!x||typeof x!=='object')return out;if(x.n!=null||x.title||x.sp){out.push(x);return out}for(const v of Object.values(x))collect(v,out);return out}
+          function parse(raw){try{return collect(JSON.parse(raw),[])}catch{return splitObjects(raw).flatMap(x=>collect(x,[]))}}
+          function safeObj(x){if(!x||typeof x!=='object')return x;const out={};for(const [k,v] of Object.entries(x)){if(/pass|secret|token|credential/i.test(k))continue;out[k]=v}return out}
+
+          for(const bucket of ['Y4M','Y4M11plus']){
+            const items=parse(await get(src,bucket));
+            console.log(`PHASE18_Y4_SOURCE_BUCKET bucket=${bucket} count=${items.length}`);
+            for(const x of items.filter(x=>Number(x.n)>=18&&Number(x.n)<=26)) console.log(`PHASE18_Y4_SOURCE bucket=${bucket} n=${x.n} title=${x.title||''} sp=${x.sp||''}`);
+          }
+
+          const y4keys=(await list(v2,'lesson:Y4M')).map(x=>x.name).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+          for(const key of y4keys){const rec=JSON.parse(await get(v2,key));if(/fraction/i.test(String(rec.title||''))||['Y4M20','Y4M21','Y4M22','Y4M23','Y4M24','Y4M25','Y4M26'].includes(rec.lessonId)) console.log(`PHASE18_Y4_V2 id=${rec.lessonId} order=${rec.order} title=${rec.title||''} video=${rec?.core?.video?.screenpal||'(none)'}`)}
+
+          for(const bucket of ['Y5M','Y5M11plus']){
+            const items=parse(await get(src,bucket));
+            for(const x of items.filter(x=>Number(x.n)>=9&&Number(x.n)<=14)) console.log(`PHASE18_Y5_SOURCE bucket=${bucket} raw=${JSON.stringify(safeObj(x))}`);
+          }
+          for(const id of ['Y5M12','Y5M13']){
+            const rec=JSON.parse(await get(v2,`lesson:${id}`));
+            console.log(`PHASE18_Y5_V2 id=${id} title=${rec.title||''} video=${JSON.stringify(rec?.core?.video??null)} status=${JSON.stringify(rec?.contentStatus??null)}`);
+          }
+          console.log('PHASE18_VIDEO_DEEP_DIAGNOSTIC_COMPLETE writes=0');
+          NODE
