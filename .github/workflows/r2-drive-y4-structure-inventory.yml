@@ -1,4 +1,4 @@
-name: R2 Drive Y4 structure inventory
+name: Drive Y4 active folder census
 
 on:
   workflow_dispatch:
@@ -7,36 +7,30 @@ on:
       - ops/r2-drive-sync-y4
     paths:
       - .github/workflows/r2-drive-y4-structure-inventory.yml
-      - scripts/r2_drive_y4_structure_inventory.py
 
 permissions:
   contents: read
 
 concurrency:
-  group: r2-drive-y4-structure-inventory
+  group: drive-y4-active-folder-census
   cancel-in-progress: false
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  R2_BUCKET: fpt-materials-dev
-
 jobs:
-  inventory-year4:
+  census-year4:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m pip install --quiet google-auth requests
-      - name: Inspect Year 4 Drive/R2 structure without mutation
+      - name: Census every active Drive folder beginning Y4
         env:
           GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
-        run: python3 scripts/r2_drive_y4_structure_inventory.py
-      - name: Upload Year 4 structure inventory
+        run: python3 scripts/drive_y4_active_folder_census.py
+      - name: Upload Year 4 active folder census
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: y4-r2-structure-inventory
-          path: y4-r2-structure-inventory.json
+          name: y4-active-folder-census
+          path: y4-active-folder-census.json
           if-no-files-found: warn
           retention-days: 30
