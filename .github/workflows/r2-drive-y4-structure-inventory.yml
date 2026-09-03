@@ -1,4 +1,4 @@
-name: R2 Y4 path-family inventory
+name: R2 Drive Y4 full read-only preflight
 
 on:
   workflow_dispatch:
@@ -11,25 +11,31 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: r2-drive-y4-full-read-only-preflight
+  cancel-in-progress: false
+
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   R2_BUCKET: fpt-materials-dev
 
 jobs:
-  inventory-y4-r2:
+  preflight-y4:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m pip install --quiet requests
-      - name: Inventory Year 4 R2 path families without mutation
-        run: python3 scripts/r2_y4_path_inventory.py
-      - name: Upload Year 4 R2 path inventory
+      - run: python3 -m pip install --quiet google-auth requests
+      - name: Build and hash complete Year 4 expected Drive state without mutation
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: python3 scripts/r2_drive_y4_full_preflight.py
+      - name: Upload Year 4 full read-only preflight
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: y4-r2-path-inventory
-          path: y4-r2-path-inventory.json
+          name: y4-r2-full-read-only-preflight
+          path: y4-r2-full-read-only-preflight.json
           if-no-files-found: warn
           retention-days: 30
