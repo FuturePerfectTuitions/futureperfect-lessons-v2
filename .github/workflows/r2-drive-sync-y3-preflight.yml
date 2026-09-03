@@ -1,4 +1,4 @@
-name: R2 Drive sync Y3 read-only preflight
+name: R2 Drive sync Y3 final read-only verification
 
 on:
   workflow_dispatch:
@@ -7,7 +7,6 @@ on:
       - ops/r2-drive-sync-y3
     paths:
       - .github/workflows/r2-drive-sync-y3-preflight.yml
-      - scripts/r2_drive_sync_y3_preflight.py
 
 permissions:
   contents: read
@@ -18,7 +17,7 @@ env:
   R2_BUCKET: fpt-materials-dev
 
 jobs:
-  preflight-year3:
+  verify-year3-final:
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -29,16 +28,16 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install --quiet google-auth requests
 
-      - name: Read-only Year 3 Drive and R2 preflight
+      - name: Final read-only exact key, size and SHA-256 audit
         env:
           GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
-        run: python3 scripts/r2_drive_sync_y3_preflight.py
+        run: python3 scripts/r2_drive_verify_y3_final.py
 
-      - name: Upload Year 3 preflight summary
+      - name: Upload final Year 3 read-only audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: y3-r2-preflight-summary
-          path: y3-r2-preflight-summary.json
+          name: y3-final-read-only-byte-hash-audit
+          path: y3-final-read-only-byte-hash-audit.json
           if-no-files-found: warn
           retention-days: 30
