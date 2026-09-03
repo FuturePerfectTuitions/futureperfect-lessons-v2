@@ -59,3 +59,5 @@ jobs:
           assert actual_sha256 == expected_sha256, f'SHA256 mismatch: {actual_sha256} != {expected_sha256}'
           print('Y2T1E01_DRIVE_EXACT_BYTE_VERIFICATION_PASS')
           PY
+
+# trigger direct Drive auth test
