@@ -1,0 +1,52 @@
+name: R2 Drive Y4 corrected read-only preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/r2-drive-sync-y4
+    paths:
+      - .github/workflows/r2-drive-y4-corrected-preflight.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-drive-y4-corrected-read-only-preflight
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+
+jobs:
+  corrected-preflight-y4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet google-auth requests
+      - name: Patch obsolete EE requirement out of read-only preflight
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('scripts/r2_drive_y4_full_preflight.py').read_text()
+          old = '    if not ee_seen:\n        raise RuntimeError("No current Year 4 EE 11+ lesson folders discovered")\n'
+          if old not in src:
+              raise SystemExit('Expected EE requirement block not found; refusing to patch unknown script')
+          src = src.replace(old, '    # Separate EE lesson folders were confirmed obsolete and removed from authoritative Drive.\n    # Nested valid 11+/VR resources remain governed by the current ordinary lesson folder.\n', 1)
+          Path('/tmp/r2_drive_y4_corrected_preflight.py').write_text(src)
+          PY
+      - name: Build and hash corrected Year 4 expected Drive state without mutation
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: python3 /tmp/r2_drive_y4_corrected_preflight.py
+      - name: Upload corrected Year 4 full read-only preflight
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y4-r2-corrected-read-only-preflight
+          path: y4-r2-full-read-only-preflight.json
+          if-no-files-found: warn
+          retention-days: 30
