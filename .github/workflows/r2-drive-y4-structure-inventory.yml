@@ -1,4 +1,4 @@
-name: Drive Y4 Maths direct-child snapshot
+name: Drive Y4 English direct-child snapshot
 
 on:
   workflow_dispatch:
@@ -12,21 +12,21 @@ permissions:
   contents: read
 
 jobs:
-  snapshot-y4-maths:
+  snapshot-y4-english:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m pip install --quiet google-auth requests
-      - name: Snapshot authoritative Year 4 Maths direct children
+      - name: Snapshot authoritative Year 4 English direct children
         env:
           GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
-        run: python3 scripts/drive_y4_math_direct_children.py
-      - name: Upload Year 4 Maths snapshot
+        run: python3 scripts/drive_y4_english_direct_children.py
+      - name: Upload Year 4 English snapshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: y4-math-direct-children
-          path: y4-math-direct-children.json
+          name: y4-english-direct-children
+          path: y4-english-direct-children.json
           if-no-files-found: warn
           retention-days: 30
