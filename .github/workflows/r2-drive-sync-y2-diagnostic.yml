@@ -10,54 +10,137 @@ on:
 permissions:
   contents: read
 
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+
 jobs:
   diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Install Google auth library
         run: python3 -m pip install --quiet google-auth requests
 
-      - name: Download and verify authoritative Y2T1E01 Drive file
+      - name: Fresh-read authoritative Drive folders and R2 candidates read-only
         shell: bash
         env:
           GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, os, re, urllib.parse, urllib.request
           from google.oauth2 import service_account
           from google.auth.transport.requests import AuthorizedSession
 
-          file_id = '1nZ_cL_qPT5ECetDf9yr3XZpGhOYPky5c'
-          expected_size = 64208
-          expected_sha256 = '018221642603f3c602747209a4804cf529ba0369c565c1caf3439e76d583b5b7'
+          drive_folders = {
+              'Y2T1E01': {
+                  'folder_id': '1_i54WilYBi_dMIiCC-n51oF5fEVc3ADV',
+                  'title': 'Comprehension, Simple Present Simple Past',
+              },
+              'Y2T1M01': {
+                  'folder_id': '1qCX92s-3bxATWY-l05Qs01C0ioMMy81A',
+                  'title': 'Transition to Year 2',
+              },
+          }
 
           info = json.loads(os.environ['GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON'])
           creds = service_account.Credentials.from_service_account_info(
               info,
               scopes=['https://www.googleapis.com/auth/drive.readonly'],
           )
-          session = AuthorizedSession(creds)
-          url = f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true'
-          response = session.get(url, timeout=120)
-          response.raise_for_status()
-          body = response.content
+          drive = AuthorizedSession(creds)
 
-          actual_size = len(body)
-          actual_sha256 = hashlib.sha256(body).hexdigest()
-          is_pdf = body.startswith(b'%PDF-')
+          authoritative = {}
+          for code, meta in drive_folders.items():
+              q = urllib.parse.quote(f"'{meta['folder_id']}' in parents and trashed=false", safe='')
+              fields = urllib.parse.quote('files(id,name,mimeType,size,modifiedTime)', safe='(),')
+              url = f'https://www.googleapis.com/drive/v3/files?q={q}&fields={fields}&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true'
+              r = drive.get(url, timeout=120)
+              r.raise_for_status()
+              children = r.json().get('files', [])
+              children.sort(key=lambda x: x['name'].lower())
+              authoritative[code] = []
+              print(f'DRIVE_FOLDER {code} TITLE={meta["title"]!r} COUNT={len(children)}')
+              for item in children:
+                  file_id = item['id']
+                  media = drive.get(f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true', timeout=180)
+                  media.raise_for_status()
+                  body = media.content
+                  sha = hashlib.sha256(body).hexdigest()
+                  rec = {
+                      'id': file_id,
+                      'name': item['name'],
+                      'mimeType': item.get('mimeType'),
+                      'size': len(body),
+                      'sha256': sha,
+                  }
+                  authoritative[code].append(rec)
+                  print('DRIVE_FILE', code, json.dumps(rec, sort_keys=True))
 
-          print('Drive file ID:', file_id)
-          print('PDF signature:', is_pdf)
-          print('Size:', actual_size)
-          print('SHA256:', actual_sha256)
+          acct = os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token = os.environ['CLOUDFLARE_API_TOKEN']
+          bucket = os.environ['R2_BUCKET']
+          headers = {'Authorization': f'Bearer {token}'}
+          objects = []
+          cursor = None
+          while True:
+              params = {'per_page': '1000'}
+              if cursor:
+                  params['cursor'] = cursor
+              url = f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects?' + urllib.parse.urlencode(params)
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=120) as resp:
+                  payload = json.load(resp)
+              if not payload.get('success'):
+                  raise RuntimeError(payload)
+              objects.extend(payload.get('result') or [])
+              ri = payload.get('result_info') or {}
+              cursor = ri.get('cursor') if ri.get('is_truncated') else None
+              if not cursor:
+                  break
 
-          assert is_pdf, 'Downloaded bytes are not a PDF'
-          assert actual_size == expected_size, f'Size mismatch: {actual_size} != {expected_size}'
-          assert actual_sha256 == expected_sha256, f'SHA256 mismatch: {actual_sha256} != {expected_sha256}'
-          print('Y2T1E01_DRIVE_EXACT_BYTE_VERIFICATION_PASS')
+          print('R2_TOTAL_OBJECTS', len(objects))
+
+          def norm(s):
+              return re.sub(r'[^a-z0-9]+', '', s.lower())
+
+          def candidate_for(code, key):
+              nk = norm(key)
+              if norm(code) in nk:
+                  return True
+              if code == 'Y2T1E01':
+                  return all(tok in nk for tok in ('comprehension', 'present', 'past'))
+              if code == 'Y2T1M01':
+                  return all(tok in nk for tok in ('transition', 'year2'))
+              return False
+
+          for code in drive_folders:
+              candidates = [o for o in objects if candidate_for(code, o.get('key') or '')]
+              print(f'R2_CANDIDATE_COUNT {code} {len(candidates)}')
+              for obj in sorted(candidates, key=lambda x: (x.get('key') or '').lower()):
+                  key = obj.get('key') or ''
+                  encoded = urllib.parse.quote(key, safe='/')
+                  url = f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects/{encoded}'
+                  req = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(req, timeout=180) as resp:
+                      body = resp.read()
+                  rec = {
+                      'key': key,
+                      'listed_size': obj.get('size'),
+                      'actual_size': len(body),
+                      'etag': obj.get('etag'),
+                      'sha256': hashlib.sha256(body).hexdigest(),
+                  }
+                  print('R2_CANDIDATE', code, json.dumps(rec, sort_keys=True))
+
+          # Broad Year-2 inventory for semantic review if historical paths do not contain current codes.
+          y2 = [o for o in objects if 'y2' in norm(o.get('key') or '')]
+          print('R2_Y2_BROAD_COUNT', len(y2))
+          for obj in sorted(y2, key=lambda x: (x.get('key') or '').lower()):
+              print('R2_Y2_KEY', json.dumps({'key': obj.get('key'), 'size': obj.get('size'), 'etag': obj.get('etag')}, sort_keys=True))
+
+          print('Y2_FIRST_TWO_LESSONS_READ_ONLY_DISCOVERY_PASS')
           PY
-
-# trigger direct Drive auth test
