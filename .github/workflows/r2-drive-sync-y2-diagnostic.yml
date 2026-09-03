@@ -1,6 +1,7 @@
 name: R2 Drive sync Y2 diagnostic
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - ops/r2-drive-sync-y2
@@ -136,7 +137,6 @@ jobs:
                   }
                   print('R2_CANDIDATE', code, json.dumps(rec, sort_keys=True))
 
-          # Broad Year-2 inventory for semantic review if historical paths do not contain current codes.
           y2 = [o for o in objects if 'y2' in norm(o.get('key') or '')]
           print('R2_Y2_BROAD_COUNT', len(y2))
           for obj in sorted(y2, key=lambda x: (x.get('key') or '').lower()):
