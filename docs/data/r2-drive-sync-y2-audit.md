@@ -129,7 +129,7 @@ Successful full workflow run: `33794097129`
 
 ## Audit evidence
 
-- Full permanent machine-readable summary: `docs/data/r2-drive-sync-y2-final-summary.json`.
+- Full machine-readable summary is preserved in the v1.3 Starter/Handover ZIP and GitHub Actions artifact `9909086093` (30-day Actions retention).
 - Successful GitHub Actions run: `33794097129`.
 - Every accepted resource record in the JSON includes Drive file ID, active R2 key, byte size and SHA-256.
 - PowerPoint exclusions and non-current-code exclusions are recorded per lesson.
