@@ -1,0 +1,74 @@
+name: R2 Drive sync Y2 diagnostic
+
+on:
+  push:
+    branches:
+      - ops/r2-drive-sync-y2
+    paths:
+      - .github/workflows/r2-drive-sync-y2-diagnostic.yml
+      - .github/r2-drive-sync-y2-trigger.txt
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Confirm Cloudflare credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: List Year 2 English and Maths R2 objects read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          acct=os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          bucket=os.environ['R2_BUCKET']
+          for prefix in ('english/year2/','maths/year2/'):
+              cursor=None; objects=[]
+              while True:
+                  q={'prefix':prefix,'per_page':'1000'}
+                  if cursor: q['cursor']=cursor
+                  url=f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects?'+urllib.parse.urlencode(q)
+                  req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}'})
+                  with urllib.request.urlopen(req) as r: data=json.load(r)
+                  if not data.get('success'): raise SystemExit(data)
+                  result=data.get('result') or {}
+                  objects.extend(result.get('objects') or [])
+                  cursor=result.get('cursor')
+                  if not cursor: break
+              print(f'R2_PREFIX {prefix} COUNT {len(objects)}')
+              for o in objects[:200]:
+                  print('R2_OBJECT',o.get('key'),o.get('size'),o.get('etag'))
+          PY
+
+      - name: Test current Drive Year 2 files can be downloaded without Drive credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_drive() {
+            id="$1" expected="$2" out="$3"
+            url="https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t"
+            curl --fail --location --silent --show-error --output "$out" "$url"
+            actual="$(stat -c%s "$out")"
+            echo "DRIVE_DOWNLOAD $id size=$actual expected=$expected type=$(file -b --mime-type "$out")"
+            test "$actual" = "$expected"
+          }
+          download_drive '1nZ_cL_qPT5ECetDf9yr3XZpGhOYPky5c' '64208' '/tmp/y2e01-answer.pdf'
+          download_drive '17415fef6Wd9kPbE0KmSKw1q-lRhGWQ9f' '11075' '/tmp/y2m01-answer.pdf'
+
+      - name: Diagnostic pass
+        run: echo 'Y2_R2_DRIVE_DIAGNOSTIC_PASS'
