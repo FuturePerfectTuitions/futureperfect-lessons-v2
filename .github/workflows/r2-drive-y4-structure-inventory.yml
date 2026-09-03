@@ -1,4 +1,4 @@
-name: Y4 special Games/R2 overlap audit
+name: Y4 legacy R2 semantic mapping audit
 
 on:
   workflow_dispatch:
@@ -17,21 +17,21 @@ env:
   R2_BUCKET: fpt-materials-dev
 
 jobs:
-  audit-y4-special-games:
+  map-y4-legacy-r2:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m pip install --quiet google-auth requests
-      - name: Compare Year 4 Games/Mysteries Drive resources to scoped R2 without mutation
+      - name: Map historical Y4E R2 families to current Drive lessons without mutation
         env:
           GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
-        run: python3 scripts/y4_special_games_r2_overlap.py
-      - name: Upload special-area overlap audit
+        run: python3 scripts/y4_r2_semantic_mapping_audit.py
+      - name: Upload Year 4 semantic mapping audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: y4-special-games-r2-overlap
-          path: y4-special-games-r2-overlap.json
+          name: y4-r2-semantic-mapping-audit
+          path: y4-r2-semantic-mapping-audit.json
           if-no-files-found: warn
           retention-days: 30
