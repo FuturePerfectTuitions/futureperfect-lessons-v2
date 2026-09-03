@@ -2,12 +2,10 @@ name: R2 Drive sync Y3 mutate
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/r2-drive-sync-y3
-    paths:
-      - .github/workflows/r2-drive-sync-y3-mutate.yml
-      - scripts/r2_drive_sync_y3_full.py
+
+concurrency:
+  group: r2-drive-sync-y3-mutate
+  cancel-in-progress: false
 
 permissions:
   contents: read
