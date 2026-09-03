@@ -1,0 +1,38 @@
+name: R2 Drive sync Y3 structure preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/r2-drive-sync-y3
+    paths:
+      - .github/workflows/r2-drive-sync-y3-structure-preflight.yml
+      - scripts/r2_drive_sync_y3_structure_preflight.py
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+
+jobs:
+  structure-preflight-year3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet google-auth requests
+      - name: Inspect Year 3 structure without mutation
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: python3 scripts/r2_drive_sync_y3_structure_preflight.py
+      - name: Upload structure preflight summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y3-r2-structure-preflight-summary
+          path: y3-r2-structure-preflight-summary.json
+          if-no-files-found: warn
+          retention-days: 30
