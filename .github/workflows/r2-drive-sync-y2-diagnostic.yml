@@ -16,48 +16,46 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Authenticate to Google Drive
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: '${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}'
-          token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+      - name: Install Google auth library
+        run: python3 -m pip install --quiet google-auth requests
 
       - name: Download and verify authoritative Y2T1E01 Drive file
         shell: bash
         env:
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import AuthorizedSession
 
-          FILE_ID="1nZ_cL_qPT5ECetDf9yr3XZpGhOYPky5c"
-          EXPECTED_SIZE="64208"
-          EXPECTED_SHA256="018221642603f3c602747209a4804cf529ba0369c565c1caf3439e76d583b5b7"
-          OUTPUT_FILE="Y2T1E01-answer-pack.pdf"
+          file_id = '1nZ_cL_qPT5ECetDf9yr3XZpGhOYPky5c'
+          expected_size = 64208
+          expected_sha256 = '018221642603f3c602747209a4804cf529ba0369c565c1caf3439e76d583b5b7'
 
-          test -n "$ACCESS_TOKEN"
+          info = json.loads(os.environ['GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON'])
+          creds = service_account.Credentials.from_service_account_info(
+              info,
+              scopes=['https://www.googleapis.com/auth/drive.readonly'],
+          )
+          session = AuthorizedSession(creds)
+          url = f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true'
+          response = session.get(url, timeout=120)
+          response.raise_for_status()
+          body = response.content
 
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://www.googleapis.com/drive/v3/files/${FILE_ID}?alt=media&supportsAllDrives=true" \
-            -o "$OUTPUT_FILE"
+          actual_size = len(body)
+          actual_sha256 = hashlib.sha256(body).hexdigest()
+          is_pdf = body.startswith(b'%PDF-')
 
-          ACTUAL_SIZE="$(stat -c%s "$OUTPUT_FILE")"
-          ACTUAL_SHA256="$(sha256sum "$OUTPUT_FILE" | awk '{print $1}')"
-          ACTUAL_MIME="$(file -b --mime-type "$OUTPUT_FILE")"
+          print('Drive file ID:', file_id)
+          print('PDF signature:', is_pdf)
+          print('Size:', actual_size)
+          print('SHA256:', actual_sha256)
 
-          echo "Drive file ID: $FILE_ID"
-          echo "MIME: $ACTUAL_MIME"
-          echo "Size: $ACTUAL_SIZE"
-          echo "SHA256: $ACTUAL_SHA256"
-
-          test "$ACTUAL_MIME" = "application/pdf"
-          test "$ACTUAL_SIZE" = "$EXPECTED_SIZE"
-          test "$ACTUAL_SHA256" = "$EXPECTED_SHA256"
-
-          echo "Y2T1E01_DRIVE_EXACT_BYTE_VERIFICATION_PASS"
+          assert is_pdf, 'Downloaded bytes are not a PDF'
+          assert actual_size == expected_size, f'Size mismatch: {actual_size} != {expected_size}'
+          assert actual_sha256 == expected_sha256, f'SHA256 mismatch: {actual_sha256} != {expected_sha256}'
+          print('Y2T1E01_DRIVE_EXACT_BYTE_VERIFICATION_PASS')
+          PY
