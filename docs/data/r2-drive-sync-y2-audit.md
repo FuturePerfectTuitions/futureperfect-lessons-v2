@@ -3,110 +3,137 @@
 Date: 2026-09-03
 Branch: `ops/r2-drive-sync-y2`
 Bucket: `fpt-materials-dev`
+Successful full workflow run: `33794097129`
 
-## Governing rules
+## Governing rules applied
 
 - Google Drive is authoritative.
 - Current Drive lesson code is the active R2 lesson-path ID.
-- Every accepted current Drive resource is written afresh to R2 and must pass byte-size and SHA-256 read-back verification before historical/unsupported active objects are removed.
-- Owner clarification on 2026-09-03: **PowerPoint resources are excluded from Portal/R2.** PowerPoint-family extensions are not accepted lesson resources in this reconciliation.
-- Existing or accidentally added PowerPoint objects under an active lesson path are unsupported/excess and must be removed after the accepted resources for that lesson are verified.
+- Only files whose filename begins with the exact current Drive lesson code are eligible current lesson resources.
+- Owner clarification: PowerPoint-family files are excluded from Portal/R2.
+- Exact Drive bytes were written afresh and each active R2 object was read back and checked by byte size and SHA-256.
+- Historical, old-code, uncoded and unsupported Year 2 active R2 objects were removed after authoritative resources had verified.
 
-## Y2T1E01 — Comprehension, Simple Present Simple Past
+## Completion summary
 
-Drive folder ID: `1_i54WilYBi_dMIiCC-n51oF5fEVc3ADV`
+- Status: **PASS**
+- Active Drive lessons discovered: **65** (29 English, 36 Maths)
+- Lesson-level parity passes: **65 / 65**
+- Accepted authoritative Drive resources: **157**
+- Final active Year 2 R2 file objects: **157**
+- PowerPoint resources excluded: **64**
+- Non-current-code Drive files excluded: **24**
+- Unsupported active Year 2 R2 objects removed in final cleanup: **24**
+- Final global result: **`Y2_GLOBAL_EXACT_DRIVE_R2_PARITY_PASS`**
 
-Fresh recursive Drive inventory: 3 files.
-Accepted current-code non-PowerPoint resources: 2.
-Excluded resources: 1 PowerPoint.
+## Important EOS consequence of the exact-code rule
 
-### Authoritative resources and verified active R2 objects
+`Y2T3M35 EOS 1 2 3 4` and `Y2T3M36 EOS 5 6 7 8` each contain 12 Drive PDFs, but none of those filenames begins with the current lesson code. Under the governing exact-code rule, all 24 are exclusions and neither lesson has an active R2 resource object. The matching 24 old/uncoded R2 objects under historical `Y2M33` and `Y2M34` paths were removed. Drive itself was not changed.
 
-1. `Y2T1E01 Answer Pack Homework Comprehension, Simple Present Simple Past.pdf`
-   - Drive file ID: `1nZ_cL_qPT5ECetDf9yr3XZpGhOYPky5c`
-   - Size: 64,208 bytes
-   - SHA-256: `018221642603f3c602747209a4804cf529ba0369c565c1caf3439e76d583b5b7`
-   - Active R2 key: `english/year2/Y2T1E01/homework/answers/Y2T1E01 Answer Pack Homework Comprehension, Simple Present Simple Past.pdf`
-   - Final R2 read-back: exact size/hash match
+## Lesson-by-lesson result
 
-2. `Y2T1E01 Homework Comprehension, Simple Present Simple Past.pdf`
-   - Drive file ID: `16QfkzkAMT0y9tptm1WE_FwOV4AbSCiTO`
-   - Size: 2,505,615 bytes
-   - SHA-256: `64239f3df90524b521fa0c184f8bdffda73a465afea0b59ce628084c40b0535d`
-   - Active R2 key: `english/year2/Y2T1E01/homework/sheets/Y2T1E01 Homework Comprehension, Simple Present Simple Past.pdf`
-   - Final R2 read-back: exact size/hash match
+| Lesson | Authoritative Drive folder | Accepted | Excluded | R2 candidate deletions | Result |
+|---|---|---:|---:|---:|---|
+| `Y2T1E01` | Y2T1E01 Comprehension, Simple Present Simple Past | 2 | 1 | 0 | **PASS** |
+| `Y2T1M01` | Y2T1M01 Transition to Year 2 | 3 | 1 | 0 | **PASS** |
+| `Y2T1E02` | Y2T1E02 Tenses and Contractions | 2 | 1 | 2 | **PASS** |
+| `Y2T1M02` | Y2T1M02 Money | 2 | 1 | 2 | **PASS** |
+| `Y2T1E03` | Y2T1E03 Tenses, Adjectives, Grammar and Punctuation, Spelling | 2 | 2 | 2 | **PASS** |
+| `Y2T1M03` | Y2T1M03 Money | 2 | 1 | 2 | **PASS** |
+| `Y2T1E04` | Y2T1E04 Conjunctions | 2 | 1 | 2 | **PASS** |
+| `Y2T1M04` | Y2T1M04 Multiplication and Division | 2 | 1 | 2 | **PASS** |
+| `Y2T1E05` | Y2T1E05 Special Recap and Catchup Session for Conjunctions and Punctuations | 2 | 1 | 2 | **PASS** |
+| `Y2T1M05` | Y2T1M05 Multiplication and Division | 2 | 1 | 2 | **PASS** |
+| `Y2T1E06` | Y2T1E06 Expanded Nouns | 2 | 1 | 2 | **PASS** |
+| `Y2T1M06` | Y2T1M06 Statistics | 2 | 1 | 2 | **PASS** |
+| `Y2T1E07` | Y2T1E07 Compound Nouns and Commas in Lists | 2 | 1 | 2 | **PASS** |
+| `Y2T1M07` | Y2T1M07 Statistics 2 | 3 | 1 | 3 | **PASS** |
+| `Y2T1E08` | Y2T1E08 Suffixes | 2 | 1 | 2 | **PASS** |
+| `Y2T1M08` | Y2T1M08 Statistics 3 | 3 | 1 | 3 | **PASS** |
+| `Y2T1E09` | Y2T1E09 Comprehension & Progressive Tenses | 4 | 1 | 4 | **PASS** |
+| `Y2T1M09` | Y2T1M09 Fractions | 2 | 1 | 2 | **PASS** |
+| `Y2T1E10` | Y2T1E10 Comprehension & Tenses Game | 3 | 1 | 3 | **PASS** |
+| `Y2T1M10` | Y2T1M10 Shapes | 2 | 1 | 2 | **PASS** |
+| `Y2T2E11` | Y2T2E11 Tenses again | 2 | 1 | 2 | **PASS** |
+| `Y2T1M11` | Y2T1M11 Measurements | 2 | 1 | 2 | **PASS** |
+| `Y2T2E12` | Y2T2E12 Spelling, Comprehension & Punctuation | 3 | 1 | 3 | **PASS** |
+| `Y2T1M12` | Y2T1M12 Time | 2 | 1 | 2 | **PASS** |
+| `Y2T2E13` | Y2T2E13 Comprehension, Guided Reading, Writing, Inferencing | 3 | 1 | 3 | **PASS** |
+| `Y2T2M13` | Y2T2M13 Position and Directions | 2 | 1 | 2 | **PASS** |
+| `Y2T2E14` | Y2T2E14 Revision Activity | 2 | 1 | 2 | **PASS** |
+| `Y2T2M14` | Y2T2M14 2 and 3 digit division | 3 | 1 | 3 | **PASS** |
+| `Y2T2E15` | Y2T2E15 Revision Activity | 3 | 1 | 3 | **PASS** |
+| `Y2T2M15` | Y2T2M15 Number and Place Value | 2 | 1 | 2 | **PASS** |
+| `Y2T2E16` | Y2T2E16 Alliteration and Onomatopoeia | 2 | 1 | 2 | **PASS** |
+| `Y2T2M16` | Y2T2M16 Additions and Subtractions | 2 | 1 | 2 | **PASS** |
+| `Y2T2E17` | Y2T2E17 Apostrophes and Contractions | 3 | 1 | 3 | **PASS** |
+| `Y2T2M17` | Y2T2M17 Partitioning | 2 | 1 | 2 | **PASS** |
+| `Y2T2E18` | Y2T2E18 Sentence Structure | 2 | 1 | 2 | **PASS** |
+| `Y2T2M18` | Y2T2M18 Word Problems | 2 | 1 | 2 | **PASS** |
+| `Y2T2E19` | Y2T2E19 Adjectives with -er and -est | 2 | 1 | 2 | **PASS** |
+| `Y2T2M19` | Y2T2M19 Polygons | 3 | 1 | 3 | **PASS** |
+| `Y2T3E20` | Y2T3E20 Homophones | 2 | 1 | 2 | **PASS** |
+| `Y2T2M20` | Y2T2M20 2D Shapes and Symmetry | 3 | 1 | 3 | **PASS** |
+| `Y2T3E21` | Y2T3E21 Forming Adjectives -ful -less -ment | 3 | 1 | 3 | **PASS** |
+| `Y2T2M21` | Y2T2M21 2D Shapes Sorting and Patterns | 3 | 1 | 3 | **PASS** |
+| `Y2T3E22` | Y2T3E22 Questions and Commands | 3 | 1 | 3 | **PASS** |
+| `Y2T2M22` | Y2T2M22 More 3D Shapes and Description | 3 | 1 | 3 | **PASS** |
+| `Y2T3E23` | Y2T3E23 Spellings | 2 | 1 | 2 | **PASS** |
+| `Y2T2M23` | Y2T2M23 Length and Height | 3 | 1 | 3 | **PASS** |
+| `Y2T3E24` | Y2T3E24 Subordination | 3 | 1 | 3 | **PASS** |
+| `Y2T2M24` | Y2T2M24 Length and Height 2 | 2 | 1 | 2 | **PASS** |
+| `Y2T3E25` | Y2T3E25 Questions, Commands, Statements and Exclamations | 3 | 1 | 3 | **PASS** |
+| `Y2T3M25` | Y2T3M25 Money 1 | 3 | 1 | 3 | **PASS** |
+| `Y2T3E26` | Y2T3E26 Verbs | 3 | 1 | 3 | **PASS** |
+| `Y2T3M26` | Y2T3M26 Money 2 | 3 | 1 | 3 | **PASS** |
+| `Y2T3E27` | Y2T3E27 GAP Test 1 | 3 | 1 | 3 | **PASS** |
+| `Y2T3M27` | Y2T3M27 Money 3 | 3 | 1 | 3 | **PASS** |
+| `Y2T3E28` | Y2T3E28 GAP Test 2 | 3 | 1 | 3 | **PASS** |
+| `Y2T3M28` | Y2T3M28 Length and Height 3 | 3 | 1 | 3 | **PASS** |
+| `Y2T3E29` | Y2T3E29 Revision 1 | 2 | 1 | 2 | **PASS** |
+| `Y2T3M29` | Y2T3M29 Mass 1 | 2 | 1 | 2 | **PASS** |
+| `Y2T3M30` | Y2T3M30 Mass 2 | 3 | 1 | 3 | **PASS** |
+| `Y2T3M31` | Y2T3M31 Mass 3 | 3 | 1 | 3 | **PASS** |
+| `Y2T3M32` | Y2T3M32 Volume and Capacity 1 | 2 | 1 | 2 | **PASS** |
+| `Y2T3M33` | Y2T3M33 Volume and Capacity 2 | 3 | 1 | 3 | **PASS** |
+| `Y2T3M34` | Y2T3M34 Temperature | 3 | 1 | 3 | **PASS** |
+| `Y2T3M35` | Y2T3M35 EOS 1 2 3 4 | 0 | 12 | 0 | **PASS** |
+| `Y2T3M36` | Y2T3M36 EOS 5 6 7 8 | 0 | 12 | 0 | **PASS** |
 
-### Excluded PowerPoint
+## Final cleanup deletions
 
-- `Y2T1E01 Comprehension, Simple Present Simple Past.pptx`
-- Drive file ID: `1IQK8DN5EEtm8O-HD0UmjGKuWL_94L_g5`
-- Reason: `POWERPOINT_OWNER_EXCLUDED`
-- The previously added R2 PowerPoint object was removed as unsupported/excess.
+- `maths/year2/Y2M33/homework/answers/Answer Pack 1 Number and Place Value EOS.pdf`
+- `maths/year2/Y2M33/homework/answers/Answer Pack 2 Addition and Subtraction EOS.pdf`
+- `maths/year2/Y2M33/homework/answers/Answer Pack 3 Fractions EOS.pdf`
+- `maths/year2/Y2M33/homework/answers/Answer Pack 4 Multiplication and Division EOS.pdf`
+- `maths/year2/Y2M33/homework/answers/Answer Pack Assessment 1.pdf`
+- `maths/year2/Y2M33/homework/answers/Answer Pack Assessment 2.pdf`
+- `maths/year2/Y2M33/homework/sheets/1 Number and Place Value EOS.pdf`
+- `maths/year2/Y2M33/homework/sheets/2 Addition and Subtraction EOS.pdf`
+- `maths/year2/Y2M33/homework/sheets/3 Fractions EOS.pdf`
+- `maths/year2/Y2M33/homework/sheets/4 Multiplication and Division EOS.pdf`
+- `maths/year2/Y2M33/homework/sheets/Assessment 1.pdf`
+- `maths/year2/Y2M33/homework/sheets/Assessment 2.pdf`
+- `maths/year2/Y2M34/homework/answers/Answer Pack 5 Properties of Shapes EOS.pdf`
+- `maths/year2/Y2M34/homework/answers/Answer Pack 6 Measurement EOS.pdf`
+- `maths/year2/Y2M34/homework/answers/Answer Pack 7 Statistics EOS.pdf`
+- `maths/year2/Y2M34/homework/answers/Answer Pack 8 Position and Direction EOS.pdf`
+- `maths/year2/Y2M34/homework/answers/Answer Pack Assessment 3.pdf`
+- `maths/year2/Y2M34/homework/answers/Answer Pack End of Year Activity Booklet.pdf`
+- `maths/year2/Y2M34/homework/sheets/5 Properties of Shapes EOS.pdf`
+- `maths/year2/Y2M34/homework/sheets/6 Measurement EOS.pdf`
+- `maths/year2/Y2M34/homework/sheets/7 Statistics EOS.pdf`
+- `maths/year2/Y2M34/homework/sheets/8 Position and Direction EOS.pdf`
+- `maths/year2/Y2M34/homework/sheets/Assessment 3.pdf`
+- `maths/year2/Y2M34/homework/sheets/End of Year Activity Booklet.pdf`
 
-### Historical active R2 objects removed
+## Audit evidence
 
-The two historical `english/year2/Y2E1/` objects had already been removed after exact verification in the prior run. Final historical object count remains 0.
+- Full permanent machine-readable summary: `docs/data/r2-drive-sync-y2-final-summary.json`.
+- Successful GitHub Actions run: `33794097129`.
+- Every accepted resource record in the JSON includes Drive file ID, active R2 key, byte size and SHA-256.
+- PowerPoint exclusions and non-current-code exclusions are recorded per lesson.
 
-### Final verification
+## Scope boundary
 
-Final active key count under `english/year2/Y2T1E01/`: 2.
-PowerPoint objects under the active lesson path: 0.
-Historical `english/year2/Y2E1/` lesson objects remaining: 0.
-Correction/reverification workflow run: `33792343212`.
-Result: `Y2T1E01_EXACT_DRIVE_R2_PARITY_PASS`.
-
-## Y2T1M01 — Transition to Year 2
-
-Drive folder ID: `1qCX92s-3bxATWY-l05Qs01C0ioMMy81A`
-
-Fresh recursive Drive inventory: 4 files.
-Accepted current-code non-PowerPoint resources: 3.
-Excluded resources: 1 PowerPoint.
-
-### Authoritative resources and verified active R2 objects
-
-1. `Y2T1M01 Answer Pack Homework Transition to Year 2.pdf`
-   - Drive file ID: `17415fef6Wd9kPbE0KmSKw1q-lRhGWQ9f`
-   - Size: 11,075 bytes
-   - SHA-256: `959d117cd5a209d83f56497674dc57091f8d7f99cfc03b803e48eea4064b0550`
-   - Active R2 key: `maths/year2/Y2T1M01/homework/answers/Y2T1M01 Answer Pack Homework Transition to Year 2.pdf`
-   - Final R2 read-back: exact size/hash match
-
-2. `Y2T1M01 Homework Transition to Year 2.pdf`
-   - Drive file ID: `1TU_yhClwdvCtzPeu7Uiu56wiM3r8VpM5`
-   - Size: 549,548 bytes
-   - SHA-256: `2606cc94667b34eb97107c7034d6ee0cca3bbbfcc5707f8ed6cce96aa3de3c41`
-   - Active R2 key: `maths/year2/Y2T1M01/homework/sheets/Y2T1M01 Homework Transition to Year 2.pdf`
-   - Final R2 read-back: exact size/hash match
-
-3. `Y2T1M01 PreLesson Sheets Transition to Year 2.pdf`
-   - Drive file ID: `1mLCZfzhffhYRFaRrAtY39oeAkwdyGhMc`
-   - Size: 745,725 bytes
-   - SHA-256: `69f0e32fa73237c6e92eb17b31a349c980a4b562568901814f3997cc6628dc86`
-   - Active R2 key: `maths/year2/Y2T1M01/prelesson/sheets/Y2T1M01 PreLesson Sheets Transition to Year 2.pdf`
-   - Final R2 read-back: exact size/hash match
-
-### Excluded PowerPoint
-
-- `Y2T1M01 Transition to Year 2.pptx`
-- Drive file ID: `1zEjCRKCLtyxYzdJENN93zPb90d-gEB7M`
-- Reason: `POWERPOINT_OWNER_EXCLUDED`
-- No PowerPoint was uploaded to R2.
-
-### Historical active R2 objects removed after verification
-
-- `maths/year2/Y2M1/homework/answers/Y2T1M01 Answer Pack Homework Transition to Year 2.pdf`
-- `maths/year2/Y2M1/homework/sheets/Y2T1M01 Homework Transition to Year 2.pdf`
-- `maths/year2/Y2M1/prelesson/sheets/Y2T1M01 PreLesson Sheets Transition to Year 2.pdf`
-
-### Final verification
-
-Final active key count under `maths/year2/Y2T1M01/`: 3.
-PowerPoint objects under the active lesson path: 0.
-Historical `maths/year2/Y2M1/` lesson objects remaining: 0.
-Workflow run: `33792343212`.
-Result: `Y2T1M01_EXACT_DRIVE_R2_PARITY_PASS`.
-
-## Current boundary
-
-The PowerPoint exclusion rule is now active for subsequent Year 2 reconciliation work. Continue sequentially from the next current English and Maths lessons, fresh-reading Drive before each mutation.
+Only Year 2 English and Year 2 Maths R2 lesson-library objects were reconciled. KV, D1, Worker, Excel, DNS, login/auth and Drive were not modified.
