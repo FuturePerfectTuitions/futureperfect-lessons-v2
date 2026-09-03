@@ -28,57 +28,46 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: List Year 2 English and Maths R2 objects read-only
+      - name: Search entire R2 bucket for Y2T1E01 PPTX candidate read-only
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, urllib.parse, urllib.request
+          import hashlib, json, os, urllib.parse, urllib.request
           acct=os.environ['CLOUDFLARE_ACCOUNT_ID']
           token=os.environ['CLOUDFLARE_API_TOKEN']
           bucket=os.environ['R2_BUCKET']
-          for prefix in ('english/year2/','maths/year2/'):
-              cursor=None; objects=[]
-              while True:
-                  q={'prefix':prefix,'per_page':'1000'}
-                  if cursor: q['cursor']=cursor
-                  url=f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects?'+urllib.parse.urlencode(q)
-                  req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}'})
-                  with urllib.request.urlopen(req) as r: data=json.load(r)
-                  if not data.get('success'): raise SystemExit(data)
-                  result=data.get('result') or []
-                  if not isinstance(result,list): raise SystemExit(f'Unexpected result type: {type(result)}')
-                  objects.extend(result)
-                  info=data.get('result_info') or {}
-                  cursor=info.get('cursor') if info.get('is_truncated') else None
-                  if not cursor: break
-              print(f'R2_PREFIX {prefix} COUNT {len(objects)}')
-              for o in objects:
+          target_size=17100963
+          target_hash='f9dc5f5a627749426c785a806210ceeb7bc57d47da7780423f9de74b3185df1a'
+          cursor=None; total=0; candidates=[]
+          while True:
+              q={'per_page':'1000'}
+              if cursor: q['cursor']=cursor
+              url=f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects?'+urllib.parse.urlencode(q)
+              req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}'})
+              with urllib.request.urlopen(req) as r: data=json.load(r)
+              if not data.get('success'): raise SystemExit(data)
+              result=data.get('result') or []
+              total += len(result)
+              for o in result:
                   key=o.get('key') or ''
-                  if key.startswith('english/year2/Y2E1/') or key.startswith('maths/year2/Y2M1/'):
-                      print('R2_TARGET_OBJECT',key,o.get('size'),o.get('etag'))
-          PY
-
-      - name: Hash historical Y2E1 R2 objects read-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib, os, urllib.parse, urllib.request
-          acct=os.environ['CLOUDFLARE_ACCOUNT_ID']
-          token=os.environ['CLOUDFLARE_API_TOKEN']
-          bucket=os.environ['R2_BUCKET']
-          keys=[
-            'english/year2/Y2E1/homework/answers/Y2T1E01 Answer Pack Homework Comprehension, Simple Present Simple Past.pdf',
-            'english/year2/Y2E1/homework/sheets/Y2T1E01 Homework Comprehension, Simple Present Simple Past.pdf',
-          ]
-          for key in keys:
+                  size=o.get('size')
+                  if 'Y2T1E01' in key or size == target_size:
+                      candidates.append((key,size,o.get('etag')))
+              info=data.get('result_info') or {}
+              cursor=info.get('cursor') if info.get('is_truncated') else None
+              if not cursor: break
+          print('R2_BUCKET_OBJECT_COUNT',total)
+          print('R2_CANDIDATE_COUNT',len(candidates))
+          for key,size,etag in candidates:
+              print('R2_CANDIDATE',key,size,etag)
               encoded=urllib.parse.quote(key,safe='/')
               url=f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects/{encoded}'
               req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}'})
               with urllib.request.urlopen(req) as r: body=r.read()
-              print('R2_SHA256',key,'size='+str(len(body)),'sha256='+hashlib.sha256(body).hexdigest())
+              digest=hashlib.sha256(body).hexdigest()
+              print('R2_CANDIDATE_SHA256',key,'size='+str(len(body)),'sha256='+digest,'MATCH='+str(digest==target_hash))
           PY
 
       - name: Diagnostic pass
-        run: echo 'Y2_R2_READONLY_DIAGNOSTIC_PASS'
+        run: echo 'Y2_R2_BUCKET_SEARCH_PASS'
