@@ -1,0 +1,262 @@
+name: R2 Drive sync Y2 mutate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/r2-drive-sync-y2
+    paths:
+      - .github/workflows/r2-drive-sync-y2-mutate.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+
+jobs:
+  reconcile-y2t1e01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Install dependencies
+        run: python3 -m pip install --quiet google-auth requests
+
+      - name: Reconcile Y2T1E01 exactly from Drive to R2
+        shell: bash
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import urllib.parse
+          import requests
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import AuthorizedSession
+
+          CODE = 'Y2T1E01'
+          SUBJECT = 'english'
+          YEAR = 'year2'
+          DRIVE_FOLDER_ID = '1_i54WilYBi_dMIiCC-n51oF5fEVc3ADV'
+          OLD_R2_PREFIX = 'english/year2/Y2E1/'
+          NEW_R2_PREFIX = f'{SUBJECT}/{YEAR}/{CODE}/'
+          FOLDER_MIME = 'application/vnd.google-apps.folder'
+
+          def sha256(data):
+              return hashlib.sha256(data).hexdigest()
+
+          def classify(name):
+              lower = name.lower()
+              if 'answer pack' in lower or 'answer key' in lower:
+                  return 'homework/answers'
+              if 'prelesson' in lower or 'pre-lesson' in lower or 'pre lesson' in lower:
+                  return 'prelesson/sheets'
+              if 'homework' in lower:
+                  return 'homework/sheets'
+              # Current exact-code lesson PowerPoints and other accepted resources
+              # are retained as ordinary Other Resources.
+              return 'other'
+
+          info = json.loads(os.environ['GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON'])
+          creds = service_account.Credentials.from_service_account_info(
+              info,
+              scopes=['https://www.googleapis.com/auth/drive.readonly'],
+          )
+          drive = AuthorizedSession(creds)
+
+          def list_drive_children(folder_id):
+              q = urllib.parse.quote(f"'{folder_id}' in parents and trashed=false", safe='')
+              fields = urllib.parse.quote('nextPageToken,files(id,name,mimeType,size,modifiedTime)', safe='(),')
+              page_token = None
+              out = []
+              while True:
+                  url = (
+                      'https://www.googleapis.com/drive/v3/files'
+                      f'?q={q}&fields={fields}&pageSize=1000'
+                      '&supportsAllDrives=true&includeItemsFromAllDrives=true'
+                  )
+                  if page_token:
+                      url += '&pageToken=' + urllib.parse.quote(page_token, safe='')
+                  r = drive.get(url, timeout=120)
+                  r.raise_for_status()
+                  payload = r.json()
+                  out.extend(payload.get('files', []))
+                  page_token = payload.get('nextPageToken')
+                  if not page_token:
+                      return out
+
+          def walk_drive(folder_id, rel=''):
+              files = []
+              for item in list_drive_children(folder_id):
+                  if item.get('mimeType') == FOLDER_MIME:
+                      files.extend(walk_drive(item['id'], rel + item['name'] + '/'))
+                  else:
+                      item = dict(item)
+                      item['relative_path'] = rel + item['name']
+                      files.append(item)
+              return files
+
+          children = walk_drive(DRIVE_FOLDER_ID)
+          eligible = []
+          excluded = []
+          for item in children:
+              if item['name'].startswith(CODE):
+                  eligible.append(item)
+              else:
+                  excluded.append(item)
+
+          print('DRIVE_RECURSIVE_FILE_COUNT', len(children))
+          print('DRIVE_ELIGIBLE_COUNT', len(eligible))
+          print('DRIVE_EXCLUDED_COUNT', len(excluded))
+          for item in excluded:
+              print('DRIVE_EXCLUDED', json.dumps({'id': item['id'], 'name': item['name'], 'relative_path': item['relative_path']}, sort_keys=True))
+
+          if not eligible:
+              raise RuntimeError('No eligible exact-code Drive resources found')
+
+          authoritative = {}
+          for item in sorted(eligible, key=lambda x: x['relative_path'].lower()):
+              file_id = item['id']
+              media_url = f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true'
+              r = drive.get(media_url, timeout=240)
+              if not r.ok:
+                  raise RuntimeError(f"Drive download failed for {item['name']}: HTTP {r.status_code} {r.text[:500]}")
+              body = r.content
+              metadata_size = item.get('size')
+              if metadata_size is not None and int(metadata_size) != len(body):
+                  raise RuntimeError(f"Drive size mismatch for {item['name']}: metadata={metadata_size} bytes={len(body)}")
+              resource_dir = classify(item['name'])
+              key = NEW_R2_PREFIX + resource_dir + '/' + item['name']
+              if key in authoritative:
+                  raise RuntimeError(f'Duplicate target key: {key}')
+              authoritative[key] = {
+                  'name': item['name'],
+                  'mime': item.get('mimeType') or 'application/octet-stream',
+                  'bytes': body,
+                  'size': len(body),
+                  'sha256': sha256(body),
+                  'drive_id': file_id,
+              }
+              print('DRIVE_AUTHORITATIVE', json.dumps({
+                  'key': key,
+                  'name': item['name'],
+                  'drive_id': file_id,
+                  'size': len(body),
+                  'sha256': sha256(body),
+                  'mime': item.get('mimeType'),
+              }, sort_keys=True))
+
+          expected_names = {
+              'Y2T1E01 Answer Pack Homework Comprehension, Simple Present Simple Past.pdf',
+              'Y2T1E01 Homework Comprehension, Simple Present Simple Past.pdf',
+              'Y2T1E01 Comprehension, Simple Present Simple Past.pptx',
+          }
+          actual_names = {v['name'] for v in authoritative.values()}
+          if actual_names != expected_names:
+              raise RuntimeError(f'Unexpected authoritative file set. expected={sorted(expected_names)} actual={sorted(actual_names)}')
+
+          acct = os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token = os.environ['CLOUDFLARE_API_TOKEN']
+          bucket = os.environ['R2_BUCKET']
+          headers = {'Authorization': f'Bearer {token}'}
+          base = f'https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects'
+
+          def object_url(key):
+              return base + '/' + urllib.parse.quote(key, safe='/')
+
+          def list_all_r2():
+              objects = []
+              cursor = None
+              while True:
+                  params = {'per_page': '1000'}
+                  if cursor:
+                      params['cursor'] = cursor
+                  r = requests.get(base, headers=headers, params=params, timeout=120)
+                  r.raise_for_status()
+                  payload = r.json()
+                  if not payload.get('success'):
+                      raise RuntimeError(payload)
+                  objects.extend(payload.get('result') or [])
+                  ri = payload.get('result_info') or {}
+                  cursor = ri.get('cursor') if ri.get('is_truncated') else None
+                  if not cursor:
+                      return objects
+
+          before = list_all_r2()
+          old_objects = sorted((o.get('key') or '') for o in before if (o.get('key') or '').startswith(OLD_R2_PREFIX))
+          new_objects_before = sorted((o.get('key') or '') for o in before if (o.get('key') or '').startswith(NEW_R2_PREFIX))
+          print('R2_OLD_PREFIX_BEFORE', json.dumps(old_objects))
+          print('R2_NEW_PREFIX_BEFORE', json.dumps(new_objects_before))
+
+          # Write every accepted Drive resource afresh, even when an old object has identical bytes.
+          for key, rec in sorted(authoritative.items()):
+              r = requests.put(
+                  object_url(key),
+                  headers=headers,
+                  files={'body': (rec['name'], rec['bytes'], rec['mime'])},
+                  timeout=300,
+              )
+              r.raise_for_status()
+              payload = r.json()
+              if not payload.get('success'):
+                  raise RuntimeError(payload)
+              print('AUDIT_ADD_OR_REPLACE', json.dumps({
+                  'key': key,
+                  'drive_id': rec['drive_id'],
+                  'size': rec['size'],
+                  'sha256': rec['sha256'],
+              }, sort_keys=True))
+
+              verify = requests.get(object_url(key), headers=headers, timeout=300)
+              verify.raise_for_status()
+              body = verify.content
+              got_size = len(body)
+              got_sha = sha256(body)
+              if got_size != rec['size'] or got_sha != rec['sha256']:
+                  raise RuntimeError(f'Read-back mismatch for {key}: R2 size={got_size} sha={got_sha}')
+              print('VERIFY_R2_MATCH', json.dumps({'key': key, 'size': got_size, 'sha256': got_sha}, sort_keys=True))
+
+          # Only after every new current-ID object is verified do we remove unsupported old-ID objects.
+          for key in old_objects:
+              r = requests.delete(object_url(key), headers=headers, timeout=120)
+              r.raise_for_status()
+              payload = r.json()
+              if not payload.get('success'):
+                  raise RuntimeError(payload)
+              print('AUDIT_DELETE_OLD_ID', key)
+
+          # Remove any excess object already under the new current-ID prefix that is not authoritative Drive content.
+          expected_keys = set(authoritative)
+          for key in new_objects_before:
+              if key not in expected_keys:
+                  r = requests.delete(object_url(key), headers=headers, timeout=120)
+                  r.raise_for_status()
+                  payload = r.json()
+                  if not payload.get('success'):
+                      raise RuntimeError(payload)
+                  print('AUDIT_DELETE_EXCESS_CURRENT_PREFIX', key)
+
+          after = list_all_r2()
+          old_after = sorted((o.get('key') or '') for o in after if (o.get('key') or '').startswith(OLD_R2_PREFIX))
+          new_after = sorted((o.get('key') or '') for o in after if (o.get('key') or '').startswith(NEW_R2_PREFIX))
+          if old_after:
+              raise RuntimeError(f'Old lesson path still contains objects: {old_after}')
+          if set(new_after) != expected_keys:
+              raise RuntimeError(f'Current lesson path parity failure. expected={sorted(expected_keys)} actual={new_after}')
+
+          for key, rec in sorted(authoritative.items()):
+              verify = requests.get(object_url(key), headers=headers, timeout=300)
+              verify.raise_for_status()
+              body = verify.content
+              if len(body) != rec['size'] or sha256(body) != rec['sha256']:
+                  raise RuntimeError(f'Final verification mismatch for {key}')
+
+          print('FINAL_R2_KEYS', json.dumps(new_after))
+          print('Y2T1E01_EXACT_DRIVE_R2_PARITY_PASS')
+          PY
