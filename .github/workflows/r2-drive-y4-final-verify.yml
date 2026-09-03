@@ -1,0 +1,42 @@
+name: R2 Drive Y4 final independent verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/r2-drive-sync-y4
+    paths:
+      - .github/r2-drive-y4-final-verify-trigger.txt
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_BUCKET: fpt-materials-dev
+
+jobs:
+  verify-year4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Year 4 reconciliation branch
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: python3 -m pip install --quiet google-auth requests
+
+      - name: Final read-only exact key, size and SHA-256 audit
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: python3 scripts/r2_drive_y4_final_verify.py
+
+      - name: Upload final Year 4 read-only audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y4-final-read-only-byte-hash-audit
+          path: y4-final-read-only-byte-hash-audit.json
+          if-no-files-found: warn
+          retention-days: 30
