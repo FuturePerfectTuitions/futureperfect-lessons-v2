@@ -55,6 +55,7 @@ jobs:
           drive = AuthorizedSession(creds)
 
           authoritative = {}
+          blocked_drive_downloads = []
           for code, meta in drive_folders.items():
               q = urllib.parse.quote(f"'{meta['folder_id']}' in parents and trashed=false", safe='')
               fields = urllib.parse.quote('files(id,name,mimeType,size,modifiedTime)', safe='(),')
@@ -67,8 +68,21 @@ jobs:
               print(f'DRIVE_FOLDER {code} TITLE={meta["title"]!r} COUNT={len(children)}')
               for item in children:
                   file_id = item['id']
-                  media = drive.get(f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true', timeout=180)
-                  media.raise_for_status()
+                  media_url = f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true'
+                  media = drive.get(media_url, timeout=180)
+                  if not media.ok:
+                      err = {
+                          'code': code,
+                          'id': file_id,
+                          'name': item['name'],
+                          'mimeType': item.get('mimeType'),
+                          'metadata_size': item.get('size'),
+                          'http_status': media.status_code,
+                          'response': media.text[:2000],
+                      }
+                      blocked_drive_downloads.append(err)
+                      print('DRIVE_DOWNLOAD_BLOCKED', json.dumps(err, sort_keys=True))
+                      continue
                   body = media.content
                   sha = hashlib.sha256(body).hexdigest()
                   rec = {
@@ -142,5 +156,6 @@ jobs:
           for obj in sorted(y2, key=lambda x: (x.get('key') or '').lower()):
               print('R2_Y2_KEY', json.dumps({'key': obj.get('key'), 'size': obj.get('size'), 'etag': obj.get('etag')}, sort_keys=True))
 
+          print('DRIVE_DOWNLOAD_BLOCKED_COUNT', len(blocked_drive_downloads))
           print('Y2_FIRST_TWO_LESSONS_READ_ONLY_DISCOVERY_PASS')
           PY
