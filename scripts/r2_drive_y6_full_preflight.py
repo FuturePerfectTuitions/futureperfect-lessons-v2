@@ -24,6 +24,8 @@ old = '            if not vr and not exact_code_prefix(item["name"], code):\n'
 if old not in source:
     raise RuntimeError("Expected Year 4 VR filename-exception condition not found")
 source = source.replace(old,'            if not exact_code_prefix(item["name"], code):\n',1)
+source = source.replace('"NON_CURRENT_CODE_OUTSIDE_VR"','"NON_CURRENT_CODE"')
+source = source.replace('NONCURRENT_OUTSIDE_VR','NONCURRENT')
 source = source.replace('Y4','Y6').replace('y4','y6').replace('L1T','L3T').replace('year4','year6')
 tmp = Path('/tmp/r2_drive_y6_full_preflight_runtime.py')
 tmp.write_text(source,encoding='utf-8')
