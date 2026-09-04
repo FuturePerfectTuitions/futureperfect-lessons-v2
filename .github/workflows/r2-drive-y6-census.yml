@@ -1,0 +1,24 @@
+name: R2 Drive Y6 read-only census
+on:
+  push:
+    branches: [ops/r2-drive-sync-y6]
+    paths:
+      - .github/r2-drive-y6-census-trigger.txt
+permissions:
+  contents: read
+jobs:
+  census-year6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet google-auth requests
+      - name: Read-only Year 6 direct-child census
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: python3 scripts/r2_drive_y6_census.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y6-drive-direct-child-census
+          path: y6-drive-direct-child-census.json
+          retention-days: 30
