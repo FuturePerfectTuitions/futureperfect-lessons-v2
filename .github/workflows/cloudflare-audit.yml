@@ -1,4 +1,4 @@
-name: Cloudflare legacy lesson KV read-only audit
+name: Cloudflare V2 LESSONS_KV read-only export
 
 on:
   workflow_dispatch:
@@ -11,14 +11,13 @@ on:
 permissions:
   contents: read
 
-env:
-  LEGACY_NAMESPACE_TITLE: FPT_LESSONS_TEST
-
 jobs:
   audit:
-    name: Export legacy lesson KV safely
+    name: Export V2 LESSONS_KV safely
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      WORKER_NAME: fpt-portal-v2-worker
     steps:
       - name: Confirm Cloudflare read credentials
         shell: bash
@@ -31,7 +30,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Cloudflare credentials present; values not printed."
 
-      - name: Resolve namespace and export key list
+      - name: Resolve current LESSONS_KV namespace and export key list
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -40,14 +39,14 @@ jobs:
           set -euo pipefail
           mkdir -p audit/values
           curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            > audit/namespaces.json
-          jq -e '.success == true' audit/namespaces.json >/dev/null
-          NS_ID="$(jq -r --arg title "$LEGACY_NAMESPACE_TITLE" '.result[] | select(.title==$title) | .id' audit/namespaces.json | head -n1)"
+            > audit/worker-settings.json
+          jq -e '.success == true' audit/worker-settings.json >/dev/null
+          NS_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' audit/worker-settings.json | head -n1)"
           test -n "$NS_ID"
           echo "$NS_ID" > audit/namespace-id.txt
-          jq --arg title "$LEGACY_NAMESPACE_TITLE" '[.result[] | select(.title==$title) | {id,title}]' audit/namespaces.json > audit/namespace.json
+          jq '[.result.bindings[] | select(.name=="LESSONS_KV") | {name,type,namespace_id}]' audit/worker-settings.json > audit/namespace.json
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS_ID}/keys?limit=1000" \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -55,86 +54,57 @@ jobs:
           jq -e '.success == true' audit/keys-response.json >/dev/null
           jq '[.result[] | {name, expiration, metadata}]' audit/keys-response.json > audit/keys.json
           jq -r '.result[].name' audit/keys-response.json > audit/key-names.txt
-          echo "Legacy lesson KV key count: $(wc -l < audit/key-names.txt)"
-          cat audit/key-names.txt
+          echo "V2 LESSONS_KV key count: $(wc -l < audit/key-names.txt)"
 
-      - name: Read and sanitize every legacy KV value
+      - name: Read and sanitize every current V2 lesson KV value
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          NS_ID="$(cat audit/namespace-id.txt)"
           python3 - <<'PY'
           import json, os, pathlib, urllib.parse, urllib.request
-
           account = os.environ['CLOUDFLARE_ACCOUNT_ID']
           token = os.environ['CLOUDFLARE_API_TOKEN']
           ns_id = pathlib.Path('audit/namespace-id.txt').read_text().strip()
           names = pathlib.Path('audit/key-names.txt').read_text().splitlines()
-          out = pathlib.Path('audit/values')
-          out.mkdir(parents=True, exist_ok=True)
-
+          out = pathlib.Path('audit/values'); out.mkdir(parents=True, exist_ok=True)
           sensitive_fragments = ('password','passwd','secret','token','credential')
           def sanitize(v):
               if isinstance(v, dict):
-                  result = {}
-                  for k, val in v.items():
-                      if any(frag in str(k).lower() for frag in sensitive_fragments):
-                          result[k] = '<REDACTED>'
-                      else:
-                          result[k] = sanitize(val)
-                  return result
-              if isinstance(v, list):
-                  return [sanitize(x) for x in v]
+                  r={}
+                  for k,val in v.items():
+                      r[k] = '<REDACTED>' if any(f in str(k).lower() for f in sensitive_fragments) else sanitize(val)
+                  return r
+              if isinstance(v,list): return [sanitize(x) for x in v]
               return v
-
-          manifest = []
-          for i, name in enumerate(names):
-              url = f'https://api.cloudflare.com/client/v4/accounts/{account}/storage/kv/namespaces/{ns_id}/values/{urllib.parse.quote(name, safe="")}'
-              req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
-              with urllib.request.urlopen(req, timeout=30) as r:
-                  raw = r.read()
-              text = raw.decode('utf-8', 'replace')
+          manifest=[]; all_values={}
+          for i,name in enumerate(names):
+              url=f'https://api.cloudflare.com/client/v4/accounts/{account}/storage/kv/namespaces/{ns_id}/values/{urllib.parse.quote(name,safe="")}'
+              req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}'})
+              with urllib.request.urlopen(req,timeout=30) as r: raw=r.read()
+              text=raw.decode('utf-8','replace')
               try:
-                  parsed = json.loads(text)
-                  cleaned = sanitize(parsed)
-                  kind = 'json'
+                  parsed=json.loads(text); cleaned=sanitize(parsed); kind='json'
               except Exception:
-                  cleaned = text
-                  kind = 'text'
-              safe_name = f'{i:03d}_{urllib.parse.quote(name, safe="")}.json'
-              path = out / safe_name
-              path.write_text(json.dumps({'key': name, 'kind': kind, 'value': cleaned}, ensure_ascii=False, indent=2), encoding='utf-8')
-              manifest.append({'key': name, 'file': safe_name, 'kind': kind})
-          pathlib.Path('audit/manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-          print(f'Exported {len(manifest)} sanitized KV values.')
+                  cleaned=text; kind='text'
+              safe=f'{i:03d}_{urllib.parse.quote(name,safe="")}.json'
+              (out/safe).write_text(json.dumps({'key':name,'kind':kind,'value':cleaned},ensure_ascii=False,indent=2),encoding='utf-8')
+              manifest.append({'key':name,'file':safe,'kind':kind}); all_values[name]=cleaned
+          pathlib.Path('audit/manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          pathlib.Path('audit/LESSONS_KV_SANITIZED.json').write_text(json.dumps(all_values,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(f'Exported {len(manifest)} sanitized V2 KV values.')
           PY
-
-      - name: Build consolidated sanitized export
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, pathlib
-          manifest = json.loads(pathlib.Path('audit/manifest.json').read_text())
-          all_values = {}
-          for item in manifest:
-              obj = json.loads((pathlib.Path('audit/values') / item['file']).read_text())
-              all_values[item['key']] = obj['value']
-          pathlib.Path('audit/FPT_LESSONS_TEST_SANITIZED.json').write_text(json.dumps(all_values, ensure_ascii=False, indent=2), encoding='utf-8')
-          PY
-          sha256sum audit/FPT_LESSONS_TEST_SANITIZED.json > audit/export.sha256
-          echo "Sanitized export created."
+          sha256sum audit/LESSONS_KV_SANITIZED.json > audit/export.sha256
 
       - name: Upload audit artifact
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-fpt-lessons-test-sanitized
+          name: v2-lessons-kv-sanitized
           path: audit/
           if-no-files-found: error
           retention-days: 7
 
       - name: Confirm read-only completion
-        run: echo "READ_ONLY_LEGACY_KV_AUDIT_PASS - no Cloudflare write, delete, deploy or KV put command executed."
+        run: echo "READ_ONLY_V2_LESSONS_KV_AUDIT_PASS - no Cloudflare write, delete, deploy or KV put command executed."
