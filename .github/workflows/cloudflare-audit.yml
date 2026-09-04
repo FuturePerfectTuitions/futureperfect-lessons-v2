@@ -1,4 +1,4 @@
-name: Cloudflare read-only audit
+name: Cloudflare legacy lesson KV read-only audit
 
 on:
   workflow_dispatch:
@@ -7,212 +7,134 @@ on:
       - ops/cloudflare-audit
     paths:
       - .github/workflows/cloudflare-audit.yml
-      - .github/cloudflare-audit-trigger.txt
-  pull_request:
-    branches:
-      - main
-    paths:
-      - .github/workflows/cloudflare-audit.yml
-      - .github/cloudflare-audit-trigger.txt
 
 permissions:
   contents: read
 
+env:
+  LEGACY_NAMESPACE_TITLE: FPT_LESSONS_TEST
+
 jobs:
   audit:
-    name: Audit V2 Cloudflare state
+    name: Export legacy lesson KV safely
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-
-      - name: Confirm secrets are available
+      - name: Confirm Cloudflare read credentials
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo "Cloudflare CI credentials are present. Values are not printed."
+          echo "Cloudflare credentials present; values not printed."
 
-      - name: Wrangler identity and version
+      - name: Resolve namespace and export key list
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest --version
-          npx --yes wrangler@latest whoami
-
-      - name: Worker deployment status
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "=== Current deployment status ==="
-          npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json
-          echo "=== Recent deployments ==="
-          npx --yes wrangler@latest deployments list --name "$WORKER_NAME" --json
-          echo "=== Secret names only ==="
-          npx --yes wrangler@latest secret list --name "$WORKER_NAME" --format json
-
-      - name: Worker runtime settings and bindings (sanitized)
-        shell: bash
-        run: |
-          set -euo pipefail
+          mkdir -p audit/values
           curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/worker-settings.json
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces?per_page=100" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            > audit/namespaces.json
+          jq -e '.success == true' audit/namespaces.json >/dev/null
+          NS_ID="$(jq -r --arg title "$LEGACY_NAMESPACE_TITLE" '.result[] | select(.title==$title) | .id' audit/namespaces.json | head -n1)"
+          test -n "$NS_ID"
+          echo "$NS_ID" > audit/namespace-id.txt
+          jq --arg title "$LEGACY_NAMESPACE_TITLE" '[.result[] | select(.title==$title) | {id,title}]' audit/namespaces.json > audit/namespace.json
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS_ID}/keys?limit=1000" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            > audit/keys-response.json
+          jq -e '.success == true' audit/keys-response.json >/dev/null
+          jq '[.result[] | {name, expiration, metadata}]' audit/keys-response.json > audit/keys.json
+          jq -r '.result[].name' audit/keys-response.json > audit/key-names.txt
+          echo "Legacy lesson KV key count: $(wc -l < audit/key-names.txt)"
+          cat audit/key-names.txt
 
-          jq '
-            .result as $r |
-            {
-              success,
-              errors,
-              messages,
-              result: {
-                compatibility_date: $r.compatibility_date,
-                compatibility_flags: $r.compatibility_flags,
-                usage_model: $r.usage_model,
-                placement: $r.placement,
-                bindings: [
-                  ($r.bindings // [])[] as $b |
-                  if ($b.type == "plain_text" and ((["ENVIRONMENT","ALLOWED_ORIGINS","DEV_LOGIN_ALLOWLIST","STUDENT_LOGIN_ENABLED"] | index($b.name)) != null)) then
-                    {name: $b.name, type: $b.type, text: $b.text}
-                  elif (($b.type // "") | test("secret"; "i")) then
-                    {name: $b.name, type: $b.type}
-                  else
-                    {
-                      name: $b.name,
-                      type: $b.type,
-                      namespace_id: $b.namespace_id,
-                      bucket_name: $b.bucket_name,
-                      database_name: $b.database_name,
-                      database_id: $b.database_id,
-                      id: $b.id,
-                      service: $b.service,
-                      environment: $b.environment
-                    }
-                  end
-                ]
-              }
-            }
-          ' /tmp/worker-settings.json
-
-      - name: Deployed Worker package inventory (read-only)
+      - name: Read and sanitize every legacy KV value
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
-            --dump-header /tmp/worker-package-headers.txt \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/worker-package.bin
-
+          NS_ID="$(cat audit/namespace-id.txt)"
           python3 - <<'PY'
-          from email.parser import BytesParser
-          from email.policy import default
-          import hashlib
-          import re
+          import json, os, pathlib, urllib.parse, urllib.request
 
-          headers = open('/tmp/worker-package-headers.txt', 'rb').read().decode('latin-1', 'replace')
-          body = open('/tmp/worker-package.bin', 'rb').read()
-          match = re.search(r'(?im)^content-type:\s*([^\r\n]+)', headers)
-          content_type = match.group(1).strip() if match else 'unknown'
-          print('Content-Type:', content_type)
-          print('Package SHA256:', hashlib.sha256(body).hexdigest())
+          account = os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token = os.environ['CLOUDFLARE_API_TOKEN']
+          ns_id = pathlib.Path('audit/namespace-id.txt').read_text().strip()
+          names = pathlib.Path('audit/key-names.txt').read_text().splitlines()
+          out = pathlib.Path('audit/values')
+          out.mkdir(parents=True, exist_ok=True)
 
-          names = []
-          if content_type.lower().startswith('multipart/'):
-              message = BytesParser(policy=default).parsebytes(
-                  ('Content-Type: ' + content_type + '\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1') + body
-              )
-              for part in message.iter_parts():
-                  name = part.get_filename() or part.get_param('name', header='content-disposition') or part.get_param('name')
-                  payload = part.get_payload(decode=True) or b''
-                  names.append((name or '(unnamed)', hashlib.sha256(payload).hexdigest()))
-          else:
-              names.append(('single-script', hashlib.sha256(body).hexdigest()))
+          sensitive_fragments = ('password','passwd','secret','token','credential')
+          def sanitize(v):
+              if isinstance(v, dict):
+                  result = {}
+                  for k, val in v.items():
+                      if any(frag in str(k).lower() for frag in sensitive_fragments):
+                          result[k] = '<REDACTED>'
+                      else:
+                          result[k] = sanitize(val)
+                  return result
+              if isinstance(v, list):
+                  return [sanitize(x) for x in v]
+              return v
 
-          print('Modules:')
-          for name, digest in names:
-              print(f'- {name}: {digest}')
-
-          for marker in ('index-phase8.js', 'index-phase7.js', 'index.js'):
-              print(f'Contains {marker}:', marker.encode() in body)
+          manifest = []
+          for i, name in enumerate(names):
+              url = f'https://api.cloudflare.com/client/v4/accounts/{account}/storage/kv/namespaces/{ns_id}/values/{urllib.parse.quote(name, safe="")}'
+              req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  raw = r.read()
+              text = raw.decode('utf-8', 'replace')
+              try:
+                  parsed = json.loads(text)
+                  cleaned = sanitize(parsed)
+                  kind = 'json'
+              except Exception:
+                  cleaned = text
+                  kind = 'text'
+              safe_name = f'{i:03d}_{urllib.parse.quote(name, safe="")}.json'
+              path = out / safe_name
+              path.write_text(json.dumps({'key': name, 'kind': kind, 'value': cleaned}, ensure_ascii=False, indent=2), encoding='utf-8')
+              manifest.append({'key': name, 'file': safe_name, 'kind': kind})
+          pathlib.Path('audit/manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(f'Exported {len(manifest)} sanitized KV values.')
           PY
 
-      - name: Account resource inventory (read-only)
+      - name: Build consolidated sanitized export
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== KV namespaces ==="
-          npx --yes wrangler@latest kv namespace list
-          echo "=== D1 databases ==="
-          npx --yes wrangler@latest d1 list --json
-          echo "=== R2 buckets ==="
-          npx --yes wrangler@latest r2 bucket list
+          python3 - <<'PY'
+          import json, pathlib
+          manifest = json.loads(pathlib.Path('audit/manifest.json').read_text())
+          all_values = {}
+          for item in manifest:
+              obj = json.loads((pathlib.Path('audit/values') / item['file']).read_text())
+              all_values[item['key']] = obj['value']
+          pathlib.Path('audit/FPT_LESSONS_TEST_SANITIZED.json').write_text(json.dumps(all_values, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
+          sha256sum audit/FPT_LESSONS_TEST_SANITIZED.json > audit/export.sha256
+          echo "Sanitized export created."
 
-      - name: Phase 9 prerequisite state (read-only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/worker-settings.json)"
-          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV") | .namespace_id' /tmp/worker-settings.json)"
-          test -n "$LESSONS_KV_ID"
-          test -n "$STUDENTS_KV_ID"
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-fpt-lessons-test-sanitized
+          path: audit/
+          if-no-files-found: error
+          retention-days: 7
 
-          echo "=== ENGLISH_Y5 curriculum ==="
-          npx --yes wrangler@latest kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote
-
-          echo "=== Existing DEV-P9 lesson keys ==="
-          npx --yes wrangler@latest kv key list --namespace-id "$LESSONS_KV_ID" --prefix "lesson:DEV-P9" --remote
-
-          echo "=== test0202 profile, passwords redacted ==="
-          npx --yes wrangler@latest kv key get "user:test0202" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/test0202.json
-          jq 'del(.p, .answerPassword)' /tmp/test0202.json
-
-          echo "=== D1 table definitions ==="
-          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name;"
-
-          echo "=== lesson_entitlements columns ==="
-          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "PRAGMA table_info('lesson_entitlements');"
-
-      - name: Phase 15 post-merge baseline (read-only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          W="npx --yes wrangler@4.125.0"
-          $W d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS entitlement_count FROM lesson_entitlements; SELECT COUNT(*) AS batch_count FROM batch_definitions; SELECT COUNT(*) AS assignment_count FROM student_batch_assignments; SELECT COUNT(*) AS release_count FROM batch_lesson_releases; SELECT COUNT(DISTINCT portal_user_id_norm) AS assigned_users FROM student_batch_assignments; SELECT COUNT(*) AS assigned_user_entitlements FROM lesson_entitlements WHERE portal_user_id_norm IN (SELECT DISTINCT portal_user_id_norm FROM student_batch_assignments); SELECT COUNT(*) AS temp_entitlements FROM lesson_entitlements WHERE source_batch_code IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_batches FROM batch_definitions WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_assignments FROM student_batch_assignments WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT COUNT(*) AS temp_releases FROM batch_lesson_releases WHERE batch_key IN ('P15_M3A','P15_M4B','P15_E411'); SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_student_sessions_single_active'; PRAGMA quick_check;" >/tmp/p15-postmerge-baseline.json 2>/tmp/p15-postmerge-baseline.err
-          test "$(jq -r '.[0].results[0].entitlement_count' /tmp/p15-postmerge-baseline.json)" = '632'
-          test "$(jq -r '.[1].results[0].batch_count' /tmp/p15-postmerge-baseline.json)" = '4'
-          test "$(jq -r '.[2].results[0].assignment_count' /tmp/p15-postmerge-baseline.json)" = '4'
-          test "$(jq -r '.[3].results[0].release_count' /tmp/p15-postmerge-baseline.json)" = '0'
-          test "$(jq -r '.[4].results[0].assigned_users' /tmp/p15-postmerge-baseline.json)" = '2'
-          test "$(jq -r '.[5].results[0].assigned_user_entitlements' /tmp/p15-postmerge-baseline.json)" = '173'
-          for i in 6 7 8 9; do test "$(jq -r ".[${i}].results[0] | to_entries[0].value" /tmp/p15-postmerge-baseline.json)" = '0'; done
-          jq -e '.[10].results[0].name == "trg_student_sessions_single_active"' /tmp/p15-postmerge-baseline.json >/dev/null
-          jq -e '.[11].results[0].quick_check == "ok"' /tmp/p15-postmerge-baseline.json >/dev/null
-          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/worker-settings.json >/dev/null
-          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/worker-settings.json)" = 'fpt-materials-dev'
-          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/worker-settings.json)"
-          case "${LOGIN,,}" in ''|'false') ;; *) exit 1;; esac
-          echo 'PHASE15_POSTMERGE_READONLY_BASELINE_PASS'
-
-      - name: Repository deployment config snapshot
-        shell: bash
-        working-directory: worker
-        run: |
-          set -euo pipefail
-          echo "=== worker/wrangler.toml ==="
-          cat wrangler.toml
-
-      - name: Audit completed
-        run: echo "Read-only Cloudflare audit completed. No deploy or write command was executed."
+      - name: Confirm read-only completion
+        run: echo "READ_ONLY_LEGACY_KV_AUDIT_PASS - no Cloudflare write, delete, deploy or KV put command executed."
