@@ -1,0 +1,25 @@
+name: R2 Drive Y6 duplicate filename audit
+on:
+  push:
+    branches: [ops/r2-drive-sync-y6]
+    paths:
+      - .github/r2-drive-y6-duplicate-audit-trigger.txt
+permissions:
+  contents: read
+jobs:
+  audit-year6-duplicates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet google-auth requests
+      - name: Audit exact duplicate filenames in all current Year 6 ordinary lessons
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        run: python3 scripts/r2_drive_y6_duplicate_name_audit.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: y6-duplicate-name-audit
+          path: y6-duplicate-name-audit.json
+          retention-days: 30
