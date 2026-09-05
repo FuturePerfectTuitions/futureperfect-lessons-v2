@@ -1,0 +1,117 @@
+name: Ops fix L3 M06 M07 lesson titles
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-fix-l3-m06-m07.trigger'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  fix:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard target development environment and update only two lesson titles
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)" = 'fpt-materials-dev'
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS"; test "$LESSONS" != null
+          export LESSONS_KV_ID="$LESSONS"
+
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const api = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
+          const headers = { Authorization: `Bearer ${token}` };
+
+          async function cfJson(url, init = {}) {
+            const r = await fetch(url, { ...init, headers: { ...headers, ...(init.headers || {}) } });
+            const body = await r.json().catch(() => null);
+            if (!r.ok || !body?.success) throw new Error(`Cloudflare API failure ${r.status}: ${JSON.stringify(body)}`);
+            return body;
+          }
+
+          async function listLessonKeys() {
+            const out = [];
+            let cursor = '';
+            do {
+              const u = new URL(`${api}/keys`);
+              u.searchParams.set('prefix', 'lesson:');
+              u.searchParams.set('limit', '1000');
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const body = await cfJson(u);
+              out.push(...body.result.map(x => x.name));
+              cursor = body.result_info?.cursor || '';
+            } while (cursor);
+            return out;
+          }
+
+          async function getValue(key) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, { headers });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            return await r.text();
+          }
+
+          async function putValue(key, text) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, {
+              method: 'PUT',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: text
+            });
+            const body = await r.json().catch(() => null);
+            if (!r.ok || !body?.success) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${JSON.stringify(body)}`);
+          }
+
+          const targets = new Map([
+            ['L3T1M06', { expectedOld: new Set(['Addition SELF STUDY', 'Addition']), expectedNew: 'Addition' }],
+            ['L3T1M07', { expectedOld: new Set(['Multiplication SELF STUDY', 'Multiplication']), expectedNew: 'Multiplication' }]
+          ]);
+          const keys = await listLessonKeys();
+          const found = new Map();
+
+          for (const key of keys) {
+            const raw = await getValue(key);
+            let record;
+            try { record = JSON.parse(raw); } catch { continue; }
+            const aliases = Object.values(record?.displayIds || {}).map(String);
+            for (const [displayId, rule] of targets) {
+              if (!aliases.includes(displayId) && String(record?.lessonId || '') !== displayId) continue;
+              if (found.has(displayId)) throw new Error(`Duplicate canonical lesson match for ${displayId}: ${found.get(displayId).key}, ${key}`);
+              const oldTitle = String(record?.title || '');
+              if (!rule.expectedOld.has(oldTitle)) throw new Error(`Unexpected title for ${displayId} at ${key}: ${oldTitle}`);
+              found.set(displayId, { key, oldTitle });
+              if (oldTitle !== rule.expectedNew) {
+                record.title = rule.expectedNew;
+                await putValue(key, JSON.stringify(record));
+              }
+              const verify = JSON.parse(await getValue(key));
+              if (verify.title !== rule.expectedNew) throw new Error(`Verification failed for ${displayId} at ${key}`);
+              console.log(`${displayId}: ${key}: ${oldTitle} -> ${verify.title}`);
+            }
+          }
+
+          for (const displayId of targets.keys()) {
+            if (!found.has(displayId)) throw new Error(`Target lesson not found in LESSONS_KV: ${displayId}`);
+          }
+          console.log('KV_TITLE_FIX_PASS');
+          NODE
