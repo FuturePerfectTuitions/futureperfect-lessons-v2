@@ -1,0 +1,97 @@
+name: Ops audit Y6 English video catalogue
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-audit-y6-english-video.trigger'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  audit:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard development target and inspect Y6 English catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)" = 'fpt-materials-dev'
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS"; test "$LESSONS" != null
+          export LESSONS_KV_ID="$LESSONS"
+
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const api = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
+          const headers = { Authorization: `Bearer ${token}` };
+
+          async function getText(key) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, { headers });
+            if (r.status === 404) return null;
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            return await r.text();
+          }
+          async function list(prefix) {
+            const out = []; let cursor = '';
+            do {
+              const u = new URL(`${api}/keys`); u.searchParams.set('prefix', prefix); u.searchParams.set('limit','1000');
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const r = await fetch(u, { headers }); const b = await r.json();
+              if (!r.ok || !b?.success) throw new Error(`LIST failed ${r.status}`);
+              out.push(...b.result.map(x=>x.name)); cursor = b.result_info?.cursor || '';
+            } while (cursor);
+            return out;
+          }
+          function summary(key, r) {
+            return {
+              key,
+              lessonId:r?.lessonId,
+              order:r?.order,
+              title:r?.title,
+              description:r?.description,
+              subject:r?.subject,
+              active:r?.active,
+              displayIds:r?.displayIds,
+              video:r?.core?.video ?? null,
+              coreKeys:r?.core ? Object.keys(r.core) : []
+            };
+          }
+
+          const curriculumRaw = await getText('curriculum:ENGLISH_Y6');
+          console.log('CURRICULUM_ENGLISH_Y6=' + (curriculumRaw ?? 'MISSING'));
+          const keys = await list('lesson:');
+          const matches = [];
+          const placeholders = [];
+          for (const key of keys) {
+            const raw = await getText(key); if (!raw) continue;
+            let r; try { r = JSON.parse(raw); } catch { continue; }
+            const vals = Object.values(r?.displayIds || {}).map(String);
+            const hay = JSON.stringify(r?.core?.video ?? '').toLowerCase() + ' ' + String(r?.title || '').toLowerCase();
+            if (vals.includes('Y6T1E01') || vals.includes('Y6T1E02') || String(r?.lessonId||'') === 'Y6T1E01' || String(r?.lessonId||'') === 'Y6T1E02') {
+              matches.push(summary(key,r));
+            }
+            if (hay.includes('coming soon') || hay.includes('placeholder')) placeholders.push(summary(key,r));
+          }
+          console.log('Y6_ENGLISH_MATCHES=' + JSON.stringify(matches));
+          console.log('PLACEHOLDER_CANDIDATES=' + JSON.stringify(placeholders.slice(0,20)));
+          console.log('AUDIT_Y6_ENGLISH_PASS');
+          NODE
