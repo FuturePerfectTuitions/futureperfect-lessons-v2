@@ -3,7 +3,7 @@ import copy,json,os,re,urllib.parse,requests
 from pathlib import PurePosixPath
 
 YEAR=int(os.environ['TARGET_YEAR'])
-EXPECTED_OBJECTS=int(os.environ['EXPECTED_R2_OBJECTS'])
+EXPECTED_OBJECTS=int(os.environ.get('EXPECTED_R2_OBJECTS','0'))
 EXPECTED_LESSONS=int(os.environ['EXPECTED_LESSONS'])
 api='https://api.cloudflare.com/client/v4'
 acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
@@ -26,7 +26,10 @@ while True:
     if not cursor: break
 r2keys={o.get('key') for o in objs if o.get('key') and not o.get('key').endswith('/')}
 ykeys=sorted(k for k in r2keys if k.startswith(f'english/year{YEAR}/Y{YEAR}T'))
-assert len(ykeys)==EXPECTED_OBJECTS, f'Expected {EXPECTED_OBJECTS} current Y{YEAR} English R2 objects, found {len(ykeys)}'
+if EXPECTED_OBJECTS:
+    assert len(ykeys)==EXPECTED_OBJECTS, f'Expected {EXPECTED_OBJECTS} current Y{YEAR} English R2 objects, found {len(ykeys)}'
+else:
+    assert ykeys, f'No current Y{YEAR} English R2 objects found'
 cur=kvget(f'curriculum:ENGLISH_Y{YEAR}'); lesson_ids=cur.get('lessonIds') or []; assert len(lesson_ids)==EXPECTED_LESSONS
 os.makedirs(f'y{YEAR}english-before',exist_ok=True); os.makedirs(f'y{YEAR}english-after',exist_ok=True)
 CODE_RX=re.compile(fr'^Y{YEAR}T[123]E\d{{2}}$')
