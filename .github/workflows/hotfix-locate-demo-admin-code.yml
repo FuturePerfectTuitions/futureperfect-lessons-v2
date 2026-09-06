@@ -1,0 +1,15 @@
+name: Hotfix - locate demo admin access handling
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths: [.github/workflows/hotfix-locate-demo-admin-code.yml]
+permissions:
+  contents: read
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate flag handling
+        run: |
+          grep -R -n -C 4 --exclude-dir=.git 'demoAdminAllAccess' worker assets tests . || true
