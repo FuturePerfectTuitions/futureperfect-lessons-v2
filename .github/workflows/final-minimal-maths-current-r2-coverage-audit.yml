@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json,os,re,urllib.parse,requests
+          import json,os,urllib.parse,requests
           api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
           s=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=auth,timeout=60).json(); assert s.get('success')
           b=s['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); bucket=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
@@ -66,9 +66,9 @@ jobs:
             out[cur]={'lessons':len(ids),'currentR2':len(current),'uniqueMathsRefs':len(maths_refs),'staleOrNoncurrentRefs':len(stale),'currentR2Unreferenced':len(missing),'staleExamples':stale[:20],'missingExamples':missing[:20]}
           json.dump({'environment':env,'bucket':bucket,'curricula':out},open('maths-current-r2-coverage.json','w'),indent=2,sort_keys=True)
           print(json.dumps(out,indent=2,sort_keys=True))
-          # Y5/Y6 must be current before closure; earlier years are reported too.
-          assert out['MATHS_L2']['staleOrNoncurrentRefs']==0 and out['MATHS_L2']['currentR2Unreferenced']==0
-          assert out['MATHS_L3']['staleOrNoncurrentRefs']==0 and out['MATHS_L3']['currentR2Unreferenced']==0
+          for cur in cfg:
+            assert out[cur]['staleOrNoncurrentRefs']==0,(cur,'stale',out[cur]['staleOrNoncurrentRefs'])
+            assert out[cur]['currentR2Unreferenced']==0,(cur,'missing',out[cur]['currentR2Unreferenced'])
           print('MATHS_CURRENT_R2_COVERAGE_PASS')
           PY
       - uses: actions/upload-artifact@v4
