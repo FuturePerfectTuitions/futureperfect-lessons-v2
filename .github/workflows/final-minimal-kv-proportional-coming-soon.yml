@@ -1,0 +1,83 @@
+name: Final minimal KV - Proportional Reasoning Coming Soon
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-kv-proportional-coming-soon.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-minimal-kv-proportional-coming-soon
+  cancel-in-progress: false
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_R2: fpt-materials-dev
+  COMING_SOON_ID: cO1Zionu8NC
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve and guard deployed development bindings
+        id: guard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          env_name="$(jq -r '[.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text][0] // ""' <<<"$settings")"
+          r2="$(jq -r '[.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name][0] // ""' <<<"$settings")"
+          lessons="$(jq -r '[.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' <<<"$settings")"
+          test "$env_name" = development
+          test "$r2" = "$EXPECTED_R2"
+          test -n "$lessons"; test "$lessons" != null
+          echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
+
+      - name: Snapshot, patch exactly two records, and verify read-back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LESSONS_NS: ${{ steps.guard.outputs.lessons }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proportional-kv-backup proportional-kv-after
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          base="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}"
+          for key in lesson:Y5M19 lesson:Y6M25; do
+            enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+            curl -fsS "${auth[@]}" "$base/values/$enc" > "proportional-kv-backup/${key/:/_}.json"
+            jq -e '.title|ascii_downcase|contains("proportional reasoning")' "proportional-kv-backup/${key/:/_}.json" >/dev/null
+            jq --arg id "$COMING_SOON_ID" '
+              .core = (.core // {}) |
+              .core.video = {
+                screenpal: $id,
+                contentUrl: ("https://screenpal.com/content/video/" + $id),
+                embedUrl: ("https://go.screenpal.com/player/" + $id + "?ff=1&ahc=1&dcc=1&tl=1&bg=transparent"),
+                watchUrl: ("https://go.screenpal.com/watch/" + $id)
+              }
+            ' "proportional-kv-backup/${key/:/_}.json" > /tmp/patched.json
+            curl -fsS -X PUT "${auth[@]}" -H 'Content-Type: application/json' --data-binary @/tmp/patched.json "$base/values/$enc" >/dev/null
+            curl -fsS "${auth[@]}" "$base/values/$enc" > "proportional-kv-after/${key/:/_}.json"
+            jq -e --arg id "$COMING_SOON_ID" '.core.video.screenpal==$id and (.core.video.quiz == null)' "proportional-kv-after/${key/:/_}.json" >/dev/null
+          done
+          echo 'PROPORTIONAL_COMING_SOON_KV_PASS'
+
+      - name: Upload before and after evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: proportional-coming-soon-kv-evidence
+          path: |
+            proportional-kv-backup/
+            proportional-kv-after/
+          retention-days: 30
