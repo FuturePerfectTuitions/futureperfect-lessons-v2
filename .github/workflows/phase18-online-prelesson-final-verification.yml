@@ -1,0 +1,84 @@
+name: Phase 18 online PreLesson final verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase18-online-prelesson-final-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PAGES_ORIGIN: https://futureperfecttuitions.github.io/futureperfect-lessons-v2
+      WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      PRODUCTION_ORIGIN: https://lessons.futureperfect.education
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify committed production state
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase18-online-prelesson.js
+          node --check assets/phase18-online-prelesson-ui.js
+          grep -Fq 'main = "src/index-phase18-online-prelesson.js"' worker/wrangler.toml
+          grep -Fq '<script src="assets/phase18-online-prelesson-ui.js"></script>' phase11.html
+          grep -Fq "const PRELESSON_DOWNLOAD_KINDS = new Set(['pre', 'p11corepre', 'p11elevenpre', 'vrpre']);" worker/src/index-phase18-online-prelesson.js
+          grep -Fq "PRELESSON_ONLY" worker/src/index-phase18-online-prelesson.js
+          grep -Fq "if (item.operation === 'grant' && result.ok) await clearPrelesson(env, item);" worker/src/index-phase18-online-prelesson.js
+          grep -Fq "prelesson_grant" worker/src/index-phase18-online-prelesson.js
+          echo 'PHASE18_COMMITTED_STATE_PASS'
+
+      - name: Verify published production Pages frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in $(seq 1 18); do
+            if curl --fail --silent --show-error "$PAGES_ORIGIN/phase11.html?phase18=${GITHUB_SHA}" -o /tmp/phase11-live.html && \
+               grep -Fq 'assets/phase18-online-prelesson-ui.js' /tmp/phase11-live.html && \
+               curl --fail --silent --show-error "$PAGES_ORIGIN/assets/phase18-online-prelesson-ui.js?phase18=${GITHUB_SHA}" -o /tmp/phase18-ui-live.js && \
+               grep -Fq 'PreLesson only' /tmp/phase18-ui-live.js && \
+               grep -Fq 'Only PreLesson Sheets available to download and print.' /tmp/phase18-ui-live.js; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" = '1'
+          echo 'PHASE18_PAGES_FRONTEND_PASS'
+
+      - name: Verify deployed production Worker route
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --output /tmp/noauth.json --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' --request POST \
+            --data '{"items":[{"syncRowId":"phase18-final-noauth","operation":"prelesson_grant","portalUserId":"missing","lessonId":"missing","batchKey":"O","lessonDate":"2026-09-06"}]}' \
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync")"
+          test "$code" = '401'
+          grep -Fq 'SYNC_UNAUTHORISED' /tmp/noauth.json
+
+          code="$(curl --silent --show-error --output /tmp/browser.json --write-out '%{http_code}' \
+            --header "Origin: $PRODUCTION_ORIGIN" --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"items":[{"syncRowId":"phase18-final-browser","operation":"prelesson_grant","portalUserId":"missing","lessonId":"missing","batchKey":"O","lessonDate":"2026-09-06"}]}' \
+            "$WORKER_BASE/api/v1/admin/excel-entitlements/sync")"
+          test "$code" = '403'
+          grep -Fq 'BROWSER_REQUEST_NOT_ALLOWED' /tmp/browser.json
+          echo 'PHASE18_DEPLOYED_WORKER_PASS'
+
+      - name: Final closure marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'PHASE18_ONLINE_PRELESSON_PRODUCTION_PASS'
