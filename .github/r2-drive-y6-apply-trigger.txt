@@ -1,2 +1,3 @@
 Apply authoritative Year 6 reconciliation after strict preflight PASS on run 33850318908.
 Expected 229 current resources; 90 historical managed R2 objects; duplicate audit 0 groups.
+Final closure rerun requested 2026-09-06; current authoritative Maths ends at M43 and there is no M44.
