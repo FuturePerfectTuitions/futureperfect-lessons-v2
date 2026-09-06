@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase18-online-prelesson.js"
+main = "src/index-phase19-access.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
