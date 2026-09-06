@@ -1,0 +1,122 @@
+name: Final minimal - guarded reconciled development Worker deploy
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-guarded-development-worker-deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-minimal-reconciled-development-worker
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/final-drive-r2-kv-closure-2026-09-06
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Guard, verify, dry-run, deploy and postflight development Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+
+          node --check worker/src/index-phase17.js
+          node --check worker/src/index-phase11-efficient.js
+          node --check worker/src/phase11-view-display-names.js
+          node --check worker/src/phase11-navigation-cache.js
+          node --check worker/src/phase11-navigation-manifest.generated.js
+          node --check worker/src/phase11-screenpal.js
+          node tests/final-minimal-reconciled-worker-static.mjs
+          grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml
+
+          curl --fail --silent --show-error "$SETTINGS" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-before.json >/dev/null
+          R2="$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings-before.json)"
+          STUDENTS="$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-before.json)"
+          DB="$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-before.json)"
+          test "$R2" = 'fpt-materials-dev'
+          for value in "$STUDENTS" "$LESSONS" "$DB"; do test -n "$value"; test "$value" != null; done
+          LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          case "${LOGIN,,}" in ''|'false') ;; *) echo 'STOP: normal student login is enabled.' >&2; false;; esac
+          # Refuse deployment if the live Worker has an unexpected non-variable binding that this minimal runtime config would omit.
+          jq -e '[.result.bindings[]|select(.type!="plain_text" and .type!="secret_text")|.name]|sort == ["DB","LESSONS_KV","MATERIALS_R2","STUDENTS_KV"]' /tmp/settings-before.json >/dev/null
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/secrets-before.txt
+
+          cat > worker/wrangler.final-minimal.runtime.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-phase17.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DB}"
+          EOF
+
+          $W deploy --config worker/wrangler.final-minimal.runtime.toml --dry-run --outdir /tmp/final-worker-build >/tmp/final-worker-dry-run.log
+          test -d /tmp/final-worker-build
+          $W deploy --config worker/wrangler.final-minimal.runtime.toml --keep-vars --message 'Final Drive-R2-KV reconciled development Worker' >/tmp/final-worker-deploy.log 2>&1
+          sleep 4
+
+          curl --fail --silent --show-error "$SETTINGS" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings-after.json
+          jq -e '.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings-after.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings-after.json)" = 'fpt-materials-dev'
+          test "$(jq -r '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-after.json)" = "$STUDENTS"
+          test "$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings-after.json)" = "$LESSONS"
+          test "$(jq -r '.result.bindings[]|select(.name=="DB" and .type=="d1")|.id' /tmp/settings-after.json)" = "$DB"
+          AFTER_LOGIN="$(jq -r '[.result.bindings[]|select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text")|.text][0] // ""' /tmp/settings-after.json)"
+          case "${AFTER_LOGIN,,}" in ''|'false') ;; *) false;; esac
+          for var in ENVIRONMENT ALLOWED_ORIGINS DEV_LOGIN_ALLOWLIST STUDENT_LOGIN_ENABLED; do
+            test "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/settings-after.json)" = "$(jq -r --arg n "$var" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/settings-before.json)"
+          done
+          $W secret list --name "$WORKER_NAME" --format json | jq -r '.[].name' | sort > /tmp/secrets-after.txt
+          cmp /tmp/secrets-before.txt /tmp/secrets-after.txt
+
+          code="$(curl --silent --show-error --output /tmp/noauth-home.json --write-out '%{http_code}' --header 'Origin: https://futureperfecttuitions.github.io' "$WORKER_BASE/api/v1/student/home")"
+          test "$code" = '401'
+          code="$(curl --silent --show-error --output /tmp/invalid-login.json --write-out '%{http_code}' --header 'Origin: https://futureperfecttuitions.github.io' --header 'Content-Type: application/json' --request POST --data '{"username":"__final_reconcile_invalid__","password":"Aa1x"}' "$WORKER_BASE/api/v1/student/auth/login")"
+          test "$code" = '401'
+
+          jq -n --arg worker "$WORKER_NAME" --arg environment development --arg r2 "$R2" --arg lessons "$LESSONS" '{status:"PASS",worker:$worker,environment:$environment,r2:$r2,lessonsKvNamespace:$lessons,studentLoginEnabled:false,bindingsPreserved:true,secretsPreserved:true,noAuthSmoke:401,invalidLoginSmoke:401}' > final-minimal-worker-deploy-evidence.json
+          echo 'FINAL_MINIMAL_DEVELOPMENT_WORKER_DEPLOY_PASS'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-minimal-worker-deploy-evidence
+          path: |
+            final-minimal-worker-deploy-evidence.json
+            /tmp/final-worker-dry-run.log
+            /tmp/final-worker-deploy.log
+          retention-days: 30
