@@ -111,6 +111,28 @@
   color: var(--phase5-navy);
 }
 
+/* Keep the portal back controls visibly inverse over lesson/page content.
+   This is intentionally in the last-loaded stylesheet so earlier presentation
+   layers cannot regress the button to a pale background with dark text. */
+body.phase11-change8 .phase6-back-button {
+  border-color: #012169 !important;
+  background: #012169 !important;
+  color: #fff !important;
+  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.18);
+}
+
+body.phase11-change8 .phase6-back-button::before,
+body.phase11-change8 .phase6-back-button::after {
+  color: #fff !important;
+}
+
+body.phase11-change8 .phase6-back-button:hover,
+body.phase11-change8 .phase6-back-button:focus-visible {
+  border-color: #00184d !important;
+  background: #00184d !important;
+  color: #fff !important;
+}
+
 @media (max-width: 640px) {
   .legal-page {
     padding: 28px 16px 20px;
