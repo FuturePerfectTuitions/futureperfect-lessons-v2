@@ -1,0 +1,39 @@
+name: Ops Y5 English finalise inspect
+
+on:
+  push:
+    branches: [ops/english-content-reconcile]
+    paths:
+      - 'ops/y5-finalise-inspect.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      V2_WORKER: fpt-portal-v2-worker
+    steps:
+      - name: Inspect development Y5 candidate lesson records
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' <<<"$settings" >/dev/null
+          KV="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$settings")"
+          export KV
+          node <<'NODE'
+          const a=process.env.CLOUDFLARE_ACCOUNT_ID,t=process.env.CLOUDFLARE_API_TOKEN,k=process.env.KV;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${a}/storage/kv/namespaces/${k}/values/`;
+          const h={Authorization:`Bearer ${t}`};
+          async function get(key){const r=await fetch(base+encodeURIComponent(key),{headers:h}); if(r.status===404) return null; if(!r.ok) throw new Error(`${key} ${r.status}`); return JSON.parse(await r.text());}
+          console.log('CURRICULUM',JSON.stringify(await get('curriculum:ENGLISH_Y5')));
+          for(const id of ['Y5E31','Y5E32','Y5E33','Y5E34','Y5E35','Y5E36','Y5E37','Y5E38','Y5E39']) console.log('CANDIDATE',id,JSON.stringify(await get(`lesson:${id}`)));
+          NODE
