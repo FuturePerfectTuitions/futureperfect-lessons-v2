@@ -7,7 +7,7 @@ keep_vars = true
 ENVIRONMENT = "production"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futureperfect.education"
 DEV_LOGIN_ALLOWLIST = ""
-PROD_LOGIN_ALLOWLIST = "abi3007,ame0503,ann3009,ava2007,conn2209,dha2806,kiaan1312,ma0607,mahu1907,meh0510,rei0710,yuug1210,zar0603"
+PROD_LOGIN_ALLOWLIST = "abi3007,ame0503,ann3009,ava2007,conn2209,dha2806,kiaan1312,ma0605,mahu1907,meh0510,rei0710,yuug1210,zar0603"
 STUDENT_LOGIN_ENABLED = "true"
 
 # Portal V2 production entrypoint. src/index-phase17.js retains the Phase 17
