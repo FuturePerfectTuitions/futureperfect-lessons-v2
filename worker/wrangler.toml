@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase17.js"
+main = "src/index-phase18-online-prelesson.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,21 +9,23 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. src/index-phase17.js retains the Phase 17
-# explicit ScreenPal metadata guard and also fails closed for student login:
-# production login is available only when STUDENT_LOGIN_ENABLED is true AND the
-# normalised username is present in the Cloudflare-managed PROD_LOGIN_ALLOWLIST.
-# The production allowlist is deliberately not committed to this public repo.
-# keep_vars preserves Cloudflare-managed runtime values on ordinary deployments.
+# Portal V2 production entrypoint. src/index-phase18-online-prelesson.js wraps
+# the Phase 17 production Worker and adds the online PreLesson-only access state.
+# Full lesson access still comes only from the existing Completed/grant path.
+# There is no date/time-based automatic promotion from PreLesson-only to full.
 #
-# The Phase 13 Excel route remains unchanged and still requires the dedicated
-# EXCEL_SYNC_TOKEN Worker secret. The secret is deliberately not present in
-# this file or any repository source. Student + Lesson remains the permanent
-# idempotent entitlement identity while Batch + Lesson remains operational
-# release context; Excel does not mutate membership.
+# Production login remains governed by the inherited Phase 17 guard: login is
+# available only when STUDENT_LOGIN_ENABLED is true AND the normalised username
+# is present in the Cloudflare-managed PROD_LOGIN_ALLOWLIST.
+# The production allowlist is deliberately not committed to this public repo.
+#
+# Excel sync still requires the dedicated EXCEL_SYNC_TOKEN Worker secret. The
+# secret is deliberately not present in this file or any repository source.
+# PreLesson-only sync is accepted only for Batch IDs containing O; a later normal
+# grant promotes the lesson to full access and removes the restricted state.
 #
 # Passwords, Answer Pack passwords, private student records, production student
 # allowlists and Cloudflare credential values are never committed in plaintext.
-# The production deployment preserves the existing audited Students KV,
+# Production deployment must preserve the existing audited Students KV,
 # Lessons KV, D1 and R2 bindings; exact binding identifiers remain
 # Cloudflare-managed rather than source data.
