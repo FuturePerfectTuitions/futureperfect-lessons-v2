@@ -59,8 +59,11 @@ jobs:
           report={'environment':env,'bucket':bucket,'r2ObjectCount':len(r2keys),'activeLessonCount':len(active),'referenceCount':len(refs),'uniqueReferenceCount':len({x['r2Key'] for x in refs}),'missingReferenceCount':len(missing),'missingByCurriculum':by,'missing':missing}
           json.dump(report,open('active-kv-r2key-health-fast.json','w'),indent=2,sort_keys=True)
           print(json.dumps({k:report[k] for k in ['r2ObjectCount','activeLessonCount','referenceCount','uniqueReferenceCount','missingReferenceCount','missingByCurriculum']},indent=2))
+          assert not missing, f'Broken active KV resource references remain: {len(missing)}'
+          print('GLOBAL_ACTIVE_KV_R2_LINK_HEALTH_PASS')
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: active-kv-r2key-health-fast
           path: active-kv-r2key-health-fast.json
