@@ -1,0 +1,150 @@
+name: Ops update Y6 English videos
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y6-english-videos.trigger'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard development target, update Y6 English metadata, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' /tmp/settings.json)" = 'fpt-materials-dev'
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS"; test "$LESSONS" != null
+          export LESSONS_KV_ID="$LESSONS"
+
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const api = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const PLACEHOLDER = 'cO1Zionu8NC';
+          const HYPHENS = 'cOQ1oXnwwRd';
+          const description = `In this lesson, students learn how hyphens are used to join words or parts of words and make writing clearer by avoiding confusion.
+
+This lesson includes:
+✔ Recognising hyphens in words and phrases
+✔ Using hyphens in compound adjectives such as hot-pink and bear-like
+✔ Joining nouns to form compound nouns or adjectives
+✔ Using hyphens with prefixes to avoid awkward vowel combinations, such as co-operate and de-escalate
+✔ Using hyphens to clarify meaning, such as re-sent and re-press
+✔ Writing compound numbers from twenty-one to ninety-nine
+✔ Using hyphens when words split across line breaks
+✔ Using hyphens in informal expressions such as free-for-all and out-and-out
+✔ Using hyphens to remove ambiguity in sentences
+
+Students begin by learning what a hyphen is and how this small punctuation mark can change meaning. They identify hyphens in context and explain why each one has been used, then explore compound adjectives, compound nouns, prefixes, written numbers, line breaks and informal expressions.
+
+The lesson also shows how hyphens can prevent ambiguity by comparing sentences such as “There was a man eating shark in the bay” and “There was a man-eating shark in the bay.”
+
+By the end of the lesson, learners will understand the main purposes of hyphens and be able to use them more accurately to make their writing clearer.`;
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            return await r.json();
+          }
+          async function putJson(key, value) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+          function guardLesson(r, lessonId, title, displayId) {
+            if (r?.lessonId !== lessonId) throw new Error(`${lessonId} identity mismatch`);
+            if (r?.title !== title) throw new Error(`${lessonId} title mismatch: ${r?.title}`);
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error(`${lessonId} state mismatch`);
+            if (!Object.values(r?.displayIds || {}).includes(displayId)) throw new Error(`${lessonId} display ID mismatch`);
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error(`${lessonId} core.video missing`);
+          }
+
+          const curriculum = await getJson('curriculum:ENGLISH_Y6');
+          if (curriculum?.curriculumCode !== 'ENGLISH_Y6') throw new Error('ENGLISH_Y6 curriculum identity mismatch');
+          if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.includes('Y6E1') || !curriculum.lessonIds.includes('Y6E2')) {
+            throw new Error('ENGLISH_Y6 does not contain Y6E1 and Y6E2');
+          }
+
+          const placeholderSource = await getJson('lesson:Y5M19');
+          if (placeholderSource?.core?.video?.screenpal !== PLACEHOLDER) {
+            throw new Error('Established Coming Soon placeholder provenance check failed');
+          }
+
+          const y6e1 = await getJson('lesson:Y6E1');
+          const y6e2 = await getJson('lesson:Y6E2');
+          guardLesson(y6e1, 'Y6E1', 'Transition to Year 6', 'Y6T1E01');
+          guardLesson(y6e2, 'Y6E2', 'Hyphens', 'Y6T1E02');
+
+          if (y6e1.core.video !== null) throw new Error('Y6E1 video unexpectedly changed before apply');
+          if (y6e2.core.video !== null) throw new Error('Y6E2 video unexpectedly changed before apply');
+          if (String(y6e2.description || '') !== '') throw new Error('Y6E2 description unexpectedly changed before apply');
+
+          y6e1.core.video = video(PLACEHOLDER);
+          y6e1.contentStatus = {
+            ...(y6e1.contentStatus || {}),
+            mainVideo: 'in_production',
+            ownerConfirmedPending: true
+          };
+
+          y6e2.description = description;
+          y6e2.core.video = video(HYPHENS);
+          y6e2.contentStatus = {
+            description: 'available',
+            mainVideo: 'available',
+            ownerConfirmedPending: false
+          };
+
+          await putJson('lesson:Y6E1', y6e1);
+          await putJson('lesson:Y6E2', y6e2);
+
+          const v1 = await getJson('lesson:Y6E1');
+          const v2 = await getJson('lesson:Y6E2');
+          guardLesson(v1, 'Y6E1', 'Transition to Year 6', 'Y6T1E01');
+          guardLesson(v2, 'Y6E2', 'Hyphens', 'Y6T1E02');
+          if (v1?.core?.video?.screenpal !== PLACEHOLDER) throw new Error('Y6E1 placeholder verification failed');
+          if (v1?.contentStatus?.mainVideo !== 'in_production' || v1?.contentStatus?.ownerConfirmedPending !== true) throw new Error('Y6E1 pending status verification failed');
+          if (v2?.core?.video?.screenpal !== HYPHENS) throw new Error('Y6E2 ScreenPal verification failed');
+          if (v2?.description !== description) throw new Error('Y6E2 description verification failed');
+          if (v2?.contentStatus?.description !== 'available' || v2?.contentStatus?.mainVideo !== 'available' || v2?.contentStatus?.ownerConfirmedPending !== false) throw new Error('Y6E2 content status verification failed');
+
+          console.log('Y6E1_VERIFIED=' + JSON.stringify({lessonId:v1.lessonId,displayId:v1.displayIds['english-year6'],title:v1.title,screenpal:v1.core.video.screenpal,contentStatus:v1.contentStatus}));
+          console.log('Y6E2_VERIFIED=' + JSON.stringify({lessonId:v2.lessonId,displayId:v2.displayIds['english-year6'],title:v2.title,screenpal:v2.core.video.screenpal,description:v2.description,contentStatus:v2.contentStatus}));
+          console.log('OPS_UPDATE_Y6_ENGLISH_VIDEOS_PASS');
+          NODE
