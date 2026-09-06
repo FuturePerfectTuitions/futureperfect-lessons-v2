@@ -1,0 +1,44 @@
+name: Final minimal - inspect Y4 English transition placeholder
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-y4-transition-inspect.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect source and current dev KV record
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          { grep -RInE 'contentStatus|pendingDescription|in_production|coming.?soon' worker src scripts 2>/dev/null || true; } > transition-source-hits.txt
+          python3 - <<'PY'
+          import json,os,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          s=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=auth,timeout=60).json(); assert s.get('success')
+          b=s['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); bucket=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert bucket=='fpt-materials-dev'; assert ns
+          key='lesson:Y4E1'; url=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'+urllib.parse.quote(key,safe='')
+          r=requests.get(url,headers=auth,timeout=60); r.raise_for_status(); rec=r.json()
+          json.dump(rec,open('y4e1-current-record.json','w'),indent=2,sort_keys=True)
+          print('Y4E1_TITLE',rec.get('title')); print('Y4E1_DISPLAY',json.dumps(rec.get('displayIds'))); print('Y4E1_VIDEO',json.dumps((rec.get('core') or {}).get('video'))); print('Y4E1_CONTENT_STATUS',json.dumps(rec.get('contentStatus'))); print('Y4E1_PENDING',json.dumps(rec.get('pendingDescription')))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y4-transition-inspection
+          path: |
+            transition-source-hits.txt
+            y4e1-current-record.json
+          retention-days: 30
