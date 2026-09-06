@@ -29,7 +29,7 @@ const VIEW_META = Object.freeze({
 const clean = value => String(value ?? '').trim();
 const normaliseUser = value => clean(value).toLowerCase();
 const cleanViewId = value => clean(value).toLowerCase();
-const isTrialId = value => normaliseUser(value).startsWith('trial');
+const isTrialId = value => { const id = normaliseUser(value); return id.startsWith('trial') && !id.startsWith('admintrial'); };
 
 function allowedOrigins(env) {
   return new Set([

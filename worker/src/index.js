@@ -1071,14 +1071,21 @@ const CURRICULUM_FALLBACK_VIEWS = {
 };
 
 const FULL_LIBRARY_RULES = {
+  MATHS_Y2_FULL: { curriculumCodes: ['MATHS_Y2'] },
+  MATHS_Y3_FULL: { curriculumCodes: ['MATHS_Y3'] },
+  MATHS_Y4_FULL: { curriculumCodes: ['MATHS_L1'] },
+  MATHS_Y5_FULL: { curriculumCodes: ['MATHS_L2'] },
   MATHS_L1_FULL: { curriculumCodes: ['MATHS_L1'] },
   MATHS_L2_FULL: { curriculumCodes: ['MATHS_L2'] },
   MATHS_L3_FULL: { curriculumCodes: ['MATHS_L3'] },
   MATHS_Y6_FULL: { curriculumCodes: ['MATHS_L3', 'MATHS_Y6_EXTRA'] },
+  ENGLISH_Y2_FULL: { curriculumCodes: ['ENGLISH_Y2'] },
+  ENGLISH_Y3_FULL: { curriculumCodes: ['ENGLISH_Y3'] },
   ENGLISH_Y4_FULL: { curriculumCodes: ['ENGLISH_Y4'] },
   ENGLISH_Y4_11PLUS_FULL: { curriculumCodes: ['ENGLISH_Y4'], includesVr: true },
   ENGLISH_Y5_FULL: { curriculumCodes: ['ENGLISH_Y5'] },
-  ENGLISH_Y5_11PLUS_FULL: { curriculumCodes: ['ENGLISH_Y5'], includesVr: true }
+  ENGLISH_Y5_11PLUS_FULL: { curriculumCodes: ['ENGLISH_Y5'], includesVr: true },
+  ENGLISH_Y6_FULL: { curriculumCodes: ['ENGLISH_Y6'] }
 };
 
 function makeDescriptor({
@@ -1162,14 +1169,21 @@ function englishDescriptor(year, elevenPlus = false, extras = {}) {
 
 function descriptorForFullLibrary(code) {
   switch (String(code || '').toUpperCase()) {
+    case 'MATHS_Y2_FULL': return mathsNormalDescriptor(2, { source: 'fullLibrary' });
+    case 'MATHS_Y3_FULL': return mathsNormalDescriptor(3, { source: 'fullLibrary' });
+    case 'MATHS_Y4_FULL': return mathsNormalDescriptor(4, { source: 'fullLibrary' });
+    case 'MATHS_Y5_FULL': return mathsNormalDescriptor(5, { source: 'fullLibrary' });
     case 'MATHS_L1_FULL': return mathsLevelDescriptor(1, { source: 'fullLibrary' });
     case 'MATHS_L2_FULL': return mathsLevelDescriptor(2, { source: 'fullLibrary' });
     case 'MATHS_L3_FULL': return mathsLevelDescriptor(3, { source: 'fullLibrary' });
     case 'MATHS_Y6_FULL': return mathsNormalDescriptor(6, { source: 'fullLibrary' });
+    case 'ENGLISH_Y2_FULL': return englishDescriptor(2, false, { source: 'fullLibrary' });
+    case 'ENGLISH_Y3_FULL': return englishDescriptor(3, false, { source: 'fullLibrary' });
     case 'ENGLISH_Y4_FULL': return englishDescriptor(4, false, { source: 'fullLibrary' });
     case 'ENGLISH_Y4_11PLUS_FULL': return englishDescriptor(4, true, { source: 'fullLibrary' });
     case 'ENGLISH_Y5_FULL': return englishDescriptor(5, false, { source: 'fullLibrary' });
     case 'ENGLISH_Y5_11PLUS_FULL': return englishDescriptor(5, true, { source: 'fullLibrary' });
+    case 'ENGLISH_Y6_FULL': return englishDescriptor(6, false, { source: 'fullLibrary' });
     default: return null;
   }
 }

@@ -29,6 +29,16 @@ const LOCKED_PREVIEW_OVERLAYS = Object.freeze({
 // authoritative Current/Previous grouping from D1 assignments, so this overlay
 // never creates or implies membership.
 const FULL_LIBRARY_VIEW_OVERLAYS = Object.freeze({
+  'maths-year2': Object.freeze({ subject: 'maths', fullLibrary: 'MATHS_Y2_FULL', schoolYear: 2, batches: ['Y2M'] }),
+  'maths-year3': Object.freeze({ subject: 'maths', fullLibrary: 'MATHS_Y3_FULL', schoolYear: 3, batches: ['Y3M'] }),
+  'maths-year4': Object.freeze({ subject: 'maths', fullLibrary: 'MATHS_Y4_FULL', schoolYear: 4, batches: ['Y4M'] }),
+  'maths-year5': Object.freeze({ subject: 'maths', fullLibrary: 'MATHS_Y5_FULL', schoolYear: 5, batches: ['Y5M'] }),
+  'maths-year6': Object.freeze({ subject: 'maths', fullLibrary: 'MATHS_Y6_FULL', schoolYear: 6, batches: ['Y6M'] }),
+  'english-year2': Object.freeze({ subject: 'english', fullLibrary: 'ENGLISH_Y2_FULL', schoolYear: 2, batches: ['Y2E'] }),
+  'english-year3': Object.freeze({ subject: 'english', fullLibrary: 'ENGLISH_Y3_FULL', schoolYear: 3, batches: ['Y3E'] }),
+  'english-year4': Object.freeze({ subject: 'english', fullLibrary: 'ENGLISH_Y4_FULL', schoolYear: 4, batches: ['Y4E'] }),
+  'english-year5': Object.freeze({ subject: 'english', fullLibrary: 'ENGLISH_Y5_FULL', schoolYear: 5, batches: ['Y5E'] }),
+  'english-year6': Object.freeze({ subject: 'english', fullLibrary: 'ENGLISH_Y6_FULL', schoolYear: 6, batches: ['Y6E'] }),
   'english-year4-11plus': Object.freeze({
     subject: 'english',
     fullLibrary: 'ENGLISH_Y4_11PLUS_FULL',
