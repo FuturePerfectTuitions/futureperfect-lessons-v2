@@ -1,0 +1,124 @@
+name: Final minimal - repair Year 2 KV R2 links
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-fix-y2-r2keys.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate all Year 2 replacements, then apply and read back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import copy,json,os,re,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          worker='fpt-portal-v2-worker'; bucket='fpt-materials-dev'
+          settings=requests.get(f'{api}/accounts/{acct}/workers/scripts/{worker}/settings',headers=auth,timeout=60).json(); assert settings.get('success')
+          b=settings['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); r2bound=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert r2bound==bucket; assert ns
+          kvbase=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'
+          def kvurl(key): return kvbase+urllib.parse.quote(key,safe='')
+          def kvget(key):
+            q=requests.get(kvurl(key),headers=auth,timeout=60); q.raise_for_status(); return q.json()
+          def kvput(key,obj):
+            q=requests.put(kvurl(key),headers={**auth,'Content-Type':'application/json'},data=json.dumps(obj,separators=(',',':')).encode(),timeout=60); q.raise_for_status(); p=q.json(); assert p.get('success'),p
+          # One read-only R2 listing.
+          r2=[]; cursor=None
+          while True:
+            params={'per_page':'1000'}
+            if cursor: params['cursor']=cursor
+            p=requests.get(f'{api}/accounts/{acct}/r2/buckets/{bucket}/objects',headers=auth,params=params,timeout=120).json(); assert p.get('success'),p
+            r2.extend(p.get('result') or []); info=p.get('result_info') or {}; cursor=info.get('cursor') if info.get('is_truncated') else None
+            if not cursor: break
+          r2keys={o.get('key') for o in r2 if o.get('key') and not o.get('key').endswith('/')}
+          curricula=[('ENGLISH_Y2','english',re.compile(r'^Y2T[123]E\d{2}$')),('MATHS_Y2','maths',re.compile(r'^Y2T[123]M\d{2}$'))]
+          records={}; proposals=[]; unresolved=[]
+          def current_code(rec,rx):
+            vals=list((rec.get('displayIds') or {}).values())
+            hits=[str(v) for v in vals if isinstance(v,str) and rx.fullmatch(v)]
+            assert len(set(hits))==1,(rec.get('lessonId'),hits,rec.get('displayIds'))
+            return hits[0]
+          def collect(x,c,lid,code,path=''):
+            if isinstance(x,dict):
+              for k,v in x.items():
+                p=f'{path}.{k}' if path else k
+                if k=='r2Key' and isinstance(v,str) and v.strip():
+                  old=v.strip()
+                  if old in r2keys: continue
+                  parts=old.split('/')
+                  if len(parts)<4 or parts[0] not in ('english','maths') or parts[1]!='year2':
+                    unresolved.append({'curriculum':c,'lessonId':lid,'jsonPath':p,'old':old,'reason':'unexpected_path_shape'}); continue
+                  parts[2]=code; cand='/'.join(parts)
+                  if cand not in r2keys:
+                    unresolved.append({'curriculum':c,'lessonId':lid,'jsonPath':p,'old':old,'candidate':cand,'reason':'candidate_not_in_r2'}); continue
+                  proposals.append({'curriculum':c,'lessonId':lid,'jsonPath':p,'old':old,'new':cand})
+                else: collect(v,c,lid,code,p)
+            elif isinstance(x,list):
+              for i,v in enumerate(x): collect(v,c,lid,code,f'{path}[{i}]')
+          for c,subject,rx in curricula:
+            cur=kvget('curriculum:'+c)
+            for lid in cur.get('lessonIds') or []:
+              rec=kvget('lesson:'+lid)
+              if rec.get('active') is False: continue
+              code=current_code(rec,rx); records[lid]=rec; collect(rec,c,lid,code)
+          report={'environment':env,'bucket':bucket,'proposalCount':len(proposals),'unresolved':unresolved,'proposals':proposals}
+          os.makedirs('y2-r2key-before',exist_ok=True); os.makedirs('y2-r2key-after',exist_ok=True)
+          json.dump(report,open('y2-r2key-repair-report.json','w'),indent=2,sort_keys=True)
+          assert not unresolved, f'Year 2 unresolved replacements: {len(unresolved)}'
+          assert len(proposals)==181, f'Expected 181 broken Year 2 refs, found {len(proposals)}'
+          by={}
+          for p in proposals: by.setdefault(p['lessonId'],{})[p['old']]=p['new']
+          def replace(x,m):
+            if isinstance(x,dict):
+              for k,v in list(x.items()):
+                if k=='r2Key' and isinstance(v,str) and v in m: x[k]=m[v]
+                else: replace(v,m)
+            elif isinstance(x,list):
+              for v in x: replace(v,m)
+          for lid,m in by.items():
+            rec=records[lid]; json.dump(rec,open(f'y2-r2key-before/{lid}.json','w'),indent=2,sort_keys=True)
+            patched=copy.deepcopy(rec); replace(patched,m); kvput('lesson:'+lid,patched)
+            after=kvget('lesson:'+lid); json.dump(after,open(f'y2-r2key-after/{lid}.json','w'),indent=2,sort_keys=True)
+            assert after==patched, f'KV read-back mismatch {lid}'
+          # Final Year 2 health proof.
+          missing=[]; checked=0
+          for c,subject,rx in curricula:
+            cur=kvget('curriculum:'+c)
+            for lid in cur.get('lessonIds') or []:
+              rec=kvget('lesson:'+lid)
+              def health(x,path=''):
+                nonlocal_dummy=None
+                if isinstance(x,dict):
+                  for k,v in x.items():
+                    p=f'{path}.{k}' if path else k
+                    if k=='r2Key' and isinstance(v,str) and v.strip():
+                      if v.strip() not in r2keys: missing.append({'curriculum':c,'lessonId':lid,'jsonPath':p,'r2Key':v.strip()})
+                    else: health(v,p)
+                elif isinstance(x,list):
+                  for i,v in enumerate(x): health(v,f'{path}[{i}]')
+              health(rec)
+          assert not missing, f'Broken Year 2 refs remain: {len(missing)}'
+          print('YEAR2_R2KEY_REPAIR_PASS',len(proposals),'references repaired')
+          PY
+      - name: Upload before-after evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y2-r2key-repair-evidence
+          path: |
+            y2-r2key-repair-report.json
+            y2-r2key-before/
+            y2-r2key-after/
+          retention-days: 30
