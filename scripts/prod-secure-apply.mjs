@@ -16,8 +16,14 @@ const pairs = JSON.parse(fs.readFileSync('/tmp/fpt-provision-bulk.json', 'utf8')
 const meta = JSON.parse(fs.readFileSync('/tmp/fpt-provision-meta.json', 'utf8'));
 const expectedKeys = pairs.map(item => item.key).sort();
 const expectedKeySet = new Set(expectedKeys);
+const productionStudentIds = payload.students.map(item => String(item.portalUserId || '').trim().toLowerCase()).sort();
+const productionLoginAllowlist = productionStudentIds.join(',');
+const preservedNonStudentUserKeys = new Set(['user:admin']);
 
-if (pairs.length !== 13 || payload.students.length !== 13) throw new Error('Expected exactly 13 production users.');
+if (pairs.length !== 13 || payload.students.length !== 13 || new Set(productionStudentIds).size !== 13) {
+  throw new Error('Expected exactly 13 unique production users.');
+}
+if (productionStudentIds.includes('admin')) throw new Error('Admin must never be part of the student production allowlist.');
 
 async function cf(pathname, init = {}) {
   const response = await fetch(`https://api.cloudflare.com/client/v4${pathname}`, {
@@ -54,8 +60,8 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function makeConfig({ environment, origins, login, studentsId, lessonsId, databaseId, r2Bucket }, path) {
-  const content = `name = "fpt-portal-v2-worker"\nmain = "src/index-phase17.js"\ncompatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\nENVIRONMENT = "${environment}"\nALLOWED_ORIGINS = "${origins}"\nDEV_LOGIN_ALLOWLIST = ""\nSTUDENT_LOGIN_ENABLED = "${login}"\n\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "${studentsId}"\n\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "${lessonsId}"\n\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "${r2Bucket}"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "${databaseId}"\n`;
+function makeConfig({ environment, origins, login, prodAllowlist, studentsId, lessonsId, databaseId, r2Bucket }, path) {
+  const content = `name = "fpt-portal-v2-worker"\nmain = "src/index-phase17.js"\ncompatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\nENVIRONMENT = "${environment}"\nALLOWED_ORIGINS = "${origins}"\nDEV_LOGIN_ALLOWLIST = ""\nPROD_LOGIN_ALLOWLIST = "${prodAllowlist}"\nSTUDENT_LOGIN_ENABLED = "${login}"\n\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "${studentsId}"\n\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "${lessonsId}"\n\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "${r2Bucket}"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "${databaseId}"\n`;
   fs.writeFileSync(path, content, { mode: 0o600 });
 }
 
@@ -143,6 +149,17 @@ async function login(id) {
   throw new Error(`Login did not become available for ${id}; last status ${lastStatus}`);
 }
 
+async function rejectedLogin(username) {
+  const response = await fetch(`${workerBase}/api/v1/student/auth/login`, {
+    method: 'POST',
+    headers: { Origin: productionOrigin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password: 'Aa1x' })
+  });
+  if (response.status !== 401) throw new Error(`Disallowed login ${username} did not fail closed.`);
+  const body = await response.json().catch(() => null);
+  if (body?.error !== 'INVALID_LOGIN') throw new Error(`Disallowed login ${username} returned unexpected body.`);
+}
+
 async function home(cookie) {
   const response = await fetch(`${workerBase}/api/v1/student/home`, {
     headers: { Origin: productionOrigin, Cookie: cookie }
@@ -175,13 +192,16 @@ const secretsBefore = secretNames(settingsBefore);
 if (!secretsBefore.includes('EXCEL_SYNC_TOKEN')) throw new Error('EXCEL_SYNC_TOKEN secret is missing.');
 
 const existingKeys = await listUserKeys(studentsId);
-const unexpected = existingKeys.filter(key => !expectedKeySet.has(key));
+const unexpected = existingKeys.filter(key => !expectedKeySet.has(key) && !preservedNonStudentUserKeys.has(key));
 if (unexpected.length) {
   console.error(`STOP: unexpected STUDENTS_KV user keys: ${unexpected.join(', ')}`);
   process.exit(2);
 }
-const existingValues = await kvBulkGet(studentsId, existingKeys);
-const newlyCreated = expectedKeys.filter(key => !existingKeys.includes(key));
+const preservedFound = existingKeys.filter(key => preservedNonStudentUserKeys.has(key));
+if (preservedFound.length !== 1 || preservedFound[0] !== 'user:admin') throw new Error('Expected preserved non-student admin record was not found exactly once.');
+const existingTargetKeys = existingKeys.filter(key => expectedKeySet.has(key));
+const existingValues = await kvBulkGet(studentsId, existingTargetKeys);
+const newlyCreated = expectedKeys.filter(key => !existingTargetKeys.includes(key));
 let kvWritten = false;
 let workerDeployed = false;
 
@@ -191,12 +211,14 @@ makeConfig({
   environment: 'production',
   origins: `${devOrigin},${productionOrigin}`,
   login: 'true',
+  prodAllowlist: productionLoginAllowlist,
   studentsId, lessonsId, databaseId, r2Bucket
 }, prodConfig);
 makeConfig({
   environment: 'development',
   origins: devOrigin,
   login: 'false',
+  prodAllowlist: '',
   studentsId, lessonsId, databaseId, r2Bucket
 }, rollbackConfig);
 
@@ -215,6 +237,9 @@ try {
   if (plain(settingsAfter, 'ENVIRONMENT') !== 'production') throw new Error('Production ENVIRONMENT binding was not applied.');
   if (plain(settingsAfter, 'STUDENT_LOGIN_ENABLED').toLowerCase() !== 'true') throw new Error('Student login was not enabled.');
   if (!plain(settingsAfter, 'ALLOWED_ORIGINS').split(',').map(x => x.trim()).includes(productionOrigin)) throw new Error('Production origin is not allowed.');
+  const deployedAllowlist = plain(settingsAfter, 'PROD_LOGIN_ALLOWLIST').split(',').map(x => x.trim().toLowerCase()).filter(Boolean).sort();
+  if (JSON.stringify(deployedAllowlist) !== JSON.stringify(productionStudentIds)) throw new Error('Production login allowlist mismatch.');
+  if (deployedAllowlist.includes('admin')) throw new Error('Admin appeared in the production student allowlist.');
   if (String(binding(settingsAfter, 'STUDENTS_KV', 'kv_namespace')?.namespace_id || '') !== studentsId) throw new Error('Students KV binding changed.');
   if (String(binding(settingsAfter, 'LESSONS_KV', 'kv_namespace')?.namespace_id || '') !== lessonsId) throw new Error('Lessons KV binding changed.');
   if (String(binding(settingsAfter, 'DB', 'd1')?.id || '') !== databaseId) throw new Error('D1 binding changed.');
@@ -240,14 +265,10 @@ try {
   const openTotal = (reiHome?.subjects || []).flatMap(subject => subject?.views || []).reduce((sum, view) => sum + Number(view?.openLessonCount || 0), 0);
   if (openTotal !== 0) throw new Error('Reina should have zero lesson access.');
 
-  const invalid = await fetch(`${workerBase}/api/v1/student/auth/login`, {
-    method: 'POST',
-    headers: { Origin: productionOrigin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: '__not_a_student__', password: 'Aa1x' })
-  });
-  if (invalid.status !== 401) throw new Error('Invalid-login fail-closed check failed.');
+  await rejectedLogin('__not_a_student__');
+  await rejectedLogin('admin');
 
-  console.log('PORTAL_V2_PRODUCTION_PROVISIONING_PASS students=13 login=enabled origin=lessons.futureperfect.education');
+  console.log('PORTAL_V2_PRODUCTION_PROVISIONING_PASS students=13 login=allowlisted admin=preserved-and-blocked origin=lessons.futureperfect.education');
 } catch (error) {
   console.error(`Production provisioning failed: ${error.message}`);
   if (workerDeployed) {
