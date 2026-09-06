@@ -66,25 +66,42 @@ jobs:
             }
             const lessons=[];
             for(const key of keys.sort()){
-              const raw=values[key];
-              if(raw==null) continue;
+              const raw=values[key]; if(raw==null) continue;
               let v; try{v=JSON.parse(raw)}catch{continue}
               lessons.push({key,lessonId:v.lessonId||key.slice(7),order:v.order??null,title:v.title||'',description:v.description||'',subject:v.subject||'',active:v.active!==false,displayIds:v.displayIds||{},hasVideo:!!v.core?.video});
             }
-            fs.writeFileSync('ops/live-lesson-descriptions.json',JSON.stringify({count:lessons.length,lessons},null,2));
+            fs.mkdirSync('ops/live-descriptions',{recursive:true});
+            const groups={};
+            for(const x of lessons){
+              const years=new Set();
+              for(const view of Object.keys(x.displayIds||{})){
+                const m=view.match(/(?:english|maths)-year([2-6])(?:$|-)/); if(m) years.add(Number(m[1]));
+              }
+              const idm=String(x.lessonId).match(/^Y([2-6])[EM]/i); if(idm) years.add(Number(idm[1]));
+              for(const y of years){
+                if(!['english','maths'].includes(String(x.subject).toLowerCase())) continue;
+                const k=`${x.subject.toLowerCase()}-Y${y}`; (groups[k] ||= []).push(x);
+              }
+            }
+            for(const [k,arr] of Object.entries(groups)){
+              arr.sort((a,b)=>(a.order??9999)-(b.order??9999)||a.lessonId.localeCompare(b.lessonId));
+              fs.writeFileSync(`ops/live-descriptions/${k}.json`,JSON.stringify({count:arr.length,lessons:arr},null,2));
+            }
+            fs.writeFileSync('ops/live-lesson-descriptions.json',JSON.stringify({count:lessons.length,groupCounts:Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,v.length]))},null,2));
             console.log(`LIVE_LESSON_COUNT=${lessons.length}`);
+            console.log(JSON.stringify(Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,v.length]))));
           })().catch(error => { console.error(error); process.exit(1); });
           NODE
-      - name: Commit snapshot for inspection
+      - name: Commit snapshots for inspection
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/live-lesson-descriptions.json
+          git add ops/live-lesson-descriptions.json ops/live-descriptions/
           if git diff --cached --quiet; then
             echo 'Snapshot unchanged.'
           else
-            git commit -m 'Update live lesson description audit snapshot'
+            git commit -m 'Update split live lesson description snapshots'
             git push
           fi
