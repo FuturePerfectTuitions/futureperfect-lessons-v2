@@ -1,0 +1,138 @@
+name: Phase 18 final Worker redeploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase18-final-worker-redeploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      PRODUCTION_ORIGIN: https://lessons.futureperfect.education
+      WRANGLER_VERSION: 4.125.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify final Phase 18 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase18-online-prelesson.js
+          grep -Fq 'Other resources will be unlocked once the lesson is marked Completed.' worker/src/index-phase18-online-prelesson.js
+          grep -Fq "const PRELESSON_DOWNLOAD_KINDS = new Set(['pre', 'p11corepre', 'p11elevenpre', 'vrpre']);" worker/src/index-phase18-online-prelesson.js
+          grep -Fq "if (item.operation === 'grant' && result.ok) await clearPrelesson(env, item);" worker/src/index-phase18-online-prelesson.js
+          grep -Fq 'main = "src/index-phase18-online-prelesson.js"' worker/wrangler.toml
+
+      - name: Capture and preserve production runtime configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/before.json
+          jq -e '.success == true' /tmp/before.json >/dev/null
+
+          plain() { jq -r --arg n "$1" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/before.json; }
+          field() { jq -r --arg n "$1" --arg t "$2" --arg f "$3" '[.result.bindings[]|select(.name==$n and .type==$t)|.[$f]][0] // ""' /tmp/before.json; }
+
+          ENVIRONMENT_VALUE="$(plain ENVIRONMENT)"
+          ORIGINS="$(plain ALLOWED_ORIGINS)"
+          DEV_ALLOWLIST="$(plain DEV_LOGIN_ALLOWLIST)"
+          PROD_ALLOWLIST="$(plain PROD_LOGIN_ALLOWLIST)"
+          LOGIN_ENABLED="$(plain STUDENT_LOGIN_ENABLED)"
+          STUDENTS_ID="$(field STUDENTS_KV kv_namespace namespace_id)"
+          LESSONS_ID="$(field LESSONS_KV kv_namespace namespace_id)"
+          DATABASE_ID="$(field DB d1 id)"
+          R2_BUCKET="$(field MATERIALS_R2 r2_bucket bucket_name)"
+
+          test "$(printf '%s' "$ENVIRONMENT_VALUE" | tr '[:upper:]' '[:lower:]')" = production
+          test "$(printf '%s' "$LOGIN_ENABLED" | tr '[:upper:]' '[:lower:]')" = true
+          for v in "$STUDENTS_ID" "$LESSONS_ID" "$DATABASE_ID" "$R2_BUCKET"; do test -n "$v"; done
+
+          printf '%s' "$STUDENTS_ID" >/tmp/students
+          printf '%s' "$LESSONS_ID" >/tmp/lessons
+          printf '%s' "$DATABASE_ID" >/tmp/db
+          printf '%s' "$R2_BUCKET" >/tmp/r2
+          printf '%s' "$ENVIRONMENT_VALUE" >/tmp/environment
+          printf '%s' "$ORIGINS" >/tmp/origins
+          printf '%s' "$DEV_ALLOWLIST" >/tmp/dev
+          printf '%s' "$PROD_ALLOWLIST" >/tmp/prod
+          printf '%s' "$LOGIN_ENABLED" >/tmp/login
+          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/before.json >/tmp/secrets
+
+          cat >worker/wrangler.phase18.final.toml <<EOF
+          name = "${WORKER_NAME}"
+          main = "src/index-phase18-online-prelesson.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+          [vars]
+          ENVIRONMENT = "${ENVIRONMENT_VALUE}"
+          ALLOWED_ORIGINS = "${ORIGINS}"
+          DEV_LOGIN_ALLOWLIST = "${DEV_ALLOWLIST}"
+          PROD_LOGIN_ALLOWLIST = "${PROD_ALLOWLIST}"
+          STUDENT_LOGIN_ENABLED = "${LOGIN_ENABLED}"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_ID}"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "${LESSONS_ID}"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "${DATABASE_ID}"
+          EOF
+
+      - name: Deploy final Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} deploy --config worker/wrangler.phase18.final.toml --keep-vars --message 'Phase 18 final Completed-gated PreLesson access' >/tmp/deploy.log 2>/tmp/deploy.err
+
+      - name: Verify bindings, D1 and live route
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/after.json
+          plain() { jq -r --arg n "$1" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/after.json; }
+          field() { jq -r --arg n "$1" --arg t "$2" --arg f "$3" '[.result.bindings[]|select(.name==$n and .type==$t)|.[$f]][0] // ""' /tmp/after.json; }
+          test "$(field STUDENTS_KV kv_namespace namespace_id)" = "$(cat /tmp/students)"
+          test "$(field LESSONS_KV kv_namespace namespace_id)" = "$(cat /tmp/lessons)"
+          test "$(field DB d1 id)" = "$(cat /tmp/db)"
+          test "$(field MATERIALS_R2 r2_bucket bucket_name)" = "$(cat /tmp/r2)"
+          test "$(plain ENVIRONMENT)" = "$(cat /tmp/environment)"
+          test "$(plain ALLOWED_ORIGINS)" = "$(cat /tmp/origins)"
+          test "$(plain DEV_LOGIN_ALLOWLIST)" = "$(cat /tmp/dev)"
+          test "$(plain PROD_LOGIN_ALLOWLIST)" = "$(cat /tmp/prod)"
+          test "$(plain STUDENT_LOGIN_ENABLED)" = "$(cat /tmp/login)"
+          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/after.json >/tmp/secrets-after
+          cmp -s /tmp/secrets /tmp/secrets-after
+
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --config worker/wrangler.phase18.final.toml --remote --json --command "SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type='table' AND name='online_prelesson_entitlements'; PRAGMA quick_check;" >/tmp/d1.json 2>/tmp/d1.err
+          test "$(jq -r '.[0].results[0].table_count' /tmp/d1.json)" = 1
+          test "$(jq -r '.[1].results[0].quick_check' /tmp/d1.json)" = ok
+
+          code="$(curl --silent --show-error --output /tmp/noauth.json --write-out '%{http_code}' --header 'Content-Type: application/json' --request POST --data '{"items":[{"syncRowId":"phase18-final","operation":"prelesson_grant","portalUserId":"missing","lessonId":"missing","batchKey":"O","lessonDate":"2026-09-06"}]}' "$WORKER_BASE/api/v1/admin/excel-entitlements/sync")"
+          test "$code" = 401
+          grep -Fq 'SYNC_UNAUTHORISED' /tmp/noauth.json
+          rm -f worker/wrangler.phase18.final.toml
+          echo 'PHASE18_FINAL_WORKER_REDEPLOY_PASS'
