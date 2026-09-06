@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#012169">
+  <title>Privacy | Future Perfect Tuitions</title>
+  <link rel="icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+  <link rel="stylesheet" href="assets/phase5.css">
+  <link rel="stylesheet" href="assets/site-chrome.css">
+</head>
+<body class="phase5-page">
+  <div class="phase5-airmail-border" aria-hidden="true"></div>
+  <main class="legal-page">
+    <div class="legal-topbar">
+      <a href="https://futureperfect.education/" aria-label="Future Perfect Tuitions"><img src="assets/fpt-logo.png" class="legal-logo" alt="Future Perfect Tuitions"></a>
+      <button class="legal-back" type="button" onclick="goBack()">Back</button>
+    </div>
+
+    <article class="legal-card">
+      <h1>Privacy Policy</h1>
+      <div class="legal-meta"><strong>Future Perfect Tuitions</strong></div>
+      <div class="legal-meta">Last updated: <span id="lastUpdated"></span></div>
+
+      <div class="legal-content">
+        <p>Future Perfect Tuitions (“we”, “us”, “our”) is committed to protecting the privacy of students and parents. This policy explains how we collect, use, and store personal information when you use our tuition services and the student lesson portal.</p>
+
+        <h2>1) Information we collect</h2>
+        <p>We may collect the following information, where relevant:</p>
+        <ul>
+          <li><strong>Parents/guardians:</strong> name, email address, phone number, billing details and payment records.</li>
+          <li><strong>Students:</strong> name, year group, learning notes, assessment outcomes, and lesson allocations.</li>
+          <li><strong>Portal access:</strong> username and a password/access code (used to control access to content).</li>
+        </ul>
+
+        <h2>2) How we use your information</h2>
+        <p>We use personal data to:</p>
+        <ul>
+          <li>provide tuition services and learning support;</li>
+          <li>manage classes, lesson allocations, and student progress;</li>
+          <li>communicate with parents/guardians about sessions, homework, and progress;</li>
+          <li>provide access to the lesson portal;</li>
+          <li>process payments and manage administration;</li>
+          <li>improve the quality of our teaching and resources.</li>
+        </ul>
+        <p>We do <strong>not</strong> sell personal data or share it with third parties for marketing.</p>
+
+        <h2>3) Lesson portal and video content</h2>
+        <p>The portal is intended for registered students only. Lesson videos and learning resources are proprietary material belonging to Future Perfect Tuitions and must not be shared, copied, recorded, or distributed outside of Future Perfect Tuitions.</p>
+
+        <h2>4) Data storage and security</h2>
+        <p>We take reasonable steps to protect personal data using secure systems and restricted access. However, no system can guarantee absolute security. Please keep login details confidential.</p>
+
+        <h2>5) How long we keep data</h2>
+        <p>We keep student and parent data while the student is enrolled and for a reasonable period afterwards for records and administration. You may request deletion of your data where appropriate and where we are not required to retain it for legal or accounting purposes.</p>
+
+        <h2>6) Your rights</h2>
+        <p>Under UK data protection law, you have rights including:</p>
+        <ul>
+          <li>to access the personal data we hold about you;</li>
+          <li>to correct inaccurate or incomplete data;</li>
+          <li>to request deletion of data in certain circumstances;</li>
+          <li>to object to or restrict certain processing.</li>
+        </ul>
+
+        <h2>7) Contact</h2>
+        <p>If you have questions about this policy or wish to make a request, please contact:</p>
+        <p><strong>Future Perfect Tuitions</strong><br>Email: <em>sej@futureperfect.education</em><br>Phone: <em>(0044)7583391800</em></p>
+      </div>
+    </article>
+
+    <footer class="phase5-footer" data-site-footer></footer>
+  </main>
+
+  <script src="footer.js"></script>
+  <script>
+    function goBack() {
+      history.length > 1 ? history.back() : (location.href = "phase11.html");
+    }
+    document.getElementById("lastUpdated").textContent = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  </script>
+</body>
+</html>
