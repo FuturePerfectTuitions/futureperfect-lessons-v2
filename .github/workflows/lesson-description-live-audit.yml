@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -70,13 +70,19 @@ jobs:
             let v; try{v=JSON.parse(raw)}catch{continue}
             lessons.push({key,lessonId:v.lessonId||key.slice(7),order:v.order??null,title:v.title||'',description:v.description||'',subject:v.subject||'',active:v.active!==false,displayIds:v.displayIds||{},hasVideo:!!v.core?.video,record:v});
           }
-          fs.writeFileSync('/tmp/live-lessons.json',JSON.stringify({namespaceId:ns,count:lessons.length,lessons},null,2));
+          fs.writeFileSync('ops/live-lesson-descriptions.json',JSON.stringify({count:lessons.length,lessons},null,2));
           console.log(`LIVE_LESSON_COUNT=${lessons.length}`);
-          for(const x of lessons) console.log(`${x.lessonId}\t${x.subject}\t${x.title}\t${String(x.description).replace(/\s+/g,' ')}`);
           NODE
-      - name: Upload live snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: live-lesson-descriptions
-          path: /tmp/live-lessons.json
-          retention-days: 1
+      - name: Commit snapshot for inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/live-lesson-descriptions.json
+          if git diff --cached --quiet; then
+            echo 'Snapshot unchanged.'
+          else
+            git commit -m 'Update live lesson description audit snapshot'
+            git push
+          fi
