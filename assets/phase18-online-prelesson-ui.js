@@ -1,5 +1,5 @@
 (() => {
-  const PRELESSON_MESSAGE = 'Only PreLesson Sheets available to download and print. Other resources will be unlocked once the lesson starts.';
+  const PRELESSON_MESSAGE = 'Only PreLesson Sheets available to download and print. Other resources will be unlocked once the lesson is marked Completed.';
   const originalFetch = window.fetch.bind(window);
   let prelessonList = new Set();
   let currentDetail = null;
@@ -34,7 +34,7 @@
           ? {
               lessonId: String(body.lesson.lessonId || ''),
               displayLessonId: String(body.lesson.displayLessonId || ''),
-              message: String(body.lesson.accessMessage || PRELESSON_MESSAGE)
+              message: PRELESSON_MESSAGE
             }
           : null;
         queueApply();
