@@ -1,6 +1,6 @@
 import { PHASE11_NAVIGATION_MANIFEST } from './phase11-navigation-manifest.generated.js';
 
-const PHASE11_CATALOGUE_SHA256 = '7ef38f56d9891e4e1ae5aaa3874ae43b18a2fcd70f8f02e34b54ff9066306663';
+const PHASE11_CATALOGUE_SHA256 = 'eb24f0ff5a8c5c004ef08b68f4467b4bd0814c28f48d751940d5d525cf773bc2';
 const PHASE11_CURRICULUM_CODES = Object.freeze([
   'MATHS_Y2',
   'MATHS_Y3',
@@ -74,7 +74,7 @@ function validBundledManifest(manifest = PHASE11_NAVIGATION_MANIFEST) {
   if (manifest.catalogueSha256 !== PHASE11_CATALOGUE_SHA256) return false;
   if (!manifest.curricula || !manifest.lessons) return false;
   if (Object.keys(manifest.curricula).length !== 11) return false;
-  if (Object.keys(manifest.lessons).length !== 369) return false;
+  if (Object.keys(manifest.lessons).length !== 372) return false;
   return PHASE11_CURRICULUM_CODES.every(code => {
     const curriculum = manifest.curricula[code];
     return curriculum?.curriculumCode === code && Array.isArray(curriculum.lessonIds);
