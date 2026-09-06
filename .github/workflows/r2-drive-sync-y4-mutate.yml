@@ -32,6 +32,41 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install --quiet google-auth requests
 
+      - name: Patch stale Year 4 Maths boundary guard to current Drive sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          pre = Path('scripts/r2_drive_y4_full_preflight.py')
+          s = pre.read_text(encoding='utf-8')
+          old = 'MATHS_RANGES = {1: range(1, 14), 2: range(14, 23), 3: range(23, 37)}'
+          new = 'MATHS_RANGES = {1: range(1, 13), 2: range(13, 22), 3: range(22, 36)}'
+          if old not in s:
+              raise SystemExit('REFUSE: expected old Year 4 Maths boundary guard not found')
+          pre.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          app = Path('scripts/r2_drive_y4_apply_from_preflight.py')
+          s = app.read_text(encoding='utf-8')
+          old = 'if preflight.get("ordinary_english_lesson_count") != 34 or preflight.get("maths_lesson_count") != 36:'
+          new = 'if preflight.get("ordinary_english_lesson_count") != 34 or preflight.get("maths_lesson_count") != 35:'
+          if old not in s:
+              raise SystemExit('REFUSE: expected old Year 4 apply count guard not found')
+          s = s.replace(old, new, 1)
+          old = 'if preflight.get("lesson_count") != 70:'
+          new = 'if preflight.get("lesson_count") != 69:'
+          if old not in s:
+              raise SystemExit('REFUSE: expected old Year 4 total count guard not found')
+          s = s.replace(old, new, 1)
+          old = 'raise RuntimeError(f"Corrected Year 4 total lesson count is not 70: {preflight.get(\'lesson_count\')}")'
+          new = 'raise RuntimeError(f"Corrected Year 4 total lesson count is not 69: {preflight.get(\'lesson_count\')}")'
+          if old not in s:
+              raise SystemExit('REFUSE: expected old Year 4 total count message not found')
+          app.write_text(s.replace(old, new, 1), encoding='utf-8')
+          print('Y4_CURRENT_DRIVE_BOUNDARY_PATCH_PASS maths=35 total=69')
+          PY
+
       - name: Reconcile current Year 4 English and Maths from Drive to R2
         env:
           GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
