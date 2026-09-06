@@ -43,6 +43,7 @@ jobs:
           const ns = process.env.LESSONS_KV_ID;
           const api = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
           const headers = { Authorization: `Bearer ${token}` };
+          const PLACEHOLDER = 'cO1Zionu8NC';
 
           async function getText(key) {
             const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, { headers });
@@ -71,8 +72,8 @@ jobs:
               subject:r?.subject,
               active:r?.active,
               displayIds:r?.displayIds,
-              video:r?.core?.video ?? null,
-              coreKeys:r?.core ? Object.keys(r.core) : []
+              contentStatus:r?.contentStatus ?? null,
+              video:r?.core?.video ?? null
             };
           }
 
@@ -80,18 +81,19 @@ jobs:
           console.log('CURRICULUM_ENGLISH_Y6=' + (curriculumRaw ?? 'MISSING'));
           const keys = await list('lesson:');
           const matches = [];
-          const placeholders = [];
+          const placeholderUsages = [];
+          let explicitExample = null;
           for (const key of keys) {
             const raw = await getText(key); if (!raw) continue;
             let r; try { r = JSON.parse(raw); } catch { continue; }
             const vals = Object.values(r?.displayIds || {}).map(String);
-            const hay = JSON.stringify(r?.core?.video ?? '').toLowerCase() + ' ' + String(r?.title || '').toLowerCase();
-            if (vals.includes('Y6T1E01') || vals.includes('Y6T1E02') || String(r?.lessonId||'') === 'Y6T1E01' || String(r?.lessonId||'') === 'Y6T1E02') {
-              matches.push(summary(key,r));
-            }
-            if (hay.includes('coming soon') || hay.includes('placeholder')) placeholders.push(summary(key,r));
+            if (vals.includes('Y6T1E01') || vals.includes('Y6T1E02')) matches.push(summary(key,r));
+            const videoText = JSON.stringify(r?.core?.video ?? '');
+            if (videoText.includes(PLACEHOLDER)) placeholderUsages.push(summary(key,r));
+            if (!explicitExample && r?.core?.video && !videoText.includes(PLACEHOLDER)) explicitExample = summary(key,r);
           }
           console.log('Y6_ENGLISH_MATCHES=' + JSON.stringify(matches));
-          console.log('PLACEHOLDER_CANDIDATES=' + JSON.stringify(placeholders.slice(0,20)));
+          console.log('PLACEHOLDER_USAGES=' + JSON.stringify(placeholderUsages.slice(0,20)));
+          console.log('EXPLICIT_VIDEO_EXAMPLE=' + JSON.stringify(explicitExample));
           console.log('AUDIT_Y6_ENGLISH_PASS');
           NODE
