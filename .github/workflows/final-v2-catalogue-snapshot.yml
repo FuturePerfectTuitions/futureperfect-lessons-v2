@@ -1,0 +1,104 @@
+name: Final Portal V2 catalogue read-only snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-v2-catalogue-snapshot.yml
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve and guard development bindings
+        id: guard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p final-v2-catalogue/values
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          env_value="$(jq -r '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text") | .text' <<<"$settings")"
+          lessons="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          r2_bucket="$(jq -r '.result.bindings[]? | select(.bucket_name!=null) | select(.name|test("R2|MATERIAL|CONTENT";"i")) | .bucket_name' <<<"$settings" | head -n1)"
+          if [ -z "$r2_bucket" ] || [ "$r2_bucket" = null ]; then
+            r2_bucket="$(jq -r '.result.bindings[]? | select(.bucket_name!=null) | .bucket_name' <<<"$settings" | head -n1)"
+          fi
+          test "$env_value" = development || { echo "REFUSE: deployed ENVIRONMENT=$env_value" >&2; exit 1; }
+          test "$r2_bucket" = fpt-materials-dev || { echo "REFUSE: deployed R2 bucket=$r2_bucket" >&2; exit 1; }
+          test -n "$lessons"; test "$lessons" != null
+          jq -n --arg env "$env_value" --arg bucket "$r2_bucket" --arg worker "$WORKER_NAME" '{worker:$worker,environment:$env,r2Bucket:$bucket,lessonsKvResolved:true}' > final-v2-catalogue/environment.json
+          echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
+          echo "Development guard PASS: worker=$WORKER_NAME env=$env_value r2=$r2_bucket"
+
+      - name: Export curriculum and lesson catalogue read-only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LESSONS_KV_ID: ${{ steps.guard.outputs.lessons }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          : > final-v2-catalogue/key-names.txt
+          for prefix in curriculum: lesson:; do
+            cursor=''
+            while :; do
+              encoded_prefix="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$prefix")"
+              url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/keys?limit=1000&prefix=${encoded_prefix}"
+              if [ -n "$cursor" ]; then
+                encoded_cursor="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+                url="${url}&cursor=${encoded_cursor}"
+              fi
+              page="$(curl -fsS "${auth[@]}" "$url")"
+              jq -e '.success == true' <<<"$page" >/dev/null
+              jq -r '.result[]?.name' <<<"$page" >> final-v2-catalogue/key-names.txt
+              cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+              [ -z "$cursor" ] && break
+            done
+          done
+          LC_ALL=C sort -u final-v2-catalogue/key-names.txt -o final-v2-catalogue/key-names.txt
+          test -s final-v2-catalogue/key-names.txt
+          : > final-v2-catalogue/manifest.tsv
+          while IFS= read -r key; do
+            token="$(printf '%s' "$key" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+            encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}/values/${encoded}" > "final-v2-catalogue/values/${token}.value"
+            printf '%s\t%s\n' "$token" "$key" >> final-v2-catalogue/manifest.tsv
+          done < final-v2-catalogue/key-names.txt
+          printf '{"keyCount":%s,"curriculumCount":%s,"lessonCount":%s}\n' \
+            "$(wc -l < final-v2-catalogue/key-names.txt | tr -d ' ')" \
+            "$(grep -c '^curriculum:' final-v2-catalogue/key-names.txt || true)" \
+            "$(grep -c '^lesson:' final-v2-catalogue/key-names.txt || true)" \
+            > final-v2-catalogue/counts.json
+
+      - name: Catalogue-only safety check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -ERqi '"(password|expires|portalUserId|username|manualAccess)"[[:space:]]*:' final-v2-catalogue/values; then
+            echo 'Unexpected user-shaped field found; refusing artifact.' >&2
+            exit 1
+          fi
+          echo 'Catalogue-only safety check PASS'
+
+      - name: Upload final V2 catalogue snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-v2-catalogue-snapshot
+          path: final-v2-catalogue/
+          retention-days: 7
