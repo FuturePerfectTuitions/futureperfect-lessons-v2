@@ -4,16 +4,16 @@ compatibility_date = "2026-08-20"
 keep_vars = true
 
 [vars]
-ENVIRONMENT = "development"
-ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io"
+ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futureperfect.education"
 DEV_LOGIN_ALLOWLIST = ""
+PROD_LOGIN_ALLOWLIST = "abi3007,ame0503,ann3009,ava2007,conn2209,dha2806,kiaan1312,ma0607,mahu1907,meh0510,rei0710,yuug1210,zar0603"
+STUDENT_LOGIN_ENABLED = "true"
 
-# Phase 17 frozen development entrypoint. src/index-phase17.js adds one narrow
-# pre-launch safety guard on top of the accepted Phase 13/15 stack: special-area
-# ScreenPal playback succeeds only when the stored special-content metadata
-# contains the exact explicit approved HTTPS URL returned by the inherited
-# handler. A bare ScreenPal ID is therefore never sufficient at the Phase 17
-# boundary.
+# Portal V2 production entrypoint. src/index-phase17.js retains the Phase 17
+# explicit ScreenPal metadata guard and also fails closed for student login:
+# production login is available only when STUDENT_LOGIN_ENABLED is true AND the
+# normalised username is present in PROD_LOGIN_ALLOWLIST.
 #
 # The Phase 13 Excel route remains unchanged and still requires the dedicated
 # EXCEL_SYNC_TOKEN Worker secret. The secret is deliberately not present in
@@ -21,9 +21,7 @@ DEV_LOGIN_ALLOWLIST = ""
 # idempotent entitlement identity while Batch + Lesson remains operational
 # release context; Excel does not mutate membership.
 #
-# Sensitive values, private student configuration and Cloudflare binding IDs are
-# never committed. Guarded deployment workflows reconstruct the audited isolated
-# development bindings from Cloudflare before deploy. Normal student login
-# remains disabled. The checked-in development allowlist is empty after Phase 17
-# fixture cleanup; any temporary owner-only verification access must be applied
-# privately and removed again before closure.
+# Passwords, Answer Pack passwords, private student records and Cloudflare
+# credential values are never committed in plaintext. The production deployment
+# preserves the existing audited Students KV, Lessons KV, D1 and R2 bindings;
+# exact binding identifiers remain Cloudflare-managed rather than source data.
