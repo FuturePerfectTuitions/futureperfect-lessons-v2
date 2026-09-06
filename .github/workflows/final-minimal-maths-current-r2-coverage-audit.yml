@@ -1,0 +1,79 @@
+name: Final minimal - active Maths current R2 coverage audit
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-maths-current-r2-coverage-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Compare active Maths KV references to current Drive-coded R2 objects
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,re,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          s=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=auth,timeout=60).json(); assert s.get('success')
+          b=s['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); bucket=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert bucket=='fpt-materials-dev'; assert ns
+          base=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'
+          def kv(k):
+            r=requests.get(base+urllib.parse.quote(k,safe=''),headers=auth,timeout=60); r.raise_for_status(); return r.json()
+          objs=[]; cursor=None
+          while True:
+            p={'per_page':'1000'}
+            if cursor:p['cursor']=cursor
+            q=requests.get(f'{api}/accounts/{acct}/r2/buckets/{bucket}/objects',headers=auth,params=p,timeout=120).json(); assert q.get('success'),q
+            objs.extend(q.get('result') or []); info=q.get('result_info') or {}; cursor=info.get('cursor') if info.get('is_truncated') else None
+            if not cursor:break
+          r2={o.get('key') for o in objs if o.get('key') and not o.get('key').endswith('/')}
+          cfg={
+            'MATHS_Y2':('maths/year2/','Y2T',85),
+            'MATHS_Y3':('maths/year3/','Y3T',95),
+            'MATHS_L1':('maths/year4/','L1T',100),
+            'MATHS_L2':('maths/year5/','L2T',137),
+            'MATHS_L3':('maths/year6/','L3T',138),
+          }
+          out={}
+          for cur,(prefix,codeprefix,expected) in cfg.items():
+            current={k for k in r2 if k.startswith(prefix+codeprefix)}
+            assert len(current)==expected,(cur,len(current),expected)
+            ids=kv('curriculum:'+cur).get('lessonIds') or []
+            refs=[]
+            def walk(x):
+              if isinstance(x,dict):
+                for k,v in x.items():
+                  if k=='r2Key' and isinstance(v,str) and v.strip(): refs.append(v.strip())
+                  else: walk(v)
+              elif isinstance(x,list):
+                for v in x: walk(v)
+            for lid in ids: walk(kv('lesson:'+lid))
+            maths_refs={x for x in refs if x.startswith('maths/')}
+            stale=sorted(x for x in maths_refs if x not in current)
+            missing=sorted(current-maths_refs)
+            out[cur]={'lessons':len(ids),'currentR2':len(current),'uniqueMathsRefs':len(maths_refs),'staleOrNoncurrentRefs':len(stale),'currentR2Unreferenced':len(missing),'staleExamples':stale[:20],'missingExamples':missing[:20]}
+          json.dump({'environment':env,'bucket':bucket,'curricula':out},open('maths-current-r2-coverage.json','w'),indent=2,sort_keys=True)
+          print(json.dumps(out,indent=2,sort_keys=True))
+          # Y5/Y6 must be current before closure; earlier years are reported too.
+          assert out['MATHS_L2']['staleOrNoncurrentRefs']==0 and out['MATHS_L2']['currentR2Unreferenced']==0
+          assert out['MATHS_L3']['staleOrNoncurrentRefs']==0 and out['MATHS_L3']['currentR2Unreferenced']==0
+          print('MATHS_CURRENT_R2_COVERAGE_PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maths-current-r2-coverage
+          path: maths-current-r2-coverage.json
+          retention-days: 30
