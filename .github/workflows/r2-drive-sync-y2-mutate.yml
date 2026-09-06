@@ -42,3 +42,5 @@ jobs:
           path: y2-r2-reconciliation-summary.json
           if-no-files-found: warn
           retention-days: 30
+
+# Final closure rerun 2026-09-06
