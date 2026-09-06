@@ -30,6 +30,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Generate canonical navigation manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/phase11-navigation-manifest.mjs >/tmp/fpt-prod-navigation.json
+          jq -e '.lessons==369 and .curricula==11' /tmp/fpt-prod-navigation.json >/dev/null
       - name: Decrypt and validate secure payload
         shell: bash
         run: |
