@@ -1,0 +1,194 @@
+name: Ops reconcile English content and safe Drive metadata
+
+on:
+  push:
+    branches: [ops/english-content-reconcile]
+    paths:
+      - 'ops/english-content-reconcile.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      V2_WORKER: fpt-portal-v2-worker
+      LEGACY_WORKER: frosty-rain-828e
+    steps:
+      - name: Guard development and apply exact English reconciliation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          v2_settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER}/settings")"
+          jq -e '.success == true' <<<"$v2_settings" >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' <<<"$v2_settings" >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' <<<"$v2_settings")" = 'fpt-materials-dev'
+          V2_LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$v2_settings")"
+          test -n "$V2_LESSONS"; test "$V2_LESSONS" != null
+
+          legacy_settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER}/settings")"
+          jq -e '.success == true' <<<"$legacy_settings" >/dev/null
+          LEGACY_LESSONS="$(jq -r '.result.bindings[]|select(.name=="FPT_LESSONS" and .type=="kv_namespace")|.namespace_id' <<<"$legacy_settings")"
+          test -n "$LEGACY_LESSONS"; test "$LEGACY_LESSONS" != null
+
+          export V2_LESSONS LEGACY_LESSONS
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const cf = 'https://api.cloudflare.com/client/v4';
+          const v2Api = `${cf}/accounts/${account}/storage/kv/namespaces/${process.env.V2_LESSONS}`;
+          const legacyApi = `${cf}/accounts/${account}/storage/kv/namespaces/${process.env.LEGACY_LESSONS}`;
+          const headers = { Authorization: `Bearer ${token}` };
+          const fail = m => { throw new Error(m); };
+          const eq = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+
+          async function getText(api,key) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, {headers});
+            if (!r.ok) fail(`GET ${key} failed HTTP ${r.status}`);
+            return await r.text();
+          }
+          async function getJson(key) { return JSON.parse(await getText(v2Api,key)); }
+          async function putJson(key,obj) {
+            const r = await fetch(`${v2Api}/values/${encodeURIComponent(key)}`, {
+              method:'PUT', headers:{...headers,'Content-Type':'application/json'}, body:JSON.stringify(obj)
+            });
+            const b = await r.json().catch(()=>null);
+            if (!r.ok || !b?.success) fail(`PUT ${key} failed HTTP ${r.status}: ${JSON.stringify(b)}`);
+          }
+          function parseLegacyObjects(raw) {
+            raw = raw.trim();
+            if (!raw) return [];
+            try { const x=JSON.parse(raw); return Array.isArray(x)?x:[x]; }
+            catch { return JSON.parse(`[${raw}]`); }
+          }
+          function video(sp) {
+            return {
+              contentUrl:`https://screenpal.com/content/video/${sp}`,
+              embedUrl:`https://go.screenpal.com/player/${sp}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              screenpal:sp,
+              watchUrl:`https://go.screenpal.com/watch/${sp}`
+            };
+          }
+
+          const legacyBuckets = {};
+          for (const bucket of ['Y2E','Y3E','Y4E','Y5E']) {
+            legacyBuckets[bucket] = parseLegacyObjects(await getText(legacyApi,bucket));
+          }
+          function legacyBySp(bucket,sp) {
+            const hits = legacyBuckets[bucket].filter(x=>x.sp===sp);
+            if (hits.length!==1) fail(`Legacy ${bucket} ${sp} expected one record, got ${hits.length}`);
+            if (!hits[0].desc) fail(`Legacy ${bucket} ${sp} has no description`);
+            return hits[0];
+          }
+
+          const content = [
+            {id:'Y2E1', bucket:'Y2E', sp:'cOiwjgnwDwG', mode:'full', alias:'Y2T1E01'},
+            {id:'Y3E1', bucket:'Y3E', sp:'cOj3XznvPtK', mode:'description', alias:'Y3T1E01'},
+            {id:'Y3E3', bucket:'Y3E', sp:'cOjTo4nwVMj', mode:'description', alias:'Y3T1E02'},
+            {id:'Y3E4', bucket:'Y3E', sp:'cOjTrJnwnLG', mode:'description', alias:'Y3T1E03'},
+            {id:'Y3E5', bucket:'Y3E', sp:'cOjt6BnwiqH', mode:'description', alias:'Y3T1E04'},
+            {id:'Y3E6', bucket:'Y3E', sp:'cOjuQpnwQNG', mode:'description', alias:'Y3T1E05'},
+            {id:'Y4E3', sp:'cOQhjRnwvtV', mode:'video_only', alias:'Y4T1E03'},
+            {id:'Y4E13', bucket:'Y4E', sp:'cOQeDQnwO1K', mode:'full', alias:'Y4T1E09'},
+            {id:'Y4E14', bucket:'Y4E', sp:'cOQeFDnwOuu', mode:'full', alias:'Y4T1E10'},
+            {id:'Y5E7', bucket:'Y5E', sp:'cOQeqXnwOBf', mode:'full', alias:'Y5T1E06'},
+            {id:'Y5E10', bucket:'Y5E', sp:'cOQerynwOS9', mode:'full', alias:'Y5T1E07'},
+            {id:'Y5E11', bucket:'Y5E', sp:'cOQf1gnwtR0', mode:'full', alias:'Y5T1E08'},
+            {id:'Y5E12', bucket:'Y5E', sp:'cOQfiBnwuna', mode:'full', alias:'Y5T1E09'},
+            {id:'Y5E13', bucket:'Y5E', sp:'cOQfjknwuiG', mode:'full', alias:'Y5T1E10'}
+          ];
+
+          for (const t of content) {
+            const key=`lesson:${t.id}`;
+            const r=await getJson(key);
+            if (r.lessonId!==t.id) fail(`${key} lessonId guard failed`);
+            const normalAlias=Object.entries(r.displayIds||{}).find(([k])=>k.match(/^english-year[2-5]$/))?.[1];
+            if (normalAlias!==t.alias) fail(`${key} alias guard failed: ${normalAlias}`);
+            const currentSp=r.core?.video?.screenpal ?? null;
+            if (t.mode==='description') {
+              if (currentSp!==t.sp) fail(`${key} existing video mismatch: ${currentSp}`);
+              if ((r.description||'')!=='') fail(`${key} expected blank description`);
+              const src=legacyBySp(t.bucket,t.sp);
+              r.description=src.desc;
+              r.contentStatus.mainVideo='available';
+              r.contentStatus.description='available';
+              r.contentStatus.ownerConfirmedPending=false;
+              delete r.contentStatus.confirmedOn;
+            } else if (t.mode==='full') {
+              if (currentSp!==null) fail(`${key} expected no current video, found ${currentSp}`);
+              if ((r.description||'')!=='') fail(`${key} expected blank description`);
+              if (r.contentStatus?.mainVideo!=='in_production') fail(`${key} expected in_production video status`);
+              const src=legacyBySp(t.bucket,t.sp);
+              r.core.video=video(t.sp);
+              r.description=src.desc;
+              r.contentStatus.mainVideo='available';
+              r.contentStatus.description='available';
+              r.contentStatus.ownerConfirmedPending=false;
+              delete r.contentStatus.confirmedOn;
+            } else if (t.mode==='video_only') {
+              if (currentSp!==null) fail(`${key} expected no current video, found ${currentSp}`);
+              if ((r.description||'')!=='') fail(`${key} expected blank description`);
+              r.core.video=video(t.sp);
+              r.contentStatus.mainVideo='available';
+              r.contentStatus.ownerConfirmedPending=false;
+              delete r.contentStatus.confirmedOn;
+            }
+            await putJson(key,r);
+            console.log(`CONTENT_UPDATED ${key} ${t.mode} ${t.sp}`);
+          }
+
+          const titles = [
+            ['Y2E1','Lesson 1 Comprehension, Simple Present Simple Past','Comprehension, Simple Present Simple Past'],
+            ['Y2E2','Lesson 2 Tenses and Contractions','Tenses and Contractions'],
+            ['Y2E3','Lesson 3 Tenses, Adjectives, Grammar and Punctuation, Spelling','Tenses, Adjectives, Grammar and Punctuation, Spelling'],
+            ['Y2E4','Lesson 4 Conjunctions','Conjunctions'],
+            ['Y2E5','Lesson 5 Special Recap and Catchup Session for Conjunctions and Punctuations','Special Recap and Catchup Session for Conjunctions and Punctuations'],
+            ['Y2E6','Lesson 6 Expanded Nouns','Expanded Nouns'],
+            ['Y2E7','Lesson 7 Compound Nouns and Commas in Lists','Compound Nouns and Commas in Lists'],
+            ['Y2E8','Lesson 8 Suffixes','Suffixes'],
+            ['Y2E10','Lesson 10 Comprehension & Progressive Tenses','Comprehension & Progressive Tenses'],
+            ['Y2E11','Lesson 11 Comprehension & Tenses Game','Comprehension & Tenses Game'],
+            ['Y3E5','Articles','Articles A, AN & THE']
+          ];
+          for (const [id,oldTitle,newTitle] of titles) {
+            const key=`lesson:${id}`;
+            const r=await getJson(key);
+            if (r.lessonId!==id || r.title!==oldTitle) fail(`${key} title guard failed: ${r.title}`);
+            r.title=newTitle;
+            await putJson(key,r);
+            console.log(`TITLE_UPDATED ${key} -> ${newTitle}`);
+          }
+
+          const ckey='curriculum:ENGLISH_Y4';
+          const c=await getJson(ckey);
+          const expected=['Y4E1','Y4E2','Y4E3','Y4E4','Y4E5','Y4E7','Y4E9','Y4E12','Y4E13','Y4E14','Y4E19','Y4E16','Y4E17','Y4E18','Y4E20','Y4E21','Y4E22','Y4E23','Y4E24','Y4E25','Y4E26','Y4E27','Y4E28','Y4E29','Y4E30','Y4E31','Y4E32','Y4E33','Y4E34','Y4E35','Y4E36','Y4E37','Y4E38','Y4E41'];
+          const corrected=['Y4E1','Y4E2','Y4E3','Y4E4','Y4E5','Y4E7','Y4E9','Y4E12','Y4E13','Y4E14','Y4E16','Y4E17','Y4E18','Y4E19','Y4E20','Y4E21','Y4E22','Y4E23','Y4E24','Y4E25','Y4E26','Y4E27','Y4E28','Y4E29','Y4E30','Y4E31','Y4E32','Y4E33','Y4E34','Y4E35','Y4E36','Y4E37','Y4E38','Y4E41'];
+          if (c.curriculumCode!=='ENGLISH_Y4' || !eq(c.lessonIds,expected)) fail('ENGLISH_Y4 curriculum guard failed');
+          c.lessonIds=corrected;
+          await putJson(ckey,c);
+          console.log('CURRICULUM_UPDATED ENGLISH_Y4 E11-E14 order');
+
+          for (const t of content) {
+            const r=await getJson(`lesson:${t.id}`);
+            if (r.core?.video?.screenpal!==t.sp) fail(`${t.id} video verification failed`);
+            if (r.contentStatus?.mainVideo!=='available' || r.contentStatus?.ownerConfirmedPending!==false) fail(`${t.id} video-status verification failed`);
+            if (t.mode!=='video_only' && (!r.description || r.contentStatus?.description!=='available')) fail(`${t.id} description verification failed`);
+            if (t.mode==='video_only' && r.contentStatus?.description!=='pending') fail(`${t.id} description should remain pending`);
+          }
+          for (const [id,,newTitle] of titles) {
+            if ((await getJson(`lesson:${id}`)).title!==newTitle) fail(`${id} title verification failed`);
+          }
+          if (!eq((await getJson(ckey)).lessonIds,corrected)) fail('ENGLISH_Y4 curriculum verification failed');
+          console.log(`ENGLISH_RECONCILE_PASS content=${content.length} titles=${titles.length} curriculum=1`);
+          NODE
