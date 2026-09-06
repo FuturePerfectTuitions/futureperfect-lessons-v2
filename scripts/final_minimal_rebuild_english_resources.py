@@ -92,6 +92,10 @@ for lid in lesson_ids:
     p11=patched.setdefault('phase11Resources',{})
     p11['core']={'preLessonPairs':[p for p in pre_pairs if p.get('answerPack')],'cumulativeHomeworks':cum_pairs,'supplementaryAnswers':hw_extra+cum_extra+pre_extra}
     p11['elevenPlus']={'preLessonPairs':ep_pre_pairs,'homeworks':ep_hw_pairs,'cumulativeHomeworks':ep_cum_pairs,'supplementaryAnswers':ep_hw_extra+ep_cum_extra+ep_pre_extra}
+    # Obsolete phase11OtherResources paths are not part of the current reconciled R2 set.
+    # Current ordinary 'other' resources are represented in core.otherResources above;
+    # there are no current dedicated 11+ other-resource objects for the supported English years.
+    patched['phase11OtherResources']={'elevenPlus':[]}
     oldvr=patched.get('vr') if isinstance(patched.get('vr'),dict) else {}
     patched['vr']={**{k:v for k,v in oldvr.items() if k in ('preLessonVideo','homeworkVideo','homeworkSolutionVideo')},'homeworks':[{'pairId':f'{lid}-vr-hw-{i:02d}','homework':p.get('homework'),'answerPack':p.get('answerPack')} for i,p in enumerate(vr_hw_pairs,1)],'preLesson':[{'pairId':f'{lid}-vr-pre-{i:02d}','sheet':p.get('sheet'),'answerKey':p.get('answerPack')} for i,p in enumerate(vr_pre_pairs,1)]}
     p11['vr']={'supplementaryAnswers':vr_hw_extra+vr_pre_extra}
