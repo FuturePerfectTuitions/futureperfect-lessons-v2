@@ -1,0 +1,91 @@
+name: Final minimal - install current navigation manifest
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-install-current-navigation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/final-drive-r2-kv-closure-2026-09-06
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate current manifest, patch cache guard, verify and commit
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,urllib.parse,requests,re,pathlib
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          s=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=auth,timeout=60).json(); assert s.get('success')
+          b=s['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); bucket=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert bucket=='fpt-materials-dev'; assert ns
+          base=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'
+          def get(k):
+            r=requests.get(base+urllib.parse.quote(k,safe=''),headers=auth,timeout=60); r.raise_for_status(); return r.json()
+          expected={'MATHS_Y2':36,'MATHS_Y3':34,'MATHS_L1':35,'MATHS_L2':38,'MATHS_L3':43,'MATHS_Y6_EXTRA':24,'ENGLISH_Y2':29,'ENGLISH_Y3':32,'ENGLISH_Y4':34,'ENGLISH_Y5':36,'ENGLISH_Y6':31}
+          curricula={}; raw_lessons={}; ids=[]; raw_curricula={}
+          for code in expected:
+            rec=get('curriculum:'+code); raw_curricula[code]=rec; lesson_ids=rec.get('lessonIds') or []
+            assert rec.get('curriculumCode')==code and len(lesson_ids)==expected[code] and len(set(lesson_ids))==len(lesson_ids)
+            curricula[code]={'curriculumCode':code,'lessonIds':lesson_ids,'schemaVersion':rec.get('schemaVersion',1)}; ids.extend(lesson_ids)
+          assert len(ids)==372 and len(set(ids))==372
+          lessons={}
+          for lid in sorted(ids):
+            rec=get('lesson:'+lid); assert rec.get('lessonId')==lid and rec.get('active') is not False
+            raw_lessons[lid]=rec
+            safe={'lessonId':lid,'title':str(rec.get('title') or ''),'active':True,'order':rec.get('order')}
+            assert safe['title'].strip() and isinstance(safe['order'],int) and safe['order']>=1
+            if rec.get('displayIds') is not None: safe['displayIds']=rec.get('displayIds')
+            if rec.get('displayLessonIds') is not None: safe['displayLessonIds']=rec.get('displayLessonIds')
+            if isinstance(rec.get('presentation'),dict) and rec['presentation'].get('displayIds') is not None: safe['presentation']={'displayIds':rec['presentation']['displayIds']}
+            lessons[lid]=safe
+          source={'curricula':{k:raw_curricula[k] for k in sorted(raw_curricula)},'lessons':raw_lessons}
+          source_json=json.dumps(source,sort_keys=True,separators=(',',':'),ensure_ascii=False)
+          cat_hash=hashlib.sha256(source_json.encode()).hexdigest()
+          manifest={'catalogueSha256':cat_hash,'curricula':{k:curricula[k] for k in sorted(curricula)},'lessons':lessons}
+          manifest_json=json.dumps(manifest,sort_keys=True,separators=(',',':'),ensure_ascii=False)
+          nav_hash=hashlib.sha256(manifest_json.encode()).hexdigest()
+          js='\n'.join(['// Generated from the reconciled development LESSONS_KV catalogue.',f'// Source catalogue SHA-256: {cat_hash}',f'// Navigation manifest SHA-256: {nav_hash}','// Navigation-only metadata; full lesson/resource records remain in LESSONS_KV.','',f'const PHASE11_NAVIGATION_MANIFEST = {manifest_json};','','export { PHASE11_NAVIGATION_MANIFEST };',''])
+          pathlib.Path('worker/src/phase11-navigation-manifest.generated.js').write_text(js,encoding='utf-8')
+          p=pathlib.Path('worker/src/phase11-navigation-cache.js'); text=p.read_text(encoding='utf-8')
+          text=re.sub(r"const PHASE11_CATALOGUE_SHA256 = '[0-9a-f]{64}';",f"const PHASE11_CATALOGUE_SHA256 = '{cat_hash}';",text,count=1)
+          text=text.replace('Object.keys(manifest.lessons).length !== 369','Object.keys(manifest.lessons).length !== 372')
+          p.write_text(text,encoding='utf-8')
+          pathlib.Path('final-current-navigation-install.json').write_text(json.dumps({'environment':env,'bucket':bucket,'curricula':11,'lessons':372,'catalogueSha256':cat_hash,'navigationSha256':nav_hash},indent=2,sort_keys=True),encoding='utf-8')
+          print('CURRENT_NAVIGATION_INSTALLED',cat_hash,nav_hash)
+          PY
+          node --check worker/src/phase11-navigation-manifest.generated.js
+          node --check worker/src/phase11-navigation-cache.js
+          node --check worker/src/phase11-view-display-names.js
+          node --check worker/src/index-phase11-efficient.js
+          grep -Fq 'Object.keys(manifest.lessons).length !== 372' worker/src/phase11-navigation-cache.js
+          grep -Fq 'english-year5-11plus' worker/src/phase11-view-display-names.js
+          grep -Fq 'isDisplayNameRewriteView' worker/src/index-phase11-efficient.js
+          grep -Fq 'explicitElevenPlusHomework' worker/src/index-phase11-efficient.js
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/phase11-navigation-manifest.generated.js worker/src/phase11-navigation-cache.js
+          if git diff --cached --quiet; then echo 'Navigation already current'; exit 0; fi
+          git commit -m 'Install reconciled 372-lesson navigation manifest'
+          git push origin HEAD:ops/final-drive-r2-kv-closure-2026-09-06
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-navigation-install-evidence
+          path: final-current-navigation-install.json
+          retention-days: 30
