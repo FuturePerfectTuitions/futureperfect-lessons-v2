@@ -1,0 +1,84 @@
+name: Final minimal - active KV R2 link health audit
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-r2key-health-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_R2: fpt-materials-dev
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Audit all active lesson r2Key references
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, requests
+          api='https://api.cloudflare.com/client/v4'
+          acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          auth={'Authorization':f'Bearer {token}'}
+          worker='fpt-portal-v2-worker'; bucket='fpt-materials-dev'
+          settings=requests.get(f'{api}/accounts/{acct}/workers/scripts/{worker}/settings',headers=auth,timeout=60).json()
+          assert settings.get('success') is True
+          binds=settings['result']['bindings']
+          env=next((b.get('text') for b in binds if b.get('name')=='ENVIRONMENT' and b.get('type')=='plain_text'),None)
+          r2=next((b.get('bucket_name') for b in binds if b.get('name')=='MATERIALS_R2' and b.get('type')=='r2_bucket'),None)
+          ns=next((b.get('namespace_id') for b in binds if b.get('name')=='LESSONS_KV' and b.get('type')=='kv_namespace'),None)
+          assert env=='development',env; assert r2==bucket,r2; assert ns
+          kvbase=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'
+          def kvget(key):
+              u=kvbase+urllib.parse.quote(key,safe='')
+              q=requests.get(u,headers=auth,timeout=60); q.raise_for_status(); return q.json()
+          curricula=['ENGLISH_Y2','MATHS_Y2','ENGLISH_Y3','MATHS_Y3','ENGLISH_Y4','MATHS_L1','ENGLISH_Y5','MATHS_L2','ENGLISH_Y6','MATHS_L3']
+          active=[]
+          for c in curricula:
+              cur=kvget('curriculum:'+c)
+              for lid in cur.get('lessonIds') or []: active.append((c,lid))
+          refs=[]
+          def walk(x,path=''):
+              if isinstance(x,dict):
+                  for k,v in x.items():
+                      p=f'{path}.{k}' if path else k
+                      if k=='r2Key' and isinstance(v,str) and v.strip(): refs.append((cur_c,cur_lid,p,v.strip()))
+                      else: walk(v,p)
+              elif isinstance(x,list):
+                  for i,v in enumerate(x): walk(v,f'{path}[{i}]')
+          for cur_c,cur_lid in active:
+              rec=kvget('lesson:'+cur_lid)
+              if rec.get('active') is False: continue
+              walk(rec)
+          unique={r[3] for r in refs}
+          base=f'{api}/accounts/{acct}/r2/buckets/{bucket}/objects/'
+          status={}
+          for i,k in enumerate(sorted(unique),1):
+              u=base+urllib.parse.quote(k,safe='/')
+              q=requests.head(u,headers=auth,timeout=60)
+              if q.status_code==405:
+                  q=requests.get(u,headers={**auth,'Range':'bytes=0-0'},timeout=60)
+              status[k]=q.status_code
+              if i%100==0: print('CHECKED',i,'OF',len(unique),flush=True)
+          missing=[{'curriculum':c,'lessonId':lid,'jsonPath':p,'r2Key':k,'status':status[k]} for c,lid,p,k in refs if status.get(k)!=200 and status.get(k)!=206]
+          report={'environment':env,'bucket':bucket,'activeLessonCount':len(active),'referenceCount':len(refs),'uniqueR2KeyCount':len(unique),'healthyUniqueCount':sum(1 for s in status.values() if s in (200,206)),'missingReferenceCount':len(missing),'missing':missing}
+          with open('active-kv-r2key-health.json','w') as f: json.dump(report,f,indent=2,sort_keys=True)
+          print('ACTIVE_LESSONS',len(active)); print('R2KEY_REFS',len(refs)); print('UNIQUE',len(unique)); print('MISSING_REFS',len(missing))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: active-kv-r2key-health
+          path: active-kv-r2key-health.json
+          retention-days: 30
