@@ -7,6 +7,64 @@ function json(body, init = {}) {
   return new Response(JSON.stringify(body), { ...init, headers });
 }
 
+function allowedOrigins(env) {
+  return new Set([
+    'https://futureperfecttuitions.github.io',
+    ...String(env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+  ]);
+}
+
+function corsHeaders(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!origin || !allowedOrigins(env).has(origin)) return {};
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    Vary: 'Origin',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,Accept',
+    'Access-Control-Max-Age': '600'
+  };
+}
+
+function normalisePortalUserId(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function productionLoginAllowlist(env) {
+  return new Set(
+    String(env.PROD_LOGIN_ALLOWLIST || '')
+      .split(',')
+      .map(normalisePortalUserId)
+      .filter(Boolean)
+  );
+}
+
+async function productionLoginGuard(request, env, url) {
+  if (String(env.ENVIRONMENT || 'development').trim().toLowerCase() === 'development') return null;
+  if (request.method !== 'POST' || url.pathname !== '/api/v1/student/auth/login') return null;
+  if (String(env.STUDENT_LOGIN_ENABLED || '').trim().toLowerCase() !== 'true') return null;
+
+  let body = null;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return null;
+  }
+
+  const portalUserIdNorm = normalisePortalUserId(body?.username);
+  const allowlist = productionLoginAllowlist(env);
+  if (portalUserIdNorm && allowlist.has(portalUserIdNorm)) return null;
+
+  return json(
+    { error: 'INVALID_LOGIN' },
+    { status: 401, headers: corsHeaders(request, env) }
+  );
+}
+
 function explicitScreenPalUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -66,6 +124,9 @@ async function requireExplicitSpecialVideoMetadata(request, env, response, resou
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const loginGuard = await productionLoginGuard(request, env, url);
+    if (loginGuard) return loginGuard;
+
     const specialVideo = url.pathname.match(/^\/api\/v1\/student\/special-resources\/([^/]+)\/video$/);
     const response = await phase13Worker.fetch(request, env);
 
