@@ -1,21 +1,35 @@
 import { PHASE11_NAVIGATION_MANIFEST } from './phase11-navigation-manifest.generated.js';
 
 const MATHS_YEAR_VIEW_RULES = Object.freeze({
-  'maths-year4': Object.freeze({ levelViewId: 'maths-level1', legacyCode: /\bL1T\d+M\d+\b/gi }),
-  'maths-year5': Object.freeze({ levelViewId: 'maths-level2', legacyCode: /\bL2T\d+M\d+\b/gi }),
-  'maths-year6': Object.freeze({ levelViewId: 'maths-level3', legacyCode: /\bL3T\d+M\d+\b/gi })
+  'maths-year4': Object.freeze({ pairedViewId: 'maths-level1', sourceCode: /\bL1T\d+M\d+\b/gi }),
+  'maths-year5': Object.freeze({ pairedViewId: 'maths-level2', sourceCode: /\bL2T\d+M\d+\b/gi }),
+  'maths-year6': Object.freeze({ pairedViewId: 'maths-level3', sourceCode: /\bL3T\d+M\d+\b/gi })
+});
+
+const ENGLISH_ELEVEN_PLUS_VIEW_RULES = Object.freeze({
+  'english-year4-11plus': Object.freeze({ pairedViewId: 'english-year4', sourceCode: /\bY4T\d+E(?!E)\d+\b/gi }),
+  'english-year5-11plus': Object.freeze({ pairedViewId: 'english-year5', sourceCode: /\bY5T\d+E(?!E)\d+\b/gi })
+});
+
+const DISPLAY_NAME_VIEW_RULES = Object.freeze({
+  ...MATHS_YEAR_VIEW_RULES,
+  ...ENGLISH_ELEVEN_PLUS_VIEW_RULES
 });
 
 const YEAR4_MATHS_VIEW = 'maths-year4';
 const YEAR5_MATHS_VIEW = 'maths-year5';
 const YEAR6_MATHS_VIEW = 'maths-year6';
 
+function normalisedViewId(viewId) {
+  return String(viewId || '').trim().toLowerCase();
+}
+
 function viewRule(viewId) {
-  return MATHS_YEAR_VIEW_RULES[String(viewId || '').trim()] || null;
+  return DISPLAY_NAME_VIEW_RULES[normalisedViewId(viewId)] || null;
 }
 
 function displayLessonIdForView(record, viewId) {
-  return String(record?.displayIds?.[String(viewId || '').trim()] || '').trim();
+  return String(record?.displayIds?.[normalisedViewId(viewId)] || '').trim();
 }
 
 function displayLessonIdForLesson(lessonId, viewId) {
@@ -26,7 +40,7 @@ function displayLessonIdForLesson(lessonId, viewId) {
 function pairedLevelDisplayIdForLesson(lessonId, viewId) {
   const rule = viewRule(viewId);
   if (!rule) return '';
-  return displayLessonIdForLesson(lessonId, rule.levelViewId);
+  return displayLessonIdForLesson(lessonId, rule.pairedViewId);
 }
 
 function rewriteLegacyLevelCode(value, displayLessonId, viewId) {
@@ -34,7 +48,7 @@ function rewriteLegacyLevelCode(value, displayLessonId, viewId) {
   const replacement = String(displayLessonId || '').trim();
   const rule = viewRule(viewId);
   if (!text || !replacement || !rule) return text;
-  return text.replace(rule.legacyCode, replacement);
+  return text.replace(rule.sourceCode, replacement);
 }
 
 // Compatibility export retained for existing Phase 11 tests/callers.
@@ -70,11 +84,21 @@ function normaliseDisplayNameForView(displayName, displayLessonId, viewId) {
 }
 
 function isNormalMathsYearView(viewId) {
+  return Boolean(MATHS_YEAR_VIEW_RULES[normalisedViewId(viewId)]);
+}
+
+function isEnglishElevenPlusView(viewId) {
+  return Boolean(ENGLISH_ELEVEN_PLUS_VIEW_RULES[normalisedViewId(viewId)]);
+}
+
+function isDisplayNameRewriteView(viewId) {
   return Boolean(viewRule(viewId));
 }
 
 export {
   MATHS_YEAR_VIEW_RULES,
+  ENGLISH_ELEVEN_PLUS_VIEW_RULES,
+  DISPLAY_NAME_VIEW_RULES,
   YEAR4_MATHS_VIEW,
   YEAR5_MATHS_VIEW,
   YEAR6_MATHS_VIEW,
@@ -85,5 +109,7 @@ export {
   rewriteLegacyLevel2Code,
   normaliseLessonDisplayNamesForView,
   normaliseDisplayNameForView,
-  isNormalMathsYearView
+  isNormalMathsYearView,
+  isEnglishElevenPlusView,
+  isDisplayNameRewriteView
 };
