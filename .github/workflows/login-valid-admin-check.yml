@@ -1,0 +1,53 @@
+name: Valid Admin login check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/login-valid-admin-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WORKER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      ORIGIN: https://lessons.futureperfect.education
+    steps:
+      - name: Verify existing Admin credential end to end
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          STUDENTS_ID="$(jq -r '[.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' /tmp/settings.json)"
+          test -n "$STUDENTS_ID"
+
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_ID}/values/user%3Aadmin" -H "$AUTH" -o /tmp/admin.json
+          PASSWORD="$(jq -r '.p // ""' /tmp/admin.json)"
+          test -n "$PASSWORD"
+          BODY="$(jq -cn --arg p "$PASSWORD" '{username:"Admin",password:$p}')"
+
+          code="$(curl --silent --show-error --cookie-jar /tmp/cookies --output /tmp/login.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data "$BODY" "$WORKER_BASE/api/v1/student/auth/login")"
+          echo "VALID_ADMIN_LOGIN_HTTP=$code"
+          echo "VALID_ADMIN_LOGIN_OK=$(jq -r '.ok // false' /tmp/login.json)"
+          test "$code" = 200
+          test "$(jq -r '.ok // false' /tmp/login.json)" = true
+          grep -q 'fpt_v2_session' /tmp/cookies
+
+          code="$(curl --silent --show-error --cookie /tmp/cookies --output /tmp/session.json --write-out '%{http_code}' --header "Origin: $ORIGIN" "$WORKER_BASE/api/v1/student/session")"
+          echo "VALID_ADMIN_SESSION_HTTP=$code"
+          echo "VALID_ADMIN_SESSION_OK=$(jq -r '.ok // false' /tmp/session.json)"
+          test "$code" = 200
+          test "$(jq -r '.ok // false' /tmp/session.json)" = true
+
+          curl --silent --show-error --cookie /tmp/cookies --header "Origin: $ORIGIN" --request POST "$WORKER_BASE/api/v1/student/auth/logout" >/dev/null || true
+          rm -f /tmp/admin.json /tmp/login.json /tmp/session.json /tmp/cookies
+          echo VALID_ADMIN_LOGIN_PASS
