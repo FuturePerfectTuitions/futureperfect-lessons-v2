@@ -15,10 +15,11 @@ LESSONS="$(field LESSONS_KV kv_namespace namespace_id)"
 DBID="$(field DB d1 id)"
 R2="$(field MATERIALS_R2 r2_bucket bucket_name)"
 for value in "$STUDENTS" "$LESSONS" "$DBID" "$R2"; do test -n "$value"; done
+jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-secrets-before.json >/dev/null 2>&1 || true
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings.json >/tmp/fpt-secrets-before.json
 {
   printf 'name = "%s"\n' "$WORKER_NAME"
-  printf 'main = "src/index-phase19-access.js"\n'
+  printf 'main = "src/index-phase20-change7.js"\n'
   printf 'compatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\n'
   printf 'ENVIRONMENT = "%s"\n' "$(plain ENVIRONMENT)"
   printf 'ALLOWED_ORIGINS = "%s"\n' "$(plain ALLOWED_ORIGINS)"
