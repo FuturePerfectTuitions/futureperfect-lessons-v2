@@ -1,0 +1,594 @@
+{
+  "purpose": "Script-backed refresh of materially concise FPT Portal V2 lesson descriptions. Only description fields are changed.",
+  "selectionRule": "Matched readable avatar script supplied in Scripts.zip and live description was under 200 words at audit time.",
+  "lessons": [
+    {
+      "lessonId": "Y4E5",
+      "expectedTitle": "Pronouns and Possessive Nouns",
+      "sourceScript": "Scripts/English/Year 4/Y4T1E05.docx",
+      "description": "In this lesson, students develop a much deeper understanding of pronouns and how they work alongside nouns. The lesson moves beyond simply spotting pronouns: students learn why writers use them, how different types of pronoun function, and how careful pronoun choices can make writing clearer and less repetitive.\n\nThis lesson includes:\n✔ Revising common, proper, countable and non-countable nouns\n✔ Understanding how pronouns replace nouns and reduce unnecessary repetition\n✔ Recognising personal, possessive, relative, reflexive, demonstrative, interrogative and indefinite pronouns\n✔ Distinguishing personal pronouns from possessive pronouns\n✔ Choosing pronouns that make sense in context and show ownership correctly\n✔ Balancing nouns and pronouns so writing remains clear rather than confusing\n✔ Identifying the noun or noun phrase to which a pronoun refers\n✔ Using pronouns to improve the fluency and cohesion of writing\n\nStudents first revisit different types of noun before seeing how pronouns can replace repeated nouns. They then compare personal and possessive pronouns, explore a wider range of pronoun types, sort and identify pronouns in sentences, and practise choosing suitable pronouns for gaps and their own sentences. A key focus is clarity: students see that overusing pronouns can make a paragraph confusing if the reader cannot tell which noun a pronoun refers to.\n\nBy the end of the lesson, learners should be able to identify several types of pronoun, choose pronouns accurately, link them back to the correct noun or noun phrase, and use nouns and pronouns together to improve the fluency and cohesion of their writing."
+    },
+    {
+      "lessonId": "Y5E14",
+      "expectedTitle": "Verbal Reasoning",
+      "sourceScript": "Scripts/English/Year 5/Y5T2E11.docx",
+      "description": "In this lesson, students build verbal reasoning skills by analysing how words are formed, related, pronounced and used. The lesson combines vocabulary knowledge with logic and pattern spotting, so students have to explain connections rather than rely on recall alone.\n\nThis lesson includes:\n✔ Building verbal comprehension, logic and word-based problem-solving skills\n✔ Recognising relationships between words, including opposites, categories and analogies\n✔ Identifying odd-one-out words using meaning, spelling or pronunciation\n✔ Working with palindromes, compound words and letter patterns\n✔ Finding hidden words across neighbouring words\n✔ Rearranging letters and words to solve anagrams and sentence problems\n✔ Applying word codes and missing-letter rules\n✔ Using careful vocabulary knowledge to infer the best answer from context\n\nStudents work through a broad range of verbal reasoning question types, including word relationships, opposites, odd-one-out questions, hidden words, palindromes, compound words, letter patterns, word codes and rearrangement tasks. They also use context and grammatical relationships to decide which answer best fits a question. The activities progressively require closer attention to spelling, meaning, sound and structure.\n\nBy the end of the lesson, learners should be more confident at recognising verbal patterns, making precise word connections and applying a systematic approach to unfamiliar verbal reasoning questions."
+    },
+    {
+      "lessonId": "Y4M2",
+      "expectedTitle": "Number and Place Value 1",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M2.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading and representing numbers in the thousands\n✔ Understanding groups of hundreds within larger numbers\n✔ Using ten-frames and place-value reasoning to show thousands\n✔ Recognising multiples of 100\n✔ Explaining how multiplying by 100 changes a number's value\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M3",
+      "expectedTitle": "Number and Place Value 2",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M3.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Partitioning four-digit numbers by place value\n✔ Writing four-digit numbers in expanded form\n✔ Partitioning the same number in different ways\n✔ Interpreting different representations of four-digit numbers\n✔ Finding 1,000 more or less than a given number\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M4",
+      "expectedTitle": "Number and Place Value 3",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M4.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Comparing and ordering four-digit numbers\n✔ Using digit cards to form numbers under given conditions\n✔ Using place value to justify greater-than and less-than comparisons\n✔ Estimating the position of four-digit numbers on number lines\n✔ Using endpoints and intervals to make sensible estimates\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M5",
+      "expectedTitle": "Number and Place Value 4",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M5.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Rounding four-digit numbers to the nearest 100\n✔ Using number lines to decide whether to round up or down\n✔ Using the digit to the right of the target place value to round efficiently\n✔ Applying midpoint rules accurately\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M6",
+      "expectedTitle": "Number and Place Value 5",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M6.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Rounding four-digit numbers to the nearest 10, 100 and 1,000\n✔ Counting in multiples of 6, 7 and 9\n✔ Recognising and working with multiples of 25 and 1,000\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M7",
+      "expectedTitle": "Number and Place Value 6",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M7.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value 6 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Counting forwards and backwards through zero\n✔ Recognising positive and negative integers\n✔ Locating and completing values on number lines\n✔ Applying negative numbers to real-life temperature contexts\n✔ Reading temperatures below zero in degrees Celsius\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value 6 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M9",
+      "expectedTitle": "Addition",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M9.docx",
+      "description": "In this lesson, students develop their understanding of Addition through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding four-digit numbers using formal column addition\n✔ Adding without regrouping\n✔ Regrouping from ones to tens and across further place-value columns\n✔ Completing calculations with more than one regroup\n✔ Keeping digits aligned by place value\n\nStudents organise calculations carefully by place value, recognise when regrouping or exchange is required, and connect formal written methods with reasoning and problem-solving tasks. They also practise checking calculations and explaining the sequence of steps used.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Addition more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M10",
+      "expectedTitle": "Subtraction",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M10.docx",
+      "description": "In this lesson, students develop their understanding of Subtraction through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Subtracting four-digit numbers using formal column subtraction\n✔ Subtracting without exchange\n✔ Using one exchange correctly\n✔ Managing calculations that require several exchanges\n✔ Choosing efficient subtraction strategies when a formal method is not necessary\n\nStudents organise calculations carefully by place value, recognise when regrouping or exchange is required, and connect formal written methods with reasoning and problem-solving tasks. They also practise checking calculations and explaining the sequence of steps used.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Subtraction more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M12",
+      "expectedTitle": "Addition and Subtraction",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M12.docx",
+      "description": "In this lesson, students develop their understanding of Addition and Subtraction through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Solving two-step addition and subtraction problems\n✔ Choosing bar models that represent a problem correctly\n✔ Deciding which operations are needed from the context\n✔ Using inverse operations to check calculations\n✔ Explaining multi-step reasoning\n\nStudents organise calculations carefully by place value, recognise when regrouping or exchange is required, and connect formal written methods with reasoning and problem-solving tasks. They also practise checking calculations and explaining the sequence of steps used.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Addition and Subtraction more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M14",
+      "expectedTitle": "Rule of 3",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M14.docx",
+      "description": "In this lesson, students develop their understanding of Rule of 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Using the Rule of 3 to solve proportional problems\n✔ Setting out multiplication and division relationships clearly\n✔ Cross-multiplying known values and dividing by the remaining value\n✔ Simplifying calculations before multiplying where possible\n✔ Applying the method to contextual problems\n\nStudents learn a repeatable proportional method: organise the known values, identify the missing value, multiply across the known relationship and divide by the remaining value. They also see how simplifying before multiplying can make the calculation more efficient, then apply the method to contextual problems.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Rule of 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M15",
+      "expectedTitle": "Converting Lengths",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M15.docx",
+      "description": "In this lesson, students develop their understanding of Converting Lengths through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Ordering millimetres, centimetres, metres and kilometres by size\n✔ Converting between millimetres, centimetres and metres\n✔ Using known conversion facts accurately\n✔ Converting between metres and kilometres\n✔ Applying conversions to mixed measurement questions\n\nStudents connect calculation with measurement, making sure quantities are expressed in compatible units before they compare, convert or calculate. The lesson develops fluency with unit relationships as well as reasoning about which conversion is appropriate.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Converting Lengths more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M16",
+      "expectedTitle": "Comparing and Calculating Lengths",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M16.docx",
+      "description": "In this lesson, students develop their understanding of Comparing and Calculating Lengths through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Comparing lengths expressed in different units\n✔ Converting measurements to a common unit before comparing\n✔ Ordering lengths from shortest to longest\n✔ Using <, > and = accurately with measurements\n✔ Calculating unknown lengths in contextual problems\n\nStudents connect calculation with measurement, making sure quantities are expressed in compatible units before they compare, convert or calculate. The lesson develops fluency with unit relationships as well as reasoning about which conversion is appropriate.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Comparing and Calculating Lengths more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M13",
+      "expectedTitle": "Area",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M13.docx",
+      "description": "In this lesson, students develop their understanding of Area through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding area as the amount of surface inside a 2D shape\n✔ Counting square units to find area\n✔ Using multiplication as an efficient way to calculate the area of rectangles\n✔ Comparing and reasoning about areas\n\nStudents connect visual models of shapes with numerical calculation, moving from counting square units to using multiplication efficiently and explaining how dimensions determine area.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Area more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M17",
+      "expectedTitle": "Perimeter",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M17.docx",
+      "description": "In this lesson, students develop their understanding of Perimeter through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding the perimeter of rectangles\n✔ Using known side properties of rectangles and squares to find missing lengths\n✔ Finding the perimeter of rectilinear shapes\n✔ Adding side lengths accurately\n\nStudents connect perimeter with the total distance around a boundary, use known shape properties to recover missing side lengths, and apply this reasoning to increasingly complex figures.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Perimeter more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M18",
+      "expectedTitle": "Fractions 1",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M18.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Identifying a whole and recognising equal and unequal parts\n✔ Understanding how equal parts form fractions of a whole\n✔ Using numerator and denominator language\n✔ Counting fractions beyond one whole\n✔ Representing fractions using shapes and number lines\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M19",
+      "expectedTitle": "Fractions 2",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M19.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Partitioning mixed numbers into whole-number and fractional parts\n✔ Locating mixed numbers on number lines\n✔ Using number-line intervals to identify missing mixed numbers\n✔ Comparing mixed numbers\n✔ Ordering mixed numbers accurately\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M20",
+      "expectedTitle": "Fractions 3",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M20.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding improper fractions\n✔ Understanding mixed numbers\n✔ Converting mixed numbers to improper fractions\n✔ Converting improper fractions to mixed numbers\n✔ Using visual and numerical representations to explain conversions\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M21",
+      "expectedTitle": "Fractions 4",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M21.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding two or more fractions\n✔ Adding fractions and mixed numbers\n✔ Subtracting fractions\n✔ Subtracting fractions from whole amounts\n✔ Subtracting from mixed numbers\n✔ Using equivalence and regrouping where needed\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M22",
+      "expectedTitle": "Fractions 5",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M22.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding decimal tenths\n✔ Understanding decimal hundredths\n✔ Connecting tenths and hundredths to fractions of a whole\n✔ Reading decimal representations on grids and place-value charts\n✔ Partitioning decimals into tenths and hundredths\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M23",
+      "expectedTitle": "Fractions 6",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M23.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 6 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Connecting one half and one quarter with their decimal equivalents\n✔ Reading decimal halves and quarters\n✔ Locating decimals on number lines\n✔ Rounding decimals to the nearest whole number\n✔ Using midpoint reasoning when rounding decimals\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 6 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M24",
+      "expectedTitle": "Fractions 7",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M24.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 7 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Comparing decimal numbers\n✔ Using place value to compare tenths and hundredths\n✔ Using less-than, greater-than and equal-to symbols with decimals\n✔ Ordering decimals from smallest to largest and largest to smallest\n✔ Justifying decimal comparisons using place value\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 7 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M1",
+      "expectedTitle": "Estimate, Compare & Calculate Money",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M .docx",
+      "description": "In this lesson, students develop their understanding of Estimate, Compare & Calculate Money through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Estimating prices by rounding money amounts\n✔ Rounding pounds and pence to sensible whole-pound estimates\n✔ Comparing estimated and exact costs\n✔ Using estimation to judge whether there is enough money to buy items\n✔ Checking estimates against accurate calculations\n\nStudents work with realistic prices and amounts, applying number skills to pounds and pence. They practise choosing an efficient calculation, keeping units consistent and interpreting the result sensibly in a money context.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Estimate, Compare & Calculate Money more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M37",
+      "expectedTitle": "Money 1",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M Money 1.docx",
+      "description": "In this lesson, students develop their understanding of Money 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Identifying and counting UK coins and notes\n✔ Combining coins to make a total amount\n✔ Comparing money amounts with £1 and with each other\n✔ Understanding £1 as 100p\n✔ Connecting tenths and hundredths of a pound with decimal notation\n✔ Writing pounds and pence correctly as decimals\n\nStudents work with realistic prices and amounts, applying number skills to pounds and pence. They practise choosing an efficient calculation, keeping units consistent and interpreting the result sensibly in a money context.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Money 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M38",
+      "expectedTitle": "Money 2",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M Money 2.docx",
+      "description": "In this lesson, students develop their understanding of Money 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Estimating money by rounding to the nearest pound\n✔ Using a number line to decide whether an amount rounds up or down\n✔ Handling halfway amounts correctly\n✔ Applying rounded estimates to shopping situations\n✔ Solving money problems using estimation and exact calculation\n\nStudents work with realistic prices and amounts, applying number skills to pounds and pence. They practise choosing an efficient calculation, keeping units consistent and interpreting the result sensibly in a money context.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Money 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M39",
+      "expectedTitle": "Money 3",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M Money 3.docx",
+      "description": "In this lesson, students develop their understanding of Money 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding amounts of money to find total costs\n✔ Finding change using subtraction\n✔ Using multiplication and division in money problems\n✔ Working accurately with pounds and pence\n\nStudents work with realistic prices and amounts, applying number skills to pounds and pence. They practise choosing an efficient calculation, keeping units consistent and interpreting the result sensibly in a money context.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Money 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M25",
+      "expectedTitle": "Time 1",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M25.docx",
+      "description": "In this lesson, students develop their understanding of Time 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Converting between years and months\n✔ Converting between weeks and days\n✔ Reading calendars accurately\n✔ Using calendar information to calculate dates and durations\n\nStudents use key time facts and conversion relationships to move confidently between units and representations. They apply these facts to comparison and calculation questions rather than treating each conversion as an isolated rule.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Time 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M26",
+      "expectedTitle": "Time 2",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M26.docx",
+      "description": "In this lesson, students develop their understanding of Time 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Converting between hours and minutes\n✔ Converting between minutes and seconds\n✔ Using key time facts such as 60 seconds in a minute and 60 minutes in an hour\n✔ Comparing durations expressed in different units\n\nStudents use key time facts and conversion relationships to move confidently between units and representations. They apply these facts to comparison and calculation questions rather than treating each conversion as an isolated rule.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Time 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M27",
+      "expectedTitle": "Time 3",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M27.docx",
+      "description": "In this lesson, students develop their understanding of Time 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading analogue and digital times\n✔ Converting between analogue and digital time\n✔ Distinguishing a.m. and p.m.\n✔ Converting 12-hour times to the 24-hour clock\n✔ Using time notation accurately\n\nStudents use key time facts and conversion relationships to move confidently between units and representations. They apply these facts to comparison and calculation questions rather than treating each conversion as an isolated rule.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Time 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y4M28",
+      "expectedTitle": "Time 4",
+      "sourceScript": "Scripts/Maths/Year 4/Y4M28.docx",
+      "description": "In this lesson, students develop their understanding of Time 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading 24-hour times accurately\n✔ Converting from the 24-hour clock to 12-hour time\n✔ Connecting 24-hour times with analogue clocks\n✔ Using a.m. and p.m. correctly after conversion\n✔ Solving time-conversion questions\n\nStudents use key time facts and conversion relationships to move confidently between units and representations. They apply these facts to comparison and calculation questions rather than treating each conversion as an isolated rule.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Time 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M1",
+      "expectedTitle": "Number and Place Value I",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M1.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value I through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading and writing whole numbers up to 100,000\n✔ Understanding the value of each digit in five-digit numbers\n✔ Representing numbers in different ways\n✔ Partitioning numbers by place value\n✔ Reasoning about number representations\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value I more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M2",
+      "expectedTitle": "Number and Place Value II",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M2.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value II through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading and writing whole numbers up to 1,000,000\n✔ Determining the value of digits in large numbers\n✔ Extending place-value understanding into decimal numbers\n✔ Using place-value charts accurately\n✔ Reasoning about how digit position changes value\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value II more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M3",
+      "expectedTitle": "Number and Place Value III",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M3.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value III through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Ordering whole numbers up to 1,000,000\n✔ Comparing whole numbers up to 1,000,000\n✔ Using place-value grids to justify comparisons\n✔ Using greater-than and less-than symbols accurately\n✔ Solving number-reasoning problems\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value III more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M4",
+      "expectedTitle": "Counting in Powers of Ten",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M4.docx",
+      "description": "In this lesson, students develop their understanding of Counting in Powers of Ten through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding powers of ten and index notation\n✔ Reading powers such as 10¹, 10² and 10³\n✔ Recognising how powers of ten grow by repeated multiplication\n✔ Counting forwards and backwards in steps that are powers of ten\n✔ Using place value to continue number sequences\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Counting in Powers of Ten more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M5",
+      "expectedTitle": "Rounding Whole Numbers",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M5.docx",
+      "description": "In this lesson, students develop their understanding of Rounding Whole Numbers through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Rounding whole numbers to the nearest 10, 100, 1,000 and 10,000\n✔ Using place value to decide which digit controls the rounding\n✔ Applying the five-or-more rule accurately\n✔ Completing rounding tables across different place values\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Rounding Whole Numbers more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M6",
+      "expectedTitle": "Roman Numerals",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M6.docx",
+      "description": "In this lesson, students develop their understanding of Roman Numerals through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Recognising the seven main Roman numeral symbols and their values\n✔ Reading and writing Roman numerals\n✔ Understanding additive and subtractive Roman numeral rules\n✔ Interpreting Roman numerals in real-life contexts such as clocks and dates\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Roman Numerals more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M7",
+      "expectedTitle": "Negative Numbers",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M7.docx",
+      "description": "In this lesson, students develop their understanding of Negative Numbers through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Counting forwards and backwards through zero\n✔ Recognising and ordering negative numbers\n✔ Using number lines to compare positive and negative values\n✔ Applying negative numbers to temperature contexts\n✔ Reasoning about changes in temperature above and below zero\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Negative Numbers more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M9",
+      "expectedTitle": "Fractions 1",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M9.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding equivalent unit fractions\n✔ Finding equivalent non-unit fractions\n✔ Using multiplication and division to generate equivalent fractions\n✔ Converting mixed numbers to improper fractions\n✔ Converting improper fractions to mixed numbers\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M10",
+      "expectedTitle": "Fractions 2",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M10.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Continuing fraction number sequences\n✔ Comparing fractions less than one\n✔ Using common denominators to compare fractions\n✔ Ordering fractions accurately\n✔ Using diagrams and numerical reasoning to justify comparisons\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M11",
+      "expectedTitle": "Fractions 3",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M11.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Ordering fractions less than one\n✔ Comparing fractions using common denominators\n✔ Comparing fractions using common numerators\n✔ Comparing fractions greater than one\n✔ Choosing an efficient comparison strategy\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M12",
+      "expectedTitle": "Fractions 4",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M12.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding fractions with the same denominator\n✔ Subtracting fractions with the same denominator\n✔ Keeping the denominator unchanged when the parts are the same size\n✔ Simplifying answers where appropriate\n✔ Applying addition and subtraction to fraction reasoning questions\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M13",
+      "expectedTitle": "Fractions 5",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M13.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding fractions with related denominators\n✔ Finding equivalent fractions before addition\n✔ Adding three fractions\n✔ Solving additions that cross one whole\n✔ Converting or simplifying answers where appropriate\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M14",
+      "expectedTitle": "Fractions 6",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M14.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 6 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding mixed numbers\n✔ Adding fractional parts with related denominators\n✔ Subtracting fractions\n✔ Subtracting mixed numbers\n✔ Regrouping or converting where needed to complete calculations\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 6 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M15",
+      "expectedTitle": "Fractions 7",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M15.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 7 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Subtracting fractions accurately\n✔ Finding common denominators before subtraction\n✔ Subtracting mixed numbers\n✔ Regrouping a whole when needed\n✔ Checking fraction subtraction using equivalence\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 7 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M16",
+      "expectedTitle": "Fractions 8",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M16.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 8 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding fractions of an amount\n✔ Using unit fractions to find one equal part\n✔ Finding non-unit fractions of quantities\n✔ Multiplying unit fractions by an integer\n✔ Multiplying non-unit fractions by an integer\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 8 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M17",
+      "expectedTitle": "Fractions 9",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M17.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 9 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Using fractions as operators\n✔ Finding a fraction of a number by division and multiplication\n✔ Reading and writing decimals to two decimal places\n✔ Connecting fraction operations with decimal representations\n✔ Solving reasoning questions that combine fractions and decimals\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 9 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M18",
+      "expectedTitle": "Fractions 10",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M18.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 10 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Writing decimals as fractions\n✔ Using place value to identify tenths and hundredths\n✔ Converting between fractional and decimal representations\n✔ Simplifying fractional equivalents where appropriate\n✔ Reasoning about the size of decimals and fractions\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 10 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M20",
+      "expectedTitle": "Percentages 1",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M20.docx",
+      "description": "In this lesson, students develop their understanding of Percentages 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding percentages as parts out of 100\n✔ Converting familiar fractions into percentages\n✔ Using equivalent fractions with denominator 100\n✔ Connecting fractions and percentages\n✔ Applying percentage knowledge to reasoning questions\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Percentages 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M21",
+      "expectedTitle": "Percentages 2",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M21.docx",
+      "description": "In this lesson, students develop their understanding of Percentages 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding equivalent fractions, decimals and percentages\n✔ Using place value and hundredths to connect the three forms\n✔ Converting between fractions, decimals and percentages\n✔ Comparing values written in different forms\n✔ Applying equivalence in reasoning problems\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Percentages 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M22",
+      "expectedTitle": "Multiplications and Divisions 1",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M22.docx",
+      "description": "In this lesson, students develop their understanding of Multiplications and Divisions 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding what a multiple is and how multiples are generated\n✔ Identifying multiples from times-table knowledge\n✔ Understanding factors as numbers that divide exactly\n✔ Finding factor pairs systematically\n✔ Using diagrams and sorting activities to reason about multiples and factors\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplications and Divisions 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M23",
+      "expectedTitle": "Multiplications and Divisions 2",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M23.docx",
+      "description": "In this lesson, students develop their understanding of Multiplications and Divisions 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding common factors of two numbers\n✔ Using factor lists and multiplication facts systematically\n✔ Recognising prime numbers\n✔ Distinguishing prime and composite numbers\n✔ Applying factor and prime-number knowledge in reasoning tasks\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplications and Divisions 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M24",
+      "expectedTitle": "Multiplications and Divisions 3",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M24.docx",
+      "description": "In this lesson, students develop their understanding of Multiplications and Divisions 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding prime factors\n✔ Recognising square numbers\n✔ Representing square numbers with arrays and multiplication\n✔ Recognising cube numbers\n✔ Connecting cube numbers with repeated multiplication\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplications and Divisions 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M25",
+      "expectedTitle": "Multiplications and Divisions 4",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M25.docx",
+      "description": "In this lesson, students develop their understanding of Multiplications and Divisions 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Multiplying whole numbers by 10, 100 and 1,000\n✔ Dividing whole numbers by 10, 100 and 1,000\n✔ Using place value to explain digit movement\n✔ Recognising multiples of 10, 100 and 1,000\n✔ Applying these relationships to missing-number problems\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplications and Divisions 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M26",
+      "expectedTitle": "Multiplications and Divisions 5",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M26.docx",
+      "description": "In this lesson, students develop their understanding of Multiplications and Divisions 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Multiplying two-digit numbers by two-digit numbers\n✔ Extending long multiplication to three- and four-digit numbers\n✔ Laying out long multiplication correctly by place value\n✔ Regrouping accurately during multiplication\n✔ Checking each stage of a formal written method\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplications and Divisions 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M28",
+      "expectedTitle": "Multiplications and Divisions 6",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M28.docx",
+      "description": "In this lesson, students develop their understanding of Multiplications and Divisions 6 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Dividing four-digit numbers by one digit without exchange\n✔ Using short division with correct place-value layout\n✔ Dividing four-digit numbers by one digit with exchange\n✔ Using multiplication facts to support division\n✔ Solving division calculations with remainders\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplications and Divisions 6 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M30",
+      "expectedTitle": "Statistics 1",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M30.docx",
+      "description": "In this lesson, students develop their understanding of Statistics 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Constructing line graphs from data\n✔ Choosing and using an appropriate scale and key\n✔ Reading values from line graphs\n✔ Interpreting changes and trends shown on a graph\n\nStudents extract information accurately from statistical representations and construct or interpret them using appropriate scales, labels and comparisons. Reasoning questions require them to explain what the data actually shows.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Statistics 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M31",
+      "expectedTitle": "Statistics 2",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M31.docx",
+      "description": "In this lesson, students develop their understanding of Statistics 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading and interpreting tables\n✔ Extracting information accurately from rows and columns\n✔ Reading and completing two-way tables\n✔ Reading and interpreting timetables\n✔ Using 24-hour times within timetable questions\n\nStudents extract information accurately from statistical representations and construct or interpret them using appropriate scales, labels and comparisons. Reasoning questions require them to explain what the data actually shows.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Statistics 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M32",
+      "expectedTitle": "Position, Direction and Symmetry",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M32.docx",
+      "description": "In this lesson, students develop their understanding of Position, Direction and Symmetry through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading and plotting coordinates\n✔ Using position and direction vocabulary\n✔ Following coordinates to locate points on a grid\n✔ Identifying lines of symmetry\n✔ Reasoning about symmetrical shapes\n\nStudents use precise positional language and coordinate conventions to locate, plot or transform shapes and points. The lesson develops accuracy alongside reasoning about how positions change and how missing information can be deduced.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Position, Direction and Symmetry more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M33",
+      "expectedTitle": "Reflection",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M33.docx",
+      "description": "In this lesson, students develop their understanding of Reflection through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Drawing reflected shapes on a grid\n✔ Using a mirror line accurately\n✔ Tracking equal distances from the line of reflection\n✔ Identifying whether a shape is a true reflection\n✔ Using coordinates to support reflection tasks\n\nStudents use precise positional language and coordinate conventions to locate, plot or transform shapes and points. The lesson develops accuracy alongside reasoning about how positions change and how missing information can be deduced.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Reflection more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y5M34",
+      "expectedTitle": "Translation",
+      "sourceScript": "Scripts/Maths/Year 5/Y5M34.docx",
+      "description": "In this lesson, students develop their understanding of Translation through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Drawing translated shapes\n✔ Following translation instructions accurately\n✔ Using coordinates to track movement\n✔ Identifying translated shapes\n✔ Understanding that translation changes position but not size or orientation\n\nStudents use precise positional language and coordinate conventions to locate, plot or transform shapes and points. The lesson develops accuracy alongside reasoning about how positions change and how missing information can be deduced.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Translation more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M2.1",
+      "expectedTitle": "Number and Place Value I",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M2.1.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value I through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding powers of 10 up to 10,000,000\n✔ Recognising that each place is ten times the value of the place to its right\n✔ Building large numbers from groups of powers of ten\n✔ Using visual models to explain multiplicative place-value relationships\n✔ Reading and representing large numbers accurately\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value I more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M2.2",
+      "expectedTitle": "Number and Place Value II",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M2.2.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value II through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Dividing powers of ten into equal parts\n✔ Using bar models to find the value of equal parts\n✔ Partitioning 1,000 into equal measures\n✔ Applying equal-part reasoning to measurement challenges\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value II more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M2.3",
+      "expectedTitle": "Number and Place Value III",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M2.3.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value III through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding place value in whole numbers up to 10,000,000\n✔ Building and reading large whole numbers\n✔ Extending place-value understanding to decimals\n✔ Using place-value charts to compare representations\n✔ Using non-standard partitioning to decompose numbers flexibly\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value III more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M2.4",
+      "expectedTitle": "Number and Place Value IV",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M2.4.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value IV through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Comparing and ordering large whole numbers\n✔ Using place value to justify comparisons\n✔ Comparing and ordering decimals\n✔ Estimating the position of numbers on number lines\n✔ Using intervals and endpoints to refine estimates\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value IV more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M2.5",
+      "expectedTitle": "Number and Place Value V",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M2.5.docx",
+      "description": "In this lesson, students develop their understanding of Number and Place Value V through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Multiplying and dividing by powers of 10\n✔ Rounding numbers to different degrees of accuracy\n✔ Calculating intervals that cross zero\n✔ Working with positive and negative numbers\n✔ Applying negative numbers to temperature contexts\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Number and Place Value V more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M4",
+      "expectedTitle": "Addition",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M4.docx",
+      "description": "In this lesson, students develop their understanding of Addition through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding large whole and decimal numbers using column addition\n✔ Aligning digits correctly by place value, including tenths\n✔ Regrouping across place-value columns where required\n✔ Using formal column subtraction alongside addition in puzzle problems\n✔ Checking multi-step calculations carefully\n\nStudents organise calculations carefully by place value, recognise when regrouping or exchange is required, and connect formal written methods with reasoning and problem-solving tasks. They also practise checking calculations and explaining the sequence of steps used.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Addition more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M5",
+      "expectedTitle": "Multiplication",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M5.docx",
+      "description": "In this lesson, students develop their understanding of Multiplication through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Scaling recipe quantities using multiplication\n✔ Using multiplicative relationships and fractions to scale amounts\n✔ Checking solutions with formal long multiplication\n✔ Regrouping correctly within a written multiplication method\n✔ Spotting and correcting errors in multiplication\n\nStudents use multiplication and division facts, number properties, place value and formal written methods where appropriate. They practise recognising the structure of each question, choosing an efficient strategy and checking the accuracy of each stage.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Multiplication more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M8",
+      "expectedTitle": "Fractions 1",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M8.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Simplifying fractions using common factors\n✔ Comparing fractions using common denominators\n✔ Ordering fractions by denominator relationships\n✔ Comparing fractions using common numerators\n✔ Choosing the most efficient comparison strategy\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M9",
+      "expectedTitle": "Fractions 2",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M9.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Adding and subtracting fractions\n✔ Finding lowest common multiples to create common denominators\n✔ Adding mixed numbers\n✔ Subtracting mixed numbers\n✔ Regrouping mixed numbers when required\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M10",
+      "expectedTitle": "Fractions 3",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M10.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Multiplying fractions\n✔ Using fraction models to represent multiplication\n✔ Simplifying fractions before or after calculations\n✔ Solving fraction word problems\n✔ Explaining fraction operations in context\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M11",
+      "expectedTitle": "Fractions 4",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M11.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Dividing a proper fraction by an integer\n✔ Using the inverse relationship between multiplication and division\n✔ Understanding how division affects the denominator\n✔ Simplifying answers where appropriate\n✔ Solving word problems involving division of fractions\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M12",
+      "expectedTitle": "Fractions 5",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M12.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Writing decimals as fractions\n✔ Converting fractions to decimals using division\n✔ Connecting fraction notation with place value\n✔ Solving word problems that require fraction-to-decimal conversion\n✔ Interpreting fractions of amounts in context\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M13",
+      "expectedTitle": "Fractions 6",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M13.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 6 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding decimal place value\n✔ Reading and comparing decimal numbers\n✔ Working confidently with tenths, hundredths and thousandths\n✔ Representing numbers to three decimal places\n✔ Using place value to solve decimal reasoning questions\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 6 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M14",
+      "expectedTitle": "Fractions 7",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M14.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 7 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Multiplying and dividing numbers involving decimals\n✔ Multiplying decimals by 10, 100 and 1,000\n✔ Dividing decimals by 10, 100 and 1,000\n✔ Using place value to explain decimal digit movement\n✔ Solving decimal multiplication and division puzzles\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 7 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M15",
+      "expectedTitle": "Fractions 8",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M15.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 8 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Multiplying decimals by whole-number integers\n✔ Applying decimal multiplication to money\n✔ Using place value to keep decimal positions accurate\n✔ Solving contextual decimal multiplication problems\n✔ Reasoning about missing values in decimal calculations\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 8 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M16",
+      "expectedTitle": "Fractions 9",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M16.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 9 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Dividing with results expressed as decimals\n✔ Interpreting remainders in decimal form\n✔ Applying decimal division to money and measure contexts\n✔ Reasoning about decimal remainders\n✔ Rounding decimal answers appropriately\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 9 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M17",
+      "expectedTitle": "Fractions 10",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M17.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 10 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Rounding decimals to different levels of accuracy\n✔ Using decimal number lines to judge proximity\n✔ Estimating calculations by rounding decimals\n✔ Solving decimal-rounding reasoning problems\n✔ Checking whether rounded answers are sensible\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 10 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M18",
+      "expectedTitle": "Fractions 11",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M18.docx",
+      "description": "In this lesson, students develop their understanding of Fractions 11 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding fractions, decimals and percentages as equivalent ways to express proportion\n✔ Converting common fractions to percentages\n✔ Finding percentage equivalents\n✔ Ordering equivalent values\n✔ Solving reasoning problems involving fraction-percentage equivalence\n\nStudents build the ideas through representations and numerical examples before applying them in calculations and reasoning questions. The emphasis is on understanding the relationships between the quantities and choosing a method that fits the particular fraction, decimal or percentage problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Fractions 11 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M01",
+      "expectedTitle": "BIDMAS",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M01.docx",
+      "description": "In this lesson, students develop their understanding of BIDMAS through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding what each letter in BIDMAS represents\n✔ Applying brackets, indices, division, multiplication, addition and subtraction in the correct order\n✔ Solving multi-operation calculations step by step\n✔ Explaining why changing the order can change the answer\n\nStudents translate between numerical information and algebraic notation, following a clear sequence of operations and using inverse operations or substitution where needed. The activities develop reasoning about rules rather than treating algebra as symbol manipulation alone.\n\nBy the end of the lesson, learners should be able to apply the main ideas from BIDMAS more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M1",
+      "expectedTitle": "Algebra Warm Up",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M1.docx",
+      "description": "In this lesson, students develop their understanding of Algebra Warm Up through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Substituting numerical values for algebraic variables\n✔ Evaluating expressions containing several variables\n✔ Using simple formulae to calculate unknown values\n✔ Applying the correct order of operations in algebraic calculations\n✔ Developing confidence with letters used to represent numbers\n\nStudents translate between numerical information and algebraic notation, following a clear sequence of operations and using inverse operations or substitution where needed. The activities develop reasoning about rules rather than treating algebra as symbol manipulation alone.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Algebra Warm Up more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M1.2",
+      "expectedTitle": "Algebra Use Simple Formulae",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M1.2.docx",
+      "description": "In this lesson, students develop their understanding of Algebra Use Simple Formulae through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Understanding the difference between a formula and an expression\n✔ Forming algebraic expressions from rules and function machines\n✔ Using letters to represent unknown values\n✔ Substituting values into simple formulae\n✔ Applying formulae to shape and word-problem contexts\n\nStudents translate between numerical information and algebraic notation, following a clear sequence of operations and using inverse operations or substitution where needed. The activities develop reasoning about rules rather than treating algebra as symbol manipulation alone.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Algebra Use Simple Formulae more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M1.3",
+      "expectedTitle": "Algebra Solving Equations",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M1.3.docx",
+      "description": "In this lesson, students develop their understanding of Algebra Solving Equations through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Solving one-step equations\n✔ Using inverse operations to isolate the unknown\n✔ Solving equations involving addition, subtraction and multiplication\n✔ Matching word problems to algebraic representations\n✔ Checking solutions by substitution\n\nStudents translate between numerical information and algebraic notation, following a clear sequence of operations and using inverse operations or substitution where needed. The activities develop reasoning about rules rather than treating algebra as symbol manipulation alone.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Algebra Solving Equations more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M1.4",
+      "expectedTitle": "Linear Sequences",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M1.4.docx",
+      "description": "In this lesson, students develop their understanding of Linear Sequences through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding term-to-term rules in linear sequences\n✔ Continuing sequences forwards and backwards\n✔ Finding missing terms\n✔ Following a stated sequence rule accurately\n✔ Using sequence rules to solve codebreaker-style reasoning problems\n\nStudents translate between numerical information and algebraic notation, following a clear sequence of operations and using inverse operations or substitution where needed. The activities develop reasoning about rules rather than treating algebra as symbol manipulation alone.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Linear Sequences more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M34",
+      "expectedTitle": "Ratio and Proportion 1",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M34.docx",
+      "description": "In this lesson, students develop their understanding of Ratio and Proportion 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Introducing ratio as a comparison between quantities\n✔ Writing and interpreting ratios\n✔ Introducing proportion as a part or share in relation to a whole\n✔ Connecting ratio, fractions and proportion\n✔ Solving proportional problems involving money\n\nStudents reason about multiplicative, fractional and proportional relationships, then apply those relationships to contextual and reasoning problems. The focus is on identifying what is being compared and preserving the correct relationship as values change.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Ratio and Proportion 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M35",
+      "expectedTitle": "Ratio and Proportion 2",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M35.docx",
+      "description": "In this lesson, students develop their understanding of Ratio and Proportion 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Solving fraction problems involving measurement\n✔ Converting units within fraction problems\n✔ Applying fraction knowledge to mixed problem types\n✔ Using fractions of shapes and quantities\n✔ Solving fraction reasoning problems from contextual information\n\nStudents reason about multiplicative, fractional and proportional relationships, then apply those relationships to contextual and reasoning problems. The focus is on identifying what is being compared and preserving the correct relationship as values change.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Ratio and Proportion 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M36",
+      "expectedTitle": "Ratio and Proportion 3",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M36.docx",
+      "description": "In this lesson, students develop their understanding of Ratio and Proportion 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Solving ratio problems\n✔ Interpreting ratios as comparisons between quantities\n✔ Using scale and scale factor\n✔ Enlarging shapes by a given scale factor\n✔ Solving scale-factor problems\n\nStudents reason about multiplicative, fractional and proportional relationships, then apply those relationships to contextual and reasoning problems. The focus is on identifying what is being compared and preserving the correct relationship as values change.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Ratio and Proportion 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M37",
+      "expectedTitle": "Ratio and Proportion 4",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M37.docx",
+      "description": "In this lesson, students develop their understanding of Ratio and Proportion 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reasoning about scale factors and enlargements\n✔ Identifying which shapes are true enlargements\n✔ Solving proportion problems\n✔ Using part-to-whole relationships\n✔ Solving ratio reasoning problems from combined totals\n\nStudents reason about multiplicative, fractional and proportional relationships, then apply those relationships to contextual and reasoning problems. The focus is on identifying what is being compared and preserving the correct relationship as values change.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Ratio and Proportion 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M38",
+      "expectedTitle": "Ratio and Proportion 5",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M38.docx",
+      "description": "In this lesson, students develop their understanding of Ratio and Proportion 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Finding percentages of amounts\n✔ Using efficient percentage facts\n✔ Solving contextual percentage problems\n✔ Interpreting percentages in pie charts\n✔ Solving percentage reasoning problems\n\nStudents reason about multiplicative, fractional and proportional relationships, then apply those relationships to contextual and reasoning problems. The focus is on identifying what is being compared and preserving the correct relationship as values change.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Ratio and Proportion 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M3",
+      "expectedTitle": "Compare and Order Decimals",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M3.docx",
+      "description": "In this lesson, students develop their understanding of Compare and Order Decimals through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Comparing decimal numbers\n✔ Ordering decimals accurately\n✔ Using place value to compare digits from left to right\n✔ Interpreting different decimal representations\n✔ Justifying greater-than, less-than and equal-to relationships\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Compare and Order Decimals more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M7",
+      "expectedTitle": "Calculating Intervals Across Zero",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M7.docx",
+      "description": "In this lesson, students develop their understanding of Calculating Intervals Across Zero through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Calculating the distance between positive and negative values\n✔ Using number lines that cross zero\n✔ Breaking intervals into the distance to zero and the distance beyond zero\n✔ Applying interval reasoning to contextual questions\n✔ Checking the direction and size of each interval carefully\n\nStudents move between representations and numerical reasoning so that the underlying number relationships are understood rather than memorised as isolated rules. They practise selecting the relevant place-value information, applying the correct rule and checking whether their answers are sensible.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Calculating Intervals Across Zero more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M29",
+      "expectedTitle": "Coordinates 1",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M29.docx",
+      "description": "In this lesson, students develop their understanding of Coordinates 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reading ordered pairs correctly\n✔ Locating coordinates on a grid\n✔ Remembering to move along the x-axis before the y-axis\n✔ Using coordinates to identify positions in themed grid challenges\n✔ Applying coordinate knowledge independently\n\nStudents use precise positional language and coordinate conventions to locate, plot or transform shapes and points. The lesson develops accuracy alongside reasoning about how positions change and how missing information can be deduced.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Coordinates 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M30",
+      "expectedTitle": "Coordinates 2",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M30.docx",
+      "description": "In this lesson, students develop their understanding of Coordinates 2 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Reasoning about coordinates and vertices\n✔ Completing coordinates for shapes from given information\n✔ Finding midpoints between coordinate points\n✔ Using coordinate information to complete tables and justify answers\n\nStudents use precise positional language and coordinate conventions to locate, plot or transform shapes and points. The lesson develops accuracy alongside reasoning about how positions change and how missing information can be deduced.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Coordinates 2 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M31",
+      "expectedTitle": "Transformations 1",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M31.docx",
+      "description": "In this lesson, students develop their understanding of Transformations 1 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Plotting coordinates to create and complete shapes\n✔ Using coordinate positions to identify right angles\n✔ Reasoning about quadrilaterals formed on a coordinate grid\n✔ Finding missing vertices from known coordinates\n\nStudents use precise positional language and coordinate conventions to locate, plot or transform shapes and points. The lesson develops accuracy alongside reasoning about how positions change and how missing information can be deduced.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Transformations 1 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M41",
+      "expectedTitle": "Properties of Shapes 3",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M41.docx",
+      "description": "In this lesson, students develop their understanding of Properties of Shapes 3 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Using angle facts on a straight line\n✔ Reasoning with angles in triangles\n✔ Using properties of equilateral and other triangles\n✔ Combining shape properties to find unknown angles\n\nStudents use precise geometric vocabulary, diagrams, known properties and angle facts to reason about shapes. Rather than relying on appearance alone, they justify conclusions from the defining properties given in each problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Properties of Shapes 3 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M42",
+      "expectedTitle": "Properties of Shapes 4",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M42.docx",
+      "description": "In this lesson, students develop their understanding of Properties of Shapes 4 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Identifying and classifying 3D shapes\n✔ Reasoning about quadrilaterals and polygons\n✔ Using properties of regular shapes\n✔ Using faces, sides and angle facts to identify shapes\n\nStudents use precise geometric vocabulary, diagrams, known properties and angle facts to reason about shapes. Rather than relying on appearance alone, they justify conclusions from the defining properties given in each problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Properties of Shapes 4 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M43",
+      "expectedTitle": "Properties of Shapes 5",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M43.docx",
+      "description": "In this lesson, students develop their understanding of Properties of Shapes 5 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Completing 2D shapes accurately on square grids\n✔ Reasoning about faces, edges and vertices of 3D shapes\n✔ Recognising nets that form cubes and other 3D shapes\n✔ Using shape properties to eliminate incorrect possibilities\n\nStudents use precise geometric vocabulary, diagrams, known properties and angle facts to reason about shapes. Rather than relying on appearance alone, they justify conclusions from the defining properties given in each problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Properties of Shapes 5 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    },
+    {
+      "lessonId": "Y6M44",
+      "expectedTitle": "Properties of Shapes 6",
+      "sourceScript": "Scripts/Maths/Year 6/Y6M44.docx",
+      "description": "In this lesson, students develop their understanding of Properties of Shapes 6 through clear worked examples, carefully chosen representations and guided reasoning before applying the ideas independently.\n\nThis lesson includes:\n✔ Solving geometry riddles from angle and side clues\n✔ Using circle vocabulary including radius and diameter\n✔ Reasoning with properties of triangles and quadrilaterals\n✔ Combining several shape facts to identify or correct diagrams\n\nStudents use precise geometric vocabulary, diagrams, known properties and angle facts to reason about shapes. Rather than relying on appearance alone, they justify conclusions from the defining properties given in each problem.\n\nBy the end of the lesson, learners should be able to apply the main ideas from Properties of Shapes 6 more confidently, choose an appropriate method or representation, and explain the reasoning behind their answers."
+    }
+  ]
+}
