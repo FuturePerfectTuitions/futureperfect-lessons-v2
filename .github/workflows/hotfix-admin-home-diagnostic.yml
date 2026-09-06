@@ -1,0 +1,86 @@
+name: Hotfix - diagnose development Admin home visibility
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/hotfix-admin-home-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read development Admin access metadata only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os, requests, urllib.parse
+          api='https://api.cloudflare.com/client/v4'
+          acct=os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          h={'Authorization':f'Bearer {token}'}
+          s=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=h,timeout=60).json()
+          assert s.get('success'), s
+          b=s['result']['bindings']
+          env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT')
+          ns=next(x.get('namespace_id') for x in b if x.get('name')=='STUDENTS_KV')
+          db=next(x.get('id') for x in b if x.get('name')=='DB')
+          assert env=='development' and ns and db
+
+          # Discover only Admin-like user records and redact authentication fields.
+          params={'prefix':'user:','limit':'1000'}
+          keys=[]
+          cursor=None
+          while True:
+            if cursor: params['cursor']=cursor
+            r=requests.get(f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/keys',headers=h,params=params,timeout=60).json()
+            assert r.get('success'), r
+            keys += [x['name'] for x in r.get('result') or []]
+            info=r.get('result_info') or {}
+            cursor=info.get('cursor') if info.get('cursor') else None
+            if not cursor: break
+          matches=[]
+          sensitive={'p','password','passwordHash','hash','salt','answerPassword','answerPasswords'}
+          for key in keys:
+            if 'admin' not in key.lower():
+              continue
+            q=requests.get(f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'+urllib.parse.quote(key,safe=''),headers=h,timeout=30)
+            if q.status_code != 200: continue
+            try: rec=q.json()
+            except Exception: continue
+            safe={k:v for k,v in rec.items() if k not in sensitive and 'password' not in k.lower() and k.lower() not in {'p','hash','salt'}}
+            matches.append({'key':key,'record':safe})
+          # Also catch display name Admin without printing unrelated records.
+          if not matches:
+            for key in keys:
+              q=requests.get(f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'+urllib.parse.quote(key,safe=''),headers=h,timeout=30)
+              if q.status_code != 200: continue
+              try: rec=q.json()
+              except Exception: continue
+              name=str(rec.get('name') or rec.get('displayName') or '')
+              if name.strip().lower() != 'admin': continue
+              safe={k:v for k,v in rec.items() if k not in sensitive and 'password' not in k.lower() and k.lower() not in {'p','hash','salt'}}
+              matches.append({'key':key,'record':safe})
+          print('ADMIN_KV_MATCHES='+json.dumps(matches,sort_keys=True))
+
+          for m in matches:
+            pid=m['key'][5:].strip().lower() if m['key'].startswith('user:') else ''
+            if not pid: continue
+            payload={'sql':'SELECT a.portal_user_id_norm,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY b.subject,b.school_year,COALESCE(b.maths_level,0),a.batch_key','params':[pid]}
+            d=requests.post(f'{api}/accounts/{acct}/d1/database/{db}/query',headers={**h,'Content-Type':'application/json'},json=payload,timeout=60).json()
+            assert d.get('success'), d
+            rows=[]
+            for block in d.get('result') or []: rows.extend(block.get('results') or [])
+            print('ADMIN_D1_ASSIGNMENTS='+json.dumps(rows,sort_keys=True))
+          PY
