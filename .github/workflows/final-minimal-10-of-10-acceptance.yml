@@ -48,9 +48,10 @@ jobs:
             if not cursor:break
           r2={o.get('key') for o in objs if o.get('key') and not o.get('key').endswith('/')}
           stale_y3={
-            'english/year3/Y3T3E07/homework/sheets/Y3T3E07 Homework Reading Assessment.pdf',
-            'english/year3/Y3T3E10/prelesson/sheets/Y3T3E10 PreLesson Sheets Revision 3.pdf'
+            'english/year3/Y3T3E07/homework/answers/Y3T3E07 Answer Pack Homework Reading Assessment.pdf',
+            'english/year3/Y3T3E10/homework/answers/Y3T3E10 Answer Pack Homework Revision 3.pdf'
           }
+          assert stale_y3.issubset(r2)
           cfg=[
             (2,'Maths','MATHS_Y2',36,'maths/year2/','Y2T',85),
             (2,'English','ENGLISH_Y2',29,'english/year2/','Y2T',72),
@@ -76,12 +77,13 @@ jobs:
           for year,subject,cur,expected_lessons,prefix,codeprefix,expected_r2 in cfg:
             c=kv('curriculum:'+cur); ids=c.get('lessonIds') or []; assert len(ids)==expected_lessons,(cur,len(ids))
             records=[kv('lesson:'+lid) for lid in ids]; assert all(r.get('active') is not False for r in records)
-            current={k for k in r2 if k.startswith(prefix+codeprefix)}
-            if cur=='ENGLISH_Y3': current-=stale_y3
+            physical={k for k in r2 if k.startswith(prefix+codeprefix)}
+            current=physical-stale_y3 if cur=='ENGLISH_Y3' else physical
+            if cur=='ENGLISH_Y3':
+              assert len(physical)==86 and len(stale_y3)==2
             assert len(current)==expected_r2,(cur,'r2',len(current),expected_r2)
             refs=set()
             for rec in records: refs.update(x for x in refs_in(rec) if x.startswith(prefix.split('/')[0]+'/'))
-            # Scope to this year so other non-target/special refs cannot mask mismatch.
             refs={x for x in refs if x.startswith(prefix)}
             assert refs==current,(cur,'coverage',len(current-refs),len(refs-current))
             assert not [x for x in refs if x not in r2]
@@ -99,7 +101,6 @@ jobs:
                 assert ep==re.sub(r'E(\d{2})$',r'EE\1',normal),(rec.get('lessonId'),normal,ep)
             matrix.append({'year':year,'subject':subject,'driveLessons':expected_lessons,'kvLessons':len(ids),'currentR2Objects':len(current),'activeReferencedR2Objects':len(refs),'brokenReferences':0,'status':'PASS'})
 
-          # Owner-confirmed media/presentation exceptions.
           y5p=kv('lesson:Y5M19'); y6p=kv('lesson:Y6M25')
           assert y5p['core']['video']['screenpal']=='cO1Zionu8NC' and not y5p['core']['video'].get('quiz')
           assert y6p['core']['video']['screenpal']=='cO1Zionu8NC' and not y6p['core']['video'].get('quiz')
@@ -110,9 +111,8 @@ jobs:
           trans=kv('lesson:Y4E1'); assert trans['title']=='Transitioning from Year 3 to Year 4' and (trans.get('core') or {}).get('video') is None
           last=kv('lesson:Y6M45'); assert (last.get('displayIds') or {}).get('maths-level3')=='L3T3M43' and (last.get('displayIds') or {}).get('maths-year6')=='Y6T3M43' and last['core']['video']['screenpal']=='cOiDFVnUCjn'
 
-          # No active target resource is missing physically.
           assert all(x in r2 for x in all_active_refs)
-          result={'environment':env,'bucket':bucket,'targetLessonCount':sum(x[3] for x in cfg),'matrix':matrix,'specificMediaChecks':'PASS','displayAliasChecks':'PASS','resourceCoverageChecks':'PASS','finalParity':'PASS'}
+          result={'environment':env,'bucket':bucket,'targetLessonCount':sum(x[3] for x in cfg),'matrix':matrix,'specificMediaChecks':'PASS','displayAliasChecks':'PASS','resourceCoverageChecks':'PASS','knownUnreferencedObsoleteY3Objects':sorted(stale_y3),'finalParity':'PASS'}
           assert result['targetLessonCount']==348 and len(matrix)==10 and all(x['status']=='PASS' for x in matrix)
           json.dump(result,open('final-10-of-10-acceptance.json','w'),indent=2,sort_keys=True)
           print(json.dumps(result,indent=2,sort_keys=True))
