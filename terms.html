@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#012169">
+  <title>Terms | Future Perfect Tuitions</title>
+  <link rel="icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+  <link rel="stylesheet" href="assets/phase5.css">
+  <link rel="stylesheet" href="assets/site-chrome.css">
+</head>
+<body class="phase5-page">
+  <div class="phase5-airmail-border" aria-hidden="true"></div>
+  <main class="legal-page">
+    <div class="legal-topbar">
+      <a href="https://futureperfect.education/" aria-label="Future Perfect Tuitions"><img src="assets/fpt-logo.png" class="legal-logo" alt="Future Perfect Tuitions"></a>
+      <button class="legal-back" type="button" onclick="goBack()">Back</button>
+    </div>
+
+    <article class="legal-card">
+      <h1>Terms of Use</h1>
+      <div class="legal-meta"><strong>Student Lesson Portal</strong></div>
+      <div class="legal-meta">Last updated: <span id="lastUpdated"></span></div>
+
+      <div class="legal-content">
+        <p>These Terms of Use apply to the Future Perfect Tuitions student lesson portal and related learning materials. By accessing or using the portal, you agree to these terms.</p>
+
+        <h2>1) Portal access</h2>
+        <ul>
+          <li>Access is provided only to registered students (and their parent/guardian).</li>
+          <li>Login details must be kept confidential and must not be shared with anyone outside the household.</li>
+          <li>We may suspend or withdraw access where misuse is suspected.</li>
+        </ul>
+
+        <h2>2) Use of lesson materials</h2>
+        <p>All videos, worksheets, and resources are the intellectual property of Future Perfect Tuitions and are provided for personal educational use by the registered student only.</p>
+        <p>You must not:</p>
+        <ul>
+          <li>copy, share, upload, publish, or redistribute any content;</li>
+          <li>screen-record lessons or share links, passwords, or access codes;</li>
+          <li>attempt to bypass access controls or security.</li>
+        </ul>
+
+        <h2>3) Acceptable use</h2>
+        <p>The portal must be used for learning purposes only. You agree not to:</p>
+        <ul>
+          <li>use the portal in a way that disrupts or damages the service;</li>
+          <li>try to access other users’ accounts or data;</li>
+          <li>use automated tools to scrape or download content.</li>
+        </ul>
+
+        <h2>4) Availability</h2>
+        <p>We aim to keep the portal available, but we do not guarantee uninterrupted access. The service may be temporarily unavailable due to maintenance, updates, or technical issues.</p>
+
+        <h2>5) Enrolment and access duration</h2>
+        <p>Portal access is linked to active enrolment. If enrolment ends, access to the portal and lesson resources may be removed.</p>
+
+        <h2>6) Limitation of liability</h2>
+        <p>To the extent permitted by law, Future Perfect Tuitions is not liable for losses arising from temporary service interruptions, third-party platform issues, or incorrect login details provided by the user.</p>
+
+        <h2>7) Changes to these terms</h2>
+        <p>We may update these terms from time to time. Continued use of the portal means you accept the updated terms.</p>
+
+        <h2>8) Contact</h2>
+        <p><strong>Future Perfect Tuitions</strong><br>Email: <em>sej@futureperfect.education</em></p>
+      </div>
+    </article>
+
+    <footer class="phase5-footer" data-site-footer></footer>
+  </main>
+
+  <script src="footer.js"></script>
+  <script>
+    function goBack() {
+      history.length > 1 ? history.back() : (location.href = "phase11.html");
+    }
+    document.getElementById("lastUpdated").textContent = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  </script>
+</body>
+</html>
