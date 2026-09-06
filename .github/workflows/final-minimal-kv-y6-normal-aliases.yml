@@ -1,0 +1,84 @@
+name: Final minimal KV - Year 6 normal Maths aliases
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-kv-y6-normal-aliases.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-minimal-kv-y6-normal-aliases
+  cancel-in-progress: false
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_R2: fpt-materials-dev
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve and guard development bindings
+        id: guard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          env_name="$(jq -r '[.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text][0] // ""' <<<"$settings")"
+          r2="$(jq -r '[.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name][0] // ""' <<<"$settings")"
+          lessons="$(jq -r '[.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' <<<"$settings")"
+          test "$env_name" = development
+          test "$r2" = "$EXPECTED_R2"
+          test -n "$lessons"; test "$lessons" != null
+          echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
+
+      - name: Patch normal aliases from current L3 aliases and verify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LESSONS_NS: ${{ steps.guard.outputs.lessons }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p y6alias-before y6alias-after
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          base="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}"
+          curr_key='curriculum:MATHS_L3'
+          curr_enc="$(python -c 'import urllib.parse; print(urllib.parse.quote("curriculum:MATHS_L3",safe=""))')"
+          curl -fsS "${auth[@]}" "$base/values/$curr_enc" > y6alias-before/curriculum_MATHS_L3.json
+          jq -e '.lessonIds|length==43' y6alias-before/curriculum_MATHS_L3.json >/dev/null
+
+          jq -r '.lessonIds[]' y6alias-before/curriculum_MATHS_L3.json | while read -r lid; do
+            key="lesson:${lid}"
+            enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+            curl -fsS "${auth[@]}" "$base/values/$enc" > "y6alias-before/${lid}.json"
+            level="$(jq -r '.displayIds["maths-level3"] // empty' "y6alias-before/${lid}.json")"
+            [[ "$level" =~ ^L3T[123]M[0-9][0-9]$ ]]
+            normal="Y6${level:2}"
+            jq --arg normal "$normal" '.displayIds=((.displayIds // {}) + {"maths-year6":$normal})' "y6alias-before/${lid}.json" > /tmp/patched.json
+            curl -fsS -X PUT "${auth[@]}" -H 'Content-Type: application/json' --data-binary @/tmp/patched.json "$base/values/$enc" >/dev/null
+            curl -fsS "${auth[@]}" "$base/values/$enc" > "y6alias-after/${lid}.json"
+            jq -e --arg level "$level" --arg normal "$normal" '.displayIds["maths-level3"]==$level and .displayIds["maths-year6"]==$normal' "y6alias-after/${lid}.json" >/dev/null
+          done
+
+          jq -e '.displayIds["maths-level3"]=="L3T3M43" and .displayIds["maths-year6"]=="Y6T3M43" and .core.video.screenpal=="cOiDFVnUCjn"' y6alias-after/Y6M45.json >/dev/null
+          echo 'Y6_NORMAL_ALIAS_PASS'
+
+      - name: Upload before and after evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: y6-normal-alias-kv-evidence
+          path: |
+            y6alias-before/
+            y6alias-after/
+          retention-days: 30
