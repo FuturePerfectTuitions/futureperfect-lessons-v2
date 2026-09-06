@@ -38,40 +38,42 @@ jobs:
           export LESSONS_KV_ID
           node <<'NODE'
           const fs = require('fs');
-          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const ns = process.env.LESSONS_KV_ID;
-          const headers = {Authorization:`Bearer ${token}`};
-          const keys=[];
-          let cursor='';
-          do {
-            const u=new URL(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`);
-            u.searchParams.set('prefix','lesson:'); u.searchParams.set('limit','1000');
-            if(cursor) u.searchParams.set('cursor',cursor);
-            const r=await fetch(u,{headers}); const b=await r.json();
-            if(!r.ok || !b.success) throw new Error(`KV list failed HTTP ${r.status}`);
-            keys.push(...b.result.map(x=>x.name));
-            cursor=b.result_info?.cursor||'';
-          } while(cursor);
-          const values={};
-          for(let i=0;i<keys.length;i+=100){
-            const chunk=keys.slice(i,i+100);
-            const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/bulk/get`,{
-              method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({keys:chunk,type:'text',withMetadata:false})
-            });
-            const b=await r.json();
-            if(!r.ok || !b.success) throw new Error(`KV bulk get failed HTTP ${r.status}`);
-            Object.assign(values,b.result.values||{});
-          }
-          const lessons=[];
-          for(const key of keys.sort()){
-            const raw=values[key];
-            if(raw==null) continue;
-            let v; try{v=JSON.parse(raw)}catch{continue}
-            lessons.push({key,lessonId:v.lessonId||key.slice(7),order:v.order??null,title:v.title||'',description:v.description||'',subject:v.subject||'',active:v.active!==false,displayIds:v.displayIds||{},hasVideo:!!v.core?.video,record:v});
-          }
-          fs.writeFileSync('ops/live-lesson-descriptions.json',JSON.stringify({count:lessons.length,lessons},null,2));
-          console.log(`LIVE_LESSON_COUNT=${lessons.length}`);
+          (async () => {
+            const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+            const token = process.env.CLOUDFLARE_API_TOKEN;
+            const ns = process.env.LESSONS_KV_ID;
+            const headers = {Authorization:`Bearer ${token}`};
+            const keys=[];
+            let cursor='';
+            do {
+              const u=new URL(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`);
+              u.searchParams.set('prefix','lesson:'); u.searchParams.set('limit','1000');
+              if(cursor) u.searchParams.set('cursor',cursor);
+              const r=await fetch(u,{headers}); const b=await r.json();
+              if(!r.ok || !b.success) throw new Error(`KV list failed HTTP ${r.status}`);
+              keys.push(...b.result.map(x=>x.name));
+              cursor=b.result_info?.cursor||'';
+            } while(cursor);
+            const values={};
+            for(let i=0;i<keys.length;i+=100){
+              const chunk=keys.slice(i,i+100);
+              const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/bulk/get`,{
+                method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({keys:chunk,type:'text',withMetadata:false})
+              });
+              const b=await r.json();
+              if(!r.ok || !b.success) throw new Error(`KV bulk get failed HTTP ${r.status}`);
+              Object.assign(values,b.result.values||{});
+            }
+            const lessons=[];
+            for(const key of keys.sort()){
+              const raw=values[key];
+              if(raw==null) continue;
+              let v; try{v=JSON.parse(raw)}catch{continue}
+              lessons.push({key,lessonId:v.lessonId||key.slice(7),order:v.order??null,title:v.title||'',description:v.description||'',subject:v.subject||'',active:v.active!==false,displayIds:v.displayIds||{},hasVideo:!!v.core?.video,record:v});
+            }
+            fs.writeFileSync('ops/live-lesson-descriptions.json',JSON.stringify({count:lessons.length,lessons},null,2));
+            console.log(`LIVE_LESSON_COUNT=${lessons.length}`);
+          })().catch(error => { console.error(error); process.exit(1); });
           NODE
       - name: Commit snapshot for inspection
         shell: bash
