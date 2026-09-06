@@ -16,27 +16,31 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Build compact review index
+      - name: Build compact review indexes
         shell: bash
         run: |
           node <<'NODE'
           const fs=require('fs');
           const dir='ops/live-descriptions';
-          const rows=[];
+          const out='ops/live-index';
+          fs.mkdirSync(out,{recursive:true});
+          const all=[];
           for(const file of fs.readdirSync(dir).filter(x=>x.endsWith('.json')).sort()){
             const group=file.replace('.json','');
             const data=JSON.parse(fs.readFileSync(`${dir}/${file}`,'utf8'));
-            for(const x of data.lessons){
+            const rows=data.lessons.map(x=>{
               const d=String(x.description||'');
-              rows.push({group,lessonId:x.lessonId,order:x.order,title:x.title,chars:d.length,words:d.trim()?d.trim().split(/\s+/).length:0,hasVideo:!!x.hasVideo,active:x.active!==false});
-            }
+              return {group,lessonId:x.lessonId,order:x.order,title:x.title,chars:d.length,words:d.trim()?d.trim().split(/\s+/).length:0,hasVideo:!!x.hasVideo,active:x.active!==false};
+            });
+            all.push(...rows);
+            fs.writeFileSync(`${out}/${group}.tsv`,['lessonId\torder\ttitle\tchars\twords\thasVideo\tactive',...rows.map(r=>[r.lessonId,r.order,r.title.replace(/\t/g,' '),r.chars,r.words,r.hasVideo,r.active].join('\t'))].join('\n')+'\n');
           }
-          fs.writeFileSync('ops/live-description-index.json',JSON.stringify(rows,null,2));
-          fs.writeFileSync('ops/live-description-index.tsv',['group\tlessonId\torder\ttitle\tchars\twords\thasVideo\tactive',...rows.map(r=>[r.group,r.lessonId,r.order,r.title.replace(/\t/g,' '),r.chars,r.words,r.hasVideo,r.active].join('\t'))].join('\n')+'\n');
-          console.log(`INDEX_ROWS=${rows.length}`);
+          fs.writeFileSync('ops/live-description-index.json',JSON.stringify(all,null,2));
+          fs.writeFileSync('ops/live-description-index.tsv',['group\tlessonId\torder\ttitle\tchars\twords\thasVideo\tactive',...all.map(r=>[r.group,r.lessonId,r.order,r.title.replace(/\t/g,' '),r.chars,r.words,r.hasVideo,r.active].join('\t'))].join('\n')+'\n');
+          console.log(`INDEX_ROWS=${all.length}`);
           NODE
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/live-description-index.json ops/live-description-index.tsv
-          git commit -m 'Update live lesson description review index'
+          git add ops/live-description-index.json ops/live-description-index.tsv ops/live-index/
+          git commit -m 'Update split lesson description review indexes'
           git push
