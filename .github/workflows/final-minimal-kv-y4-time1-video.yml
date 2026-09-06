@@ -1,0 +1,55 @@
+name: Final minimal KV - Year 4 Time 1 shared video
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-kv-y4-time1-video.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Remove Time 1 quiz override and preserve confirmed normal video
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          s=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=auth,timeout=60).json(); assert s.get('success')
+          b=s['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); bucket=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert bucket=='fpt-materials-dev'; assert ns
+          base=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'
+          key='lesson:Y4M25'; url=base+urllib.parse.quote(key,safe='')
+          r=requests.get(url,headers=auth,timeout=60); r.raise_for_status(); rec=r.json()
+          assert str(rec.get('title','')).strip().lower()=='time 1',rec.get('title')
+          d=rec.get('displayIds') or {}; assert d.get('maths-level1')=='L1T3M26'; assert d.get('maths-year4')=='Y4T3M26'
+          v=(rec.get('core') or {}).get('video') or {}; assert v.get('screenpal')=='cOeIjsnZCkU',v
+          before=json.loads(json.dumps(rec))
+          for k in list(v):
+            if k=='quiz' or k.lower().startswith('quiz'):
+              v.pop(k,None)
+          # Any presentation-specific 11+ override is also removed: confirmed rule is
+          # that both streams use the ordinary Time 1 ScreenPal video.
+          v.pop('elevenPlus',None); v.pop('elevenplus',None)
+          rec.setdefault('core',{})['video']=v
+          p=requests.put(url,headers={**auth,'Content-Type':'application/json'},data=json.dumps(rec,separators=(',',':')).encode(),timeout=60); p.raise_for_status(); pj=p.json(); assert pj.get('success'),pj
+          a=requests.get(url,headers=auth,timeout=60); a.raise_for_status(); after=a.json(); av=(after.get('core') or {}).get('video') or {}
+          assert av.get('screenpal')=='cOeIjsnZCkU'; assert not any(k=='quiz' or k.lower().startswith('quiz') for k in av); assert 'elevenPlus' not in av and 'elevenplus' not in av
+          json.dump({'environment':env,'lessonId':'Y4M25','displayIds':d,'beforeVideo':(before.get('core') or {}).get('video'),'afterVideo':av},open('y4-time1-video-evidence.json','w'),indent=2)
+          print('Y4_TIME1_SHARED_VIDEO_PASS',av.get('screenpal'))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y4-time1-video-evidence
+          path: y4-time1-video-evidence.json
+          retention-days: 30
