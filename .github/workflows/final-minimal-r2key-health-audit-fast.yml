@@ -1,0 +1,67 @@
+name: Final minimal - fast active KV R2 link health audit
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-r2key-health-audit-fast.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Compare active KV r2Key references to one R2 listing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          settings=requests.get(f'{api}/accounts/{acct}/workers/scripts/fpt-portal-v2-worker/settings',headers=auth,timeout=60).json(); assert settings.get('success')
+          b=settings['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); bucket=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert bucket=='fpt-materials-dev'; assert ns
+          r2=[]; cursor=None
+          while True:
+            params={'per_page':'1000'}
+            if cursor: params['cursor']=cursor
+            p=requests.get(f'{api}/accounts/{acct}/r2/buckets/{bucket}/objects',headers=auth,params=params,timeout=120).json(); assert p.get('success'),p
+            r2.extend(p.get('result') or []); info=p.get('result_info') or {}; cursor=info.get('cursor') if info.get('is_truncated') else None
+            if not cursor: break
+          r2keys={o.get('key') for o in r2 if o.get('key') and not o.get('key').endswith('/')}
+          def kv(key):
+            q=requests.get(f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'+urllib.parse.quote(key,safe=''),headers=auth,timeout=60); q.raise_for_status(); return q.json()
+          curricula=['ENGLISH_Y2','MATHS_Y2','ENGLISH_Y3','MATHS_Y3','ENGLISH_Y4','MATHS_L1','ENGLISH_Y5','MATHS_L2','ENGLISH_Y6','MATHS_L3']
+          active=[]
+          for c in curricula:
+            for lid in kv('curriculum:'+c).get('lessonIds') or []: active.append((c,lid))
+          refs=[]
+          for c,lid in active:
+            rec=kv('lesson:'+lid)
+            if rec.get('active') is False: continue
+            def walk(x,path=''):
+              if isinstance(x,dict):
+                for k,v in x.items():
+                  p=f'{path}.{k}' if path else k
+                  if k=='r2Key' and isinstance(v,str) and v.strip(): refs.append({'curriculum':c,'lessonId':lid,'jsonPath':p,'r2Key':v.strip()})
+                  else: walk(v,p)
+              elif isinstance(x,list):
+                for i,v in enumerate(x): walk(v,f'{path}[{i}]')
+            walk(rec)
+          missing=[x for x in refs if x['r2Key'] not in r2keys]
+          by={}
+          for x in missing: by[x['curriculum']]=by.get(x['curriculum'],0)+1
+          report={'environment':env,'bucket':bucket,'r2ObjectCount':len(r2keys),'activeLessonCount':len(active),'referenceCount':len(refs),'uniqueReferenceCount':len({x['r2Key'] for x in refs}),'missingReferenceCount':len(missing),'missingByCurriculum':by,'missing':missing}
+          json.dump(report,open('active-kv-r2key-health-fast.json','w'),indent=2,sort_keys=True)
+          print(json.dumps({k:report[k] for k in ['r2ObjectCount','activeLessonCount','referenceCount','uniqueReferenceCount','missingReferenceCount','missingByCurriculum']},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: active-kv-r2key-health-fast
+          path: active-kv-r2key-health-fast.json
+          retention-days: 30
