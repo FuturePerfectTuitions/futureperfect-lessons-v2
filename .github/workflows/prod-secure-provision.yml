@@ -1,5 +1,7 @@
 name: Secure Portal V2 production provisioning
 
+# One-shot guarded production activation. Sensitive student values remain encrypted
+# in source control and are decrypted only inside the authorised Actions runner.
 on:
   push:
     branches: [main]
