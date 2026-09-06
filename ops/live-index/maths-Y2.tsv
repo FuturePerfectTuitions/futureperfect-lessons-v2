@@ -1,0 +1,37 @@
+lessonId	order	title	chars	words	hasVideo	active
+Y2M1	1	Transition to Year 2	0	0	false	true
+Y2M1.1	2	Lesson 1.1 Money	0	0	false	true
+Y2M1.2	3	Lesson 1.2 Money	0	0	false	true
+Y2M2.1	4	Lesson 2.1 Multiplication and Division	0	0	false	true
+Y2M2.2	5	Lesson 2.2 Multiplication and Division	0	0	false	true
+Y2M3	6	Lesson 3 Statistics	0	0	false	true
+Y2M3.1	7	Statistics 2	0	0	false	true
+Y2M3.2	8	Statistics 3	0	0	false	true
+Y2M4	9	Lesson 4 Fractions	0	0	false	true
+Y2M5	10	Lesson 5 Shapes	0	0	false	true
+Y2M6	11	Lesson 6 Measurements	0	0	false	true
+Y2M7	12	Lesson 7 Time	0	0	false	true
+Y2M8	13	Lesson 8 Position and Directions	0	0	false	true
+Y2M10	14	Lesson 10 2 and 3 digit division	0	0	false	true
+Y2M12	15	Lesson 12 Number and Place Value	0	0	false	true
+Y2M13	16	Lesson 13 Additions and Subtractions	0	0	false	true
+Y2M14	17	Lesson 14 Partitioning	0	0	false	true
+Y2M15	18	Lesson 15 Word Problems	0	0	false	true
+Y2M17	19	Polygons	0	0	false	true
+Y2M18	20	2D Shapes and Symmetry	0	0	false	true
+Y2M19	21	2D Shapes Sorting and Patterns	0	0	false	true
+Y2M20	22	More 3D Shapes and Description	0	0	false	true
+Y2M21	23	Length and Height	0	0	false	true
+Y2M22	24	Length and Height 2	0	0	false	true
+Y2M27	25	Money 1	0	0	false	true
+Y2M28	26	Money 2	0	0	false	true
+Y2M29	27	Money 3	0	0	false	true
+Y2M23	28	Length and Height 3	0	0	false	true
+Y2M24	29	Mass 1	0	0	false	true
+Y2M25	30	Mass 2	0	0	false	true
+Y2M26	31	Mass 3	0	0	false	true
+Y2M30	32	Volume and Capacity 1	0	0	false	true
+Y2M31	33	Volume and Capacity 2	0	0	false	true
+Y2M32	34	Temperature	0	0	false	true
+Y2M33	35	EOS 1 2 3 4	0	0	false	true
+Y2M34	36	EOS 5 6 7 8	0	0	false	true
