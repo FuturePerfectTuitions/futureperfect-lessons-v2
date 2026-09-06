@@ -1,0 +1,101 @@
+name: Final current Drive lesson catalogue snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-drive-lesson-snapshot.yml
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Drive dependencies
+        run: python3 -m pip install --quiet google-auth requests
+      - name: Export current authoritative lesson folders
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re
+          from google.auth.transport.requests import AuthorizedSession
+          from google.oauth2 import service_account
+
+          FOLDER='application/vnd.google-apps.folder'
+          ROOT='1FG_SZKaf3BVqKMpt3eb_wHI4L4POUX-y'
+          PARENTS={
+            (4,'English'):'1OYFPtGBb9Io7dwiuIvdMYsvJnb2TczXb',
+            (4,'Maths'):'1OzjeIf6BaFqEL8dCleM9ad3K-A1WtONw',
+            (5,'English'):'1OKpYKW8gBxBijwFqfYQ5LwF9xp4-Eiwa',
+            (5,'Maths'):'1OvQmVd3Xlq_nUMQRyJdUQxKbuHy1gogA',
+            (6,'English'):'1OBgXw-OmLuEZGkf0N8OjPKemHYzPk5ww',
+            (6,'Maths'):'1Ou-XT-wUFxEgUJ2N0Ojq5P67z4s-HkWy',
+          }
+          info=json.loads(os.environ['GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON'])
+          creds=service_account.Credentials.from_service_account_info(info,scopes=['https://www.googleapis.com/auth/drive.readonly'])
+          drive=AuthorizedSession(creds)
+          def query(q):
+            out=[]; page=None
+            while True:
+              params={'q':q,'fields':'nextPageToken,files(id,name,mimeType,parents,trashed,modifiedTime)','pageSize':'1000','supportsAllDrives':'true','includeItemsFromAllDrives':'true'}
+              if page: params['pageToken']=page
+              r=drive.get('https://www.googleapis.com/drive/v3/files',params=params,timeout=120); r.raise_for_status(); p=r.json(); out+=p.get('files',[]); page=p.get('nextPageToken')
+              if not page: return out
+          def children(fid): return query(f"'{fid}' in parents and trashed=false")
+          rows=[]
+          # Years 2/3: recursive from shared Lessons root, excluding any Obsolete ancestry.
+          seen=set()
+          def walk(fid,path,obsolete=False):
+            if fid in seen: return
+            seen.add(fid)
+            for x in children(fid):
+              if x.get('mimeType')!=FOLDER: continue
+              name=x.get('name') or ''
+              obs=obsolete or ('obsolete' in name.lower())
+              p=path+[name]
+              if not obs:
+                m=re.match(r'^(Y([23])T([123])([EM])(\d{2}))(?=$|[^A-Za-z0-9])(.*)$',name,re.I)
+                if m:
+                  y=int(m.group(2)); subj='English' if m.group(4).upper()=='E' else 'Maths'
+                  rows.append({'year':y,'subject':subj,'driveCode':m.group(1).upper(),'term':int(m.group(3)),'serial':int(m.group(5)),'title':(m.group(6) or '').strip(' -–—'),'folderId':x['id'],'folderName':name,'path':'/'.join(p)})
+              walk(x['id'],p,obs)
+          walk(ROOT,[])
+          # Years 4/5/6: current lesson folders are direct children of their subject folders.
+          for (y,subj),pid in PARENTS.items():
+            for x in children(pid):
+              if x.get('mimeType')!=FOLDER: continue
+              name=x.get('name') or ''
+              if subj=='English':
+                m=re.match(rf'^(Y{y}T([123])E(\d{{2}}))(?=$|[^A-Za-z0-9])(.*)$',name,re.I)
+              else:
+                level=y-3
+                m=re.match(rf'^(L{level}T([123])M(\d{{2}}))(?=$|[^A-Za-z0-9])(.*)$',name,re.I)
+              if not m: continue
+              rows.append({'year':y,'subject':subj,'driveCode':m.group(1).upper(),'term':int(m.group(2)),'serial':int(m.group(3)),'title':(m.group(4) or '').strip(' -–—'),'folderId':x['id'],'folderName':name,'path':name})
+          # Refuse duplicate current codes within a year/subject.
+          by={}
+          for r in rows:
+            k=(r['year'],r['subject'],r['driveCode'])
+            if k in by: raise SystemExit(f'DUPLICATE_CURRENT_DRIVE_CODE {k}: {by[k]} / {r}')
+            by[k]=r
+          rows.sort(key=lambda r:(r['year'],0 if r['subject']=='Maths' else 1,r['term'],r['serial'],r['driveCode']))
+          counts={}
+          for r in rows: counts[f"Y{r['year']} {r['subject']}"]=counts.get(f"Y{r['year']} {r['subject']}",0)+1
+          os.makedirs('final-drive-lessons',exist_ok=True)
+          json.dump({'status':'pass','root':ROOT,'counts':counts,'lessons':rows},open('final-drive-lessons/catalogue.json','w'),indent=2,ensure_ascii=False)
+          print('FINAL_DRIVE_LESSON_SNAPSHOT_PASS',json.dumps(counts,sort_keys=True))
+          PY
+      - name: Upload current Drive lesson catalogue
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-current-drive-lesson-catalogue
+          path: final-drive-lessons/catalogue.json
+          retention-days: 7
