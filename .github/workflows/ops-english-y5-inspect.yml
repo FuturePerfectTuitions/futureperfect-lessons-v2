@@ -1,0 +1,60 @@
+name: Ops inspect Y5 English development state
+
+on:
+  push:
+    branches: [ops/english-content-reconcile]
+    paths:
+      - 'ops/english-y5-inspect.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      V2_WORKER: fpt-portal-v2-worker
+      EXPECTED_BUCKET: fpt-materials-dev
+    steps:
+      - name: Guard development and inspect Y5 English
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' <<<"$settings" >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' <<<"$settings")" = "$EXPECTED_BUCKET"
+          KV="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$settings")"
+          test -n "$KV"; test "$KV" != null
+          export KV
+
+          node <<'NODE'
+          const a=process.env.CLOUDFLARE_ACCOUNT_ID,t=process.env.CLOUDFLARE_API_TOKEN,k=process.env.KV;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${a}/storage/kv/namespaces/${k}/values/`;
+          const h={Authorization:`Bearer ${t}`};
+          async function get(key){const r=await fetch(base+encodeURIComponent(key),{headers:h}); if(!r.ok) throw new Error(`${key} ${r.status}`); return JSON.parse(await r.text());}
+          const c=await get('curriculum:ENGLISH_Y5');
+          console.log('CURRICULUM',JSON.stringify(c));
+          for(const id of c.lessonIds.slice(-8)) console.log('LESSON',id,JSON.stringify(await get(`lesson:${id}`)));
+          NODE
+
+          cursor=''
+          : > /tmp/y5keys.txt
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${EXPECTED_BUCKET}/objects?per_page=1000"
+            [ -n "$cursor" ] && url="${url}&cursor=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq -r '.result[]?.key' <<<"$page" >> /tmp/y5keys.txt
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          echo 'MATCHING_R2_KEYS_BEGIN'
+          grep -Ei 'Y5T3E(29|31|33|34)|Y5E(29|31|33|34)|Upleveling Sentences|Suspense and Thrillers|Character Descriptions and Recounting|Experimenting with Similes and Metaphors' /tmp/y5keys.txt || true
+          echo 'MATCHING_R2_KEYS_END'
