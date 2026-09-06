@@ -39,6 +39,7 @@ jobs:
 
           worker = Path('worker/src/index-phase19-access.js')
           s = worker.read_text(encoding='utf-8')
+
           old_guard = """async function handleLogin(request, env, ctx) {
             const windowToken = clean(request.headers.get(WINDOW_HEADER));
             if (windowToken.length < 24) {
@@ -47,26 +48,44 @@ jobs:
 
             const response = await phase18Worker.fetch(request, env, ctx);"""
           new_guard = """async function handleLogin(request, env, ctx) {
-            // Do not make valid credentials depend on a cross-origin custom header.
-            // Browser-window reauthentication is enforced by sessionStorage in the UI.
+            // Valid credentials must not depend on a custom browser-window header.
+            // Window-close reauthentication is enforced by sessionStorage in the UI.
             const windowToken = clean(request.headers.get(WINDOW_HEADER));
             const response = await phase18Worker.fetch(request, env, ctx);"""
-          if old_guard not in s:
-              raise SystemExit('Phase19 login window guard pattern not found')
-          s = s.replace(old_guard, new_guard, 1)
+          if old_guard in s:
+              s = s.replace(old_guard, new_guard, 1)
+          elif "if (windowToken.length < 24)" in s:
+              raise SystemExit('Unexpected Phase19 login guard shape')
 
-          old_enforcement = """    if (url.pathname.startsWith('/api/v1/student/')) {
-              let validWindow = false;
-              try { validWindow = await requireWindow(request, env); } catch { validWindow = false; }
-              if (!validWindow) {
-                return json({ error: 'WINDOW_SESSION_REQUIRED' }, { status: 401 }, request, env);
-              }
-            }
+          # Remove the Phase19 global server-side window-header gate structurally,
+          # irrespective of indentation. Trial one-use and content restrictions remain.
+          needle = "if (url.pathname.startsWith('/api/v1/student/')) {"
+          start = s.find(needle)
+          if start >= 0:
+              if 'WINDOW_SESSION_REQUIRED' not in s[start:start+1200]:
+                  raise SystemExit('Found student gate but not expected window error')
+              line_start = s.rfind('\n', 0, start) + 1
+              brace = s.find('{', start)
+              depth = 0
+              end = None
+              for i in range(brace, len(s)):
+                  ch = s[i]
+                  if ch == '{': depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+              if end is None:
+                  raise SystemExit('Could not locate end of server window gate')
+              while end < len(s) and s[end] in ' \t': end += 1
+              if end < len(s) and s[end] == '\n': end += 1
+              s = s[:line_start] + s[end:]
+          elif 'WINDOW_SESSION_REQUIRED' in s:
+              # Remaining occurrence is allowed only in historical helper/constant code,
+              # not as an active fetch gate. The login guard above must already be gone.
+              pass
 
-          """
-          if old_enforcement not in s:
-              raise SystemExit('Phase19 global window enforcement pattern not found')
-          s = s.replace(old_enforcement, '', 1)
           worker.write_text(s, encoding='utf-8')
 
           ui = Path('assets/phase19-access-ui.js')
@@ -148,10 +167,13 @@ jobs:
           html = Path('phase11.html')
           h = html.read_text(encoding='utf-8')
           old = '<script src="assets/phase19-access-ui.js"></script>'
-          new = '<script src="assets/phase19-access-ui.js?v=20260906-login-hotfix-1"></script>'
+          new = '<script src="assets/phase19-access-ui.js?v=20260906-login-hotfix-2"></script>'
           if old in h:
               h = h.replace(old, new, 1)
-          elif new not in h:
+          elif 'assets/phase19-access-ui.js?v=20260906-login-hotfix-' in h:
+              import re
+              h = re.sub(r'assets/phase19-access-ui\.js\?v=20260906-login-hotfix-\d+', 'assets/phase19-access-ui.js?v=20260906-login-hotfix-2', h, count=1)
+          else:
               raise SystemExit('Phase19 UI script tag not found')
           html.write_text(h, encoding='utf-8')
           PY
@@ -160,7 +182,8 @@ jobs:
           node --check assets/phase19-access-ui.js
           grep -Fq "fpt_v2_window_login_v2" assets/phase19-access-ui.js
           grep -Fq "sessionStorage.setItem(WINDOW_KEY, 'authenticated')" assets/phase19-access-ui.js
-          grep -Fq 'phase19-access-ui.js?v=20260906-login-hotfix-1' phase11.html
+          grep -Fq 'phase19-access-ui.js?v=20260906-login-hotfix-2' phase11.html
+          ! grep -A8 -F "async function handleLogin(request, env, ctx)" worker/src/index-phase19-access.js | grep -Fq "WINDOW_SESSION_REQUIRED"
 
       - name: Commit hotfix source
         shell: bash
@@ -169,8 +192,10 @@ jobs:
           git config user.name 'FuturePerfectTuitions'
           git config user.email 'futureperfectlessons@gmail.com'
           git add worker/src/index-phase19-access.js assets/phase19-access-ui.js phase11.html
-          git commit -m 'Hotfix portal login window handling'
-          git push origin HEAD:main
+          if ! git diff --cached --quiet; then
+            git commit -m 'Hotfix portal login window handling'
+            git push origin HEAD:main
+          fi
 
       - name: Preserve production Worker configuration
         shell: bash
@@ -230,23 +255,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Invalid credentials without a window header must now reach the real
-          # credential validator. If the old regression remained this would be
-          # WINDOW_SESSION_REQUIRED instead of INVALID_LOGIN.
-          code="$(curl --silent --show-error --output /tmp/login.json --write-out '%{http_code}' \
-            --header "Origin: $PRODUCTION_ORIGIN" \
-            --header 'Content-Type: application/json' \
-            --request POST --data '{"username":"definitely-not-a-user","password":"Aa1b"}' \
-            "$WORKER_BASE/api/v1/student/auth/login")"
+          code="$(curl --silent --show-error --output /tmp/login.json --write-out '%{http_code}' --header "Origin: $PRODUCTION_ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"username":"definitely-not-a-user","password":"Aa1b"}' "$WORKER_BASE/api/v1/student/auth/login")"
           test "$code" = 401
           grep -Fq 'INVALID_LOGIN' /tmp/login.json
           ! grep -Fq 'WINDOW_SESSION_REQUIRED' /tmp/login.json
 
-          # An unauthenticated session request must likewise reach the base
-          # session validator rather than the removed window-header gate.
-          code="$(curl --silent --show-error --output /tmp/session.json --write-out '%{http_code}' \
-            --header "Origin: $PRODUCTION_ORIGIN" \
-            "$WORKER_BASE/api/v1/student/session")"
+          code="$(curl --silent --show-error --output /tmp/session.json --write-out '%{http_code}' --header "Origin: $PRODUCTION_ORIGIN" "$WORKER_BASE/api/v1/student/session")"
           test "$code" = 401
           ! grep -Fq 'WINDOW_SESSION_REQUIRED' /tmp/session.json
 
@@ -263,11 +277,7 @@ jobs:
           set -euo pipefail
           ok=0
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error "$PAGES_ORIGIN/phase11.html?loginhotfix=${GITHUB_RUN_ID}" -o /tmp/phase11.html && \
-               grep -Fq 'phase19-access-ui.js?v=20260906-login-hotfix-1' /tmp/phase11.html && \
-               curl --fail --silent --show-error "$PAGES_ORIGIN/assets/phase19-access-ui.js?v=20260906-login-hotfix-1" -o /tmp/ui.js && \
-               grep -Fq 'fpt_v2_window_login_v2' /tmp/ui.js && \
-               grep -Fq "sessionStorage.setItem(WINDOW_KEY, 'authenticated')" /tmp/ui.js; then
+            if curl --fail --silent --show-error "$PAGES_ORIGIN/phase11.html?loginhotfix=${GITHUB_RUN_ID}" -o /tmp/phase11.html && grep -Fq 'phase19-access-ui.js?v=20260906-login-hotfix-2' /tmp/phase11.html && curl --fail --silent --show-error "$PAGES_ORIGIN/assets/phase19-access-ui.js?v=20260906-login-hotfix-2" -o /tmp/ui.js && grep -Fq 'fpt_v2_window_login_v2' /tmp/ui.js && grep -Fq "sessionStorage.setItem(WINDOW_KEY, 'authenticated')" /tmp/ui.js; then
               ok=1
               break
             fi
