@@ -1,0 +1,51 @@
+name: Login account metadata diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/login-account-metadata-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Inspect non-sensitive account status metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          STUDENTS_ID="$(jq -r '[.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' /tmp/settings.json)"
+          test -n "$STUDENTS_ID"
+          curl --fail --silent --show-error -G "$API/storage/kv/namespaces/${STUDENTS_ID}/keys" -H "$AUTH" --data-urlencode 'prefix=user:' --data-urlencode 'limit=1000' -o /tmp/keys.json
+          jq -r '.result[].name' /tmp/keys.json >/tmp/keynames.txt
+
+          today="2026-09-06"
+          total=0; expired=0; locked=0; missing_expiry=0; admin_expiry=''; admin_locked=''
+          while IFS= read -r key; do
+            total=$((total+1))
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_ID}/values/${encoded}" -H "$AUTH" -o /tmp/user.json
+            exp="$(jq -r '.expires // .expiry // .expiresAt // ""' /tmp/user.json)"
+            lock="$(jq -r '(.locked // .accountLocked // false) | tostring' /tmp/user.json)"
+            if [ -z "$exp" ]; then missing_expiry=$((missing_expiry+1)); elif [[ "$exp" < "$today" ]]; then expired=$((expired+1)); fi
+            if [ "$lock" = true ]; then locked=$((locked+1)); fi
+            if [ "$key" = 'user:admin' ]; then admin_expiry="$exp"; admin_locked="$lock"; fi
+          done </tmp/keynames.txt
+
+          echo "TOTAL_USERS=$total"
+          echo "EXPIRED_USERS=$expired"
+          echo "LOCKED_USERS=$locked"
+          echo "MISSING_EXPIRY=$missing_expiry"
+          echo "ADMIN_EXPIRY=${admin_expiry:-none}"
+          echo "ADMIN_LOCKED=${admin_locked:-unknown}"
