@@ -12,7 +12,7 @@ import {
   displayLessonIdForLesson,
   normaliseLessonDisplayNamesForView,
   normaliseDisplayNameForView,
-  isNormalMathsYearView
+  isDisplayNameRewriteView
 } from './phase11-view-display-names.js';
 
 function decodeSegment(value) {
@@ -51,6 +51,11 @@ function responseWithHeaders(response, headers) {
   });
 }
 
+function isElevenPlusView(viewId) {
+  const id = String(viewId || '').trim().toLowerCase();
+  return /^maths-level[123]$/.test(id) || /^english-year[45]-11plus$/.test(id);
+}
+
 async function suppressVrVideoResponse(request, response) {
   const url = new URL(request.url);
 
@@ -83,22 +88,47 @@ async function suppressVrVideoResponse(request, response) {
   return response;
 }
 
-async function normaliseMathsYearResponse(request, response) {
+async function normalisePresentationResponse(request, response) {
   const url = new URL(request.url);
   const viewId = String(url.searchParams.get('viewId') || '').trim();
-  if (!isNormalMathsYearView(viewId) || !response) return response;
+  if (!response) return response;
 
   const lessonMatch = url.pathname.match(/^\/api\/v1\/student\/lessons\/([^/]+)$/);
   if (lessonMatch && request.method === 'GET' && response.ok) {
     const lessonId = decodeSegment(lessonMatch[1]);
     const body = await response.clone().json().catch(() => null);
     if (!body?.ok || !body.lesson) return response;
-    const displayLessonId = String(
-      body.lesson.displayLessonId || displayLessonIdForLesson(lessonId, viewId)
-    ).trim();
-    normaliseLessonDisplayNamesForView(body.lesson, displayLessonId, viewId);
-    return responseLikeJson(response, body);
+    let changed = false;
+
+    if (isDisplayNameRewriteView(viewId)) {
+      const displayLessonId = String(
+        body.lesson.displayLessonId || displayLessonIdForLesson(lessonId, viewId)
+      ).trim();
+      if (displayLessonId) {
+        normaliseLessonDisplayNamesForView(body.lesson, displayLessonId, viewId);
+        changed = true;
+      }
+    }
+
+    // When an explicit 11+ Homework set exists, it substitutes for the ordinary
+    // Homework set in the 11+ presentation. Ordinary Homework remains available
+    // as fallback only when there is no explicit 11+ Homework for that lesson.
+    const explicitElevenPlusHomework = body.lesson?.phase11Resources?.elevenPlus?.homeworks;
+    if (
+      isElevenPlusView(viewId) &&
+      Array.isArray(explicitElevenPlusHomework) &&
+      explicitElevenPlusHomework.length > 0 &&
+      Array.isArray(body.lesson.homeworks) &&
+      body.lesson.homeworks.length > 0
+    ) {
+      body.lesson.homeworks = [];
+      changed = true;
+    }
+
+    return changed ? responseLikeJson(response, body) : response;
   }
+
+  if (!isDisplayNameRewriteView(viewId)) return response;
 
   const authorizeMatch = url.pathname.match(
     /^\/api\/v1\/student\/resources\/([^/]+)\/answer\/authorize$/
@@ -140,7 +170,7 @@ export default {
     const prepared = await prepareSessionProfileEnv(request, measuredEnv);
     const response = await phase11Worker.fetch(request, prepared.env, ctx);
     await persistSessionProfile(request, response, measuredEnv, prepared.state);
-    const displayResponse = await normaliseMathsYearResponse(request, response);
+    const displayResponse = await normalisePresentationResponse(request, response);
     const presentedResponse = await suppressVrVideoResponse(request, displayResponse);
     return appendKvAuditHeaders(presentedResponse, env, audit);
   }
