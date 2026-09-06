@@ -9,10 +9,28 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. src/index-phase18-online-prelesson.js wraps
-# the Phase 17 production Worker and adds the online PreLesson-only access state.
-# Full lesson access still comes only from the existing Completed/grant path.
-# There is no date/time-based automatic promotion from PreLesson-only to full.
+# Portal V2 production entrypoint. src/index-phase19-access.js wraps the Phase 18
+# Worker, preserving online PreLesson-only access while adding Trial accounts,
+# browser-window-bound student sessions and cross-subject catalogue previews.
+#
+# Online PreLesson rule remains unchanged: selected rows for Batch IDs containing
+# O may grant PreLesson-only access before completion; full lesson access still
+# comes only through the normal Completed/grant path. There is no date/time-based
+# automatic promotion from PreLesson-only to full.
+#
+# Trial Portal User IDs are recognised by the Trial prefix. Their permitted
+# Maths/English views are stored on the student record as trialViews. A Trial ID
+# can complete only its first successful login; later logins are rejected.
+# Trial access exposes full lesson descriptions and the lesson-video slot only.
+#
+# Student sessions are bound to a per-window token supplied by the published
+# frontend. A fresh browser window without that token cannot reuse an existing
+# session cookie and must authenticate again.
+#
+# Students may browse the corresponding unenrolled subject catalogue for their
+# active normal/11+ programme. Full lesson descriptions are visible, while all
+# lesson resources remain server-side locked unless an independent entitlement
+# already grants access.
 #
 # Production login remains governed by the inherited Phase 17 guard: login is
 # available only when STUDENT_LOGIN_ENABLED is true AND the normalised username
@@ -21,8 +39,6 @@ STUDENT_LOGIN_ENABLED = "true"
 #
 # Excel sync still requires the dedicated EXCEL_SYNC_TOKEN Worker secret. The
 # secret is deliberately not present in this file or any repository source.
-# PreLesson-only sync is accepted only for Batch IDs containing O; a later normal
-# grant promotes the lesson to full access and removes the restricted state.
 #
 # Passwords, Answer Pack passwords, private student records, production student
 # allowlists and Cloudflare credential values are never committed in plaintext.
