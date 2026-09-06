@@ -49,4 +49,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/prod-secure-apply.mjs
+          # Cloudflare's settings API can show the new deployment slightly before
+          # every workers.dev edge serves it. Make the functional acceptance retry
+          # only that transient FORBIDDEN_ORIGIN response; all other 403s still fail.
+          node <<'NODE'
+          const fs = require('fs');
+          const source = fs.readFileSync('scripts/prod-secure-apply.mjs', 'utf8');
+          const needle = "    if (response.status !== 401) throw new Error(`Unexpected login status ${response.status} for ${id}`);\n    await sleep(5000);";
+          const replacement = "    if (response.status === 403) {\n      const transient = await response.json().catch(() => null);\n      if (transient?.error === 'FORBIDDEN_ORIGIN') { await sleep(5000); continue; }\n    }\n    if (response.status !== 401) throw new Error(`Unexpected login status ${response.status} for ${id}`);\n    await sleep(5000);";
+          if (!source.includes(needle)) throw new Error('Propagation retry patch target not found');
+          fs.writeFileSync('/tmp/prod-secure-apply.mjs', source.replace(needle, replacement), { mode: 0o600 });
+          NODE
+          node /tmp/prod-secure-apply.mjs
