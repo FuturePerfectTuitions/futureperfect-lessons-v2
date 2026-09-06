@@ -1,0 +1,36 @@
+name: Final minimal - rebuild Year 4-6 Maths resources
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-rebuild-y4-y6-maths-resources.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild all current Year 4-6 Maths resource metadata
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 scripts/final_minimal_rebuild_maths_resources.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: y4-y6-maths-resource-rebuild-evidence
+          path: |
+            y4-y6-maths-resource-rebuild-report.json
+            y4maths-before/
+            y4maths-after/
+            y5maths-before/
+            y5maths-after/
+            y6maths-before/
+            y6maths-after/
+          retention-days: 30
