@@ -1,0 +1,382 @@
+{
+  "count": 29,
+  "lessons": [
+    {
+      "key": "lesson:Y2E1",
+      "lessonId": "Y2E1",
+      "order": 1,
+      "title": "Comprehension, Simple Present Simple Past",
+      "description": "In this lesson, students develop their reading comprehension skills and learn how to recognise and use the simple present and simple past tenses.\n\nThis lesson includes:\n✔ Understanding how punctuation can change the meaning of a sentence\n✔ Reading short comprehension passages carefully\n✔ Retrieving information directly from a text\n✔ Identifying descriptive words\n✔ Sequencing events and instructions\n✔ Finding words and phrases with similar meanings\n✔ Making sensible predictions from information in a text\n✔ Understanding what a verb is doing within a sentence\n✔ Recognising the simple present tense\n✔ Recognising the simple past tense\n✔ Understanding when the simple present tense is used\n✔ Understanding when the simple past tense is used\n✔ Identifying verbs describing regular routines and general facts\n✔ Identifying verbs describing events that have already happened\n✔ Choosing missing verbs to complete sentences\n✔ Using context to decide whether a sentence is in the present or past tense\n\nStudents begin by exploring how punctuation can completely change the meaning of a sentence. They then work through a series of short comprehension activities involving a princess, a bus and a story about Jack and a cow. Students retrieve information, identify vocabulary, sequence events and make sensible predictions using evidence from each passage.\n\nThe lesson then introduces the simple present and simple past tenses through familiar situations. Students describe their normal morning routine using present-tense verbs such as wake, brush, eat and wear before describing activities that have already happened using past-tense verbs such as watched, played and talked.\n\nStudents then apply their tense knowledge through an interactive butterfly challenge. They complete missing verbs including forgot, grow and choose and use the meaning of each sentence to decide whether it is written in the simple present or simple past tense.\n\nBy the end of the lesson, learners will have strengthened their comprehension skills and be able to distinguish between simple present and simple past verbs, understanding how each tense is used according to when an action happens.",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E01"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y2E2",
+      "lessonId": "Y2E2",
+      "order": 2,
+      "title": "Tenses and Contractions",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E02"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E3",
+      "lessonId": "Y2E3",
+      "order": 3,
+      "title": "Tenses, Adjectives, Grammar and Punctuation, Spelling",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E03"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E4",
+      "lessonId": "Y2E4",
+      "order": 4,
+      "title": "Conjunctions",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E04"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E5",
+      "lessonId": "Y2E5",
+      "order": 5,
+      "title": "Special Recap and Catchup Session for Conjunctions and Punctuations",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E05"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E6",
+      "lessonId": "Y2E6",
+      "order": 6,
+      "title": "Expanded Nouns",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E06"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E7",
+      "lessonId": "Y2E7",
+      "order": 7,
+      "title": "Compound Nouns and Commas in Lists",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E07"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E8",
+      "lessonId": "Y2E8",
+      "order": 8,
+      "title": "Suffixes",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E08"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E10",
+      "lessonId": "Y2E10",
+      "order": 9,
+      "title": "Comprehension & Progressive Tenses",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E09"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E11",
+      "lessonId": "Y2E11",
+      "order": 10,
+      "title": "Comprehension & Tenses Game",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T1E10"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E12",
+      "lessonId": "Y2E12",
+      "order": 11,
+      "title": "Tenses again",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E11"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E13",
+      "lessonId": "Y2E13",
+      "order": 12,
+      "title": "Spelling, Comprehension & Punctuation",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E12"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E15",
+      "lessonId": "Y2E15",
+      "order": 13,
+      "title": "Comprehension, Guided Reading, Writing, Inferencing",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E13"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E16",
+      "lessonId": "Y2E16",
+      "order": 14,
+      "title": "Revision Activity",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E14"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E17",
+      "lessonId": "Y2E17",
+      "order": 15,
+      "title": "Revision Activity",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E15"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E18",
+      "lessonId": "Y2E18",
+      "order": 16,
+      "title": "Alliteration and Onomatopoeia",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E16"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E19",
+      "lessonId": "Y2E19",
+      "order": 17,
+      "title": "Apostrophes and Contractions",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E17"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E21",
+      "lessonId": "Y2E21",
+      "order": 18,
+      "title": "Sentence Structure",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E18"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E22",
+      "lessonId": "Y2E22",
+      "order": 19,
+      "title": "Adjectives with -er and -est",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T2E19"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E23",
+      "lessonId": "Y2E23",
+      "order": 20,
+      "title": "Homophones",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E20"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E24",
+      "lessonId": "Y2E24",
+      "order": 21,
+      "title": "Forming Adjectives -ful -less -ment",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E21"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E25",
+      "lessonId": "Y2E25",
+      "order": 22,
+      "title": "Questions and Commands",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E22"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E26",
+      "lessonId": "Y2E26",
+      "order": 23,
+      "title": "Spellings",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E23"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E27",
+      "lessonId": "Y2E27",
+      "order": 24,
+      "title": "Subordination",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E24"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E28",
+      "lessonId": "Y2E28",
+      "order": 25,
+      "title": "Questions, Commands, Statements and Exclamations",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E25"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E29",
+      "lessonId": "Y2E29",
+      "order": 26,
+      "title": "Verbs",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E26"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E31",
+      "lessonId": "Y2E31",
+      "order": 27,
+      "title": "GAP Test 1",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E27"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E32",
+      "lessonId": "Y2E32",
+      "order": 28,
+      "title": "GAP Test 2",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E28"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y2E33",
+      "lessonId": "Y2E33",
+      "order": 29,
+      "title": "Revision 1",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year2": "Y2T3E29"
+      },
+      "hasVideo": false
+    }
+  ]
+}

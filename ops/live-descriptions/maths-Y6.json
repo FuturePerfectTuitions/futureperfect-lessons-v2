@@ -1,0 +1,919 @@
+{
+  "count": 67,
+  "lessons": [
+    {
+      "key": "lesson:Y6M2.1",
+      "lessonId": "Y6M2.1",
+      "order": 1,
+      "title": "Number and Place Value I",
+      "description": "In this lesson, students develop a deep understanding of place value up to ten million.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M01",
+        "maths-year6": "Y6T1M01"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M46",
+      "lessonId": "Y6M46",
+      "order": 1,
+      "title": "Ratio and Proportion 1",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6T1M17"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M2.2",
+      "lessonId": "Y6M2.2",
+      "order": 2,
+      "title": "Number and Place Value II",
+      "description": "In this lesson, students apply decimal reasoning to powers of ten and measurement scales.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M02",
+        "maths-year6": "Y6T1M02"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M47",
+      "lessonId": "Y6M47",
+      "order": 2,
+      "title": "Ratio and Proportion 2",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6T1M18"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M2.3",
+      "lessonId": "Y6M2.3",
+      "order": 3,
+      "title": "Number and Place Value III",
+      "description": "In this lesson, students work confidently with large numbers and decimal partitioning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M03",
+        "maths-year6": "Y6T1M03"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M48",
+      "lessonId": "Y6M48",
+      "order": 3,
+      "title": "Ratio and Proportion 3",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6T1M19"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M2.4",
+      "lessonId": "Y6M2.4",
+      "order": 4,
+      "title": "Number and Place Value IV",
+      "description": "In this lesson, students compare and order whole numbers and decimals using place value reasoning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M04",
+        "maths-year6": "Y6T1M04"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M49",
+      "lessonId": "Y6M49",
+      "order": 4,
+      "title": "Ratio and Proportion 4",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6T1M20"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M2.5",
+      "lessonId": "Y6M2.5",
+      "order": 5,
+      "title": "Number and Place Value V",
+      "description": "In this lesson, students round numbers confidently and reason with negative values.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M05",
+        "maths-year6": "Y6T1M05"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M50",
+      "lessonId": "Y6M50",
+      "order": 5,
+      "title": "Ratio and Proportion 5",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6T1M21"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M4",
+      "lessonId": "Y6M4",
+      "order": 6,
+      "title": "Addition",
+      "description": "In this lesson, students use formal written methods to add and subtract large numbers and decimals.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M06",
+        "maths-year6": "Y6T1M06"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M51",
+      "lessonId": "Y6M51",
+      "order": 6,
+      "title": "SATs Preparation Measurement",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M1"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M5",
+      "lessonId": "Y6M5",
+      "order": 7,
+      "title": "Multiplication",
+      "description": "In this lesson, students use formal written multiplication methods in real-life contexts.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M07",
+        "maths-year6": "Y6T1M07"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M52",
+      "lessonId": "Y6M52",
+      "order": 7,
+      "title": "SATs Preparation Measurement & Addition Subtraction",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M2"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M53",
+      "lessonId": "Y6M53",
+      "order": 8,
+      "title": "SATs Preparation Algebra",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M3"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M8",
+      "lessonId": "Y6M8",
+      "order": 8,
+      "title": "Fractions 1",
+      "description": "In this lesson, students simplify, compare, and order fractions.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M08",
+        "maths-year6": "Y6T1M08"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M54",
+      "lessonId": "Y6M54",
+      "order": 9,
+      "title": "SATs Preparation Fractions Decimals and Percentage",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M4"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M9",
+      "lessonId": "Y6M9",
+      "order": 9,
+      "title": "Fractions 2",
+      "description": "In this lesson, students add and subtract fractions with different denominators.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M09",
+        "maths-year6": "Y6T1M09"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M10",
+      "lessonId": "Y6M10",
+      "order": 10,
+      "title": "Fractions 3",
+      "description": "In this lesson, students apply fraction operations to multi-step reasoning problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M10",
+        "maths-year6": "Y6T1M10"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M55",
+      "lessonId": "Y6M55",
+      "order": 10,
+      "title": "SATs Preparation Multiplication and Division",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M5"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M11",
+      "lessonId": "Y6M11",
+      "order": 11,
+      "title": "Fractions 4",
+      "description": "In this lesson, students build fraction fluency using structured written methods.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M11",
+        "maths-year6": "Y6T1M11"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M56",
+      "lessonId": "Y6M56",
+      "order": 11,
+      "title": "SATs Preparation Number and Place Value",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M6"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M12",
+      "lessonId": "Y6M12",
+      "order": 12,
+      "title": "Fractions 5",
+      "description": "In this lesson, students convert fractions into decimal equivalents using short division and solve fraction-to-decimal reasoning problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M12",
+        "maths-year6": "Y6T1M12"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M57",
+      "lessonId": "Y6M57",
+      "order": 12,
+      "title": "SATs Preparation Position and Direction",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M7"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M13",
+      "lessonId": "Y6M13",
+      "order": 13,
+      "title": "Fractions 6",
+      "description": "In this lesson, students tackle advanced fraction problems combining multiple steps.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M13",
+        "maths-year6": "Y6T1M13"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M58",
+      "lessonId": "Y6M58",
+      "order": 13,
+      "title": "SATs Preparation Properties of Shape",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M8"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M14",
+      "lessonId": "Y6M14",
+      "order": 14,
+      "title": "Fractions 7",
+      "description": "In this lesson, students extend fraction reasoning to more complex multi-step tasks.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M14",
+        "maths-year6": "Y6T1M14"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M59",
+      "lessonId": "Y6M59",
+      "order": 14,
+      "title": "SATs Preparation Ratio and Proportion",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M9"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M15",
+      "lessonId": "Y6M15",
+      "order": 15,
+      "title": "Fractions 8",
+      "description": "In this lesson, students multiply decimals by whole numbers using formal written methods.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M15",
+        "maths-year6": "Y6T1M15"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M60",
+      "lessonId": "Y6M60",
+      "order": 15,
+      "title": "SATs Preparation Statistics",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M10"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M16",
+      "lessonId": "Y6M16",
+      "order": 16,
+      "title": "Fractions 9",
+      "description": "In this lesson, students convert division remainders into fractions and decimals using short and long division in real-life contexts.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T1M16",
+        "maths-year6": "Y6T1M16"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M61",
+      "lessonId": "Y6M61",
+      "order": 16,
+      "title": "SATs Intensive Practice 1",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M11"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M17",
+      "lessonId": "Y6M17",
+      "order": 17,
+      "title": "Fractions 10",
+      "description": "In this lesson, students deepen their understanding of decimal rounding and estimation. They solve decimal pair problems, apply formal rounding rules to different place values, estimate large calculations using rounding, and tackle multi-step rounding reasoning puzzles.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M17",
+        "maths-year6": "Y6T2M17"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M62",
+      "lessonId": "Y6M62",
+      "order": 17,
+      "title": "SATs Intensive Practice 2",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M12"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M18",
+      "lessonId": "Y6M18",
+      "order": 18,
+      "title": "Fractions 11",
+      "description": "In this lesson, students explore the relationships between fractions, decimals and percentages. They convert between all three forms, order mixed representations, and solve proportional reasoning problems using models and contextual scenarios.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M18",
+        "maths-year6": "Y6T2M18"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M63",
+      "lessonId": "Y6M63",
+      "order": 18,
+      "title": "SATs Intensive Practice 3",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M13"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M19",
+      "lessonId": "Y6M19",
+      "order": 19,
+      "title": "Fractions 12",
+      "description": "In this lesson, students consolidate their understanding of fractions, decimals and percentages by converting between forms fluently, comparing offers, ordering values, and solving real-life proportional reasoning problems involving percentages and amounts.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M19",
+        "maths-year6": "Y6T2M19"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M64",
+      "lessonId": "Y6M64",
+      "order": 19,
+      "title": "SATs Revision",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M14"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M01",
+      "lessonId": "Y6M01",
+      "order": 20,
+      "title": "BIDMAS",
+      "description": "In this lesson, students learn how to use BIDMAS to solve calculations in the correct order.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M20",
+        "maths-year6": "Y6T2M20"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M65",
+      "lessonId": "Y6M65",
+      "order": 20,
+      "title": "SATs Practice 1",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M15"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M1",
+      "lessonId": "Y6M1",
+      "order": 21,
+      "title": "Algebra Warm Up",
+      "description": "In this lesson, students strengthen their algebra foundations through pattern spotting and substitution.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M21",
+        "maths-year6": "Y6T2M21"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M66",
+      "lessonId": "Y6M66",
+      "order": 21,
+      "title": "SATs Practice 2",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M16"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M1.2",
+      "lessonId": "Y6M1.2",
+      "order": 22,
+      "title": "Algebra Use Simple Formulae",
+      "description": "In this lesson, students form and use simple algebraic formulae and connect function machines to written expressions.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M22",
+        "maths-year6": "Y6T2M22"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M67",
+      "lessonId": "Y6M67",
+      "order": 22,
+      "title": "SATs Practice 3",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M17"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M1.3",
+      "lessonId": "Y6M1.3",
+      "order": 23,
+      "title": "Algebra Solving Equations",
+      "description": "In this lesson, students solve one-step and two-step equations using balanced reasoning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M23",
+        "maths-year6": "Y6T2M23"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M68",
+      "lessonId": "Y6M68",
+      "order": 23,
+      "title": "SATs Reasoning Focus",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M18"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M1.4",
+      "lessonId": "Y6M1.4",
+      "order": 24,
+      "title": "Linear Sequences",
+      "description": "In this lesson, students explore linear sequences and identify term-to-term rules.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M24",
+        "maths-year6": "Y6T2M24"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M69",
+      "lessonId": "Y6M69",
+      "order": 24,
+      "title": "End of SATs Games",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-year6": "Y6M19"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6M25",
+      "lessonId": "Y6M25",
+      "order": 25,
+      "title": "Proportional Reasoning",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M25",
+        "maths-year6": "Y6T2M25"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M34",
+      "lessonId": "Y6M34",
+      "order": 26,
+      "title": "Ratio and Proportion 1",
+      "description": "In this lesson, students are introduced to ratio and proportion. They learn how to compare quantities using ratio notation, simplify ratios, use equivalent ratios, and solve basic sharing and scaling problems in real-life contexts.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M26",
+        "maths-year6": "Y6T2M26"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M35",
+      "lessonId": "Y6M35",
+      "order": 27,
+      "title": "Ratio and Proportion 2",
+      "description": "In this lesson, students deepen their ratio and proportion understanding through equivalent ratios, missing values, recipe scaling, map scales, and sharing quantities in a given ratio. They apply ratio reasoning to increasingly challenging multi-step problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M27",
+        "maths-year6": "Y6T2M27"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M36",
+      "lessonId": "Y6M36",
+      "order": 28,
+      "title": "Ratio and Proportion 3",
+      "description": "In this lesson, students solve ratio scenarios involving weekly totals, grouped data, paint mixing, recipe scaling, map scales, enlargement and scale factor. Students also explore similar shapes, perimeter and area changes after enlargement, and justify answers using clear proportional reasoning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M28",
+        "maths-year6": "Y6T2M28"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M37",
+      "lessonId": "Y6M37",
+      "order": 29,
+      "title": "Ratio and Proportion 4",
+      "description": "In this lesson, students continue ratio and proportion by exploring surface area after enlargement, scale factor reasoning, proportion problems and ratio reasoning in real-life contexts.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M29",
+        "maths-year6": "Y6T2M29"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M38",
+      "lessonId": "Y6M38",
+      "order": 30,
+      "title": "Ratio and Proportion 5",
+      "description": "In this lesson, students learn how to calculate percentages, including 1%, 5%, 10% and other values, solve percentage problems, use bar models, and interpret pie charts by linking percentages to fractions and degrees.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T2M30",
+        "maths-year6": "Y6T2M30"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M3",
+      "lessonId": "Y6M3",
+      "order": 31,
+      "title": "Compare and Order Decimals",
+      "description": "In this lesson, students deepen their decimal comparison skills.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M31",
+        "maths-year6": "Y6T3M31"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M7",
+      "lessonId": "Y6M7",
+      "order": 32,
+      "title": "Calculating Intervals Across Zero",
+      "description": "In this lesson, students calculate intervals across zero using number lines.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M32",
+        "maths-year6": "Y6T3M32"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M29",
+      "lessonId": "Y6M29",
+      "order": 33,
+      "title": "Coordinates 1",
+      "description": "In this lesson, students read, plot and describe coordinates using all four quadrants.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M33",
+        "maths-year6": "Y6T3M33"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M30",
+      "lessonId": "Y6M30",
+      "order": 34,
+      "title": "Coordinates 2",
+      "description": "In this lesson, students deepen coordinate reasoning skills and solve midpoint problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M34",
+        "maths-year6": "Y6T3M34"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M31",
+      "lessonId": "Y6M31",
+      "order": 35,
+      "title": "Transformations 1",
+      "description": "In this lesson, students work confidently with coordinates in all four quadrants. They identify and plot coordinates, draw and classify coordinate shapes, reason about missing vertices, complete quadrilaterals using coordinate properties, and solve coordinate-based reasoning problems involving squares, parallelograms, trapezia, kites and right-angled triangles.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M35",
+        "maths-year6": "Y6T3M35"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M32",
+      "lessonId": "Y6M32",
+      "order": 36,
+      "title": "Transformations 2",
+      "description": "In this lesson, students develop advanced transformation skills by translating and reflecting shapes on four-quadrant coordinate grids. They learn to describe translations using coordinate notation, identify reflections across the x-axis and y-axis, determine missing coordinates through logical reasoning, and solve challenging multi-step transformation problems.\n\nThis lesson includes:\n✔ Translating shapes in all four quadrants\n✔ Writing translations using coordinate notation\n✔ Reflecting shapes in the x-axis and y-axis\n✔ Finding missing coordinates after transformations\n✔ Solving multi-step transformation reasoning problems\n\nStudents begin by translating shapes on four-quadrant coordinate grids.\n\nStudents will:\n✔ Translate shapes left, right, up and down\n✔ Move every vertex by the same amount\n✔ Understand that translations preserve size and orientation\n✔ Label successive transformations using prime notation\n✔ Describe translations accurately\n\nThe lesson then introduces translation vectors using coordinate notation.\n\nStudents will:\n✔ Write translations using ordered pairs\n✔ Understand positive and negative movement along each axis\n✔ Link horizontal movement to the x-axis\n✔ Link vertical movement to the y-axis\n✔ Apply translation coordinates to every vertex\n\nStudents then apply translation reasoning to coordinate geometry.\n\nStudents will:\n✔ Identify missing coordinates after translations\n✔ Determine translation vectors from known points\n✔ Solve coordinate reasoning questions\n✔ Use algebraic reasoning to calculate unknown vertices\n✔ Check answers logically\n\nThe lesson then explores reflections on coordinate grids.\n\nStudents will:\n✔ Identify correct and incorrect reflections\n✔ Recognise mirror images\n✔ Reflect shapes across horizontal, vertical and diagonal mirror lines\n✔ Understand congruency after reflection\n✔ Explain why reflected shapes remain the same size and shape\n\nStudents extend their understanding by reflecting shapes across the x-axis and y-axis.\n\nStudents will:\n✔ Reflect coordinates across the x-axis\n✔ Reflect coordinates across the y-axis\n✔ Identify which coordinate changes sign\n✔ Find missing reflected vertices\n✔ Solve reflection reasoning problems\n\nThe lesson concludes with advanced reasoning questions that combine translation, reflection and coordinate geometry. Students solve missing-coordinate problems, complete transformed shapes, describe transformation rules, and justify each stage of their reasoning using mathematical vocabulary.\n\nBy the end of the lesson, learners will confidently translate and reflect shapes on four-quadrant coordinate grids, describe transformations using coordinate notation, determine missing coordinates through logical reasoning, and solve complex transformation problems involving multiple steps.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M36",
+        "maths-year6": "Y6T3M36"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M39",
+      "lessonId": "Y6M39",
+      "order": 37,
+      "title": "Properties of Shapes 1",
+      "description": "In this lesson, students develop their understanding of the properties of two-dimensional shapes, accurate geometrical drawing, angle measurement, and angle reasoning. They learn how to use mathematical equipment correctly, calculate interior angles of polygons, and solve problems involving angles around a point.\n\nThis lesson includes:\n✔ Drawing and measuring two-dimensional shapes accurately\n✔ Using rulers and protractors correctly\n✔ Calculating interior angles of polygons\n✔ Identifying and classifying different types of angles\n✔ Solving problems involving angles at a point\n\nStudents begin by revisiting the area of rectangles and squares before developing accurate drawing skills.\n\nStudents will:\n✔ Calculate the area of rectangles and squares\n✔ Measure lengths accurately using rulers\n✔ Draw straight lines to precise measurements\n✔ Understand centimetres and millimetres\n✔ Develop accurate geometrical drawing skills\n\nThe lesson then focuses on using a protractor.\nStudents learn how to measure and draw angles precisely.\n\nStudents will:\n✔ Identify the vertex of an angle\n✔ Position a protractor correctly\n✔ Read the correct scale\n✔ Measure angles in degrees\n✔ Draw given angles accurately\n\nStudents explore the interior angles of polygons.\nThey discover how polygons can be divided into triangles and use this pattern to calculate angle sums.\n\nStudents will:\n✔ Divide polygons into triangles\n✔ Find the interior angle sum of quadrilaterals\n✔ Calculate interior angle sums of pentagons and hexagons\n✔ Recognise patterns between number of sides and angle sums\n✔ Use the formula (n − 2) × 180° to calculate interior angles of polygons\n\nThe lesson develops students' understanding of angle types.\nStudents identify angles using both their appearance and their measurements.\n\nStudents will:\n✔ Identify acute angles\n✔ Identify obtuse angles\n✔ Identify reflex angles\n✔ Recognise right angles\n✔ Recognise straight angles\n\nStudents then investigate angle facts.\nThey learn how rotations affect angles and apply known angle relationships.\n\nStudents will:\n✔ Understand that rotating a shape does not change its angles\n✔ Combine right angles to form straight angles\n✔ Recognise that straight angles measure 180°\n✔ Apply known angle facts when solving problems\n✔ Justify their reasoning mathematically\n\nThe lesson introduces angles at a point.\nStudents learn that the angles around any point always total 360°.\n\nStudents will:\n✔ Use the fact that angles at a point sum to 360°\n✔ Find missing angles around a point\n✔ Match complementary angle pairs that total 360°\n✔ Solve missing-angle reasoning problems\n✔ Apply subtraction accurately when calculating unknown angles\n\nStudents also learn how to name angles correctly.\nThey use standard geometrical notation when describing angles.\n\nStudents will:\n✔ Name angles using three-letter notation\n✔ Identify the vertex correctly\n✔ Interpret angle notation accurately\n✔ Read labelled diagrams\n✔ Communicate mathematical reasoning clearly\n\nThe lesson concludes with true-or-false reasoning problems involving reflex angles and angles at a point. Students use known angle facts to determine whether mathematical statements are correct and explain their reasoning.\n\nBy the end of the lesson, learners will confidently use rulers and protractors, calculate interior angle sums of polygons, classify angles, solve problems involving angles around a point, and apply correct geometrical notation when naming and reasoning about angles.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M37",
+        "maths-year6": "Y6T3M37"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M40",
+      "lessonId": "Y6M40",
+      "order": 38,
+      "title": "Properties of Shapes 2",
+      "description": "In this lesson, students extend their understanding of angle facts by exploring angles on a straight line and vertically opposite angles. They estimate angle sizes, solve missing-angle problems using known angle relationships, and apply logical reasoning to increasingly complex geometrical diagrams.\n\nThis lesson includes:\n✔ Estimating angle sizes\n✔ Solving angles on a straight line\n✔ Understanding vertically opposite angles\n✔ Calculating missing angles using angle facts\n✔ Solving multi-step angle reasoning problems\n\nStudents begin by estimating angles before calculating their exact values.\n\nStudents will:\n✔ Estimate acute, obtuse and reflex angles\n✔ Compare angles with right and straight angles\n✔ Explain why an estimate is reasonable\n✔ Develop stronger visual angle recognition\n✔ Build confidence before calculating exact values\n\nThe lesson then introduces angles on a straight line.\nStudents learn that adjacent angles on a straight line always total 180°.\n\nStudents will:\n✔ Understand that a straight angle measures 180°\n✔ Recognise that 180° is half a full turn\n✔ Calculate missing angles on a straight line\n✔ Use subtraction to solve unknown angles\n✔ Apply straight-line angle facts in reasoning questions\n\nStudents strengthen this understanding through matching, true-or-false activities and missing-angle problems.\n\nStudents will:\n✔ Match angle pairs that total 180°\n✔ Identify incorrect angle statements\n✔ Explain mathematical reasoning\n✔ Solve progressively more challenging missing-angle questions\n✔ Check answers using known angle facts\n\nThe lesson then introduces vertically opposite angles.\nStudents discover that when two straight lines intersect, opposite angles are always equal.\n\nStudents will:\n✔ Recognise intersecting lines\n✔ Identify pairs of vertically opposite angles\n✔ Understand that vertically opposite angles are equal\n✔ Calculate missing angles using opposite-angle facts\n✔ Combine vertically opposite angles with straight-line reasoning\n\nStudents apply multiple angle facts together to solve increasingly complex diagrams.\n\nStudents will:\n✔ Calculate several missing angles from one given angle\n✔ Combine vertically opposite angles with angles on a straight line\n✔ Solve complete angle diagrams systematically\n✔ Label unknown angles correctly\n✔ Justify each step of their reasoning\n\nThe lesson concludes with mixed reasoning questions where students combine all of the angle facts learned to calculate every missing angle within complex intersecting-line diagrams.\n\nBy the end of the lesson, learners will confidently estimate angle sizes, solve problems involving angles on a straight line and vertically opposite angles, combine multiple angle facts to calculate unknown angles, and explain their reasoning using correct mathematical vocabulary.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M38",
+        "maths-year6": "Y6T3M38"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M41",
+      "lessonId": "Y6M41",
+      "order": 39,
+      "title": "Properties of Shapes 3",
+      "description": "In this lesson, students deepen their understanding of geometrical reasoning by solving increasingly challenging angle problems involving triangles, squares, rectangles, parallel lines and isosceles triangles. They develop fluency in identifying, classifying and reasoning about two-dimensional shapes before exploring the properties of different types of triangles.\n\nStudents learn to:\n✔ Solve multi-step angle reasoning problems\n✔ Apply angle facts involving triangles, straight lines, parallel lines and angles around a point\n✔ Identify and classify common polygons\n✔ Recognise and describe different types of triangles\n✔ Solve missing-angle problems using triangle properties\n\nBy the end of the lesson, learners will confidently combine multiple angle facts, classify two-dimensional shapes accurately, identify the properties of equilateral, isosceles, scalene and right-angled triangles, and solve increasingly complex geometrical reasoning problems using clear mathematical justification.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M39",
+        "maths-year6": "Y6T3M39"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M42",
+      "lessonId": "Y6M42",
+      "order": 40,
+      "title": "Properties of Shapes 4",
+      "description": "In this lesson, students extend their understanding of quadrilaterals, polygons and three-dimensional shapes. They investigate the properties of common quadrilaterals, calculate missing angles, explore regular and irregular polygons, calculate perimeters, determine interior angle sums using the polygon formula, and solve increasingly challenging polygon reasoning problems.\n\nStudents learn to:\n✔ Identify and describe common three-dimensional shapes\n✔ Compare and classify quadrilaterals using their properties\n✔ Calculate missing angles in quadrilaterals and polygons\n✔ Find perimeters of regular and irregular shapes\n✔ Use the interior-angle-sum formula for polygons\n✔ Solve multi-step polygon reasoning and shape-construction problems\n\nBy the end of the lesson, learners will confidently classify quadrilaterals and polygons, apply angle and perimeter reasoning, calculate interior angle sums, and solve complex geometrical reasoning problems involving both two-dimensional and three-dimensional shapes.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M40",
+        "maths-year6": "Y6T3M40"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M43",
+      "lessonId": "Y6M43",
+      "order": 41,
+      "title": "Properties of Shapes 5",
+      "description": "In this lesson, students consolidate their understanding of two-dimensional and three-dimensional geometry through practical drawing tasks, shape construction and advanced reasoning. They draw and complete shapes accurately on grids, explore the properties of three-dimensional shapes, investigate Platonic solids, apply Euler's Rule, interpret shape nets, and solve increasingly challenging spatial reasoning problems.\n\nStudents learn to:\n✔ Complete and construct two-dimensional shapes accurately\n✔ Compare areas and draw shapes on square and isometric grids\n✔ Identify faces, edges and vertices of three-dimensional shapes\n✔ Understand Platonic solids and apply Euler's Rule\n✔ Recognise and evaluate shape nets\n✔ Solve advanced three-dimensional reasoning problems involving slicing and combining solids\n\nBy the end of the lesson, learners will confidently construct accurate geometrical figures, analyse three-dimensional shapes, apply Euler's Rule, interpret shape nets, and solve sophisticated spatial reasoning problems involving faces, edges, vertices and composite solids.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M41",
+        "maths-year6": "Y6T3M41"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M44",
+      "lessonId": "Y6M44",
+      "order": 42,
+      "title": "Properties of Shapes 6",
+      "description": "In this lesson, students complete their study of geometry by exploring circles, circle notation and circle reasoning. They learn the properties of circles, identify and use the radius, diameter and circumference, discover the relationships between these measurements, solve simple circle algebra problems, and apply their understanding to increasingly challenging real-life reasoning questions.\n\nStudents learn to:\n✔ Identify and describe the parts of a circle\n✔ Understand the relationships between radius, diameter and circumference\n✔ Apply simple circle algebra using radius and diameter\n✔ Estimate circumference using the diameter\n✔ Solve practical circle reasoning problems involving distance and measurement\n✔ Apply circle properties in increasingly complex geometrical contexts\n\nBy the end of the lesson, learners will confidently identify and use the key parts of a circle, calculate missing measurements using the relationships between radius, diameter and circumference, apply simple circle algebra, and solve multi-step reasoning problems involving circles in both mathematical and real-life situations.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M42",
+        "maths-year6": "Y6T3M42"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6M45",
+      "lessonId": "Y6M45",
+      "order": 43,
+      "title": "Non Standard Partitioning",
+      "description": "In this lesson, students explore non-standard partitioning and composing of large numbers, including numbers with decimals. They learn that numbers can be partitioned in many different ways while maintaining the same value, and they apply non-standard partitioning strategies to calculation, reasoning and problem solving.\n\nThis lesson includes:\n✔ Standard and non-standard partitioning\n✔ Composing numbers from non-standard unit parts\n✔ Partitioning numbers in multiple ways\n✔ Using non-standard partitioning to support calculations\n✔ Solving reasoning and word problems involving place value\n\nStudents begin by revisiting standard partitioning and composing numbers from place value parts.\n\nStudents will:\n✔ Compose numbers from given place value parts\n✔ Partition large whole numbers and decimals\n✔ Identify the value of each digit\n✔ Represent numbers using place value understanding\n✔ Explain how numbers are composed and decomposed\n\nThe lesson then introduces non-standard partitioning.\n\nStudents will:\n✔ Understand that numbers can be partitioned in different ways\n✔ Split place values into alternative groupings\n✔ Combine place values into larger units\n✔ Recognise that the total value remains unchanged\n✔ Compare standard and non-standard partitioning methods\n\nStudents deepen their understanding by creating multiple representations of the same number.\n\nStudents will:\n✔ Find different non-standard partitions of a number\n✔ Explain similarities and differences between partitions\n✔ Represent numbers using place value counters and models\n✔ Justify why different partitions have the same value\n✔ Develop flexible number sense\n\nThe lesson then focuses on non-standard composing.\n\nStudents will:\n✔ Compose numbers from non-standard unit parts\n✔ Regroup place value parts efficiently\n✔ Combine similar place values mentally\n✔ Interpret non-standard representations accurately\n✔ Explain their methods clearly\n\nStudents apply non-standard partitioning to reasoning and problem-solving contexts.\n\nStudents will:\n✔ Evaluate whether mathematical statements are correct\n✔ Explain errors and justify reasoning\n✔ Use part-whole models to solve subtraction problems\n✔ Apply partitioning strategies to word problems\n✔ Solve place-value puzzles and challenges\n\nThe lesson concludes with reasoning activities involving hopscotch pathways and multiple representations of the same number. Students identify valid non-standard partitions and justify their choices using place value knowledge.\n\nBy the end of the lesson, learners will confidently compose and partition numbers using both standard and non-standard methods, understand that numbers can be represented in many equivalent ways, and apply flexible place value strategies to solve reasoning and real-life problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level3": "L3T3M43",
+        "maths-year6": "Y6T3M43"
+      },
+      "hasVideo": true
+    }
+  ]
+}

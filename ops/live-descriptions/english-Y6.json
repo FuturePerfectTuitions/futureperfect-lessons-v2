@@ -1,0 +1,408 @@
+{
+  "count": 31,
+  "lessons": [
+    {
+      "key": "lesson:Y6E1",
+      "lessonId": "Y6E1",
+      "order": 1,
+      "title": "Transition to Year 6",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E01"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6E2",
+      "lessonId": "Y6E2",
+      "order": 2,
+      "title": "Hyphens",
+      "description": "In this lesson, students learn how hyphens are used to join words or parts of words and make writing clearer by avoiding confusion.\n\nThis lesson includes:\n✔ Recognising hyphens in words and phrases\n✔ Using hyphens in compound adjectives such as hot-pink and bear-like\n✔ Joining nouns to form compound nouns or adjectives\n✔ Using hyphens with prefixes to avoid awkward vowel combinations, such as co-operate and de-escalate\n✔ Using hyphens to clarify meaning, such as re-sent and re-press\n✔ Writing compound numbers from twenty-one to ninety-nine\n✔ Using hyphens when words split across line breaks\n✔ Using hyphens in informal expressions such as free-for-all and out-and-out\n✔ Using hyphens to remove ambiguity in sentences\n\nStudents begin by learning what a hyphen is and how this small punctuation mark can change meaning. They identify hyphens in context and explain why each one has been used, then explore compound adjectives, compound nouns, prefixes, written numbers, line breaks and informal expressions.\n\nThe lesson also shows how hyphens can prevent ambiguity by comparing sentences such as “There was a man eating shark in the bay” and “There was a man-eating shark in the bay.”\n\nBy the end of the lesson, learners will understand the main purposes of hyphens and be able to use them more accurately to make their writing clearer.",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E02"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y6E3",
+      "lessonId": "Y6E3",
+      "order": 3,
+      "title": "Using the Passive",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E03"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E4",
+      "lessonId": "Y6E4",
+      "order": 4,
+      "title": "Synonyms and Antonyms, Formal and Informal Speech AND Semi-Colons, Colons and Dashes",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E04"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E6",
+      "lessonId": "Y6E6",
+      "order": 5,
+      "title": "Layout Devices",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E05"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E7",
+      "lessonId": "Y6E7",
+      "order": 6,
+      "title": "Formal and Informal Writing",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E06"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E8",
+      "lessonId": "Y6E8",
+      "order": 7,
+      "title": "Cohesion Across Paragraphs",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E07"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E9",
+      "lessonId": "Y6E9",
+      "order": 8,
+      "title": "Comprehension",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E08"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E10",
+      "lessonId": "Y6E10",
+      "order": 9,
+      "title": "Words ending in -able",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T1E09"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E11",
+      "lessonId": "Y6E11",
+      "order": 10,
+      "title": "SPaG Consolidation",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E10"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E12",
+      "lessonId": "Y6E12",
+      "order": 11,
+      "title": "Synonyms and Antonyms",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E11"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E13",
+      "lessonId": "Y6E13",
+      "order": 12,
+      "title": "Pronouns and Apostrophe",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E12"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E14",
+      "lessonId": "Y6E14",
+      "order": 13,
+      "title": "Subjunctive and Modal",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E13"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E33",
+      "lessonId": "Y6E33",
+      "order": 14,
+      "title": "SATs Preparation Grammatical Terms & Word Classes",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E14"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E15",
+      "lessonId": "Y6E15",
+      "order": 15,
+      "title": "SATs Preparation Sentences, Phrases and Clauses",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E15"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E16",
+      "lessonId": "Y6E16",
+      "order": 16,
+      "title": "SATs Preparation Verb Forms and Tenses",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E16"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E17",
+      "lessonId": "Y6E17",
+      "order": 17,
+      "title": "SATs Preparation Punctuation",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E17"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E18",
+      "lessonId": "Y6E18",
+      "order": 18,
+      "title": "SATs Preparation Vocabulary and Standard English",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E18"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E19",
+      "lessonId": "Y6E19",
+      "order": 19,
+      "title": "SATs Preparation Comprehension Vocabulary",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T2E19"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E20",
+      "lessonId": "Y6E20",
+      "order": 20,
+      "title": "SATs Preparation Comprehension Retrieving",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E20"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E21",
+      "lessonId": "Y6E21",
+      "order": 21,
+      "title": "SATs Preparation Comprehension Summarising",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E21"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E22",
+      "lessonId": "Y6E22",
+      "order": 22,
+      "title": "SATs Preparation Comprehension Inferencing",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E22"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E23",
+      "lessonId": "Y6E23",
+      "order": 23,
+      "title": "SATs Preparation Comprehension Predicting",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E23"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E24",
+      "lessonId": "Y6E24",
+      "order": 24,
+      "title": "SATs Preparation Comprehension Commenting",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E24"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E25",
+      "lessonId": "Y6E25",
+      "order": 25,
+      "title": "SATs Intensive Practice 1",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E25"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E26",
+      "lessonId": "Y6E26",
+      "order": 26,
+      "title": "SATs Intensive Practice 2",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E26"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E27",
+      "lessonId": "Y6E27",
+      "order": 27,
+      "title": "SATs Intensive Practice 3",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E27"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E28",
+      "lessonId": "Y6E28",
+      "order": 28,
+      "title": "SATs Intensive Practice 4",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E28"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E29",
+      "lessonId": "Y6E29",
+      "order": 29,
+      "title": "SATs Preparation Comprehension Figurative Speech",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E29"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E30",
+      "lessonId": "Y6E30",
+      "order": 30,
+      "title": "VCOP Practice",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E30"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y6E32",
+      "lessonId": "Y6E32",
+      "order": 31,
+      "title": "Verb Tenses Roundup",
+      "description": "",
+      "subject": "english",
+      "active": true,
+      "displayIds": {
+        "english-year6": "Y6T3E31"
+      },
+      "hasVideo": false
+    }
+  ]
+}

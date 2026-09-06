@@ -1,0 +1,537 @@
+{
+  "count": 38,
+  "lessons": [
+    {
+      "key": "lesson:Y5M1",
+      "lessonId": "Y5M1",
+      "order": 1,
+      "title": "Number and Place Value I",
+      "description": "In this lesson, students learn how to read, write, and represent numbers up to one million.\nThey use place value grids, counters, and models to understand how digit positions affect value.\n\nThis lesson includes:\n✔ Representing numbers in different ways\n✔ Standard and non-standard partitioning\n✔ Reading and writing large numbers\n✔ Finding the value of digits\n✔ Comparing place values",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M01",
+        "maths-year5": "Y5T1M01"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M2",
+      "lessonId": "Y5M2",
+      "order": 2,
+      "title": "Number and Place Value II",
+      "description": "In this lesson, students continue exploring place value, including decimals and larger numbers.\nThey practise reading, writing, and partitioning numbers up to one million.\n\nThis lesson includes:\n✔ Understanding decimal place value\n✔ Partitioning numbers into expanded form\n✔ Matching decimals to models\n✔ Reading and writing large numbers\n✔ Place value challenges",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M02",
+        "maths-year5": "Y5T1M02"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M3",
+      "lessonId": "Y5M3",
+      "order": 3,
+      "title": "Number and Place Value III",
+      "description": "In this lesson, students compare and order numbers up to one million.\nThey use place value reasoning and inequality symbols to justify their answers.\n\nThis lesson includes:\n✔ Comparing large numbers\n✔ Using greater than, less than, and equals symbols\n✔ Ordering numbers in ascending and descending order\n✔ True or false reasoning tasks\n✔ Missing number challenges",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M03",
+        "maths-year5": "Y5T1M03"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M4",
+      "lessonId": "Y5M4",
+      "order": 4,
+      "title": "Counting in Powers of Ten",
+      "description": "In this lesson, students explore powers of ten and how numbers change when multiplied or divided by ten, one hundred, and one thousand.\n\nThis lesson includes:\n✔ Understanding powers of ten\n✔ Counting forwards and backwards in steps\n✔ Using place value grids\n✔ Solving number sequences\n✔ Reasoning with patterns",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M04",
+        "maths-year5": "Y5T1M04"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M5",
+      "lessonId": "Y5M5",
+      "order": 5,
+      "title": "Rounding Whole Numbers",
+      "description": "In this lesson, students learn how to round whole numbers to different place values.\nThey use number lines and place value reasoning to decide when to round up or down.\n\nThis lesson includes:\n✔ Rounding to the nearest 10, 100, and 1,000\n✔ Rounding larger numbers\n✔ Using number lines to support reasoning\n✔ True or false challenges\n✔ Real-life rounding problems",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M05",
+        "maths-year5": "Y5T1M05"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M6",
+      "lessonId": "Y5M6",
+      "order": 6,
+      "title": "Roman Numerals",
+      "description": "In this lesson, students learn how Roman numerals work and how to read and write them.\nThey explore the symbols and rules used to form different numbers.\n\nThis lesson includes:\n✔ Roman numeral symbols and values\n✔ Reading and writing Roman numerals\n✔ Converting between Roman and modern numbers\n✔ Real-life examples\n✔ Matching and reasoning tasks",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M06",
+        "maths-year5": "Y5T1M06"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M22",
+      "lessonId": "Y5M22",
+      "order": 7,
+      "title": "Multiplications and Divisions 1",
+      "description": "In this lesson, students explore multiples and factors using divisibility rules.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M07",
+        "maths-year5": "Y5T1M07"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M23",
+      "lessonId": "Y5M23",
+      "order": 8,
+      "title": "Multiplications and Divisions 2",
+      "description": "In this lesson, students find common factors, highest common factors, and identify prime numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M08",
+        "maths-year5": "Y5T1M08"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M24",
+      "lessonId": "Y5M24",
+      "order": 9,
+      "title": "Multiplications and Divisions 3",
+      "description": "In this lesson, students explore prime factorisation, square numbers, and cube numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M09",
+        "maths-year5": "Y5T1M09"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M25",
+      "lessonId": "Y5M25",
+      "order": 10,
+      "title": "Multiplications and Divisions 4",
+      "description": "In this lesson, students multiply and divide by 10, 100, and 1,000 using place value reasoning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M10",
+        "maths-year5": "Y5T1M10"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M26",
+      "lessonId": "Y5M26",
+      "order": 11,
+      "title": "Multiplications and Divisions 5",
+      "description": "In this lesson, students build confidence with long multiplication using formal written methods.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M11",
+        "maths-year5": "Y5T1M11"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M28",
+      "lessonId": "Y5M28",
+      "order": 12,
+      "title": "Multiplications and Divisions 6",
+      "description": "In this lesson, students divide four-digit numbers by one-digit numbers using short division, both with and without exchanging.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T1M12",
+        "maths-year5": "Y5T1M12"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M9",
+      "lessonId": "Y5M9",
+      "order": 13,
+      "title": "Fractions 1",
+      "description": "In this lesson, students explore equivalent fractions and how to convert between mixed numbers and improper fractions.\nThey use visual models to support understanding.\n\nThis lesson includes:\n✔ Understanding numerators and denominators\n✔ Finding equivalent fractions\n✔ Comparing fractions using models\n✔ Converting mixed numbers and improper fractions\n✔ Real-life fraction examples",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M13",
+        "maths-year5": "Y5T2M13"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M10",
+      "lessonId": "Y5M10",
+      "order": 14,
+      "title": "Fractions 2",
+      "description": "In this lesson, students build and compare fraction sequences.\nThey use equivalent fractions and visual models to order fractions accurately.\n\nThis lesson includes:\n✔ Fraction number sequences\n✔ Converting mixed and improper fractions\n✔ Comparing fractions using models\n✔ Finding common denominators\n✔ Simplifying fractions",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M14",
+        "maths-year5": "Y5T2M14"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M11",
+      "lessonId": "Y5M11",
+      "order": 15,
+      "title": "Fractions 3",
+      "description": "In this lesson, students learn how to compare and order fractions, including proper, improper, and mixed numbers.\n\nThis lesson includes:\n✔ Ordering fractions less than one\n✔ Using common denominators and numerators\n✔ Simplifying fractions\n✔ Comparing improper fractions\n✔ Comparing mixed numbers",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M15",
+        "maths-year5": "Y5T2M15"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M12",
+      "lessonId": "Y5M12",
+      "order": 16,
+      "title": "Fractions 4",
+      "description": "In this 11+ lesson, students order fractions greater than one and compare improper fractions and mixed numbers.\nThey also practise adding and subtracting fractions with the same denominator, using clear visual models and step-by-step reasoning.\n\nThis lesson includes:\n✔ Ordering fractions greater than one\n✔ Comparing improper fractions and mixed numbers\n✔ Using bar models to justify comparisons\n✔ Converting between mixed numbers and improper fractions\n✔ Fraction counting sticks for fluency\n✔ Adding and subtracting fractions with the same denominator\n✔ Converting improper answers into mixed numbers\n✔ Missing number and reasoning problems",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M16",
+        "maths-year5": "Y5T2M16"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M13",
+      "lessonId": "Y5M13",
+      "order": 17,
+      "title": "Fractions 5",
+      "description": "In this 11+ lesson, students add fractions with different denominators when one denominator is a multiple of the other.\nThey use equivalent fractions and common denominators to add accurately, including questions that cross one whole.\n\nThis lesson includes:\n✔ Adding fractions with the same denominator\n✔ Adding fractions with denominator multiples using equivalent fractions\n✔ Adding three fractions efficiently\n✔ Missing number problems\n✔ True or false and error spotting tasks\n✔ Fraction word problems\n✔ Adding fractions that cross one whole",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M17",
+        "maths-year5": "Y5T2M17"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M14",
+      "lessonId": "Y5M14",
+      "order": 18,
+      "title": "Fractions 6",
+      "description": "In this lesson, students add and subtract mixed numbers and fractions using common denominators.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M18",
+        "maths-year5": "Y5T2M18"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M15",
+      "lessonId": "Y5M15",
+      "order": 19,
+      "title": "Fractions 7",
+      "description": "In this lesson, students deepen their understanding of subtracting fractions and mixed numbers, including breaking the whole.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M19",
+        "maths-year5": "Y5T2M19"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M16",
+      "lessonId": "Y5M16",
+      "order": 20,
+      "title": "Fractions 8",
+      "description": "In this lesson, students find fractions of amounts and multiply fractions by integers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M20",
+        "maths-year5": "Y5T2M20"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M17",
+      "lessonId": "Y5M17",
+      "order": 21,
+      "title": "Fractions 9",
+      "description": "In this lesson, students multiply mixed numbers and explore decimals to two decimal places.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M21",
+        "maths-year5": "Y5T2M21"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M18",
+      "lessonId": "Y5M18",
+      "order": 22,
+      "title": "Fractions 10",
+      "description": "In this lesson, students convert between fractions and decimals using place value reasoning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M22",
+        "maths-year5": "Y5T2M22"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M19",
+      "lessonId": "Y5M19",
+      "order": 23,
+      "title": "Proportional Reasoning",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M23",
+        "maths-year5": "Y5T2M23"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M20",
+      "lessonId": "Y5M20",
+      "order": 24,
+      "title": "Percentages 1",
+      "description": "In this lesson, students learn what percent means and how it relates to fractions and decimals.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M24",
+        "maths-year5": "Y5T2M24"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M21",
+      "lessonId": "Y5M21",
+      "order": 25,
+      "title": "Percentages 2",
+      "description": "In this lesson, students convert between percentages and decimals and explore equivalent representations.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T2M25",
+        "maths-year5": "Y5T2M25"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M7",
+      "lessonId": "Y5M7",
+      "order": 26,
+      "title": "Negative Numbers",
+      "description": "In this lesson, students explore negative numbers and how they appear in real life.\nThey use number lines and temperature examples to build understanding.\n\nThis lesson includes:\n✔ Counting below zero\n✔ Understanding positive and negative numbers\n✔ Using number lines\n✔ Reading thermometers\n✔ Real-life reasoning tasks",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M26",
+        "maths-year5": "Y5T3M26"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M30",
+      "lessonId": "Y5M30",
+      "order": 27,
+      "title": "Statistics 1",
+      "description": "In this lesson, students learn how to draw and interpret line graphs.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M27",
+        "maths-year5": "Y5T3M27"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M31",
+      "lessonId": "Y5M31",
+      "order": 28,
+      "title": "Statistics 2",
+      "description": "In this lesson, students learn how to interpret tables, two way tables, tally charts and timetables, calculate missing values, and solve real-life data reasoning problems including time conversions and duration calculations.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M28",
+        "maths-year5": "Y5T3M28"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M32",
+      "lessonId": "Y5M32",
+      "order": 29,
+      "title": "Position, Direction and Symmetry",
+      "description": "In this lesson, students learn how to describe position using coordinates and explore lines of symmetry in shapes. They practise reading coordinates correctly by moving across the x-axis first and then up the y-axis, solving missing coordinate problems, and identifying symmetrical shapes.\n\nThis lesson includes:\n✔ Reading and writing coordinates using (x, y)\n✔ Understanding the x-axis (across) and y-axis (up)\n✔ Solving missing coordinate problems on a grid\n✔ Using coordinates to locate objects on a map\n✔ Understanding regular and irregular shapes\n✔ Identifying vertical, horizontal and diagonal lines of symmetry\n✔ Counting lines of symmetry in regular polygons\n✔ Reasoning about symmetry using folding and mirror tests",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M29",
+        "maths-year5": "Y5T3M29"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M33",
+      "lessonId": "Y5M33",
+      "order": 30,
+      "title": "Reflection",
+      "description": "In this lesson, students learn how to draw and identify reflected shapes using mirror lines and coordinates.\n\nThis lesson includes:\n✔ Understanding reflection as a mirror image\n✔ Checking whether a reflection is correct\n✔ Drawing reflected shapes accurately\n✔ Keeping equal distance from the mirror line\n✔ Identifying missing coordinates after reflection\n✔ Solving reflection reasoning problems",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M30",
+        "maths-year5": "Y5T3M30"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M34",
+      "lessonId": "Y5M34",
+      "order": 31,
+      "title": "Translation",
+      "description": "In this lesson, students learn how to describe, draw, and identify translated shapes on coordinate grids.\n\nThis lesson includes:\n✔ Understanding translation as a slide\n✔ Moving shapes left, right, up, and down\n✔ Using vectors to describe movement\n✔ Drawing translated shapes accurately\n✔ Identifying translations from diagrams\n✔ Finding missing coordinates after translation",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M31",
+        "maths-year5": "Y5T3M31"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M35",
+      "lessonId": "Y5M35",
+      "order": 32,
+      "title": "Properties of Shapes 1",
+      "description": "In this lesson, students develop their understanding of angles, turns and angle measurement in degrees. They learn how to classify, measure and interpret angles using protractors, compass directions and real-life contexts.\n\nStudents begin by revising acute, right and obtuse angles.\nThey learn how to identify and classify angles according to their size.\n\nStudents will:\n✔ Recognise acute, right and obtuse angles\n✔ Explain why angles belong to each category\n✔ Compare different angle sizes\n✔ Draw examples of different angle types\n\nThe lesson then explores clockwise and anticlockwise turns.\nStudents learn how turns relate to the movement of clock hands.\n\nStudents will also:\n✔ Identify clockwise and anticlockwise rotations\n✔ Describe turns using mathematical vocabulary\n✔ Compare different directions of rotation\n✔ Apply turning language in practical situations\n\nNext, students learn how turns are measured in degrees.\nThey investigate quarter turns, half turns, three-quarter turns and full turns.\n\nStudents will:\n✔ Understand that a quarter turn is 90°\n✔ Understand that a half turn is 180°\n✔ Understand that a three-quarter turn is 270°\n✔ Understand that a full turn is 360°\n✔ Link turns to angle types\n\nThe lesson then introduces angle classification using degree measures.\nStudents learn that:\n✔ Acute angles are less than 90°\n✔ Right angles measure exactly 90°\n✔ Obtuse angles are greater than 90° and less than 180°\n✔ Straight line angles measure 180°\n✔ Reflex angles are greater than 180° and less than 360°\n✔ Full angles measure 360°\n\nStudents also explore compass directions and bearings.\nThey use compass points to calculate turns and identify angle sizes.\n\nStudents will:\n✔ Measure angles between compass points\n✔ Use 45° intervals between neighbouring compass directions\n✔ Calculate clockwise and anticlockwise turns\n✔ Classify compass angles as acute, obtuse or reflex\n✔ Solve direction and movement problems\n\nNext, students investigate real-life turning scenarios.\nThey use maps, landmarks and compass directions to work out where someone will be facing after a turn.\n\nStudents will also:\n✔ Calculate turning angles accurately\n✔ Follow directional instructions\n✔ Predict final positions after rotations\n✔ Apply angle reasoning in context\n\nThe lesson then introduces measuring acute angles using a protractor.\nStudents learn how to position a protractor correctly and read the appropriate scale.\n\nStudents will:\n✔ Identify the vertex of an angle\n✔ Align the protractor accurately\n✔ Read angles from inside and outside scales\n✔ Measure acute angles to the nearest degree\n✔ Estimate angles before measuring\n\nStudents then learn how to measure obtuse angles.\n\nThey will:\n✔ Use a protractor to measure obtuse angles\n✔ Choose the correct scale on the protractor\n✔ Measure angles accurately between labelled intervals\n✔ Read precise angle measurements using degree increments\n✔ Check whether answers are reasonable\n\nThe lesson also develops estimation and reasoning skills.\nStudents learn how estimating first helps identify mistakes when reading a protractor.\n\nStudents will:\n✔ Estimate angle sizes before measuring\n✔ Spot incorrect measurements\n✔ Explain common protractor errors\n✔ Use angle knowledge to justify answers\n✔ Compare reasonable and unreasonable measurements\n\nFinally, students solve reasoning problems involving angle measurement.\nThey identify mistakes, explain misconceptions and apply their understanding of angle types and degree measures.\n\nBy the end of the lesson, learners will confidently classify angles, measure acute and obtuse angles using a protractor, calculate turns in degrees, and apply angle knowledge to solve a wide range of reasoning and direction problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M32",
+        "maths-year5": "Y5T3M32"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M36",
+      "lessonId": "Y5M36",
+      "order": 33,
+      "title": "Properties of Shapes 2",
+      "description": "In this lesson, students deepen their understanding of angle relationships by exploring angles on a straight line and angles around a point. They learn how to use known angle facts to calculate missing angles and solve reasoning problems.\n\nStudents begin by revising key angle facts.\nThey learn that a straight angle measures 180° and is equivalent to a half turn.\n\nStudents will:\n✔ Recognise that a straight line angle measures 180°\n✔ Link straight angles to half turns\n✔ Understand that two right angles make 180°\n✔ Use angle facts to support calculations\n✔ Compare different angle sizes\n\nThe lesson then focuses on angles on a straight line.\nStudents learn that all angles on a straight line add up to 180°.\n\nStudents will:\n✔ Calculate missing angles on a straight line\n✔ Use subtraction to find unknown angles\n✔ Solve problems with two and three adjacent angles\n✔ Identify acute, right and obtuse missing angles\n✔ Check answers using inverse operations\n\nStudents also use bar models and number lines to visualise angle calculations.\n\nThey will:\n✔ Represent angle totals using bar models\n✔ Use known and unknown parts of a whole\n✔ Apply addition and subtraction strategies\n✔ Explain their reasoning clearly\n✔ Verify solutions efficiently\n\nNext, students revisit angle types.\nThey classify angles as acute, right, obtuse, straight line and reflex angles.\n\nStudents will:\n✔ Identify different types of angles\n✔ Compare angle sizes accurately\n✔ Use degree measurements to justify classifications\n✔ Recall key angle definitions\n✔ Apply angle vocabulary confidently\n\nThe lesson then introduces angles around a point.\nStudents learn that angles around a point always total 360°.\n\nStudents will:\n✔ Understand that angles around a point equal a full turn\n✔ Link 360° to four right angles\n✔ Recognise full-turn angle relationships\n✔ Use angle facts to solve problems\n✔ Interpret diagrams involving complete rotations\n\nStudents then calculate missing angles around a point.\nThey use known angle values to determine unknown angles.\n\nStudents will:\n✔ Calculate missing angles using subtraction\n✔ Solve problems involving three or more angles\n✔ Work with acute, obtuse and reflex missing angles\n✔ Use inverse operations to check answers\n✔ Explain how they found solutions\n\nThe lesson also develops reasoning and problem-solving skills.\nStudents compare questions, identify similarities and differences, and decide which angle facts apply.\n\nStudents will:\n✔ Spot patterns in angle problems\n✔ Select appropriate solving strategies\n✔ Justify calculations mathematically\n✔ Explain mistakes and misconceptions\n✔ Solve increasingly complex angle challenges\n\nFinally, students apply their understanding to mixed missing-angle problems involving straight lines and points.\nThey combine angle facts, arithmetic and logical reasoning to find unknown values.\n\nBy the end of the lesson, learners will confidently calculate missing angles on straight lines and around points, apply key angle facts, and solve a wide range of angle reasoning problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M33",
+        "maths-year5": "Y5T3M33"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M37",
+      "lessonId": "Y5M37",
+      "order": 34,
+      "title": "Properties of Shapes 3",
+      "description": "In this lesson, students apply their knowledge of shape properties to calculate missing lengths, find unknown angles, classify polygons, and investigate three-dimensional shapes and shape nets.\n\nStudents begin by solving perimeter problems involving regular and compound shapes.\nThey use known side lengths and shape properties to calculate missing measurements.\n\nThis lesson includes:\n✔ Calculating the perimeter of regular and irregular shapes\n✔ Finding missing side lengths using known measurements\n✔ Using properties of rectangles and squares\n✔ Solving perimeter problems involving compound shapes\n✔ Applying logical reasoning to real-life contexts\n\nThe lesson then develops angle reasoning within shapes.\nStudents use angle facts to calculate unknown angles in squares, triangles, and composite figures.\n\nStudents will:\n✔ Calculate missing angles in shapes\n✔ Use the fact that angles on a straight line total 180°\n✔ Use the fact that angles in a triangle total 180°\n✔ Apply properties of isosceles triangles\n✔ Use right-angle facts to solve problems efficiently\n\nStudents also learn how complex shapes can be broken into simpler shapes to support problem-solving.\n\nThey will:\n✔ Split compound shapes into rectangles and triangles\n✔ Find missing angles using known angle facts\n✔ Combine angle calculations from different parts of a shape\n✔ Explain their mathematical reasoning\n✔ Solve multi-step geometry problems\n\nNext, students explore polygons.\nThey learn what makes a shape a polygon and how polygons can be classified.\n\nStudents will:\n✔ Identify polygons and non-polygons\n✔ Recognise that polygons must be closed shapes\n✔ Understand that polygons must have straight sides\n✔ Classify shapes using geometric properties\n✔ Justify why shapes belong in particular groups\n\nThe lesson then introduces regular and irregular polygons.\nStudents investigate the properties that make a polygon regular.\n\nStudents will:\n✔ Understand that regular polygons have equal sides and equal angles\n✔ Compare regular and irregular polygons\n✔ Identify common regular polygons\n✔ Investigate properties of different triangles\n✔ Recognise that only equilateral triangles are regular polygons\n\nStudents then move on to three-dimensional shapes.\nThey identify and classify a range of common solids.\n\nStudents will:\n✔ Recognise cubes, cuboids, prisms, pyramids, cylinders, cones and spheres\n✔ Identify octahedrons and triangular prisms\n✔ Compare different three-dimensional shapes\n✔ Describe geometric properties accurately\n✔ Use correct mathematical vocabulary\n\nThe lesson also introduces polyhedrons.\nStudents learn how to distinguish polyhedrons from shapes with curved surfaces.\n\nStudents will:\n✔ Understand that polyhedrons have flat faces, straight edges and vertices\n✔ Classify three-dimensional shapes as polyhedrons or non-polyhedrons\n✔ Identify faces, edges and vertices\n✔ Explain why cylinders, cones and spheres are not polyhedrons\n✔ Apply geometric reasoning to classification tasks\n\nFinally, students explore shape nets.\nThey learn how two-dimensional nets fold into three-dimensional shapes.\n\nStudents will:\n✔ Identify valid and invalid shape nets\n✔ Recognise nets of cubes, cuboids, prisms and octahedrons\n✔ Count faces in three-dimensional shapes\n✔ Match two-dimensional faces to three-dimensional solids\n✔ Visualise how shapes fold together\n\nBy the end of the lesson, learners will confidently calculate lengths and angles in shapes, classify regular and irregular polygons, identify three-dimensional shapes and polyhedrons, and interpret and construct shape nets.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M34",
+        "maths-year5": "Y5T3M34"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M38",
+      "lessonId": "Y5M38",
+      "order": 35,
+      "title": "Measurement 1",
+      "description": "In this lesson, students develop their understanding of perimeter by measuring accurately, converting between units of length, and solving increasingly complex perimeter problems involving rectangles, rectilinear shapes, polygons, and composite figures.\n\nStudents begin by exploring equivalent measurements and using rulers correctly.\nThey learn how centimetres, millimetres, and decimal measurements are connected.\n\nThis lesson includes:\n✔ Converting between centimetres and millimetres\n✔ Reading measurements accurately from a ruler\n✔ Identifying common measuring mistakes\n✔ Writing equivalent measurements in different forms\n✔ Using decimal notation for lengths\n\nThe lesson then introduces the perimeter of rectangles.\nStudents learn multiple methods for calculating perimeter and compare the efficiency of different approaches.\n\nStudents will:\n✔ Understand perimeter as the distance around a shape\n✔ Calculate the perimeter of rectangles\n✔ Use addition and multiplication methods\n✔ Compare different calculation strategies\n✔ Solve perimeter problems involving decimal lengths\n\nStudents also investigate missing side lengths in rectangles.\nThey use perimeter information to calculate unknown dimensions.\n\nStudents will:\n✔ Find missing lengths using known perimeters\n✔ Apply inverse operations\n✔ Solve reasoning problems involving rectangles\n✔ Explore multiple rectangles with the same perimeter\n✔ Recognise patterns between perimeter, length, and width\n\nThe lesson then extends to rectilinear shapes.\nStudents learn how to calculate perimeters when shapes contain many sides and missing measurements.\n\nStudents will:\n✔ Calculate the perimeter of rectilinear shapes\n✔ Identify and calculate missing side lengths\n✔ Use addition and subtraction to determine unknown measurements\n✔ Apply perimeter reasoning to compound shapes\n✔ Develop efficient calculation strategies\n\nStudents explore reasoning and problem-solving questions involving perimeter.\nThey learn that some shapes can be solved even when individual measurements are not known.\n\nStudents will:\n✔ Use total horizontal and vertical lengths to find perimeter\n✔ Determine when enough information is available\n✔ Justify mathematical conclusions\n✔ Solve multi-step perimeter problems\n✔ Apply logical geometric reasoning\n\nThe lesson also investigates shapes made from identical squares.\nStudents examine how arrangement affects perimeter.\n\nStudents will:\n✔ Calculate the perimeter of composite shapes made from squares\n✔ Determine square dimensions from a known perimeter\n✔ Count perimeter edges efficiently\n✔ Compare different arrangements of identical shapes\n✔ Understand how shape structure affects perimeter\n\nNext, students explore the perimeter of polygons.\nThey learn how regular polygons can be calculated efficiently using multiplication.\n\nStudents will:\n✔ Identify polygons and regular polygons\n✔ Calculate the perimeter of regular polygons\n✔ Use the number of sides and side length to find perimeter\n✔ Find missing side lengths from a known perimeter\n✔ Solve reasoning problems involving regular shapes\n\nThe lesson then develops perimeter reasoning using compound polygon arrangements.\nStudents investigate how joining shapes changes the perimeter.\n\nStudents will:\n✔ Calculate the perimeter of combined shapes\n✔ Recognise that shared edges are internal and not part of the perimeter\n✔ Compare different solution methods\n✔ Use subtraction to account for shared boundaries\n✔ Solve real-life perimeter problems involving joined shapes\n\nBy the end of the lesson, learners will confidently measure lengths, convert between centimetres and millimetres, calculate the perimeter of rectangles, rectilinear shapes and polygons, find missing side lengths, and solve complex perimeter reasoning problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M35",
+        "maths-year5": "Y5T3M35"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M39",
+      "lessonId": "Y5M39",
+      "order": 36,
+      "title": "Measurement 2",
+      "description": "In this lesson, students develop their understanding of area by calculating, comparing, estimating, and solving problems involving rectangles, compound shapes, and irregular shapes.\n\nStudents begin by exploring what area represents and why it is useful in everyday life.\nThey learn that area measures the amount of space inside a two-dimensional shape and is measured using square units.\n\nThis lesson includes:\n✔ Understanding area as the space inside a shape\n✔ Recognising real-life uses of area\n✔ Understanding square centimetres and square metres\n✔ Linking arrays to area calculations\n✔ Comparing different arrangements with the same area\n\nStudents first calculate area by counting squares.\nThey learn how square units measure surface area and how counting can be used to find the area of simple shapes.\n\nStudents will:\n✔ Count square units accurately\n✔ Calculate area using square centimetres\n✔ Recognise area as a measure of surface coverage\n✔ Compare areas of different shapes\n✔ Record answers using correct units\n\nThe lesson then introduces the area formula for rectangles.\nStudents learn how multiplication can be used to calculate area efficiently.\n\nStudents will:\n✔ Use the formula area = length × width\n✔ Calculate areas of rectangles\n✔ Work with measurements in centimetres and metres\n✔ Choose appropriate square units\n✔ Solve practical area problems\n\nStudents explore reasoning and error-spotting activities.\nThey learn to identify common mistakes involving area calculations and units.\n\nStudents will:\n✔ Check calculations for accuracy\n✔ Identify incorrect methods\n✔ Distinguish between perimeter and area\n✔ Use correct units of measurement\n✔ Justify mathematical reasoning\n\nThe lesson also develops understanding of factors and area relationships.\nStudents investigate how different rectangles can have the same area.\n\nStudents will:\n✔ Find factor pairs of a number\n✔ Create rectangles with a given area\n✔ Explore links between multiplication and area\n✔ Compare different rectangle dimensions\n✔ Apply reasoning to area investigations\n\nStudents are then introduced to compound shapes.\nThey learn how complex shapes can be divided into simpler rectangles.\n\nStudents will:\n✔ Understand what compound and composite shapes are\n✔ Split compound shapes into rectangles\n✔ Calculate the area of each section\n✔ Add areas together to find totals\n✔ Solve multi-step area problems\n\nThe lesson also introduces the subtraction method for compound shapes.\nStudents learn how to calculate a larger rectangle and remove missing sections.\n\nStudents will:\n✔ Calculate the area of larger enclosing rectangles\n✔ Find areas of missing sections\n✔ Use subtraction to determine compound shape areas\n✔ Compare different solution methods\n✔ Solve real-life area problems involving gardens, ponds, and layouts\n\nStudents explore more advanced area reasoning.\nThey calculate fractional areas and solve problems involving overlapping calculations.\n\nStudents will:\n✔ Use fractions of known areas\n✔ Apply area calculations to real-world scenarios\n✔ Interpret diagrams efficiently\n✔ Solve multi-step reasoning problems\n✔ Justify mathematical conclusions\n\nThe lesson then introduces estimating area.\nStudents learn how to estimate the area of irregular shapes using square grids.\n\nStudents will:\n✔ Estimate areas using whole squares\n✔ Combine partial squares to create whole squares\n✔ Understand acceptable ranges for estimates\n✔ Compare different estimation methods\n✔ Develop efficient counting strategies\n\nStudents also distinguish between exact and estimated area.\nThey learn when exact answers are possible and when estimation is more appropriate.\n\nStudents will:\n✔ Identify exact areas using whole and half squares\n✔ Estimate areas of irregular shapes\n✔ Recognise when estimation is required\n✔ Evaluate the accuracy of estimates\n✔ Explain reasoning using mathematical language\n\nBy the end of the lesson, learners will confidently calculate the area of rectangles and compound shapes, solve real-life area problems, understand square units, estimate the area of irregular shapes, and apply area reasoning in a variety of mathematical contexts.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M36",
+        "maths-year5": "Y5T3M36"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M40",
+      "lessonId": "Y5M40",
+      "order": 37,
+      "title": "Measurement 3",
+      "description": "In this lesson, students develop fluency with metric and imperial measurement conversions, learning how prefixes help us understand relationships between units and how conversion skills can be applied to solve real-life problems.\n\nStudents begin by exploring the meaning of the metric prefixes kilo and milli.\nThey learn how these prefixes help us understand the size relationships between different units of measurement.\n\nThis lesson includes:\n✔ Understanding the meaning of kilo and milli\n✔ Exploring relationships between metric units\n✔ Using place value when converting measurements\n✔ Reading and interpreting number lines\n✔ Applying conversion rules in practical contexts\n\nStudents first learn about kilograms and grams.\nThey investigate how mass can be converted between larger and smaller metric units.\n\nStudents will:\n✔ Convert kilograms to grams\n✔ Convert grams to kilograms\n✔ Use multiplication and division by one thousand\n✔ Interpret number lines involving mass\n✔ Solve practical mass problems\n\nThe lesson then develops understanding of decimal conversions.\nStudents learn how decimal values relate to metric measurements.\n\nStudents will:\n✔ Convert decimal kilograms into grams\n✔ Interpret values between whole numbers\n✔ Use tenths and halves on number lines\n✔ Compare equivalent measurements\n✔ Recognise patterns in metric conversions\n\nStudents then apply the same principles to kilometres and metres.\nThey learn how distance measurements follow identical conversion rules.\n\nStudents will:\n✔ Convert kilometres to metres\n✔ Convert metres to kilometres\n✔ Use multiplication and division by one thousand\n✔ Read distance scales and number lines\n✔ Solve distance conversion problems\n\nThe lesson introduces millimetres and metres.\nStudents investigate how smaller units relate to larger metric units.\n\nStudents will:\n✔ Convert metres into millimetres\n✔ Convert millimetres into metres\n✔ Work with decimal values and fractions\n✔ Use place value knowledge when converting\n✔ Solve practical measurement questions\n\nStudents then learn about litres and millilitres.\nThey explore capacity conversions using both whole numbers and decimals.\n\nStudents will:\n✔ Convert litres into millilitres\n✔ Convert millilitres into litres\n✔ Interpret decimal capacities\n✔ Use number lines to represent capacity\n✔ Solve real-life capacity problems\n\nThe lesson develops understanding of equivalent measurements involving fractions and decimals.\nStudents use reasoning to connect metric units.\n\nStudents will:\n✔ Convert fractional metres into millimetres\n✔ Convert decimal litres into millilitres\n✔ Compare equivalent measurements\n✔ Apply proportional reasoning\n✔ Interpret measurement scales accurately\n\nStudents then compare different metric units.\nThey learn to convert measurements into a common unit before comparing values.\n\nStudents will:\n✔ Compare measurements given in different units\n✔ Identify and correct conversion errors\n✔ Convert between millimetres, centimetres and metres\n✔ Explain mathematical reasoning\n✔ Spot common misconceptions\n\nThe lesson also introduces imperial units.\nStudents learn commonly used approximate conversions between metric and imperial systems.\n\nStudents will:\n✔ Convert inches and centimetres approximately\n✔ Convert kilograms and pounds approximately\n✔ Convert pints and millilitres approximately\n✔ Understand the meaning of approximate equivalence\n✔ Use practical conversion facts efficiently\n\nStudents explore scaling strategies and proportional reasoning.\nThey use doubling, halving and known facts to estimate equivalent values.\n\nStudents will:\n✔ Apply multiplicative reasoning\n✔ Use known benchmark conversions\n✔ Estimate measurements efficiently\n✔ Compare metric and imperial quantities\n✔ Justify answers using conversion facts\n\nThe lesson concludes with multi-step reasoning problems involving mixed units.\nStudents solve practical scenarios by converting measurements into common units before comparing them.\n\nBy the end of the lesson, learners will confidently convert between kilograms and grams, kilometres and metres, millimetres and metres, litres and millilitres, compare metric measurements, use approximate imperial conversions, and solve real-life measurement problems involving a range of units.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M37",
+        "maths-year5": "Y5T3M37"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y5M41",
+      "lessonId": "Y5M41",
+      "order": 38,
+      "title": "Measurement 4",
+      "description": "In this lesson, students develop their understanding of time, timetables, capacity and volume. They learn how to convert between units of time, interpret timetables, estimate capacities, and calculate the volume of cubes and cuboids.\n\nStudents begin by exploring relationships between units of time.\nThey learn how multiplication and division can be used to convert between different time units.\n\nThis lesson includes:\n✔ Converting between seconds, minutes and hours\n✔ Converting between days, weeks, months and years\n✔ Solving time conversion problems\n✔ Interpreting timetables\n✔ Estimating capacity and volume\n\nStudents first investigate seconds and minutes.\nThey learn how to convert between these units using multiplication and division.\n\nStudents will:\n✔ Convert minutes into seconds\n✔ Convert seconds into minutes\n✔ Use multiplication and division by sixty\n✔ Apply known multiplication facts\n✔ Solve real-life time problems\n\nThe lesson then develops understanding of hours and minutes.\nStudents learn how larger units of time relate to smaller units.\n\nStudents will:\n✔ Convert hours into minutes\n✔ Convert minutes into hours\n✔ Use multiplication and division by sixty\n✔ Compare durations accurately\n✔ Solve multi-step time calculations\n\nStudents explore practical time problems involving durations.\nThey learn how to compare times expressed in different formats.\n\nStudents will:\n✔ Convert mixed units of time\n✔ Compare race times and event durations\n✔ Calculate differences between times\n✔ Use reasoning to justify answers\n✔ Apply inverse operations when converting\n\nThe lesson introduces days, weeks, months and years.\nStudents use multiplication and division facts to convert between longer periods of time.\n\nStudents will:\n✔ Convert weeks into days\n✔ Convert days into weeks\n✔ Convert years into months\n✔ Convert months into years\n✔ Compare ages using equivalent units\n\nStudents then develop their timetable skills.\nThey learn how to read, interpret and use timetable information.\n\nStudents will:\n✔ Read bus and train timetables\n✔ Identify departure and arrival times\n✔ Determine earliest and latest journeys\n✔ Interpret timetable symbols and conventions\n✔ Extract relevant information efficiently\n\nThe lesson develops duration calculations using timetables.\nStudents learn how to calculate journey times accurately.\n\nStudents will:\n✔ Calculate durations between times\n✔ Use number lines to find time differences\n✔ Solve travel problems\n✔ Compare journey lengths\n✔ Apply timetable information to real-life scenarios\n\nStudents explore reasoning problems involving transport schedules.\nThey learn how to combine timetable information with time conversions.\n\nStudents will:\n✔ Solve multi-step timetable problems\n✔ Convert seconds into minutes when required\n✔ Determine suitable travel options\n✔ Explain mathematical reasoning\n✔ Avoid common errors when working with time\n\nThe lesson then introduces estimating capacity.\nStudents learn the difference between capacity and volume and how to estimate sensible capacities for everyday objects.\n\nStudents will:\n✔ Understand the meaning of capacity\n✔ Estimate realistic capacities\n✔ Select appropriate units of measure\n✔ Compare container sizes\n✔ Apply measurement knowledge to everyday contexts\n\nStudents next explore volume.\nThey learn that volume measures the amount of space occupied by a three-dimensional object.\n\nStudents will:\n✔ Understand cubic units\n✔ Count cubes to estimate volume\n✔ Compare volumes of different shapes\n✔ Recognise hidden cubes in structures\n✔ Use cubic centimetres correctly\n\nThe lesson introduces formulas for finding the volume of cuboids.\nStudents learn how dimensions can be used to calculate volume efficiently.\n\nStudents will:\n✔ Calculate volume using length × width × height\n✔ Connect area and volume concepts\n✔ Use dimensions to calculate volume\n✔ Apply volume formulas accurately\n✔ Check answers using cube models\n\nStudents also investigate how changing dimensions affects volume.\nThey explore the relationship between scaling dimensions and resulting volumes.\n\nStudents will:\n✔ Predict changes in volume\n✔ Calculate volumes after scaling dimensions\n✔ Compare original and enlarged shapes\n✔ Use multiplicative reasoning\n✔ Explain patterns in volume calculations\n\nThe lesson concludes with reasoning and problem-solving involving cuboids.\nStudents investigate missing cubes, complete cuboids, and explore different dimension combinations that produce the same volume.\n\nBy the end of the lesson, learners will confidently convert between units of time, interpret and use timetables, estimate capacities, distinguish between capacity and volume, calculate volumes of cubes and cuboids, and solve a wide range of practical measurement problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level2": "L2T3M38",
+        "maths-year5": "Y5T3M38"
+      },
+      "hasVideo": true
+    }
+  ]
+}

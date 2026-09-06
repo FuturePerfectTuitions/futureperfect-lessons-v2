@@ -1,0 +1,523 @@
+{
+  "count": 37,
+  "lessons": [
+    {
+      "key": "lesson:Y4M2",
+      "lessonId": "Y4M2",
+      "order": 1,
+      "title": "Number and Place Value 1",
+      "description": "In this video, students will learn how numbers build up to 1000 and beyond.\nWe will use visual models and place value charts to explore thousands, hundreds, tens, and ones.\n\nStudents will also:\n✔ Represent thousands using visual models\n✔ Partition numbers in standard and non-standard ways\n✔ Break 1000 into equal parts\n✔ Compare, order, and compose four-digit numbers\n✔ Solve word problems using partitioning\n\nBy the end of the lesson, learners will confidently represent and partition large numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M01",
+        "maths-year4": "Y4T1M01"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M36",
+      "lessonId": "Y4M36",
+      "order": 1,
+      "title": "Transition to Level 1",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M01",
+        "maths-year4": "Y4T1M01"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y4M3",
+      "lessonId": "Y4M3",
+      "order": 2,
+      "title": "Number and Place Value 2",
+      "description": "In this video, students will build on their knowledge of partitioning and place value.\nThey will represent and break apart four-digit numbers and write them in expanded form.\n\nStudents will also:\n✔ Partition four-digit numbers using place value models\n✔ Solve word problems using partitioning\n✔ Explore number lines and currency examples\n✔ Find 1000 more or 1000 less\n✔ Play games to apply these skills\n\nBy the end of the lesson, learners will confidently represent and manipulate four-digit numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M02",
+        "maths-year4": "Y4T1M02"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M4",
+      "lessonId": "Y4M4",
+      "order": 3,
+      "title": "Number and Place Value 3",
+      "description": "In this video, students will learn how to compare and round four-digit numbers.\nThey will use place value to compare, order, and estimate numbers.\n\nStudents will also:\n✔ Check comparison statements using place value reasoning\n✔ Order numbers accurately\n✔ Place numbers on number lines\n✔ Round numbers to the nearest ten\n\nBy the end of the lesson, learners will confidently compare, order, and round four-digit numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M03",
+        "maths-year4": "Y4T1M03"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M5",
+      "lessonId": "Y4M5",
+      "order": 4,
+      "title": "Number and Place Value 4",
+      "description": "In this video, students will explore negative numbers in real-life contexts.\nThey will count below zero and read temperatures using negative values.\n\nStudents will also:\n✔ Understand negative numbers and zero\n✔ Fill in missing numbers on number lines\n✔ Read temperatures on thermometers\n✔ Solve real-life temperature problems\n\nBy the end of the lesson, learners will confidently use negative numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M04",
+        "maths-year4": "Y4T1M04"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M6",
+      "lessonId": "Y4M6",
+      "order": 5,
+      "title": "Number and Place Value 5",
+      "description": "In this video, students will explore negative numbers in real-life contexts.\nThey will count below zero and read temperatures using negative values.\n\nStudents will also:\n✔ Understand negative numbers and zero\n✔ Fill in missing numbers on number lines\n✔ Read temperatures on thermometers\n✔ Solve real-life temperature problems\n\nBy the end of the lesson, learners will confidently use negative numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M05",
+        "maths-year4": "Y4T1M05"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M7",
+      "lessonId": "Y4M7",
+      "order": 6,
+      "title": "Number and Place Value 6",
+      "description": "In this video, students will explore negative numbers in real-life contexts.\nThey will count below zero and read temperatures using negative values.\n\nStudents will also:\n✔ Understand negative numbers and zero\n✔ Fill in missing numbers on number lines\n✔ Read temperatures on thermometers\n✔ Solve real-life temperature problems\n\nBy the end of the lesson, learners will confidently use negative numbers.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M06",
+        "maths-year4": "Y4T1M06"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M9",
+      "lessonId": "Y4M9",
+      "order": 7,
+      "title": "Addition",
+      "description": "In this lesson, students learn four-digit column addition step by step.\nThey start with simple additions and move on to regrouping and trickier problems.\n\nStudents will practise:\n✔ Basic addition facts\n✔ Using place value to add large numbers\n✔ Regrouping correctly\n✔ Solving missing digit problems\n✔ Fun challenge activities",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M07",
+        "maths-year4": "Y4T1M07"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M10",
+      "lessonId": "Y4M10",
+      "order": 8,
+      "title": "Subtraction",
+      "description": "In this lesson, students learn how to subtract four-digit numbers using the column method.\nThey start with simple calculations and move on to exchanges.\n\nThis lesson includes:\n✔ Subtraction with and without exchanges\n✔ Place value models for understanding\n✔ Fun puzzles and challenges\n✔ Real-life examples\n✔ Efficient subtraction strategies\n\nBy the end of the lesson, learners will be confident with column subtraction.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M08",
+        "maths-year4": "Y4T1M08"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M12",
+      "lessonId": "Y4M12",
+      "order": 9,
+      "title": "Addition and Subtraction",
+      "description": "In this lesson, students explore addition and subtraction problem-solving using real-life examples.\nThey learn how to choose the correct operation and check answers using the inverse.\n\nThis lesson includes:\n✔ Two-step word problems\n✔ Addition and subtraction keyword activities\n✔ Real-life examples\n✔ Checking answers using inverse operations\n✔ Practice challenges",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M09",
+        "maths-year4": "Y4T1M09"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M14",
+      "lessonId": "Y4M14",
+      "order": 10,
+      "title": "Rule of 3",
+      "description": "In this lesson, students learn the Rule of Three to solve proportion problems.\nThey practise cross multiplication and division using real-life examples.\n\nThis lesson includes:\n✔ Understanding proportions\n✔ Step-by-step Rule of Three method\n✔ Real-life word problems\n✔ Measurement conversions\n✔ Practice worksheets",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M10",
+        "maths-year4": "Y4T1M10"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M15",
+      "lessonId": "Y4M15",
+      "order": 11,
+      "title": "Converting Lengths",
+      "description": "In this lesson, students learn how to convert between different units of length.\nThey practise converting and comparing measurements.\n\nThis lesson includes:\n✔ Ordering units of length\n✔ Converting between mm, cm, m, and km\n✔ Real-life examples\n✔ Solving word problems\n✔ Comparing and ordering measurements",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M11",
+        "maths-year4": "Y4T1M11"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M16",
+      "lessonId": "Y4M16",
+      "order": 12,
+      "title": "Comparing and Calculating Lengths",
+      "description": "In this lesson, students learn how to compare and order lengths.\nThey convert between centimetres, metres, and kilometres to solve problems.\n\nThis lesson includes:\n✔ Converting units of length\n✔ Comparing and ordering measurements\n✔ Real-life word problems\n✔ Fun comparison challenges\n✔ Subtraction problems with distances",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T1M12",
+        "maths-year4": "Y4T1M12"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M13",
+      "lessonId": "Y4M13",
+      "order": 13,
+      "title": "Area",
+      "description": "In this lesson, students explore the concept of area.\nThey learn how to measure the space inside shapes using unit squares and multiplication.\n\nThis lesson includes:\n✔ Understanding area in real life\n✔ Counting squares to find area\n✔ Using multiplication for rectangles\n✔ Working with half-squares and composite shapes\n✔ Practice activities",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M13",
+        "maths-year4": "Y4T2M13"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M17",
+      "lessonId": "Y4M17",
+      "order": 14,
+      "title": "Perimeter",
+      "description": "",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M14",
+        "maths-year4": "Y4T2M14"
+      },
+      "hasVideo": false
+    },
+    {
+      "key": "lesson:Y4M18",
+      "lessonId": "Y4M18",
+      "order": 15,
+      "title": "Fractions 1",
+      "description": "In this lesson, students build a strong understanding of fractions.\nThey explore wholes, equal parts, and fractions greater than one using models and number lines.\n\nThis lesson includes:\n✔ Identifying wholes and equal parts\n✔ Unit and non-unit fractions\n✔ Completing fractions to make a whole\n✔ Counting in fractions on number lines\n✔ Improper fractions and mixed numbers\n✔ Step-by-step practice questions",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M15",
+        "maths-year4": "Y4T2M15"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M19",
+      "lessonId": "Y4M19",
+      "order": 16,
+      "title": "Fractions 2",
+      "description": "In this lesson, students learn about mixed numbers and how to represent, compare, and order fractions.\nThey use number lines and visual models to build confidence.\n\nThis lesson includes:\n✔ Counting in fractional steps\n✔ Writing mixed numbers from models\n✔ Placing fractions on number lines\n✔ Comparing and ordering mixed numbers\n✔ Practice activities",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M16",
+        "maths-year4": "Y4T2M16"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M20",
+      "lessonId": "Y4M20",
+      "order": 17,
+      "title": "Fractions 3",
+      "description": "In this lesson, students explore improper fractions and mixed numbers.\nThey learn how to recognise, represent, and convert between them.\n\nThis lesson includes:\n✔ Identifying improper fractions\n✔ Using visual models and number lines\n✔ Converting mixed numbers and improper fractions\n✔ Times-table reasoning\n✔ Guided practice and challenges",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M17",
+        "maths-year4": "Y4T2M17"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M21",
+      "lessonId": "Y4M21",
+      "order": 18,
+      "title": "Fractions 4",
+      "description": "In this lesson, students learn how to add and subtract fractions with the same denominator.\nThey also work with mixed numbers and improper fractions.\n\nThis lesson includes:\n✔ Adding fractions with the same denominator\n✔ Using models to visualise calculations\n✔ Adding fractions to mixed numbers\n✔ Subtracting fractions and mixed numbers\n✔ Converting improper fractions to mixed numbers",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M18",
+        "maths-year4": "Y4T2M18"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M22",
+      "lessonId": "Y4M22",
+      "order": 19,
+      "title": "Fractions 5",
+      "description": "Fractions 5: decimals, tenths, hundredths and partitioning.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M19",
+        "maths-year4": "Y4T2M19"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M23",
+      "lessonId": "Y4M23",
+      "order": 20,
+      "title": "Fractions 6",
+      "description": "In this lesson, students explore decimal halves and quarters.\nThey learn about equivalent fractions and rounding decimals.\n\nThis lesson includes:\n✔ Equivalent fractions for halves and quarters\n✔ Writing halves and quarters as decimals\n✔ Using models and number lines\n✔ Rounding decimals to the nearest whole\n✔ Applying place value reasoning",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M20",
+        "maths-year4": "Y4T2M20"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M24",
+      "lessonId": "Y4M24",
+      "order": 21,
+      "title": "Fractions 7",
+      "description": "In this lesson, students compare and order decimal numbers.\nThey use place value knowledge and number lines to decide which decimals are greater or smaller.\n\nThis lesson includes:\n✔ Linking fractions to decimals\n✔ Comparing decimals using place value\n✔ Using greater than, less than, and equals symbols\n✔ Ordering decimals in ascending and descending order\n✔ Solving mixed comparison problems",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M21",
+        "maths-year4": "Y4T2M21"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M32",
+      "lessonId": "Y4M32",
+      "order": 21,
+      "title": "Multiplication and Division",
+      "description": "In this lesson, students develop their multiplication and division skills by exploring multiples of 3, multiplying and dividing by 6, and multiplying and dividing by 9.\n\nStudents begin by learning the three times table using groups, repeated addition and number lines.\n\nStudents will:\n✔ Count in multiples of 3\n✔ Use repeated addition to represent multiplication\n✔ Link groups of objects to multiplication calculations\n✔ Recognise patterns in the three times table\n✔ Use number lines to calculate multiples of 3\n\nThe lesson then explores how known multiplication facts can help solve larger calculations.\nStudents learn to build on known facts such as twelve times three to calculate more challenging multiples.\n\nStudents will also:\n✔ Use known facts to solve larger calculations\n✔ Count on in equal groups\n✔ Explain multiplication patterns\n✔ Apply efficient mental maths strategies\n\nNext, students investigate multiples of 3 using digit sums.\nThey learn that if the sum of the digits is a multiple of 3, then the whole number is also a multiple of 3.\n\nStudents will:\n✔ Find digit sums\n✔ Test whether numbers are multiples of 3\n✔ Identify multiples in large numbers\n✔ Use divisibility rules confidently\n\nThe lesson then moves on to multiplying and dividing by 6.\nStudents use groups, sharing, grouping and arrays to explore multiplication and division facts.\n\nStudents will also:\n✔ Represent multiplication using equal groups\n✔ Use arrays to show rows and columns\n✔ Understand that multiplication is commutative\n✔ Divide by sharing equally\n✔ Divide by grouping\n✔ Write multiplication and division calculations from arrays\n\nStudents then explore fact families.\nThey learn how multiplication and division facts are linked together.\n\nStudents will:\n✔ Create multiplication and division fact families\n✔ Use arrays to identify related facts\n✔ Correct mistakes in fact families\n✔ Understand the relationship between multiplication and division\n\nThe lesson also shows how the six times table links to the three times table.\nStudents learn that multiplying by 6 can be found by doubling the answers in the three times table.\n\nStudents practise:\n✔ Doubling multiples of 3\n✔ Building fluency in the six times table\n✔ Splitting numbers to solve larger multiplications\n✔ Using partitioning strategies\n\nNext, students move on to multiplying and dividing by 9.\nThey explore equal groups, arrays and fact families involving multiples of 9.\n\nStudents will also:\n✔ Count in multiples of 9\n✔ Use repeated addition with groups of 9\n✔ Represent multiplication using arrays\n✔ Solve division calculations by grouping\n✔ Create fact families for the nine times table\n\nFinally, students learn efficient strategies for calculating larger multiples of 9.\nThey use partitioning and known facts such as ten times nine to solve more challenging calculations.\n\nStudents will:\n✔ Split numbers into easier parts\n✔ Use known multiplication facts\n✔ Add and subtract multiples efficiently\n✔ Solve larger multiplication calculations mentally\n\nBy the end of the lesson, learners will confidently identify multiples of 3 and use multiplication and division facts for 6 and 9 to solve a wide range of calculations.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T2M21",
+        "maths-year4": "Y4T2M21"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M1",
+      "lessonId": "Y4M1",
+      "order": 22,
+      "title": "Estimate, Compare & Calculate Money",
+      "description": "Today’s lesson lays the foundation for working with money in the real world.\n\nIn this video, students will learn how to estimate with money.\nWe will explore how to round amounts to the nearest pound, use number lines to check, and decide when to round up or down.\nStudents will practise adding, subtracting, multiplying, and dividing money in real-life shopping situations, and finding change quickly and accurately.\n\nBy the end of the lesson, learners will be able to:\n✔ Estimate totals confidently\n✔ Round prices to make calculations easier\n✔ Work out exact costs and share amounts fairly\n✔ Use quick methods to calculate change\n\nThis lesson builds strong money skills, boosts confidence with mental maths, and prepares students for everyday problem-solving.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M22",
+        "maths-year4": "Y4T3M22"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M37",
+      "lessonId": "Y4M37",
+      "order": 23,
+      "title": "Money 1",
+      "description": "In this video, students will learn all about pounds and pence.\nWe will explore how to identify, count, and combine coins and notes, and practise writing money amounts in different ways using words, pence, and decimal notation.\n\nStudents will also:\n✔ Learn how pounds and pence link with decimals\n✔ Practise comparing and ordering money amounts\n✔ Convert between pence and pounds to make calculations easier\n✔ Work with ascending and descending order of money values\n\nBy the end of the lesson, learners will be able to count, compare, and convert money amounts with confidence.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M23",
+        "maths-year4": "Y4T3M23"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M38",
+      "lessonId": "Y4M38",
+      "order": 24,
+      "title": "Money 2",
+      "description": "In this video, students will learn how to estimate and work with money more confidently.\nWe will practise rounding amounts to the nearest pound, using number lines, and applying the tenths digit rule to decide whether to round up or down.\n\nStudents will also:\n✔ Estimate totals and check if shop prices seem reasonable\n✔ Add and subtract money using different strategies\n✔ Work out change by counting up or using rounding shortcuts\n✔ Handle tricky prices ending in .99 by rounding and adjusting accurately\n\nBy the end of this lesson, learners will be able to round, add, subtract, and estimate money totals quickly and correctly.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M24",
+        "maths-year4": "Y4T3M24"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M39",
+      "lessonId": "Y4M39",
+      "order": 25,
+      "title": "Money 3",
+      "description": "In this lesson, students explore money word problems using pounds and pence.\nThey practise adding costs, multiplying to find totals, and dividing amounts equally between people.\n\nThis lesson includes:\n✔ Adding prices of different items\n✔ Using multiplication to find costs of multiples\n✔ Comparing costs\n✔ Sharing the cost of items equally\n✔ Step-by-step worked examples\n\nPerfect for building confidence in solving real-life money problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M25",
+        "maths-year4": "Y4T3M25"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M25",
+      "lessonId": "Y4M25",
+      "order": 26,
+      "title": "Time 1",
+      "description": "In this lesson, students learn about years, months, weeks and days, and how these units of time are connected. They practise naming and ordering the months of the year, recalling how many days are in each month, identifying leap years, and converting between years and months. They also learn to use calendars to answer date questions and convert between weeks and days in real-life contexts.\n\nThis lesson includes:\n✔ Ordering months and recalling the number of days in each month\n✔ Understanding years, months, calendars, weeks and days\n✔ Identifying leap years and explaining why February can have 29 days\n✔ Converting between years and months\n✔ Converting between weeks and days\n✔ Solving mixed-unit problems with years and months or weeks and days\n✔ Reading calendars to find dates and days of the week\n✔ Using times tables and division facts to solve time problems",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M26",
+        "maths-year4": "Y4T3M26"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M26",
+      "lessonId": "Y4M26",
+      "order": 27,
+      "title": "Time 2",
+      "description": "In this lesson, students learn to convert between hours and minutes, and between minutes and seconds. They use the fact that there are 60 minutes in one hour and 60 seconds in one minute to solve conversions, compare durations, and work out mixed-unit time problems. They also apply these skills to real-life reasoning questions involving schedules, reading challenges and elapsed time.\n\nThis lesson includes:\n✔ Converting hours to minutes and minutes to hours\n✔ Converting minutes to seconds and seconds to minutes\n✔ Solving mixed-unit problems such as hours and minutes, or minutes and seconds\n✔ Comparing durations using greater than, less than and equals\n✔ Using multiplication and division facts with 60\n✔ Solving elapsed-time problems in real-life contexts\n✔ Ordering times from shortest to longest\n✔ Interpreting and solving reasoning problems with time tables and totals",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M27",
+        "maths-year4": "Y4T3M27"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M27",
+      "lessonId": "Y4M27",
+      "order": 28,
+      "title": "Time 3",
+      "description": "In this lesson, students learn how to convert between analogue clocks and twelve-hour digital times, and how to interpret and use the 24-hour clock. They practise reading minutes past and minutes to the hour, using a.m. and p.m. correctly, and converting times between 12-hour and 24-hour formats. They also solve elapsed-time problems involving start times and finish times.\n\nThis lesson includes:\n✔ Reading analogue clocks and matching them to digital times\n✔ Understanding minutes past and minutes to the hour\n✔ Using a.m. and p.m. correctly\n✔ Converting analogue times to 12-hour digital times\n✔ Converting 12-hour times to 24-hour clock times\n✔ Knowing when to add 12 for p.m. times after noon\n✔ Solving start-time and finish-time problems\n✔ Explaining and correcting common mistakes in time conversion",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M28",
+        "maths-year4": "Y4T3M28"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M28",
+      "lessonId": "Y4M28",
+      "order": 29,
+      "title": "Time 4",
+      "description": "In this lesson, students learn how to convert from 24-hour clock to 12-hour digital and analogue times. They practise identifying whether a 24-hour time is a.m. or p.m., subtracting 12 from times after noon, and matching 24-hour times to correct analogue clock faces. They also solve reasoning problems involving equivalent times and common conversion errors.\n\nThis lesson includes:\n✔ Converting from 24-hour clock to 12-hour digital times\n✔ Identifying whether a 24-hour time is a.m. or p.m.\n✔ Subtracting 12 from times after 12:59 to convert to p.m. times\n✔ Matching 24-hour times to analogue clocks\n✔ Converting activities and schedules between time formats\n✔ Explaining common mistakes in 24-hour to 12-hour conversion\n✔ Recognising equivalent analogue, 12-hour and 24-hour times\n✔ Solving reasoning problems using different clock representations",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M29",
+        "maths-year4": "Y4T3M29"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M29",
+      "lessonId": "Y4M29",
+      "order": 30,
+      "title": "Statistics 1",
+      "description": "In this lesson, students are introduced to statistics and learn how to collect, interpret and present discrete data.\n\nIn this video, students will learn what discrete data is.\nThey will understand that discrete data is counted and cannot have in-between values, such as the number of cars or children.\n\nStudents will begin with a real-life investigation, analysing different coloured cars passing a school. They will:\n✔ Identify the most common category\n✔ Compare values between categories\n✔ Calculate totals\n\nThe lesson then introduces pictograms.\nStudents will learn that pictograms use symbols to represent data and that a key is essential.\n\nStudents will also:\n✔ Interpret pictograms using a key\n✔ Work out totals from symbols\n✔ Compare categories\n✔ Understand that symbols can represent more than one unit\n✔ Use parts of symbols for smaller values\n\nNext, students will learn how to draw pictograms.\nThey will:\n✔ Choose an appropriate key\n✔ Represent data accurately\n✔ Use fractions of symbols where needed\n\nThe lesson then introduces bar charts.\nStudents will learn that bar charts:\n✔ Have a horizontal axis for categories\n✔ Have a vertical axis for values\n✔ Use a number scale\n✔ Include titles and labelled axes\n✔ Have equal-width bars with gaps\n\nStudents will also:\n✔ Read values from scales\n✔ Compare categories\n✔ Calculate differences and totals\n✔ Choose appropriate scales such as 1, 2, 5 or 10\n\nThe lesson then extends to more advanced bar charts.\n\nGrouped bar charts:\n✔ Compare subcategories such as boys and girls\n✔ Use multiple bars per category\n✔ Require a key or legend\n\nStacked bar charts:\n✔ Combine subcategories into one bar\n✔ Help compare totals and parts together\n\nStudents will apply their learning to real datasets, such as birthdays across months.\nThey will interpret data, compare values, and answer questions.\n\nThe lesson then introduces Venn diagrams.\nStudents will learn that:\n✔ Each circle represents a set\n✔ Overlapping sections show shared data\n✔ Items in overlaps belong to multiple categories\n\nStudents will also interpret Venn diagrams by:\n✔ Identifying where data belongs\n✔ Answering questions about combinations\n✔ Understanding multiple overlaps with three sets\n\nFinally, students are introduced to Carroll diagrams as another way to organise data into categories.\n\nBy the end of the lesson, learners will understand how to present and interpret data using different methods and use this knowledge to answer comparison and total-based questions.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M30",
+        "maths-year4": "Y4T3M30"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M30",
+      "lessonId": "Y4M30",
+      "order": 31,
+      "title": "Statistics 2",
+      "description": "In this lesson, students build on their understanding of statistics by interpreting and drawing bar charts and time graphs using both discrete and continuous data.\n\nStudents begin by using timelines and bar charts to investigate kings and queens from history.\nThey will:\n✔ Read timelines accurately\n✔ Match years to positions on a scale\n✔ Interpret bar charts\n✔ Compare lengths of reigns\n✔ Calculate totals and differences from charts\n\nThe lesson then introduces grouped bar charts.\nStudents learn that grouped bar charts compare two sets of related data using a key or legend.\n\nStudents will also:\n✔ Compare two pieces of information side by side\n✔ Interpret grouped bar charts\n✔ Identify similarities and differences in data\n✔ Answer reasoning questions using scales and bars\n\nNext, students explore countryside statistics using tally charts and frequency tables.\nThey will:\n✔ Count tally marks in groups of five\n✔ Complete missing frequencies\n✔ Interpret discrete data\n✔ Calculate totals and differences\n✔ Identify the highest and lowest frequencies\n\nStudents then move on to drawing and interpreting bar charts.\nThey learn that bar charts:\n✔ Use horizontal and vertical axes\n✔ Need a suitable scale\n✔ Must include labels and titles\n✔ Require equal-width bars with gaps between them\n\nStudents will also:\n✔ Spot mistakes in incorrect bar charts\n✔ Compare categories visually\n✔ Solve reasoning problems using data\n✔ Interpret scales accurately\n\nThe lesson then introduces continuous data and time graphs.\nStudents learn that continuous data is measured and can have in-between values.\n\nStudents will:\n✔ Understand the difference between discrete and continuous data\n✔ Read and interpret time graphs\n✔ Measure distance against time\n✔ Estimate values between plotted points\n✔ Calculate changes over time\n\nStudents also learn how to:\n✔ Read scales carefully\n✔ Follow points across axes\n✔ Find approximate values from graphs\n✔ Compare distances and times\n\nThe lesson then explores true and false reasoning questions using bar charts.\nStudents will:\n✔ Evaluate statements using data\n✔ Calculate totals and differences\n✔ Explain whether statements are true or false\n\nNext, students investigate temperatures using thermometers, bar charts and time graphs.\nThey will:\n✔ Read temperatures in degrees Celsius\n✔ Record continuous data\n✔ Compare temperatures across days\n✔ Calculate temperature differences\n✔ Decide which graph type is most appropriate\n\nStudents then compare temperatures from different cities around the world.\nThey will:\n✔ Interpret bar charts showing city temperatures\n✔ Compare values between cities\n✔ Identify equal and greater values\n✔ Answer multi-step comparison questions\n\nFinally, students are introduced to double time graphs.\nThey learn that double time graphs compare two sets of continuous data over the same time period.\n\nStudents will also:\n✔ Compare two lines on one graph\n✔ Calculate differences between datasets\n✔ Interpret changes over time visually\n✔ Analyse patterns and trends\n\nBy the end of the lesson, learners will confidently interpret and compare data using timelines, tally charts, grouped bar charts, bar charts, time graphs and double time graphs.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M31",
+        "maths-year4": "Y4T3M31"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M31",
+      "lessonId": "Y4M31",
+      "order": 32,
+      "title": "Statistics 3",
+      "description": "In this lesson, students continue developing their statistics skills by interpreting and drawing bar charts, line graphs and time graphs using real-life data.\n\nStudents begin with gardening statistics.\nThey measure sunflower heights using a metre stick and record the data in a table.\n\nStudents will:\n✔ Read scales accurately\n✔ Measure heights in centimetres\n✔ Complete data tables\n✔ Compare values\n✔ Calculate differences and totals\n\nThe lesson then explores which type of graph is most suitable for presenting data.\nStudents learn that:\n✔ Bar charts are useful for comparing categories\n✔ Time graphs are used when data changes over time\n✔ Discrete data uses separate categories\n✔ Continuous data is measured over time\n\nStudents then interpret bar charts by:\n✔ Identifying the tallest and shortest values\n✔ Calculating differences between categories\n✔ Finding combined totals\n✔ Solving reasoning questions using graph data\n\nNext, students investigate runner bean growth over two weeks.\nThey learn how to present continuous data using a time graph.\n\nStudents will also:\n✔ Understand how time graphs show change over time\n✔ Read horizontal and vertical axes\n✔ Choose suitable scales\n✔ Plot and join points correctly\n✔ Interpret approximate values between points\n\nStudents practise answering questions from time graphs by:\n✔ Reading measurements accurately\n✔ Calculating growth over time\n✔ Estimating values from graph lines\n✔ Identifying when measurements reach certain values\n\nThe lesson then introduces double time graphs.\nStudents learn that double time graphs compare two sets of data measured over the same period of time.\n\nStudents will:\n✔ Compare two lines on one graph\n✔ Read values from different datasets\n✔ Calculate differences between lines\n✔ Analyse changes over time visually\n\nNext, students explore sponsored swim statistics.\nThey identify mistakes in bar charts and learn how incorrect data presentation can affect interpretation.\n\nStudents will also:\n✔ Spot incorrect bar heights\n✔ Compare chart data with frequency tables\n✔ Correct graph errors\n✔ Interpret swimming competition data\n✔ Solve reasoning problems using bar charts\n\nThe lesson then introduces line graphs for journeys and distance over time.\nStudents learn that line graphs can be used to show continuous movement and changing measurements.\n\nStudents will:\n✔ Estimate distances and times from line graphs\n✔ Read approximate values\n✔ Calculate time differences\n✔ Interpret journeys visually\n\nFinally, students investigate pets statistics.\nThey interpret bar charts and line graphs involving pet ownership, animal weights and kitten growth.\n\nStudents will also:\n✔ Compare quantities from bar charts\n✔ Calculate totals and differences\n✔ Read decimal values from graphs\n✔ Interpret weight graphs over time\n✔ Estimate values between plotted points\n\nBy the end of the lesson, learners will confidently interpret, compare and analyse data using bar charts, line graphs, time graphs and double time graphs.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M32",
+        "maths-year4": "Y4T3M32"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M33",
+      "lessonId": "Y4M33",
+      "order": 33,
+      "title": "Shapes 1",
+      "description": "In this lesson, students develop their understanding of angles and polygons. They learn how to identify, compare and order different types of angles and recognise angles within shapes.\n\nStudents begin by revising clockwise and anticlockwise turns.\nThey learn to identify quarter turns, half turns and three-quarter turns in different directions.\n\nStudents will:\n✔ Identify clockwise and anticlockwise turns\n✔ Recognise quarter, half and three-quarter turns\n✔ Describe turns using correct mathematical language\n✔ Find more than one way to reach the same position\n\nThe lesson then introduces angles as a measure of turn.\nStudents learn that an angle is formed between two straight lines and that a larger turn creates a larger angle.\n\nStudents will also:\n✔ Understand angles as measures of turn\n✔ Relate quarter turns to right angles\n✔ Recognise that a full turn equals four right angles\n✔ Identify right angles in different orientations\n\nNext, students explore acute angles.\nThey learn that acute angles are smaller than a right angle.\n\nStudents will:\n✔ Identify acute angles in different positions\n✔ Compare acute angles\n✔ Decide whether statements about acute angles are true or false\n✔ Understand that acute angles can be different sizes\n\nThe lesson then introduces obtuse angles.\nStudents learn that obtuse angles are larger than a right angle but smaller than a half turn.\n\nStudents will also:\n✔ Identify obtuse angles\n✔ Compare obtuse and acute angles\n✔ Use right-angle checkers to classify angles\n✔ Explain reasoning using mathematical vocabulary\n\nStudents then investigate combinations of angles.\nThey learn that two acute angles can sometimes combine to make an obtuse angle, depending on their sizes.\n\nStudents will:\n✔ Classify angles accurately\n✔ Explain whether statements are always, sometimes or never true\n✔ Compare different angle sizes\n✔ Apply logical reasoning to angle problems\n\nThe lesson then explores polygons and interior angles.\nStudents learn that polygons are two-dimensional shapes with straight sides and that the angles inside them are called interior angles.\n\nStudents will also:\n✔ Identify interior angles in polygons\n✔ Count acute and obtuse angles within shapes\n✔ Recognise different angle types in triangles, quadrilaterals and other polygons\n✔ Correct misconceptions about polygon angles\n\nStudents then use a Venn diagram to classify polygons according to their interior angles.\n\nThey will:\n✔ Sort polygons with acute angles\n✔ Sort polygons with obtuse angles\n✔ Identify polygons containing both acute and obtuse angles\n✔ Compare different polygon properties\n\nThe lesson then focuses on comparing and ordering angles.\nStudents learn that the greater the turn, the greater the angle.\n\nStudents will also:\n✔ Compare acute angles by size\n✔ Compare obtuse angles by size\n✔ Understand that larger acute angles are closer to a right angle\n✔ Understand that larger obtuse angles are closer to a straight angle\n\nFinally, students learn that the size of an angle depends on the amount of turn, not the length of the lines forming the angle.\n\nStudents will:\n✔ Compare angles accurately regardless of line length\n✔ Recognise equal angles in different drawings\n✔ Explain why longer lines do not create larger angles\n✔ Apply angle reasoning to solve comparison problems\n\nBy the end of the lesson, learners will confidently identify, classify, compare and order acute, obtuse and right angles, and recognise how angles are used within polygons.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M33",
+        "maths-year4": "Y4T3M33"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M34",
+      "lessonId": "Y4M34",
+      "order": 34,
+      "title": "Shapes 2",
+      "description": "In this lesson, students develop their understanding of triangles and quadrilaterals. They learn how to identify, classify and compare different types of triangles and quadrilaterals using their properties.\n\nStudents begin by revising common polygons and identifying which shapes are triangles.\nThey learn that a triangle is a closed two-dimensional shape with three straight sides.\n\nStudents will:\n✔ Identify common polygons\n✔ Recognise triangles in different orientations\n✔ Explain why some shapes are not triangles\n✔ Use the properties of sides and vertices to classify shapes\n\nThe lesson then introduces different types of triangles.\nStudents learn how to identify equilateral, isosceles, scalene and right-angled triangles.\n\nStudents will also:\n✔ Recognise equilateral triangles with three equal sides and three equal angles\n✔ Identify isosceles triangles with two equal sides and two equal angles\n✔ Identify scalene triangles with no equal sides\n✔ Recognise right-angled triangles using the right-angle symbol\n✔ Sort triangles according to their properties\n\nNext, students explore perimeter problems involving triangles.\nThey use equal-side markings and known lengths to calculate missing sides and total perimeters.\n\nStudents will:\n✔ Calculate the perimeter of equilateral triangles\n✔ Calculate the perimeter of isosceles triangles\n✔ Find missing side lengths using equal-side markings\n✔ Use addition, subtraction and division to solve perimeter problems\n✔ Apply reasoning skills to multi-step triangle questions\n\nThe lesson then uses clues to identify different triangle types.\n\nStudents will also:\n✔ Match properties to triangle names\n✔ Explain their reasoning using mathematical vocabulary\n✔ Identify triangles from side and angle clues\n✔ Compare different triangle classifications\n\nThe lesson then introduces parallel lines and quadrilaterals.\nStudents learn how to identify parallel sides and classify shapes according to their properties.\n\nStudents will:\n✔ Identify pairs of parallel lines in polygons\n✔ Understand that parallel lines never meet\n✔ Recognise quadrilaterals as four-sided polygons\n✔ Identify vertices and sides of quadrilaterals\n✔ Distinguish between regular and irregular quadrilaterals\n\nStudents then compare different quadrilaterals.\nThey explore squares, rectangles, parallelograms, rhombuses, kites and trapeziums.\n\nStudents will also:\n✔ Identify properties of squares and rectangles\n✔ Compare parallelograms and rhombuses\n✔ Recognise the properties of kites\n✔ Identify trapeziums using parallel sides\n✔ Understand which properties are shared between quadrilaterals\n\nThe lesson also develops reasoning skills using sorting and classification activities.\n\nStudents will:\n✔ Sort quadrilaterals using properties such as right angles, equal sides and parallel sides\n✔ Identify and correct classification mistakes\n✔ Explain why shapes remain the same when rotated\n✔ Use clues to identify quadrilaterals\n✔ Apply mathematical vocabulary accurately\n\nBy the end of the lesson, learners will confidently identify and classify triangles and quadrilaterals, calculate triangle perimeters, and use shape properties to solve reasoning and classification problems.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M34",
+        "maths-year4": "Y4T3M34"
+      },
+      "hasVideo": true
+    },
+    {
+      "key": "lesson:Y4M35",
+      "lessonId": "Y4M35",
+      "order": 35,
+      "title": "Shapes 3",
+      "description": "In this lesson, students develop their understanding of regular polygons, lines of symmetry and reflective symmetry. They learn how to identify symmetrical shapes, count lines of symmetry and complete symmetrical figures accurately.\n\nStudents begin by exploring regular and irregular polygons.\nThey learn that regular polygons have sides of equal length and angles of equal size.\n\nStudents will:\n✔ Identify regular and irregular polygons\n✔ Recognise pentagons, hexagons, heptagons and octagons\n✔ Classify polygons by the number of sides\n✔ Explain the difference between regular and irregular shapes\n\nThe lesson then explores perimeter in regular polygons.\nStudents learn that knowing the length of one side is enough to calculate the perimeter of a regular polygon.\n\nStudents will also:\n✔ Calculate perimeters using multiplication\n✔ Use equal side lengths to solve perimeter problems\n✔ Apply division to find side lengths from known perimeters\n✔ Solve reasoning problems involving regular polygons\n\nNext, students investigate how perimeter and side length are connected.\nThey explore which regular polygons can be created from a fixed length of ribbon.\n\nStudents will:\n✔ Divide perimeters into equal side lengths\n✔ Identify when side lengths are whole numbers\n✔ Compare different regular polygons\n✔ Use multiplication and division to justify answers\n\nThe lesson then introduces lines of symmetry.\nStudents learn that a line of symmetry divides a shape into two matching mirror-image halves.\n\nStudents will also:\n✔ Identify vertical, horizontal and diagonal lines of symmetry\n✔ Use mirrors to test symmetry\n✔ Explain why some lines are not lines of symmetry\n✔ Recognise symmetry in different orientations\n\nStudents then explore lines of symmetry in common shapes.\n\nStudents will:\n✔ Identify lines of symmetry in squares, rectangles and triangles\n✔ Recognise shapes with no lines of symmetry\n✔ Understand that circles have infinitely many lines of symmetry\n✔ Compare the symmetry of different polygons\n\nThe lesson also investigates symmetry in regular polygons.\nStudents discover patterns between the number of sides and the number of lines of symmetry.\n\nStudents will:\n✔ Count lines of symmetry in regular polygons\n✔ Identify patterns in regular shapes\n✔ Compare polygons with the most and fewest lines of symmetry\n✔ Explain mathematical relationships using evidence\n\nNext, students explore symmetrical figures.\nThey learn how lines of symmetry create matching mirror-image halves.\n\nStudents will also:\n✔ Identify lines of symmetry in everyday objects and images\n✔ Recognise symmetrical figures in different orientations\n✔ Explain why figures are symmetrical\n✔ Compare different types of symmetry\n\nThe lesson then develops reflection skills using grids.\nStudents learn how to reflect patterns accurately across mirror lines.\n\nStudents will:\n✔ Reflect shaded squares across vertical and horizontal mirror lines\n✔ Measure distances from the mirror line\n✔ Complete symmetrical patterns\n✔ Check reflections for accuracy\n\nStudents then apply reflection techniques to polygons.\n\nThey will:\n✔ Identify and reflect vertices accurately\n✔ Construct reflected polygons using grid coordinates\n✔ Complete dissected symmetrical polygons\n✔ Identify the polygons formed after reflection\n✔ Solve reasoning problems involving vertices and symmetry\n\nFinally, students explore reflections across more than one line of symmetry.\nThey learn how repeated reflections create fully symmetrical patterns.\n\nStudents will:\n✔ Reflect shapes across multiple mirror lines\n✔ Complete symmetrical designs in all directions\n✔ Check that reflected points remain equal distances from mirror lines\n✔ Apply symmetry skills to increasingly complex figures\n\nBy the end of the lesson, learners will confidently identify regular polygons, calculate their perimeters, recognise and count lines of symmetry, and complete symmetrical patterns and reflected shapes accurately.",
+      "subject": "maths",
+      "active": true,
+      "displayIds": {
+        "maths-level1": "L1T3M35",
+        "maths-year4": "Y4T3M35"
+      },
+      "hasVideo": true
+    }
+  ]
+}
