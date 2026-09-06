@@ -1,0 +1,179 @@
+name: Final minimal KV - Year 4 Maths catalogue
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-kv-y4-maths-catalogue.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-minimal-kv-y4-maths-catalogue
+  cancel-in-progress: false
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_R2: fpt-materials-dev
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve and guard deployed development bindings
+        id: guard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          env_name="$(jq -r '[.result.bindings[]|select(.name=="ENVIRONMENT" and .type=="plain_text")|.text][0] // ""' <<<"$settings")"
+          r2="$(jq -r '[.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name][0] // ""' <<<"$settings")"
+          lessons="$(jq -r '[.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' <<<"$settings")"
+          test "$env_name" = development
+          test "$r2" = "$EXPECTED_R2"
+          test -n "$lessons"; test "$lessons" != null
+          echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
+
+      - name: Patch active Year 4 Maths catalogue and verify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LESSONS_NS: ${{ steps.guard.outputs.lessons }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p y4maths-before y4maths-after
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          base="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}"
+
+          cat > /tmp/map.tsv <<'EOF'
+          Y4M2	L1T1M01	Y4T1M01	Number and Place Value 1	1
+          Y4M3	L1T1M02	Y4T1M02	Number and Place Value 2	2
+          Y4M4	L1T1M03	Y4T1M03	Number and Place Value 3	3
+          Y4M5	L1T1M04	Y4T1M04	Number and Place Value 4	4
+          Y4M6	L1T1M05	Y4T1M05	Number and Place Value 5	5
+          Y4M7	L1T1M06	Y4T1M06	Number and Place Value 6	6
+          Y4M9	L1T1M07	Y4T1M07	Addition	7
+          Y4M10	L1T1M08	Y4T1M08	Subtraction	8
+          Y4M12	L1T1M09	Y4T1M09	Addition and Subtraction	9
+          Y4M14	L1T1M10	Y4T1M10	Rule of 3	10
+          Y4M15	L1T1M11	Y4T1M11	Converting Lengths	11
+          Y4M16	L1T1M12	Y4T1M12	Comparing and Calculating Lengths	12
+          Y4M13	L1T2M13	Y4T2M13	Area	13
+          Y4M17	L1T2M14	Y4T2M14	Perimeter	14
+          Y4M18	L1T2M15	Y4T2M15	Fractions 1	15
+          Y4M19	L1T2M16	Y4T2M16	Fractions 2	16
+          Y4M20	L1T2M17	Y4T2M17	Fractions 3	17
+          Y4M21	L1T2M18	Y4T2M18	Fractions 4	18
+          Y4M22	L1T2M19	Y4T2M19	Fractions 5	19
+          Y4M23	L1T2M20	Y4T2M20	Fractions 6	20
+          Y4M32	L1T2M21	Y4T2M21	Multiplication and Division	21
+          Y4M1	L1T3M22	Y4T3M22	Estimate, Compare & Calculate Money	22
+          Y4M37	L1T3M23	Y4T3M23	Money 1	23
+          Y4M38	L1T3M24	Y4T3M24	Money 2	24
+          Y4M39	L1T3M25	Y4T3M25	Money 3	25
+          Y4M25	L1T3M26	Y4T3M26	Time 1	26
+          Y4M26	L1T3M27	Y4T3M27	Time 2	27
+          Y4M27	L1T3M28	Y4T3M28	Time 3	28
+          Y4M28	L1T3M29	Y4T3M29	Time 4	29
+          Y4M29	L1T3M30	Y4T3M30	Statistics 1	30
+          Y4M30	L1T3M31	Y4T3M31	Statistics 2	31
+          Y4M31	L1T3M32	Y4T3M32	Statistics 3	32
+          Y4M33	L1T3M33	Y4T3M33	Shapes 1	33
+          Y4M34	L1T3M34	Y4T3M34	Shapes 2	34
+          Y4M35	L1T3M35	Y4T3M35	Shapes 3	35
+          EOF
+          sed -i 's/^          //' /tmp/map.tsv
+
+          curr_enc="$(python -c 'import urllib.parse; print(urllib.parse.quote("curriculum:MATHS_L1",safe=""))')"
+          curl -fsS "${auth[@]}" "$base/values/$curr_enc" > y4maths-before/curriculum_MATHS_L1.json
+
+          while IFS=$'\t' read -r lid level year title ord; do
+            key="lesson:${lid}"
+            enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+            if [ "$lid" != Y4M22 ]; then
+              curl -fsS "${auth[@]}" "$base/values/$enc" > "y4maths-before/${lid}.json"
+              jq --arg level "$level" --arg year "$year" --arg title "$title" --argjson ord "$ord" '
+                .title=$title |
+                .order=$ord |
+                .displayIds=((.displayIds // {}) + {"maths-level1":$level,"maths-year4":$year})
+              ' "y4maths-before/${lid}.json" > /tmp/patched.json
+            else
+              cat > /tmp/patched.json <<'JSON'
+          {
+            "active": true,
+            "contentStatus": {"description":"available","mainVideo":"available","ownerConfirmedPending":false},
+            "core": {
+              "homeworks": [{
+                "pairId":"Y4M22-hw-01",
+                "homework":{"resourceId":"Y4M22-hw-01-file","displayName":"L1T2M19 Homework Fractions 5.pdf","r2Key":"maths/year4/L1T2M19/homework/sheets/L1T2M19 Homework Fractions 5.pdf"},
+                "answerPack":{"resourceId":"Y4M22-hw-01-answer","displayName":"L1T2M19 Answer Pack Homework Fractions 5.pdf","r2Key":"maths/year4/L1T2M19/homework/answers/L1T2M19 Answer Pack Homework Fractions 5.pdf"}
+              }],
+              "otherResources": [],
+              "preLessonSheets": [{"displayName":"L1T2M19 PreLesson Sheets Fractions 5.pdf","r2Key":"maths/year4/L1T2M19/prelesson/sheets/L1T2M19 PreLesson Sheets Fractions 5.pdf"}],
+              "video": {
+                "screenpal":"cOV0oUn36SV",
+                "contentUrl":"https://screenpal.com/content/video/cOV0oUn36SV",
+                "embedUrl":"https://go.screenpal.com/player/cOV0oUn36SV?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+                "watchUrl":"https://go.screenpal.com/watch/cOV0oUn36SV",
+                "elevenPlus": {
+                  "screenpal":"cOQfqLnwUz8",
+                  "contentUrl":"https://screenpal.com/content/video/cOQfqLnwUz8",
+                  "embedUrl":"https://go.screenpal.com/player/cOQfqLnwUz8?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+                  "watchUrl":"https://go.screenpal.com/watch/cOQfqLnwUz8"
+                }
+              }
+            },
+            "description":"Fractions 5: decimals, tenths, hundredths and partitioning.",
+            "displayIds":{"maths-level1":"L1T2M19","maths-year4":"Y4T2M19"},
+            "lessonId":"Y4M22",
+            "metadataProvenance":{"title":"current_drive_folder","resources":"current_drive_r2_reconciliation","video":"owner_confirmed_screenpal"},
+            "order":19,
+            "phase11OtherResources":{"elevenPlus":[]},
+            "phase11Resources":{"core":{"cumulativeHomeworks":[],"preLessonPairs":[],"supplementaryAnswers":[]},"elevenPlus":{"cumulativeHomeworks":[],"homeworks":[],"preLessonPairs":[],"supplementaryAnswers":[]},"vr":{"supplementaryAnswers":[]}},
+            "schemaVersion":2,
+            "subject":"maths",
+            "title":"Fractions 5",
+            "vr":null
+          }
+          JSON
+            fi
+            curl -fsS -X PUT "${auth[@]}" -H 'Content-Type: application/json' --data-binary @/tmp/patched.json "$base/values/$enc" >/dev/null
+          done < /tmp/map.tsv
+
+          ids_json="$(cut -f1 /tmp/map.tsv | jq -R . | jq -s .)"
+          jq --argjson ids "$ids_json" '.lessonIds=$ids | .curriculumCode="MATHS_L1" | .schemaVersion=(.schemaVersion // 1)' y4maths-before/curriculum_MATHS_L1.json > /tmp/curr.json
+          curl -fsS -X PUT "${auth[@]}" -H 'Content-Type: application/json' --data-binary @/tmp/curr.json "$base/values/$curr_enc" >/dev/null
+
+          curl -fsS "${auth[@]}" "$base/values/$curr_enc" > y4maths-after/curriculum_MATHS_L1.json
+          jq -e '.lessonIds|length==35' y4maths-after/curriculum_MATHS_L1.json >/dev/null
+          jq -e '.lessonIds[0]=="Y4M2" and .lessonIds[18]=="Y4M22" and .lessonIds[34]=="Y4M35" and (index("Y4M36")|not) and (index("Y4M24")|not)' y4maths-after/curriculum_MATHS_L1.json >/dev/null
+
+          while IFS=$'\t' read -r lid level year title ord; do
+            key="lesson:${lid}"
+            enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+            curl -fsS "${auth[@]}" "$base/values/$enc" > "y4maths-after/${lid}.json"
+            jq -e --arg level "$level" --arg year "$year" --arg title "$title" --argjson ord "$ord" '
+              .title==$title and .order==$ord and .displayIds["maths-level1"]==$level and .displayIds["maths-year4"]==$year
+            ' "y4maths-after/${lid}.json" >/dev/null
+          done < /tmp/map.tsv
+
+          jq -e '.core.video.screenpal=="cOV0oUn36SV" and .core.video.elevenPlus.screenpal=="cOQfqLnwUz8" and .core.homeworks[0].homework.r2Key=="maths/year4/L1T2M19/homework/sheets/L1T2M19 Homework Fractions 5.pdf"' y4maths-after/Y4M22.json >/dev/null
+          echo 'Y4_MATHS_CATALOGUE_PASS'
+
+      - name: Upload before and after evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: y4-maths-catalogue-kv-evidence
+          path: |
+            y4maths-before/
+            y4maths-after/
+          retention-days: 30
