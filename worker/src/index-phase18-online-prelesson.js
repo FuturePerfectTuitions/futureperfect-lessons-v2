@@ -6,7 +6,7 @@ import {
 
 const EXCEL_SYNC_PATH = '/api/v1/admin/excel-entitlements/sync';
 const MAX_SYNC_ITEMS = 1000;
-const PRELESSON_MESSAGE = 'Only PreLesson Sheets available to download and print. Other resources will be unlocked once the lesson starts.';
+const PRELESSON_MESSAGE = 'Only PreLesson Sheets available to download and print. Other resources will be unlocked once the lesson is marked Completed.';
 const PRELESSON_DOWNLOAD_KINDS = new Set(['pre', 'p11corepre', 'p11elevenpre', 'vrpre']);
 
 function json(body, init = {}) {
