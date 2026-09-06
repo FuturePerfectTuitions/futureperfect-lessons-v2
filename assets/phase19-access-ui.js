@@ -1,5 +1,5 @@
 (() => {
-  const WINDOW_KEY = 'fpt_v2_window_token';
+  const WINDOW_KEY = 'fpt_v2_window_login_v2';
   const WINDOW_HEADER = 'X-FPT-Window-Token';
   const TRIAL_ENDED_MESSAGE = 'Trial access ended, please contact Future Perfect Tuitions to continue accessing content';
   const TRIAL_MESSAGE = 'Trial access includes full lesson descriptions and lesson videos only.';
@@ -56,68 +56,70 @@
   }
 
   window.fetch = async (input, init) => {
-    const url = requestUrl(input);
-    const studentApi = Boolean(url?.pathname?.startsWith('/api/v1/student/'));
-    const login = url?.pathname === '/api/v1/student/auth/login';
-    const logout = url?.pathname === '/api/v1/student/auth/logout';
+  const url = requestUrl(input);
+  const studentApi = Boolean(url?.pathname?.startsWith('/api/v1/student/'));
+  const login = url?.pathname === '/api/v1/student/auth/login';
+  const logout = url?.pathname === '/api/v1/student/auth/logout';
 
-    let args = [input, init];
-    if (studentApi) {
-      const token = login ? ensureWindowToken() : getWindowToken();
-      if (!token && !login) {
-        return new Response(JSON.stringify({ error: 'WINDOW_SESSION_REQUIRED' }), {
-          status: 401,
-          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
-        });
-      }
-      if (token) args = requestWithWindowToken(input, init, token);
-    }
+  // A successful login marks only this browser window. sessionStorage
+  // survives reloads in the same window/tab but disappears when it is closed.
+  // A fresh window therefore cannot reuse an older HttpOnly session cookie.
+  if (studentApi && !login && !getWindowToken()) {
+    return new Response(JSON.stringify({ error: 'WINDOW_LOGIN_REQUIRED' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
+    });
+  }
 
-    const response = await originalFetch(...args);
+  const response = await originalFetch(input, init);
 
-    if (login) {
-      const body = await response.clone().json().catch(() => null);
-      lastLoginError = body?.error === 'TRIAL_ACCESS_ENDED'
-        ? String(body?.message || TRIAL_ENDED_MESSAGE)
-        : '';
-      if (body?.error === 'TRIAL_ACCESS_ENDED') clearWindowToken();
-    } else if (studentApi && response.status === 401) {
+  if (login) {
+    const body = await response.clone().json().catch(() => null);
+    lastLoginError = body?.error === 'TRIAL_ACCESS_ENDED'
+      ? String(body?.message || TRIAL_ENDED_MESSAGE)
+      : '';
+    if (response.ok && body?.ok) {
+      try { sessionStorage.setItem(WINDOW_KEY, 'authenticated'); } catch (_) {}
+    } else {
       clearWindowToken();
     }
+  } else if (studentApi && response.status === 401) {
+    clearWindowToken();
+  }
 
-    if (logout && response.ok) clearWindowToken();
+  if (logout && response.ok) clearWindowToken();
 
-    if (/\/api\/v1\/student\/views\/[^/]+\/lessons$/.test(url?.pathname || '')) {
-      response.clone().json().then(body => {
-        listModes = new Map();
-        for (const lesson of Array.isArray(body?.lessons) ? body.lessons : []) {
-          const mode = String(lesson?.accessMode || '');
-          if (!['trial', 'subject-preview'].includes(mode)) continue;
-          for (const code of [lesson?.lessonId, lesson?.displayLessonId].map(String).filter(Boolean)) {
-            listModes.set(code, mode);
-          }
+  if (/\/api\/v1\/student\/views\/[^/]+\/lessons$/.test(url?.pathname || '')) {
+    response.clone().json().then(body => {
+      listModes = new Map();
+      for (const lesson of Array.isArray(body?.lessons) ? body.lessons : []) {
+        const mode = String(lesson?.accessMode || '');
+        if (!['trial', 'subject-preview'].includes(mode)) continue;
+        for (const code of [lesson?.lessonId, lesson?.displayLessonId].map(String).filter(Boolean)) {
+          listModes.set(code, mode);
         }
-        queueApply();
-      }).catch(() => {});
-    }
+      }
+      queueApply();
+    }).catch(() => {});
+  }
 
-    if (/\/api\/v1\/student\/lessons\/[^/]+$/.test(url?.pathname || '')) {
-      response.clone().json().then(body => {
-        const mode = String(body?.lesson?.accessMode || '');
-        currentDetail = ['trial', 'subject-preview'].includes(mode)
-          ? {
-              mode,
-              lessonId: String(body.lesson.lessonId || ''),
-              displayLessonId: String(body.lesson.displayLessonId || ''),
-              message: String(body.lesson.accessMessage || (mode === 'trial' ? TRIAL_MESSAGE : SUBJECT_PREVIEW_MESSAGE))
-            }
-          : null;
-        queueApply();
-      }).catch(() => {});
-    }
+  if (/\/api\/v1\/student\/lessons\/[^/]+$/.test(url?.pathname || '')) {
+    response.clone().json().then(body => {
+      const mode = String(body?.lesson?.accessMode || '');
+      currentDetail = ['trial', 'subject-preview'].includes(mode)
+        ? {
+            mode,
+            lessonId: String(body.lesson.lessonId || ''),
+            displayLessonId: String(body.lesson.displayLessonId || ''),
+            message: String(body.lesson.accessMessage || (mode === 'trial' ? TRIAL_MESSAGE : SUBJECT_PREVIEW_MESSAGE))
+          }
+        : null;
+      queueApply();
+    }).catch(() => {});
+  }
 
-    return response;
-  };
+  return response;
+};
 
   function applyLoginError() {
     if (!lastLoginError) return;

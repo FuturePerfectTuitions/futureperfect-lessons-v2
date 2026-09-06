@@ -145,11 +145,9 @@ async function revokeSession(env, sessionToken) {
 }
 
 async function handleLogin(request, env, ctx) {
+  // Valid credentials must not depend on a custom browser-window header.
+  // Window-close reauthentication is enforced by sessionStorage in the UI.
   const windowToken = clean(request.headers.get(WINDOW_HEADER));
-  if (windowToken.length < 24) {
-    return json({ error: 'WINDOW_SESSION_REQUIRED' }, { status: 401 }, request, env);
-  }
-
   const response = await phase18Worker.fetch(request, env, ctx);
   if (!response.ok) return response;
   const body = await response.clone().json().catch(() => null);
@@ -665,13 +663,6 @@ export default {
       return handleLogin(request, env, ctx);
     }
 
-    if (url.pathname.startsWith('/api/v1/student/')) {
-      let validWindow = false;
-      try { validWindow = await requireWindow(request, env); } catch { validWindow = false; }
-      if (!validWindow) {
-        return json({ error: 'WINDOW_SESSION_REQUIRED' }, { status: 401 }, request, env);
-      }
-    }
 
     if (!url.pathname.startsWith('/api/v1/student/')) return phase18Worker.fetch(request, env, ctx);
 
