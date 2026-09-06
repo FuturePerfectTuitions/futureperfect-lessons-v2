@@ -1,0 +1,109 @@
+name: Final minimal - repair Year 3 KV R2 links
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-fix-y3-r2keys.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Repair Year 3 refs only where current R2 target is unique
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import copy,json,os,re,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; auth={'Authorization':f'Bearer {token}'}
+          bucket='fpt-materials-dev'; worker='fpt-portal-v2-worker'
+          settings=requests.get(f'{api}/accounts/{acct}/workers/scripts/{worker}/settings',headers=auth,timeout=60).json(); assert settings.get('success')
+          b=settings['result']['bindings']; env=next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT'); r2bound=next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2'); ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          assert env=='development'; assert r2bound==bucket; assert ns
+          kvbase=f'{api}/accounts/{acct}/storage/kv/namespaces/{ns}/values/'
+          def ku(k): return kvbase+urllib.parse.quote(k,safe='')
+          def kg(k): q=requests.get(ku(k),headers=auth,timeout=60); q.raise_for_status(); return q.json()
+          def kp(k,o): q=requests.put(ku(k),headers={**auth,'Content-Type':'application/json'},data=json.dumps(o,separators=(',',':')).encode(),timeout=60); q.raise_for_status(); assert q.json().get('success')
+          r2=[]; cursor=None
+          while True:
+            params={'per_page':'1000'}
+            if cursor: params['cursor']=cursor
+            p=requests.get(f'{api}/accounts/{acct}/r2/buckets/{bucket}/objects',headers=auth,params=params,timeout=120).json(); assert p.get('success'),p
+            r2.extend(p.get('result') or []); info=p.get('result_info') or {}; cursor=info.get('cursor') if info.get('is_truncated') else None
+            if not cursor: break
+          r2keys={o.get('key') for o in r2 if o.get('key') and not o.get('key').endswith('/')}
+          curricula=[('ENGLISH_Y3','english',re.compile(r'^Y3T[123]E\d{2}$')),('MATHS_Y3','maths',re.compile(r'^Y3T[123]M\d{2}$'))]
+          active=[]
+          for c,s,rx in curricula:
+            for lid in kg('curriculum:'+c).get('lessonIds') or []: active.append((c,s,rx,lid))
+          def refs(x,out):
+            if isinstance(x,dict):
+              for k,v in x.items():
+                if k=='r2Key' and isinstance(v,str) and v.strip(): out.append(v.strip())
+                else: refs(v,out)
+            elif isinstance(x,list):
+              for v in x: refs(v,out)
+          def code(rec,rx):
+            h={str(v) for v in (rec.get('displayIds') or {}).values() if isinstance(v,str) and rx.fullmatch(v)}; assert len(h)==1,(rec.get('lessonId'),h); return next(iter(h))
+          def fix(x,subject,current):
+            changed=0; unresolved=[]
+            if isinstance(x,dict):
+              for k,v in list(x.items()):
+                if k=='r2Key' and isinstance(v,str) and v.strip() and v.strip() not in r2keys:
+                  old=v.strip(); parts=old.split('/')
+                  if len(parts)<5 or parts[0]!=subject or parts[1]!='year3': unresolved.append(old); continue
+                  category='/'.join(parts[3:-1]); parts[2]=current; direct='/'.join(parts); target=None
+                  if direct in r2keys: target=direct
+                  if not target:
+                    prefix=f'{subject}/year3/{current}/{category}/'; cs=sorted(z for z in r2keys if z.startswith(prefix))
+                    if len(cs)==1: target=cs[0]
+                  if not target:
+                    lessonprefix=f'{subject}/year3/{current}/'; bn=old.rsplit('/',1)[-1]; cs=sorted(z for z in r2keys if z.startswith(lessonprefix) and z.rsplit('/',1)[-1]==bn)
+                    if len(cs)==1: target=cs[0]
+                  if not target: unresolved.append(old); continue
+                  x[k]=target
+                  if 'displayName' in x: x['displayName']=target.rsplit('/',1)[-1]
+                  changed+=1
+                elif k!='r2Key':
+                  c,u=fix(v,subject,current); changed+=c; unresolved+=u
+            elif isinstance(x,list):
+              for v in x:
+                c,u=fix(v,subject,current); changed+=c; unresolved+=u
+            return changed,unresolved
+          os.makedirs('y3-before',exist_ok=True); os.makedirs('y3-after',exist_ok=True)
+          initial=0
+          for c,s,rx,lid in active:
+            a=[]; refs(kg('lesson:'+lid),a); initial+=sum(1 for k in a if k not in r2keys)
+          assert initial==178,initial
+          changed=[]
+          for c,s,rx,lid in active:
+            before=kg('lesson:'+lid); current=code(before,rx); patched=copy.deepcopy(before); n,u=fix(patched,s,current); assert not u,f'{lid} {current}: {u}'
+            a=[]; refs(patched,a); assert all(k in r2keys for k in a),(lid,current)
+            if patched!=before:
+              json.dump(before,open(f'y3-before/{lid}.json','w'),indent=2,sort_keys=True); kp('lesson:'+lid,patched); after=kg('lesson:'+lid); assert after==patched,lid; json.dump(after,open(f'y3-after/{lid}.json','w'),indent=2,sort_keys=True); changed.append({'lessonId':lid,'code':current,'repairedRefs':n})
+          final=0
+          for c,s,rx,lid in active:
+            a=[]; refs(kg('lesson:'+lid),a); final+=sum(1 for k in a if k not in r2keys)
+          assert final==0,final
+          report={'environment':env,'bucket':bucket,'initialBroken':initial,'finalBroken':final,'changedLessons':changed}
+          json.dump(report,open('y3-r2key-report.json','w'),indent=2,sort_keys=True)
+          print('YEAR3_R2KEY_PASS initial',initial,'final',final,'changedLessons',len(changed))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y3-r2key-evidence
+          path: |
+            y3-r2key-report.json
+            y3-before/
+            y3-after/
+          retention-days: 30
