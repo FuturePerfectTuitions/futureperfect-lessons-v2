@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Resolve live LESSONS_KV and snapshot lesson records
+      - name: Resolve live LESSONS_KV and snapshot lesson metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -69,7 +69,7 @@ jobs:
               const raw=values[key];
               if(raw==null) continue;
               let v; try{v=JSON.parse(raw)}catch{continue}
-              lessons.push({key,lessonId:v.lessonId||key.slice(7),order:v.order??null,title:v.title||'',description:v.description||'',subject:v.subject||'',active:v.active!==false,displayIds:v.displayIds||{},hasVideo:!!v.core?.video,record:v});
+              lessons.push({key,lessonId:v.lessonId||key.slice(7),order:v.order??null,title:v.title||'',description:v.description||'',subject:v.subject||'',active:v.active!==false,displayIds:v.displayIds||{},hasVideo:!!v.core?.video});
             }
             fs.writeFileSync('ops/live-lesson-descriptions.json',JSON.stringify({count:lessons.length,lessons},null,2));
             console.log(`LIVE_LESSON_COUNT=${lessons.length}`);
