@@ -1,0 +1,65 @@
+name: Final minimal KV - Year 3 English missing current resources
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-kv-y3-english-missing-current-resources.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Add current Mini Test answer and Subordinate Clauses poster
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.parse,requests
+          api='https://api.cloudflare.com/client/v4'; a=os.environ['CLOUDFLARE_ACCOUNT_ID']; t=os.environ['CLOUDFLARE_API_TOKEN']; h={'Authorization':f'Bearer {t}'}
+          s=requests.get(f'{api}/accounts/{a}/workers/scripts/fpt-portal-v2-worker/settings',headers=h,timeout=60).json(); assert s.get('success')
+          b=s['result']['bindings']; assert next(x.get('text') for x in b if x.get('name')=='ENVIRONMENT')=='development'; assert next(x.get('bucket_name') for x in b if x.get('name')=='MATERIALS_R2')=='fpt-materials-dev'; ns=next(x.get('namespace_id') for x in b if x.get('name')=='LESSONS_KV')
+          base=f'{api}/accounts/{a}/storage/kv/namespaces/{ns}/values/'
+          def url(k): return base+urllib.parse.quote(k,safe='')
+          def get(k):
+            r=requests.get(url(k),headers=h,timeout=60); r.raise_for_status(); return r.json()
+          def put(k,v):
+            r=requests.put(url(k),headers={**h,'Content-Type':'application/json'},data=json.dumps(v,separators=(',',':')).encode(),timeout=60); r.raise_for_status(); assert r.json().get('success')
+          answer='english/year3/Y3T1E07/homework/answers/Y3T1E07 Answer Pack Mini Test Prepositions.pdf'
+          poster='english/year3/Y3T1E09/other/Y3T1E09 Subordinate Clauses Poster.pdf'
+          # Verify both current objects are physically present before changing KV.
+          objs=[]; c=None
+          while True:
+            p={'per_page':'1000'}
+            if c:p['cursor']=c
+            q=requests.get(f'{api}/accounts/{a}/r2/buckets/fpt-materials-dev/objects',headers=h,params=p,timeout=120).json(); assert q.get('success'); objs += q.get('result') or []; i=q.get('result_info') or {}; c=i.get('cursor') if i.get('is_truncated') else None
+            if not c:break
+          keys={o.get('key') for o in objs}; assert answer in keys and poster in keys
+          ids=get('curriculum:ENGLISH_Y3')['lessonIds']
+          records={lid:get('lesson:'+lid) for lid in ids}
+          bycode={str((r.get('displayIds') or {}).get('english-year3') or ''):lid for lid,r in records.items()}
+          lid7=bycode['Y3T1E07']; lid9=bycode['Y3T1E09']
+          r7=records[lid7]; p11=r7.setdefault('phase11Resources',{}); core=p11.setdefault('core',{}); supp=core.setdefault('supplementaryAnswers',[])
+          if not any(x.get('r2Key')==answer for x in supp if isinstance(x,dict)): supp.append({'displayName':answer.rsplit('/',1)[-1],'r2Key':answer})
+          r9=records[lid9]; c9=r9.setdefault('core',{}); others=c9.setdefault('otherResources',[])
+          if not any(x.get('r2Key')==poster for x in others if isinstance(x,dict)): others.append({'displayName':poster.rsplit('/',1)[-1],'r2Key':poster})
+          put('lesson:'+lid7,r7); put('lesson:'+lid9,r9)
+          a7=get('lesson:'+lid7); a9=get('lesson:'+lid9)
+          assert any(x.get('r2Key')==answer for x in a7['phase11Resources']['core']['supplementaryAnswers'])
+          assert any(x.get('r2Key')==poster for x in a9['core']['otherResources'])
+          json.dump({'environment':'development','answerLessonId':lid7,'answerR2Key':answer,'posterLessonId':lid9,'posterR2Key':poster,'status':'PASS'},open('y3-english-missing-current-resources-evidence.json','w'),indent=2)
+          print('Y3_ENGLISH_MISSING_CURRENT_RESOURCES_PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y3-english-missing-current-resources-evidence
+          path: y3-english-missing-current-resources-evidence.json
+          retention-days: 30
