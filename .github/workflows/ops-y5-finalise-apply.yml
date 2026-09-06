@@ -1,0 +1,179 @@
+name: Ops Y5 English finalise apply
+
+on:
+  push:
+    branches: [ops/english-content-reconcile]
+    paths:
+      - 'ops/y5-finalise-apply.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      V2_WORKER: fpt-portal-v2-worker
+    steps:
+      - name: Guard development and finalise Y5 English
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${V2_WORKER}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' <<<"$settings" >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' <<<"$settings")" = 'fpt-materials-dev'
+          KV="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$settings")"
+          test -n "$KV"; test "$KV" != null
+          export KV
+
+          node <<'NODE'
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${process.env.KV}`;
+          const headers={Authorization:`Bearer ${token}`};
+          const fail=m=>{throw new Error(m)};
+          const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+          async function getMaybe(key){const r=await fetch(`${api}/values/${encodeURIComponent(key)}`,{headers}); if(r.status===404)return null; if(!r.ok) fail(`GET ${key} ${r.status}`); return JSON.parse(await r.text());}
+          async function get(key){const v=await getMaybe(key); if(v==null) fail(`Missing ${key}`); return v;}
+          async function put(key,obj){const r=await fetch(`${api}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(obj)}); const b=await r.json().catch(()=>null); if(!r.ok||!b?.success) fail(`PUT ${key} ${r.status} ${JSON.stringify(b)}`);}
+          const curriculumKey='curriculum:ENGLISH_Y5';
+          const curriculum=await get(curriculumKey);
+          const expected=['Y5E2','Y5E3','Y5E4','Y5E5','Y5E6','Y5E7','Y5E10','Y5E11','Y5E12','Y5E13','Y5E14','Y5E15','Y5E16','Y5E17','Y5E18','Y5E19','Y5E20','Y5E21','Y5E22','Y5E23','Y5E24','Y5E25','Y5E26','Y5E27','Y5E28','Y5E29','Y5E30','Y5E31','Y5E32','Y5E34','Y5E37','Y5E39'];
+          if(curriculum.curriculumCode!=='ENGLISH_Y5'||!eq(curriculum.lessonIds,expected)) fail(`Y5 curriculum guard failed: ${JSON.stringify(curriculum.lessonIds)}`);
+
+          for(const id of ['Y5E33','Y5E35','Y5E36','Y5E38']) if(await getMaybe(`lesson:${id}`)!==null) fail(`${id} must still be absent before create`);
+
+          const r31=await get('lesson:Y5E31');
+          const r32=await get('lesson:Y5E32');
+          const r34=await get('lesson:Y5E34');
+          const r37=await get('lesson:Y5E37');
+          const r39=await get('lesson:Y5E39');
+          const guards=[
+            [r31,'Y5E31','Creative Writing Writing the Dilemma','Y5T3E28'],
+            [r32,'Y5E32','Creative Writing Closing and Editing','Y5T3E29'],
+            [r34,'Y5E34','Reading Assessment','Y5T3E30'],
+            [r37,'Y5E37','Degrees of Possibility using Adverbs','Y5T3E31'],
+            [r39,'Y5E39','Comprehension','Y5T3E32']
+          ];
+          for(const [r,id,title,display] of guards){
+            if(r.lessonId!==id||r.title!==title||r.displayIds?.['english-year5']!==display) fail(`${id} guard failed`);
+          }
+
+          const e31=r31.phase11Resources?.elevenPlus||{};
+          const e34=r34.phase11Resources?.elevenPlus||{};
+          const e37=r37.phase11Resources?.elevenPlus||{};
+          if((e31.homeworks||[]).length!==1) fail('Y5E31 expected one Upleveling 11+ homework');
+          if((e34.homeworks||[]).length!==1||(e34.preLessonPairs||[]).length!==1) fail('Y5E34 expected Suspense 11+ resources');
+          if((e37.homeworks||[]).length!==3||(e37.preLessonPairs||[]).length!==1) fail('Y5E37 expected three 11+ homeworks and one prelesson');
+
+          function clone(x){return JSON.parse(JSON.stringify(x));}
+          function rewriteIds(x,from,to){
+            const walk=v=>{
+              if(Array.isArray(v)) return v.map(walk);
+              if(v&&typeof v==='object') { const o={}; for(const [k,val] of Object.entries(v)) o[k]=walk(val); return o; }
+              if(typeof v==='string') return v.replace(new RegExp(`^${from}-`),`${to}-`);
+              return v;
+            };
+            return walk(x);
+          }
+          function placeholder(id,title,order,display,elevenPlus){
+            return {
+              active:true,
+              contentStatus:{confirmedOn:'2026-09-06',description:'pending',mainVideo:'in_production',ownerConfirmedPending:true},
+              core:{homeworks:[],otherResources:[],preLessonSheets:[],video:null},
+              description:'',
+              displayIds:{'english-year5':display,'english-year5-11plus':display},
+              lessonId:id,
+              metadataProvenance:{description:'owner_confirmed_pending_content',resources:'owner_confirmed_drive_authoritative',title:'owner_confirmed_drive_authoritative',video:'owner_confirmed_video_in_production'},
+              order,
+              phase11OtherResources:{elevenPlus:[]},
+              phase11Resources:{core:{cumulativeHomeworks:[],preLessonPairs:[],supplementaryAnswers:[]},elevenPlus,vr:{supplementaryAnswers:[]}},
+              schemaVersion:2,
+              subject:'english',
+              title,
+              vr:{homeworkVideo:null,homeworks:[],preLesson:[],preLessonVideo:null}
+            };
+          }
+
+          let up=clone(e31);
+          up=rewriteIds(up,'Y5E31','Y5E33');
+          up.homeworks[0].homework.displayName='Y5T3E33 Homework 11+ Creative Writing Upleveling Sentences.pdf';
+          up.homeworks[0].answerPack.displayName='Y5T3E33 Answer Pack Homework 11+ Creative Writing Upleveling Sentences.pdf';
+
+          let suspense=clone(e34);
+          suspense=rewriteIds(suspense,'Y5E34','Y5E35');
+          suspense.homeworks[0].homework.displayName='Y5T3E34 11+ Homework Creative Writing Suspense and Thrillers.pdf';
+          suspense.homeworks[0].answerPack.displayName='Y5T3E34 Answer Pack 11+ Homework Creative Writing Suspense and Thrillers.pdf';
+          suspense.preLessonPairs[0].sheet.displayName='Y5T3E34 11+ PreLesson Sheet Creative Writing Suspense and Thrillers.pdf';
+
+          const charHW=rewriteIds([clone(e37.homeworks[0])],'Y5E37','Y5E36');
+          const charPre=rewriteIds([clone(e37.preLessonPairs[0])],'Y5E37','Y5E36');
+          charHW[0].homework.displayName='Y5T3E35 11+ Homework Creative Writing Character Descriptions and Recounting.pdf';
+          charHW[0].answerPack.displayName='Y5T3E35 Answer Pack 11+ Homework Creative Writing Character Descriptions and Recounting.pdf';
+          charPre[0].sheet.displayName='Y5T3E35 11+ PreLesson Sheet Creative Writing Character Descriptions and Recounting.pdf';
+          const character={cumulativeHomeworks:[],homeworks:charHW,preLessonPairs:charPre,supplementaryAnswers:[]};
+
+          const expHW=rewriteIds([clone(e37.homeworks[1]),clone(e37.homeworks[2])],'Y5E37','Y5E38');
+          expHW[0].homework.displayName='Y5T3E36 Homework 11+ Creative Writing Character Study.pdf';
+          expHW[0].answerPack.displayName='Y5T3E36 Answer Pack Homework 11+ Creative Writing Character Study.pdf';
+          expHW[1].homework.displayName='Y5T3E36 Homework 11+ Creative Writing Experimenting with Similes and Metaphors.pdf';
+          expHW[1].answerPack.displayName='Y5T3E36 Answer Pack Homework 11+ Creative Writing Experimenting with Similes and Metaphors.pdf';
+          const experiment={cumulativeHomeworks:[],homeworks:expHW,preLessonPairs:[],supplementaryAnswers:[]};
+
+          r31.phase11Resources.elevenPlus={cumulativeHomeworks:[],homeworks:[],preLessonPairs:[],supplementaryAnswers:[]};
+          r34.phase11Resources.elevenPlus={cumulativeHomeworks:[],homeworks:[],preLessonPairs:[],supplementaryAnswers:[]};
+          r37.phase11Resources.elevenPlus={cumulativeHomeworks:[],homeworks:[],preLessonPairs:[],supplementaryAnswers:[]};
+          r39.title='Reading Comprehension';
+
+          for(const id of expected){
+            const r=await get(`lesson:${id}`);
+            const normal=r.displayIds?.['english-year5'];
+            if(normal) r.displayIds['english-year5-11plus']=normal;
+            if(id==='Y5E31') Object.assign(r,r31);
+            if(id==='Y5E32') Object.assign(r,r32);
+            if(id==='Y5E34') Object.assign(r,r34);
+            if(id==='Y5E37') Object.assign(r,r37);
+            if(id==='Y5E39') Object.assign(r,r39);
+            if(normal) r.displayIds['english-year5-11plus']=normal;
+            await put(`lesson:${id}`,r);
+          }
+
+          const n33=placeholder('Y5E33','Upleveling Sentences',33,'Y5T3E33',up);
+          const n35=placeholder('Y5E35','Suspense and Thrillers',34,'Y5T3E34',suspense);
+          const n36=placeholder('Y5E36','Character Descriptions and Recounting',35,'Y5T3E35',character);
+          const n38=placeholder('Y5E38','Experimenting with Similes and Metaphors',36,'Y5T3E36',experiment);
+          for(const r of [n33,n35,n36,n38]) await put(`lesson:${r.lessonId}`,r);
+
+          curriculum.lessonIds=[...expected,'Y5E33','Y5E35','Y5E36','Y5E38'];
+          await put(curriculumKey,curriculum);
+
+          const verify=await get(curriculumKey);
+          if(verify.lessonIds.length!==36) fail(`Expected 36 Y5 lessons, got ${verify.lessonIds.length}`);
+          const final=[
+            ['Y5E33','Upleveling Sentences','Y5T3E33'],
+            ['Y5E35','Suspense and Thrillers','Y5T3E34'],
+            ['Y5E36','Character Descriptions and Recounting','Y5T3E35'],
+            ['Y5E38','Experimenting with Similes and Metaphors','Y5T3E36']
+          ];
+          for(const [id,title,display] of final){
+            const r=await get(`lesson:${id}`);
+            if(r.title!==title||r.order!==Number(display.slice(-2))||r.displayIds?.['english-year5']!==display||r.displayIds?.['english-year5-11plus']!==display) fail(`${id} final verify failed`);
+            if(r.core?.video!==null||r.contentStatus?.mainVideo!=='in_production') fail(`${id} placeholder verify failed`);
+          }
+          for(const id of verify.lessonIds){
+            const r=await get(`lesson:${id}`);
+            const normal=r.displayIds?.['english-year5'];
+            const plus=r.displayIds?.['english-year5-11plus'];
+            if(normal&&plus!==normal) fail(`${id} 11+ display code is not E-only: ${plus} vs ${normal}`);
+          }
+          if((await get('lesson:Y5E39')).title!=='Reading Comprehension') fail('Y5E39 title verify failed');
+          console.log('Y5_ENGLISH_FINALISE_PASS lessons=36 new_placeholders=4 ee_display_ids=0');
+          NODE
