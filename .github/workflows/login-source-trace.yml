@@ -1,0 +1,27 @@
+name: Login source trace
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/login-source-trace.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace login implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- auth/login references ---'
+          grep -RIn --exclude='*.map' '/api/v1/student/auth/login' worker/src || true
+          echo '--- INVALID_LOGIN references ---'
+          grep -RIn --exclude='*.map' 'INVALID_LOGIN' worker/src || true
+          echo '--- password compare references ---'
+          grep -RIn --exclude='*.map' -E 'password|student_sessions|Set-Cookie' worker/src | head -n 120
