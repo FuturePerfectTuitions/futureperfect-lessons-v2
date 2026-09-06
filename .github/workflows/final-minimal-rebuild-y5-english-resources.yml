@@ -1,0 +1,36 @@
+name: Final minimal - rebuild Year 5 English resources
+
+on:
+  push:
+    branches: [ops/final-drive-r2-kv-closure-2026-09-06]
+    paths:
+      - .github/workflows/final-minimal-rebuild-y5-english-resources.yml
+      - scripts/final_minimal_rebuild_english_resources.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild Year 5 English resources
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TARGET_YEAR: '5'
+          EXPECTED_R2_OBJECTS: '285'
+          EXPECTED_LESSONS: '36'
+        run: python3 scripts/final_minimal_rebuild_english_resources.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: y5english-resource-rebuild-evidence
+          path: |
+            y5english-resource-rebuild-report.json
+            y5english-before/
+            y5english-after/
+          retention-days: 30
