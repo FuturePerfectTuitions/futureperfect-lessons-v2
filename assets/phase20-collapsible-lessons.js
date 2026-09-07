@@ -42,6 +42,9 @@
   }
 
   function enhanceSection(section) {
+    // Lesson Video already has its own View/Hide control in phase7-upsell.js.
+    // Adding the generic section control here creates a redundant two-click flow.
+    if (section.id === 'video-section') return;
     if (section.dataset.fptCollapsible === 'true') return;
     const heading = Array.from(section.children).find(child => child.classList?.contains('phase7-section-heading'));
     if (!heading) return;
