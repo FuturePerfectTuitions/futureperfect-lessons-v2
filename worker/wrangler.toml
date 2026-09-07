@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change15.js"
+main = "src/index-phase20-change16.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,10 +9,16 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 15 fixes Maths 11+ navigation presentation:
-# students with 11+ Maths access see L1/L2/L3 rather than the normal Year 4/5/6
-# aliases for the same curricula. Normal Year 2/3 and normal non-11+ navigation
-# remain unchanged. Existing access/resource gates remain authoritative.
+# Portal V2 production entrypoint. Change 16 restricts cross-subject upsell previews
+# to subjects in which the student has no actual entitlement. If a student already
+# has any real English access, English year/level navigation comes only from
+# explicit English entitlements/imports; Maths access cannot add extra English
+# year cards. The same rule applies in reverse for Maths. This preserves the
+# unenrolled-subject upsell catalogue while preventing over-broad navigation.
+#
+# Change 15 fixes Maths 11+ navigation presentation: students with 11+ Maths access
+# see L1/L2/L3 rather than normal Year 4/5/6 aliases for the same curricula.
+# Normal Year 2/3 and normal non-11+ navigation remain unchanged.
 #
 # Change 14 adds the Year 4 11+ Maths import baseline: a Y411 Maths CSV row carries
 # full Level 1 access for that student, while the original row continues to control
@@ -27,9 +33,8 @@ STUDENT_LOGIN_ENABLED = "true"
 #
 # Change 12 derives the unenrolled-subject preview from the student's actual
 # visible Year/Level views returned by the underlying Portal, rather than from one
-# particular entitlement source. This makes the agreed upsell catalogue work for
-# Full Libraries, manual access, retained/direct entitlements and batch-backed
-# views alike. The counterpart view is presentation-only.
+# particular entitlement source. Change 16 constrains those previews to a wholly
+# unenrolled target subject.
 #
 # Change 11 wraps Change 10 and makes an explicit Full Library enrolment
 # participate in the older cross-subject preview discovery path even when there
@@ -68,10 +73,10 @@ STUDENT_LOGIN_ENABLED = "true"
 # frontend. A fresh browser window without that token cannot reuse an existing
 # session cookie and must authenticate again.
 #
-# Students may browse the corresponding unenrolled subject catalogue for their
-# visible Year/Level programme. Full lesson descriptions are visible, while all
-# lesson resources remain server-side locked unless an independent entitlement
-# already grants access.
+# Students who are completely unenrolled in the counterpart subject may browse
+# the corresponding locked catalogue for their visible Year/Level programme.
+# Full lesson descriptions are visible, while all lesson resources remain
+# server-side locked unless an independent entitlement already grants access.
 #
 # Year 6 Maths SATS lessons appear at the end of the normal Year 6 Maths list as
 # Y6MS1-Y6MS19. Their ordinary resource model is unchanged: PreLesson Sheets,
