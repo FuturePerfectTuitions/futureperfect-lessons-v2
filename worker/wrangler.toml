@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change9.js"
+main = "src/index-phase20-change10.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,8 +9,12 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. src/index-phase20-change9.js wraps Change 8
-# and normalises every student-facing 11+ Year/Level label to one convention:
+# Portal V2 production entrypoint. Change 10 wraps Change 9 and verifies that an
+# imported PRELESSON_ONLY release actually has at least one usable PreLesson
+# resource before it is presented as clickable/available. Empty PreLesson releases
+# stay visible for information as "No PreLesson Sheets" but are not openable.
+#
+# Change 9 normalises every student-facing 11+ Year/Level label to one convention:
 # "Year N 11+" / "Level N 11+" (no mixed parenthesised/non-parenthesised forms).
 # It does not alter curriculum access, lesson identity, entitlement or resources.
 #
