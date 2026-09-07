@@ -8,7 +8,10 @@ on:
       - assets/admin-import.js
       - worker/src/admin-lesson-release-import.js
       - worker/src/index-phase20-change7.js
+      - worker/src/index-phase20-change8.js
+      - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
+      - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
   push:
     branches: [lesson-release-admin-import]
@@ -17,7 +20,10 @@ on:
       - assets/admin-import.js
       - worker/src/admin-lesson-release-import.js
       - worker/src/index-phase20-change7.js
+      - worker/src/index-phase20-change8.js
+      - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
+      - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
 
 permissions:
@@ -37,8 +43,14 @@ jobs:
           set -euo pipefail
           node --check worker/src/admin-lesson-release-import.js
           node --check worker/src/index-phase20-change7.js
+          node --check worker/src/index-phase20-change8.js
           node --check assets/admin-import.js
-      - name: Mixed FULL and PreLesson-only verification
+      - name: Importer verification
         run: |
           set -euo pipefail
           node tests/admin-lesson-release-import-verification.mjs
+      - name: Lesson release navigation verification
+        run: |
+          set -euo pipefail
+          node tests/lesson-release-navigation-verification.mjs
+          grep -Fq 'main = "src/index-phase20-change8.js"' worker/wrangler.toml
