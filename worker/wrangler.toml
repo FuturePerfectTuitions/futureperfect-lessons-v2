@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change14.js"
+main = "src/index-phase20-change15.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,11 +9,15 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 14 adds the Year 4 11+ Maths import
-# baseline: a Y411 Maths CSV row carries full Level 1 access for that student,
-# while the original row continues to control the current Level 2 lesson release.
-# The baseline is derived from the authoritative MATHS_L1 curriculum in LESSONS_KV
-# and is idempotent through the existing lesson_entitlements importer.
+# Portal V2 production entrypoint. Change 15 fixes Maths 11+ navigation presentation:
+# students with 11+ Maths access see L1/L2/L3 rather than the normal Year 4/5/6
+# aliases for the same curricula. Normal Year 2/3 and normal non-11+ navigation
+# remain unchanged. Existing access/resource gates remain authoritative.
+#
+# Change 14 adds the Year 4 11+ Maths import baseline: a Y411 Maths CSV row carries
+# full Level 1 access for that student, while the original row continues to control
+# the current Level 2 lesson release. The baseline is derived from the authoritative
+# MATHS_L1 curriculum in LESSONS_KV and is idempotent through existing entitlements.
 #
 # Change 13 fixes cross-subject preview catalogue population when the repository
 # contains the deliberate null Phase 11 manifest. Preview lesson identity/order/
@@ -37,9 +41,8 @@ STUDENT_LOGIN_ENABLED = "true"
 # clickable/available. Empty PreLesson releases stay visible for information as
 # "No PreLesson Sheets" but are not openable.
 #
-# Change 9 normalises every student-facing 11+ Year/Level label to one convention:
-# "Year N 11+" / "Level N 11+" (no mixed parenthesised/non-parenthesised forms).
-# It does not alter curriculum access, lesson identity, entitlement or resources.
+# Change 9 normalises every student-facing 11+ Year/Level label to one convention.
+# Change 15 supersedes the Maths level wording specifically with L1/L2/L3.
 #
 # Change 8 surfaces imported FULL / Online PreLesson-only lesson access in the
 # correct student year/11+ navigation view without depending on the D1 batch roster.
