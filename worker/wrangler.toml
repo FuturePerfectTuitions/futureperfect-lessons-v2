@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change8.js"
+main = "src/index-phase20-change9.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,9 +9,13 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. src/index-phase20-change8.js wraps Change 7
-# and surfaces imported FULL / Online PreLesson-only lesson access in the correct
-# student year/11+ navigation view without depending on the D1 batch roster.
+# Portal V2 production entrypoint. src/index-phase20-change9.js wraps Change 8
+# and normalises every student-facing 11+ Year/Level label to one convention:
+# "Year N 11+" / "Level N 11+" (no mixed parenthesised/non-parenthesised forms).
+# It does not alter curriculum access, lesson identity, entitlement or resources.
+#
+# Change 8 surfaces imported FULL / Online PreLesson-only lesson access in the
+# correct student year/11+ navigation view without depending on the D1 batch roster.
 # Existing Phase 18/19 resource gates remain authoritative: PreLesson-only access
 # exposes only allowed PreLesson downloads; video, homework and Answer Packs stay
 # locked until FULL access exists.
