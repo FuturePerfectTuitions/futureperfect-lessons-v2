@@ -1,0 +1,58 @@
+name: Admin lesson ID readonly audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-lesson-id-readonly-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve LESSONS_KV and find exact lesson records
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          LESSONS="$(jq -r '[.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' /tmp/settings.json)"
+          test -n "$LESSONS"
+          cursor=''
+          : > /tmp/keys.txt
+          while :; do
+            if [ -n "$cursor" ]; then
+              URL="$API/storage/kv/namespaces/$LESSONS/keys?limit=1000&cursor=$cursor"
+            else
+              URL="$API/storage/kv/namespaces/$LESSONS/keys?limit=1000"
+            fi
+            curl --fail --silent --show-error "$URL" -H "$AUTH" -o /tmp/page.json
+            jq -r '.result[].name' /tmp/page.json >> /tmp/keys.txt
+            cursor="$(jq -r '.result_info.cursor // ""' /tmp/page.json)"
+            [ -z "$cursor" ] && break
+          done
+          found=0
+          while IFS= read -r key; do
+            case "$key" in lesson:*) ;; *) continue ;; esac
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            if curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS/values/$encoded" -H "$AUTH" -o /tmp/value.json 2>/dev/null; then
+              title="$(jq -r '.title // .lessonTitle // .name // ""' /tmp/value.json 2>/dev/null || true)"
+              if [ "$title" = 'Descriptive Writing Settings and Atmosphere' ] || [ "$title" = 'Transitioning to Year 3' ]; then
+                echo "MATCH key=$key lessonId=$(jq -r '.lessonId // ""' /tmp/value.json) title=$title subject=$(jq -r '.subject // ""' /tmp/value.json) active=$(jq -r '.active // ""' /tmp/value.json)"
+                found=$((found+1))
+              fi
+            fi
+          done < /tmp/keys.txt
+          echo "FOUND_COUNT=$found"
+          test "$found" -eq 2
