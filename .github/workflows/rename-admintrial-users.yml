@@ -22,49 +22,65 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Read-only locate AdminTrial identities
+      - name: Read-only collision check
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE' | tee /tmp/admintrial-diagnostic.txt
+          node <<'NODE' | tee /tmp/admintrial-collision-check.txt
           const token = String(process.env.CLOUDFLARE_API_TOKEN || '');
           const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '');
           const workerName = String(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
           const api = 'https://api.cloudflare.com/client/v4';
-          async function cf(pathname) {
-            const r = await fetch(`${api}${pathname}`, { headers: { Authorization: `Bearer ${token}` } });
+          async function cf(pathname, init = {}) {
+            const r = await fetch(`${api}${pathname}`, {
+              ...init,
+              headers: { Authorization: `Bearer ${token}`, ...(init.body ? {'Content-Type':'application/json'} : {}), ...(init.headers || {}) }
+            });
             const b = await r.json().catch(() => null);
-            if (!r.ok || !b?.success) throw new Error(`CF_READ_FAILED ${pathname} HTTP=${r.status} errors=${JSON.stringify(b?.errors || [])}`);
+            if (!r.ok || !b?.success) throw new Error(`CF_READ_FAILED HTTP=${r.status}`);
             return b;
           }
           const settings = await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
           const bindings = settings?.result?.bindings || [];
-          console.log('BINDINGS=' + bindings.map(x => `${x.name}:${x.type}`).join(','));
           const students = String(bindings.find(x => x?.name === 'STUDENTS_KV' && x?.type === 'kv_namespace')?.namespace_id || '');
-          const db = bindings.find(x => x?.name === 'DB');
-          console.log(`STUDENTS_BOUND=${Boolean(students)} DB_TYPE=${String(db?.type || '')} DB_ID_FIELD=${Boolean(db?.id)} DB_DATABASE_ID_FIELD=${Boolean(db?.database_id)}`);
-          if (!students) throw new Error('STUDENTS_KV_NOT_FOUND');
-          let cursor = '';
-          const names = [];
+          const db = String(bindings.find(x => x?.name === 'DB' && x?.type === 'd1')?.id || '');
+          if (!students || !db) throw new Error('REQUIRED_BINDING_MISSING');
+          let cursor = ''; const names = [];
           do {
-            const q = new URLSearchParams({ limit: '1000' });
-            if (cursor) q.set('cursor', cursor);
-            const page = await cf(`/accounts/${accountId}/storage/kv/namespaces/${students}/keys?${q.toString()}`);
-            for (const x of page.result || []) names.push(String(x?.name || ''));
-            cursor = String(page?.result_info?.cursor || '');
+            const q = new URLSearchParams({limit:'1000'}); if (cursor) q.set('cursor', cursor);
+            const p = await cf(`/accounts/${accountId}/storage/kv/namespaces/${students}/keys?${q}`);
+            for (const x of p.result || []) names.push(String(x?.name || ''));
+            cursor = String(p?.result_info?.cursor || '');
           } while (cursor);
-          const matches = names.filter(x => x.toLowerCase().includes('admintrial'));
-          console.log(`KV_TOTAL_KEYS=${names.length}`);
-          console.log(`ADMINTRIAL_MATCH_COUNT=${matches.length}`);
-          console.log('ADMINTRIAL_KEYS=' + matches.join(','));
-          const prefixes = [...new Set(names.filter(x => x.includes(':')).map(x => x.split(':')[0]))].sort();
-          console.log('KV_PREFIXES=' + prefixes.join(','));
+          const oldKeys = names.filter(x => /^user:admintrial(?:2|3|4|411|5|511|6)$/i.test(x)).sort();
+          const demoKeys = names.filter(x => /^user:demo(?:2|3|4|411|5|511|6)$/i.test(x)).sort();
+          console.log('OLD_KEYS=' + oldKeys.join(','));
+          console.log('DEMO_KEYS=' + demoKeys.join(','));
+          console.log(`OLD_COUNT=${oldKeys.length} DEMO_COLLISION_COUNT=${demoKeys.length}`);
+          const allow = String(bindings.find(x => x?.name === 'PROD_LOGIN_ALLOWLIST' && x?.type === 'plain_text')?.text || '');
+          const tokens = allow.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+          console.log('ALLOW_OLD=' + tokens.filter(x => /^admintrial(?:2|3|4|411|5|511|6)$/.test(x)).join(','));
+          console.log('ALLOW_DEMO=' + tokens.filter(x => /^demo(?:2|3|4|411|5|511|6)$/.test(x)).join(','));
+          const q = async (sql, params=[]) => cf(`/accounts/${accountId}/d1/database/${db}/query`, {method:'POST', body:JSON.stringify({sql,params})});
+          const tables = await q("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+          const userTables=[];
+          for (const r of tables?.result?.[0]?.results || []) {
+            const t=String(r.name||''); if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(t)) continue;
+            const info=await q(`PRAGMA table_info(\"${t}\")`);
+            const cols=(info?.result?.[0]?.results||[]).map(x=>String(x.name||''));
+            if (cols.includes('portal_user_id_norm')) userTables.push(t);
+          }
+          console.log('USER_TABLES=' + userTables.join(','));
+          for (const t of userTables) {
+            const row=(await q(`SELECT COUNT(*) AS n FROM \"${t}\" WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%'`))?.result?.[0]?.results?.[0]||{};
+            console.log(`D1_${t}=${Number(row.n||0)}`);
+          }
           NODE
-      - name: Upload safe diagnostic
+      - name: Upload safe collision check
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: admintrial-diagnostic
-          path: /tmp/admintrial-diagnostic.txt
+          name: admintrial-collision-check
+          path: /tmp/admintrial-collision-check.txt
           if-no-files-found: error
           retention-days: 1
