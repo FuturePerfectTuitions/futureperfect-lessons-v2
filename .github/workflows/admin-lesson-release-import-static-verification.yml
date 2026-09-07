@@ -1,0 +1,44 @@
+name: Admin lesson release import verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - admin-import.html
+      - assets/admin-import.js
+      - worker/src/admin-lesson-release-import.js
+      - worker/src/index-phase20-change7.js
+      - tests/admin-lesson-release-import-verification.mjs
+      - .github/workflows/admin-lesson-release-import-static-verification.yml
+  push:
+    branches: [lesson-release-admin-import]
+    paths:
+      - admin-import.html
+      - assets/admin-import.js
+      - worker/src/admin-lesson-release-import.js
+      - worker/src/index-phase20-change7.js
+      - tests/admin-lesson-release-import-verification.mjs
+      - .github/workflows/admin-lesson-release-import-static-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          set -euo pipefail
+          node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/index-phase20-change7.js
+          node --check assets/admin-import.js
+      - name: Mixed FULL and PreLesson-only verification
+        run: |
+          set -euo pipefail
+          node tests/admin-lesson-release-import-verification.mjs
