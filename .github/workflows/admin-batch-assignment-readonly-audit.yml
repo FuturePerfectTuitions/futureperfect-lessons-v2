@@ -1,0 +1,44 @@
+name: Admin batch assignment readonly audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-batch-assignment-readonly-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Read production batch definitions and assignments
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          DB_ID="$(jq -r '[.result.bindings[] | select(.name=="DB" and ((.type // "") | test("d1";"i"))) | (.id // .database_id // .database_uuid)][0] // ""' /tmp/settings.json)"
+          test -n "$DB_ID"
+
+          query() {
+            local sql="$1"
+            jq -n --arg sql "$sql" '{sql:$sql}' > /tmp/query.json
+            curl --fail --silent --show-error "$API/d1/database/$DB_ID/query" \
+              -H "$AUTH" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/query.json
+          }
+
+          echo '=== RELEVANT BATCH DEFINITIONS ==='
+          query "SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions WHERE batch_key IN ('Y511OE1','Y3FM') OR (LOWER(subject)='english' AND school_year='Y5') OR (LOWER(subject)='maths' AND school_year='Y3') ORDER BY batch_key" | jq -c '.result[].results[]'
+
+          echo '=== STUDENT ASSIGNMENTS ==='
+          query "SELECT assignment_id, portal_user_id_norm, batch_key, effective_from, effective_to FROM student_batch_assignments WHERE portal_user_id_norm IN ('ann3009','meh0510') ORDER BY portal_user_id_norm, effective_from, batch_key" | jq -c '.result[].results[]'
