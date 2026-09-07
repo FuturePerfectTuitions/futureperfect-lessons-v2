@@ -1,0 +1,44 @@
+name: One-shot production admin isolation smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tmp-admin-isolation-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify importer requires authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          code="$(curl -sS -o /tmp/admin.json -w '%{http_code}' -X POST \
+            -H 'Origin: https://futureperfecttuitions.github.io' \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            "$BASE/api/v1/admin/lesson-releases/preview")"
+          test "$code" = '401'
+          grep -q 'UNAUTHORISED' /tmp/admin.json
+
+      - name: Verify old Excel route remains browser blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          code="$(curl -sS -o /tmp/excel.json -w '%{http_code}' -X POST \
+            -H 'Origin: https://futureperfecttuitions.github.io' \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            "$BASE/api/v1/admin/excel-entitlements/sync")"
+          test "$code" = '403'
+          grep -q 'BROWSER_REQUEST_NOT_ALLOWED' /tmp/excel.json
+
+      - name: Smoke verification complete
+        run: echo 'Production admin isolation checks passed.'
