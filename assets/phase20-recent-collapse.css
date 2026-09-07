@@ -1,0 +1,35 @@
+.phase20-recent-shares {
+  margin: 20px 0 22px;
+  padding: 18px;
+  border: 1px solid #d9e2f2;
+  border-radius: 16px;
+  background: #f8faff;
+}
+.phase20-recent-shares[hidden] { display: none !important; }
+.phase20-recent-shares-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.phase20-recent-shares-heading h2 { margin:3px 0 0; color:#012169; font-size:20px; }
+.phase20-recent-shares-list { display:grid; gap:8px; max-height:230px; overflow-y:auto; padding-right:5px; }
+.phase20-recent-share-row { padding:11px 12px; border:1px solid #e1e7f0; border-radius:12px; background:#fff; }
+.phase20-recent-share-link { display:block; color:#012169; font-size:14px; font-weight:850; line-height:1.35; text-decoration:none; }
+.phase20-recent-share-link:hover, .phase20-recent-share-link:focus-visible { text-decoration:underline; outline:none; }
+.phase20-recent-share-meta { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; margin-top:6px; color:#667085; font-size:12px; }
+.phase20-recent-share-access { display:inline-flex; align-items:center; padding:3px 8px; border-radius:999px; font-weight:800; }
+.phase20-recent-share-access.prelesson { background:#fff5d9; color:#765000; }
+.phase20-recent-share-access.full { background:#eaf7ee; color:#176532; }
+
+.phase20-description-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:16px; padding-top:14px; border-top:1px solid #e4e8ef; color:#012169; font-size:14px; font-weight:900; }
+.phase20-collapse-toggle { flex:0 0 auto; min-width:64px; min-height:34px; padding:6px 13px; border:1px solid #012169; border-radius:999px; background:#fff; color:#012169; font:inherit; font-size:12px; font-weight:900; cursor:pointer; }
+.phase20-collapse-toggle:hover, .phase20-collapse-toggle:focus-visible { background:#012169; color:#fff; outline:none; }
+.phase7-section-heading { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:14px; align-items:center; margin-bottom:0; }
+.phase7-section-heading .phase7-kicker, .phase7-section-heading h2 { grid-column:1; }
+.phase7-section-heading .phase20-collapse-toggle { grid-column:2; grid-row:1 / span 2; }
+.phase20-collapse-body { margin-top:16px; }
+.phase20-collapse-body[hidden], #lesson-description[hidden] { display:none !important; }
+.phase7-resource-section[data-fpt-collapsible="true"] { padding-top:18px; padding-bottom:18px; }
+
+@media (max-width:760px) {
+  .phase20-recent-shares { margin-top:16px; padding:14px; }
+  .phase20-recent-shares-list { max-height:210px; }
+  .phase20-recent-share-meta { align-items:flex-start; flex-direction:column; gap:5px; }
+  .phase20-collapse-toggle { min-width:58px; }
+}

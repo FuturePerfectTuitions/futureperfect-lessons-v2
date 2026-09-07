@@ -1,0 +1,40 @@
+name: Recent shares browser verification
+
+on:
+  push:
+    branches: [student-recent-shares-collapsible-lessons]
+    paths:
+      - 'assets/phase7.js'
+      - 'assets/phase20-collapsible-lessons.js'
+      - 'phase11.html'
+      - 'tests/recent-shares-browser-verification.mjs'
+      - '.github/workflows/recent-shares-browser-verification.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'assets/phase7.js'
+      - 'assets/phase20-collapsible-lessons.js'
+      - 'phase11.html'
+      - 'tests/recent-shares-browser-verification.mjs'
+      - '.github/workflows/recent-shares-browser-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright driver only
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm install --no-save --no-package-lock playwright@latest >/dev/null
+      - name: Run isolated Chrome acceptance
+        run: |
+          google-chrome --version
+          node tests/recent-shares-browser-verification.mjs
