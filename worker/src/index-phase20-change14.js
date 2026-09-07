@@ -9,6 +9,55 @@ const MAX_IMPORT_ROWS = 1000;
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
+function bytesToBase64Url(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToText(value) {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
+  return atob(base64);
+}
+
+async function hmac(secret, text) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name:'HMAC', hash:'SHA-256' },
+    false,
+    ['sign']
+  );
+  return bytesToBase64Url(
+    new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)))
+  );
+}
+
+async function timingSafeTextEqual(left, right) {
+  const a = new TextEncoder().encode(String(left));
+  const b = new TextEncoder().encode(String(right));
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let index = 0; index < a.length; index += 1) difference |= a[index] ^ b[index];
+  return difference === 0;
+}
+
+async function adminSessionAuthorised(request, env) {
+  const match = clean(request.headers.get('Authorization')).match(/^Bearer\s+(.+)$/i);
+  if (!match || !env?.ADMIN_IMPORT_SESSION_SECRET) return false;
+  const parts = match[1].split('.');
+  if (parts.length !== 2) return false;
+  const expected = await hmac(String(env.ADMIN_IMPORT_SESSION_SECRET), parts[0]);
+  if (!(await timingSafeTextEqual(parts[1], expected))) return false;
+  try {
+    const payload = JSON.parse(base64UrlToText(parts[0]));
+    return payload.scope === 'lesson-release-import' &&
+      Number(payload.exp) >= Math.floor(Date.now() / 1000);
+  } catch {
+    return false;
+  }
+}
+
 function rowValue(row, name) {
   if (!row || typeof row !== 'object') return '';
   const wanted = norm(name);
@@ -121,6 +170,12 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method !== 'POST' || !ADMIN_RELEASE_PATHS.has(url.pathname)) {
+      return change13Worker.fetch(request, env, ctx);
+    }
+
+    // Preserve the existing admin-import security boundary: unauthorised calls
+    // are delegated unchanged and never reach the baseline-expansion logic.
+    if (!(await adminSessionAuthorised(request, env))) {
       return change13Worker.fetch(request, env, ctx);
     }
 
