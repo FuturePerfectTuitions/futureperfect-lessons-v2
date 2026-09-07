@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  stage-demo-identities:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -22,33 +22,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Read identity-safe KV metadata only
+      - name: Create exact Demo copies with only portalUserId renamed
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE' 2>&1 | tee /tmp/admintrial-kv-read-diagnostic.txt
-          const token=String(process.env.CLOUDFLARE_API_TOKEN||'');
-          const accountId=String(process.env.CLOUDFLARE_ACCOUNT_ID||'');
-          const workerName=String(process.env.WORKER_NAME||'fpt-portal-v2-worker');
+          node <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
           const api='https://api.cloudflare.com/client/v4';
-          async function envelope(path){const r=await fetch(`${api}${path}`,{headers:{Authorization:`Bearer ${token}`}});const b=await r.json().catch(()=>null);if(!r.ok||!b?.success)throw new Error(`Envelope read failed HTTP=${r.status}`);return b;}
-          const settings=await envelope(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
-          const ns=String((settings?.result?.bindings||[]).find(x=>x?.name==='STUDENTS_KV'&&x?.type==='kv_namespace')?.namespace_id||'');
-          if(!ns) throw new Error('STUDENTS_KV unavailable');
-          for(const suffix of ['2','3','4','411','5','511','6']){
-            const key=`user:admintrial${suffix}`;
-            const r=await fetch(`${api}/accounts/${accountId}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
-            const raw=await r.text();
-            if(!r.ok) throw new Error(`Direct KV read failed ${key} HTTP=${r.status}`);
-            let obj; try{obj=JSON.parse(raw)}catch{throw new Error(`Record is not JSON: ${key}`)}
-            console.log(`${key} portalUserId=${String(obj?.portalUserId||'')} fields=${Object.keys(obj).sort().join(',')}`);
+          const ids=['2','3','4','411','5','511','6'];
+          const settings=await fetch(`${api}/accounts/${account}/workers/scripts/${process.env.WORKER_NAME}/settings`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
+          if(!settings?.success) throw new Error('Could not read production settings');
+          const ns=(settings.result.bindings||[]).find(x=>x.name==='STUDENTS_KV'&&x.type==='kv_namespace')?.namespace_id;
+          if(!ns) throw new Error('STUDENTS_KV missing');
+          async function read(key){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});if(r.status===404)return null;if(!r.ok)throw new Error(`Read failed ${key}`);return r.text();}
+          async function write(key,value){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:value});const j=await r.json();if(!r.ok||!j?.success)throw new Error(`Write failed ${key}`);}
+          for(const n of ids){
+            const oldKey=`user:admintrial${n}`, newKey=`user:demo${n}`;
+            const oldRaw=await read(oldKey); if(!oldRaw) throw new Error(`Missing ${oldKey}`);
+            if(await read(newKey)) throw new Error(`Target already exists ${newKey}`);
+            const before=JSON.parse(oldRaw); if(before.portalUserId!==`AdminTrial${n}`) throw new Error(`ID mismatch ${oldKey}`);
+            const after=structuredClone(before); after.portalUserId=`Demo${n}`;
+            await write(newKey,JSON.stringify(after));
+            const check=JSON.parse(await read(newKey));
+            const a=structuredClone(before),b=structuredClone(check); delete a.portalUserId; delete b.portalUserId;
+            if(check.portalUserId!==`Demo${n}`||JSON.stringify(a)!==JSON.stringify(b)) throw new Error(`Parity failed ${newKey}`);
           }
+          console.log('DEMO_KV_STAGE_PASS accounts=7');
           NODE
-      - name: Upload safe KV read diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: admintrial-kv-read-diagnostic
-          path: /tmp/admintrial-kv-read-diagnostic.txt
-          if-no-files-found: error
-          retention-days: 1
