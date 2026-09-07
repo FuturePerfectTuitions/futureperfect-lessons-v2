@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change8.js"
+main = "src/index-phase20-change7.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,22 +9,8 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. src/index-phase20-change8.js wraps Change 7
-# without altering the existing student access rules or the legacy Excel sync
-# endpoint. Change 8 adds the browser-based lesson release CSV import routes.
-#
-# The admin importer accepts the existing FuturePerfectLive CSV dump and derives:
-# Completed -> FULL; otherwise Online Batch IDs containing O -> PRELESSON_ONLY;
-# incomplete face-to-face rows -> no release. Preview is read-only and Confirm
-# revalidates Portal student, lesson, exact batch, subject, effective assignment,
-# lesson date and blocked status before applying access.
-#
-# Admin import authentication requires Cloudflare Worker secrets
-# ADMIN_IMPORT_PASSWORD and ADMIN_IMPORT_SESSION_SECRET. Neither secret is stored
-# in this repository. Successful login issues a short-lived signed browser session
-# token; the long-lived admin password/secret is never embedded in frontend code.
-#
-# src/index-phase20-change7.js preserves the Phase 18/19 access rules and adds the
+# Portal V2 production source configuration.
+# src/index-phase20-change7.js wraps the Phase 18/19 access rules and adds the
 # Year 6 Maths SATS student/workbook alias resolver: Y6MS1-Y6MS19 map to immutable
 # canonical lesson keys Y6M51-Y6M69. The canonical keys remain entitlement/content
 # identities.
