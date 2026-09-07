@@ -1,0 +1,86 @@
+name: Temporary Y5T1E01 pair and bucket audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tmp-y5t1e01-pair-audit.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  audit:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Inspect exact 11+ homework pair structure and account R2 presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const accountId=String(process.env.CLOUDFLARE_ACCOUNT_ID||'').trim();
+          const token=String(process.env.CLOUDFLARE_API_TOKEN||'').trim();
+          const workerName=String(process.env.WORKER_NAME||'').trim();
+          const names=[
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Adventure.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Chiller.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Fable.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Fantasy.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Mystery.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Myths and Legends.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Sci-Fi.pdf',
+            'Y5T1E01 11+ Homework Uplevelling Descriptive Writing Traditional Tale.pdf'
+          ];
+          const target=new Set(names);
+          async function cf(path,init={}) { const r=await fetch(`https://api.cloudflare.com/client/v4${path}`,{...init,headers:{Authorization:`Bearer ${token}`,...(init.body?{'Content-Type':'application/json'}:{}),...(init.headers||{})}}); const b=await r.json().catch(()=>null); if(!r.ok||!b?.success) throw new Error(`CF ${path} HTTP ${r.status}`); return b; }
+          const settings=await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
+          const bind=(n,t)=>settings.result.bindings.find(x=>x?.name===n&&(!t||x?.type===t));
+          if(String(bind('ENVIRONMENT','plain_text')?.text||'')!=='production') throw new Error('Not production worker');
+          const lessonsId=String(bind('LESSONS_KV','kv_namespace')?.namespace_id||'');
+          const liveBucket=String(bind('MATERIALS_R2','r2_bucket')?.bucket_name||'');
+          const body=await cf(`/accounts/${accountId}/storage/kv/namespaces/${lessonsId}/bulk/get`,{method:'POST',body:JSON.stringify({keys:['lesson:Y5E2'],type:'text',withMetadata:false})});
+          const raw=body?.result?.values?.['lesson:Y5E2'];
+          if(!raw) throw new Error('lesson:Y5E2 missing');
+          const rec=JSON.parse(String(raw));
+          if(rec?.displayIds?.['english-year5']!=='Y5T1E01') throw new Error('Display ID mismatch');
+          const pairs=rec?.phase11Resources?.elevenPlus?.homeworks;
+          if(!Array.isArray(pairs)) throw new Error('11+ homeworks array missing');
+          const matched=[];
+          for(let i=0;i<pairs.length;i++) { const p=pairs[i]; const key=String(p?.homework?.r2Key||''); const base=key.split('/').pop(); if(target.has(base)) matched.push({index:i,homework:{r2Key:key,title:p?.homework?.title||null},answerPack:p?.answerPack?{r2Key:p.answerPack.r2Key||null,title:p.answerPack.title||null}:null,keys:Object.keys(p||{})}); }
+          const allRefs=[]; function walk(v){if(Array.isArray(v))return v.forEach(walk); if(!v||typeof v!=='object')return; if(typeof v.r2Key==='string')allRefs.push(v.r2Key); Object.values(v).forEach(walk);} walk(rec);
+          const targetRefs=allRefs.filter(k=>target.has(String(k).split('/').pop()));
+          const buckets=await cf(`/accounts/${accountId}/r2/buckets`);
+          const namesOut=(buckets.result?.buckets||buckets.result||[]).map(x=>x?.name).filter(Boolean);
+          fs.writeFileSync('/tmp/target-keys.txt', matched.map(x=>x.homework.r2Key).join('\n')+'\n');
+          fs.writeFileSync('/tmp/buckets.txt', namesOut.join('\n')+'\n');
+          console.log(JSON.stringify({status:(matched.length===8&&targetRefs.length===8)?'PASS':'STOP',liveBucket,totalPairs:pairs.length,matchedCount:matched.length,targetReferenceCount:targetRefs.length,matched,buckets:namesOut},null,2));
+          if(matched.length!==8||targetRefs.length!==8) process.exit(2);
+          NODE
+
+          echo 'R2 exact-object presence:'
+          while IFS= read -r bucket; do
+            [ -n "$bucket" ] || continue
+            while IFS= read -r key; do
+              [ -n "$key" ] || continue
+              tmp="/tmp/probe-$RANDOM.pdf"
+              if npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${bucket}/${key}" --file="$tmp" --remote >/dev/null 2>&1; then
+                printf 'PRESENT\t%s\t%s\n' "$bucket" "$key"
+                rm -f "$tmp"
+              else
+                printf 'ABSENT\t%s\t%s\n' "$bucket" "$key"
+              fi
+            done </tmp/target-keys.txt
+          done </tmp/buckets.txt
