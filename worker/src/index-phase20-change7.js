@@ -1,4 +1,5 @@
 import phase19Worker from './index-phase19-access.js';
+import { handleAdminLessonReleaseImport } from './admin-lesson-release-import.js';
 
 const EXCEL_SYNC_PATH = '/api/v1/admin/excel-entitlements/sync';
 const MAX_SYNC_ITEMS = 1000;
@@ -337,6 +338,9 @@ export { canonicalLessonId, validatePrelessonItem, processAuthoritativePrelesson
 
 export default {
   async fetch(request, env, ctx) {
+    const adminResponse = await handleAdminLessonReleaseImport(request, env);
+    if (adminResponse) return adminResponse;
+
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === EXCEL_SYNC_PATH) {
       const rewritten = await rewriteExcelSyncRequest(request);
