@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change12.js"
+main = "src/index-phase20-change13.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,13 +9,17 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 12 derives the unenrolled-subject
-# preview from the student's actual visible Year/Level views returned by the
-# underlying Portal, rather than from one particular entitlement source. This
-# makes the agreed upsell catalogue work for Full Libraries, manual access,
-# retained/direct entitlements and batch-backed views alike. The counterpart
-# view is presentation-only: all resources remain locked unless independent
-# access already exists.
+# Portal V2 production entrypoint. Change 13 fixes cross-subject preview catalogue
+# population when the repository contains the deliberate null Phase 11 manifest.
+# Preview lesson identity/order/title/description is read from the live LESSONS_KV
+# curriculum + lesson records, matching the existing Phase 11 fail-safe model.
+# This is presentation-only: it does not write KV/D1 and does not grant resources.
+#
+# Change 12 derives the unenrolled-subject preview from the student's actual
+# visible Year/Level views returned by the underlying Portal, rather than from one
+# particular entitlement source. This makes the agreed upsell catalogue work for
+# Full Libraries, manual access, retained/direct entitlements and batch-backed
+# views alike. The counterpart view is presentation-only.
 #
 # Change 11 wraps Change 10 and makes an explicit Full Library enrolment
 # participate in the older cross-subject preview discovery path even when there
