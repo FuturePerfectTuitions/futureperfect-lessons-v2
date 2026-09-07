@@ -122,6 +122,8 @@ assert.equal(extractLessonId('Y6MS1 SATS Preparation'), 'Y6M51');
 assert.equal(normaliseCsvRow(onlineReady, 0).releaseType, 'PRELESSON_ONLY');
 assert.equal(normaliseCsvRow(faceToFaceCompleted, 1).releaseType, 'FULL');
 assert.equal(normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Ready' }, 2).releaseType, 'SKIP');
+assert.equal(normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Not Completed' }, 3).releaseType, 'SKIP');
+assert.equal(normaliseCsvRow({ ...onlineReady, LessonStatus:'Not Completed' }, 4).releaseType, 'PRELESSON_ONLY');
 
 const origin = 'https://futureperfecttuitions.github.io';
 async function call(path, body, token='') {
