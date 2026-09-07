@@ -1,4 +1,4 @@
-# Matched historical-key payload retry
+# Exact-scope English entitlement update retry
 name: Secure production entitlement update
 
 on:
@@ -67,7 +67,7 @@ jobs:
             const required = Array.isArray(payload.requiredExistingFullLibraries) ? payload.requiredExistingFullLibraries.map(String) : [];
             const additions = Array.isArray(payload.addFullLibraries) ? payload.addFullLibraries.map(String) : [];
             const allowed = new Set(['ENGLISH_Y3_FULL', 'ENGLISH_Y4_FULL']);
-            if (!id || !expectedFirstName || additions.length !== 2 || !additions.every(code => allowed.has(code))) {
+            if (!id || !expectedFirstName || required.length !== 0 || additions.length !== 2 || !additions.every(code => allowed.has(code))) {
               throw new Error('Encrypted update failed its exact-scope guard.');
             }
 
@@ -114,8 +114,6 @@ jobs:
             if (String(before.portalUserId || '').trim().toLowerCase() !== id) throw new Error('Target identity validation failed.');
             if (String(before.firstName || '').trim() !== expectedFirstName) throw new Error('Target first-name validation failed.');
             const beforeLibraries = Array.isArray(before.fullLibraries) ? before.fullLibraries.map(String) : [];
-            if (!required.every(code => beforeLibraries.includes(code))) throw new Error('Required existing library validation failed.');
-
             const merged = [...beforeLibraries];
             for (const code of additions) if (!merged.includes(code)) merged.push(code);
             const after = { ...before, fullLibraries: merged };
