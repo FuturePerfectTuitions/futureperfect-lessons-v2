@@ -1,0 +1,32 @@
+name: Temporary live UI diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tmp-live-ui-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect production portal HTML and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          curl -fsS -D /tmp/root.headers "$BASE/" -o /tmp/root.html
+          echo '--- root headers ---'
+          grep -Ei '^(cache-control|age|cf-cache-status|etag|last-modified|content-location|location):' /tmp/root.headers || true
+          echo '--- root markers ---'
+          for marker in 'Just shared with you' 'phase20-collapsible-lessons.js' 'phase20-recent-collapse.css' 'footer.js' 'phase19-access-ui.js'; do
+            if grep -Fq "$marker" /tmp/root.html; then echo "PRESENT: $marker"; else echo "MISSING: $marker"; fi
+          done
+          curl -fsS "$BASE/assets/phase7.js" -o /tmp/phase7.js
+          echo '--- phase7 markers ---'
+          for marker in 'renderRecentShares' 'recentSharesPanel'; do
+            if grep -Fq "$marker" /tmp/phase7.js; then echo "PRESENT: $marker"; else echo "MISSING: $marker"; fi
+          done
+          curl -fsS "$BASE/assets/phase20-collapsible-lessons.js" -o /tmp/collapse.js
+          grep -Fq 'phase20-collapse-toggle' /tmp/collapse.js
+          echo 'COLLAPSE_ASSET_PRESENT'
