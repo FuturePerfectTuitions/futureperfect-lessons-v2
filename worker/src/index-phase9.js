@@ -148,13 +148,14 @@ function normaliseVr(record) {
 
   return {
     preLesson: preLesson.map((item, index) => {
+      const sheet = item?.sheet || ((item?.r2Key || item?.r2 || item?.displayName || item?.name) ? item : null);
       const answerKey = item?.answerKey || null;
       return {
         index: index + 1,
-        sheet: item
+        sheet: sheet
           ? {
-              displayName: String(item.displayName || item.name || `VR PreLesson Sheet ${index + 1}`),
-              r2Key: String(item.r2Key || item.r2 || '').trim()
+              displayName: String(sheet.displayName || sheet.name || `VR PreLesson Sheet ${index + 1}`),
+              r2Key: String(sheet.r2Key || sheet.r2 || '').trim()
             }
           : null,
         answerKey: answerKey
@@ -746,6 +747,8 @@ async function gateAnswerView(request, env, token) {
   }
   return phase8Worker.fetch(request, bridgeEnv(env));
 }
+
+export { normaliseVr };
 
 export default {
   async fetch(request, env, ctx) {

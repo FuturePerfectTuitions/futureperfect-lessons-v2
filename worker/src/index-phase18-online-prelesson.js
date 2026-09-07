@@ -455,6 +455,17 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === EXCEL_SYNC_PATH && request.method === 'POST') return handleExcelSync(request, env);
+
+    const disableLegacyPrelessonOverlay = env?.PHASE20_DISABLE_LEGACY_PRELESSON_OVERLAY === true;
+    if (disableLegacyPrelessonOverlay) {
+      const isStudentHome = request.method === 'GET' && url.pathname === '/api/v1/student/home';
+      const isStudentList = request.method === 'GET' && /^\/api\/v1\/student\/views\/[^/]+\/lessons$/.test(url.pathname);
+      const isStudentDetail = request.method === 'GET' && /^\/api\/v1\/student\/lessons\/[^/]+$/.test(url.pathname);
+      const isStudentResource = /^\/api\/v1\/student\/resources\//.test(url.pathname);
+      if (isStudentHome || isStudentList || isStudentDetail || isStudentResource) {
+        return phase17Worker.fetch(request, env, ctx);
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/v1/student/home') return handleHome(request, env, ctx);
     if (request.method === 'GET' && /^\/api\/v1\/student\/views\/[^/]+\/lessons$/.test(url.pathname)) return handleLessonList(request, env, ctx);
 
