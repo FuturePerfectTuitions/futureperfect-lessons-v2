@@ -17,6 +17,7 @@ jobs:
           echo '=== DNS ==='
           getent ahosts lessons.futureperfect.education || true
           echo
+          # Re-run after the live frontend repository deployment.
           for url in \
             'https://lessons.futureperfect.education/' \
             'https://lessons.futureperfect.education/phase11-change8.html' \
