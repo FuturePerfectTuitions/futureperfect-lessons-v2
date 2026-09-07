@@ -229,9 +229,17 @@ body.phase11-change8 #english-choice .phase5-subject-arrow {
 }
 
 body.phase11-change8 .phase6-back-button {
-  border-color: rgba(1, 33, 105, 0.15);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.13);
+  border-color: var(--c8-navy);
+  background: var(--c8-navy);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.18);
+}
+
+body.phase11-change8 .phase6-back-button:hover,
+body.phase11-change8 .phase6-back-button:focus-visible {
+  border-color: var(--c8-navy-deep);
+  background: var(--c8-navy-deep);
+  color: #fff;
 }
 
 body.phase11-change8 .phase6-view-grid {
