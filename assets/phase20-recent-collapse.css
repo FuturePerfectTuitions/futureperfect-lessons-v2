@@ -64,3 +64,11 @@
   .phase7-section-heading { grid-template-columns:minmax(0,1fr) 84px; column-gap:10px; }
   .phase20-collapse-toggle { width:80px; min-width:80px; }
 }
+
+
+/* Empty PreLesson release presentation */
+.phase6-lesson-row-unavailable { cursor: default; }
+.phase6-lesson-state.no-prelesson { color:#8a1218; font-weight:900; }
+.phase20-recent-share-link.disabled { color:#667085; cursor:default; text-decoration:none; }
+.phase20-recent-share-link.disabled:hover,
+.phase20-recent-share-link.disabled:focus-visible { text-decoration:none; }

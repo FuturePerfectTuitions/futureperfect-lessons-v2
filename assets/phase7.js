@@ -116,14 +116,18 @@
       const row = document.createElement('article');
       row.className = 'phase20-recent-share-row';
 
-      const link = document.createElement('a');
-      link.className = 'phase20-recent-share-link';
+      const noPreLesson = item?.accessMode === 'prelesson' && item?.preLessonAvailable === false;
+    const shareClickable = item?.clickable !== false && !noPreLesson;
+    const link = document.createElement(shareClickable ? 'a' : 'span');
+    link.className = `phase20-recent-share-link${shareClickable ? '' : ' disabled'}`;
+    link.textContent = sharedLessonLabel(item);
+    if (shareClickable) {
       link.href = `#shared-${encodeURIComponent(String(item.viewId || ''))}-${encodeURIComponent(String(item.lessonId || ''))}`;
-      link.textContent = sharedLessonLabel(item);
       link.addEventListener('click', event => {
         event.preventDefault();
         openSharedLesson(item);
       });
+    }
 
       const meta = document.createElement('div');
       meta.className = 'phase20-recent-share-meta';
@@ -481,9 +485,11 @@
     }
 
     for (const lesson of filtered) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'phase6-lesson-row';
+    const noPreLesson = lesson?.accessMode === 'prelesson' && lesson?.preLessonAvailable === false;
+    const row = document.createElement(noPreLesson ? 'div' : 'button');
+    if (!noPreLesson) row.type = 'button';
+    row.className = `phase6-lesson-row${noPreLesson ? ' phase6-lesson-row-unavailable' : ''}`;
+    if (noPreLesson) row.setAttribute('aria-disabled', 'true');
 
       const main = document.createElement('span');
       main.className = 'phase6-lesson-main';
@@ -500,17 +506,20 @@
       main.appendChild(title);
 
       const stateLabel = document.createElement('span');
-      stateLabel.className = `phase6-lesson-state${lesson.locked ? ' locked' : ''}`;
-      stateLabel.textContent = lesson.locked ? '🔒 Locked' : 'Available';
+    stateLabel.className = `phase6-lesson-state${lesson.locked ? ' locked' : ''}${noPreLesson ? ' no-prelesson' : ''}`;
+    stateLabel.textContent = noPreLesson
+      ? 'No PreLesson Sheets'
+      : (lesson.accessMode === 'prelesson' ? 'PreLesson Sheets only' : (lesson.locked ? '🔒 Locked' : 'Available'));
 
-      row.appendChild(main);
-      row.appendChild(stateLabel);
-      row.addEventListener('click', () => openLesson(lesson));
+    row.appendChild(main);
+    row.appendChild(stateLabel);
+    if (!noPreLesson) row.addEventListener('click', () => openLesson(lesson));
       els.lessonList.appendChild(row);
     }
   }
 
   async function openSharedLesson(item) {
+    if (item?.clickable === false || (item?.accessMode === 'prelesson' && item?.preLessonAvailable === false)) return;
     recordActivity();
     if (!state.home) {
       const home = await loadHome();
