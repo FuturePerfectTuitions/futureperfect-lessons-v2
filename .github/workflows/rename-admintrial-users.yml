@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
+          node <<'NODE' | tee /tmp/admintrial-diagnostic.txt
           const token = String(process.env.CLOUDFLARE_API_TOKEN || '');
           const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '');
           const workerName = String(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
@@ -60,3 +60,11 @@ jobs:
           const prefixes = [...new Set(names.filter(x => x.includes(':')).map(x => x.split(':')[0]))].sort();
           console.log('KV_PREFIXES=' + prefixes.join(','));
           NODE
+      - name: Upload safe diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admintrial-diagnostic
+          path: /tmp/admintrial-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 1
