@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change13.js"
+main = "src/index-phase20-change14.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,11 +9,17 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 13 fixes cross-subject preview catalogue
-# population when the repository contains the deliberate null Phase 11 manifest.
-# Preview lesson identity/order/title/description is read from the live LESSONS_KV
-# curriculum + lesson records, matching the existing Phase 11 fail-safe model.
-# This is presentation-only: it does not write KV/D1 and does not grant resources.
+# Portal V2 production entrypoint. Change 14 adds the Year 4 11+ Maths import
+# baseline: a Y411 Maths CSV row carries full Level 1 access for that student,
+# while the original row continues to control the current Level 2 lesson release.
+# The baseline is derived from the authoritative MATHS_L1 curriculum in LESSONS_KV
+# and is idempotent through the existing lesson_entitlements importer.
+#
+# Change 13 fixes cross-subject preview catalogue population when the repository
+# contains the deliberate null Phase 11 manifest. Preview lesson identity/order/
+# title/description is read from the live LESSONS_KV curriculum + lesson records,
+# matching the existing Phase 11 fail-safe model. This is presentation-only: it
+# does not write KV/D1 and does not grant resources.
 #
 # Change 12 derives the unenrolled-subject preview from the student's actual
 # visible Year/Level views returned by the underlying Portal, rather than from one
