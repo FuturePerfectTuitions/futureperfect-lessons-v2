@@ -30,6 +30,7 @@ function json(body, init = {}, request = null, env = null) {
   const headers = new Headers(init.headers || {});
   headers.set('content-type', 'application/json; charset=utf-8');
   headers.set('cache-control', 'no-store');
+  headers.set('x-content-type-options', 'nosniff');
   if (request && env) {
     for (const [key, value] of Object.entries(adminCorsHeaders(request, env))) headers.set(key, value);
   }
@@ -62,16 +63,17 @@ function base64UrlToText(value) {
   return new TextDecoder().decode(base64UrlToBytes(value));
 }
 
-async function sha256Bytes(value) {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value))));
+async function adminHmacKey(sessionSecret) {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(String(sessionSecret)),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
 }
 
-async function adminHmacKey(secret) {
-  const derived = await sha256Bytes(`fpt:${ADMIN_SCOPE}:session:v1:${secret}`);
-  return crypto.subtle.importKey('raw', derived, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
-}
-
-async function signAdminSession(secret, origin) {
+async function signAdminSession(sessionSecret, origin) {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     v: 1,
@@ -82,21 +84,22 @@ async function signAdminSession(secret, origin) {
     nonce: bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)))
   };
   const encoded = textToBase64Url(JSON.stringify(payload));
-  const key = await adminHmacKey(secret);
+  const key = await adminHmacKey(sessionSecret);
   const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encoded)));
   return { token: `${encoded}.${bytesToBase64Url(signature)}`, expiresAt: new Date(payload.exp * 1000).toISOString() };
 }
 
-async function verifyAdminSession(token, secret, origin) {
+async function verifyAdminSession(token, sessionSecret, origin) {
   const parts = String(token || '').split('.');
   if (parts.length !== 2) return false;
   let payload;
   try { payload = JSON.parse(base64UrlToText(parts[0])); } catch { return false; }
   const now = Math.floor(Date.now() / 1000);
   if (payload?.v !== 1 || payload?.scope !== ADMIN_SCOPE || payload?.origin !== origin) return false;
-  if (!Number.isFinite(payload?.exp) || payload.exp <= now || payload.exp > now + ADMIN_SESSION_TTL_SECONDS + 60) return false;
+  if (!Number.isFinite(payload?.iat) || !Number.isFinite(payload?.exp)) return false;
+  if (payload.iat > now + 60 || payload.exp <= now || payload.exp - payload.iat !== ADMIN_SESSION_TTL_SECONDS) return false;
   try {
-    const key = await adminHmacKey(secret);
+    const key = await adminHmacKey(sessionSecret);
     return await crypto.subtle.verify('HMAC', key, base64UrlToBytes(parts[1]), new TextEncoder().encode(parts[0]));
   } catch {
     return false;
@@ -108,12 +111,24 @@ function bearerToken(request) {
   return match ? match[1] : '';
 }
 
+function adminConfiguration(env) {
+  const password = String(env?.ADMIN_IMPORT_PASSWORD || '');
+  const sessionSecret = String(env?.ADMIN_IMPORT_SESSION_SECRET || '');
+  return {
+    password,
+    sessionSecret,
+    configured: password.length >= 16 && sessionSecret.length >= 32
+  };
+}
+
 async function requireAdmin(request, env) {
-  const secret = String(env?.ADMIN_IMPORT_PASSWORD || '');
-  if (secret.length < 16) return { error: 'ADMIN_IMPORT_NOT_CONFIGURED', status: 503 };
+  const config = adminConfiguration(env);
+  if (!config.configured) return { error: 'ADMIN_IMPORT_NOT_CONFIGURED', status: 503 };
   const token = bearerToken(request);
   const origin = String(request.headers.get('Origin') || '');
-  if (!token || !(await verifyAdminSession(token, secret, origin))) return { error: 'ADMIN_SESSION_INVALID', status: 401 };
+  if (!token || !(await verifyAdminSession(token, config.sessionSecret, origin))) {
+    return { error: 'ADMIN_SESSION_INVALID', status: 401 };
+  }
   return { ok: true };
 }
 
@@ -122,22 +137,28 @@ async function requestJson(request) {
 }
 
 async function handleLogin(request, env) {
-  const secret = String(env?.ADMIN_IMPORT_PASSWORD || '');
-  if (secret.length < 16) return json({ ok: false, error: 'ADMIN_IMPORT_NOT_CONFIGURED' }, { status: 503 }, request, env);
+  const config = adminConfiguration(env);
+  if (!config.configured) {
+    return json({ ok: false, error: 'ADMIN_IMPORT_NOT_CONFIGURED' }, { status: 503 }, request, env);
+  }
   const body = await requestJson(request);
   const supplied = String(body?.password || '');
-  if (!supplied || !(await timingSafeTextEqual(supplied, secret))) {
+  if (!supplied || !(await timingSafeTextEqual(supplied, config.password))) {
     return json({ ok: false, error: 'ADMIN_LOGIN_FAILED' }, { status: 401 }, request, env);
   }
   const origin = String(request.headers.get('Origin') || '');
-  return json({ ok: true, ...(await signAdminSession(secret, origin)) }, { status: 200 }, request, env);
+  return json({ ok: true, ...(await signAdminSession(config.sessionSecret, origin)) }, { status: 200 }, request, env);
 }
 
 async function handlePreview(request, env) {
   const body = await requestJson(request);
-  if (typeof body?.csv !== 'string') return json({ ok: false, error: 'CSV_REQUIRED' }, { status: 400 }, request, env);
+  if (typeof body?.csv !== 'string') {
+    return json({ ok: false, error: 'CSV_REQUIRED' }, { status: 400 }, request, env);
+  }
   const preview = await buildPreview(env, body.csv, body.filename);
-  if (preview.error) return json({ ok: false, error: preview.error, message: preview.message }, { status: 400 }, request, env);
+  if (preview.error) {
+    return json({ ok: false, error: preview.error, message: preview.message }, { status: 400 }, request, env);
+  }
   return json({
     ok: true,
     filename: preview.filename,
@@ -159,7 +180,7 @@ async function handleConfirm(request, env) {
   return json(result, { status: 200 }, request, env);
 }
 
-export { ADMIN_PREFIX, signAdminSession, verifyAdminSession };
+export { ADMIN_PREFIX, adminConfiguration, signAdminSession, verifyAdminSession };
 
 export default {
   async fetch(request, env, ctx) {
@@ -170,8 +191,12 @@ export default {
       if (!allowedAdminOrigin(request, env)) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: adminCorsHeaders(request, env) });
     }
-    if (!allowedAdminOrigin(request, env)) return json({ ok: false, error: 'FORBIDDEN_ORIGIN' }, { status: 403 });
-    if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, { status: 405 }, request, env);
+    if (!allowedAdminOrigin(request, env)) {
+      return json({ ok: false, error: 'FORBIDDEN_ORIGIN' }, { status: 403 });
+    }
+    if (request.method !== 'POST') {
+      return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, { status: 405 }, request, env);
+    }
     if (url.pathname === `${ADMIN_PREFIX}/login`) return handleLogin(request, env);
 
     const auth = await requireAdmin(request, env);
