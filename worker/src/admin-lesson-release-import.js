@@ -82,7 +82,7 @@ function normaliseCsvRow(row, index) {
   const lessonId = extractLessonId(rowValue(row, 'Lesson'));
   const lessonDate = parseLessonDate(rowValue(row, 'LessonDated'));
   const lessonStatus = rowValue(row, 'LessonStatus');
-  const completed = /\bcompleted\b/i.test(lessonStatus);
+  const completed = norm(lessonStatus) === 'completed';
   const releaseType = completed ? 'FULL' : (onlineBatch(batchKey) ? 'PRELESSON_ONLY' : 'SKIP');
   return {
     index,
