@@ -4,6 +4,7 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?}"
 : "${WORKER_NAME:=fpt-portal-v2-worker}"
 : "${WRANGLER_VERSION:=4.125.0}"
+: "${WORKER_ENTRYPOINT:=src/index-phase21-admin-import.js}"
 API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
 AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings.json
@@ -19,7 +20,7 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings.json >/tmp/fpt-secrets-before.json
 {
   printf 'name = "%s"\n' "$WORKER_NAME"
-  printf 'main = "src/index-phase20-change7.js"\n'
+  printf 'main = "%s"\n' "$WORKER_ENTRYPOINT"
   printf 'compatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\n'
   printf 'ENVIRONMENT = "%s"\n' "$(plain ENVIRONMENT)"
   printf 'ALLOWED_ORIGINS = "%s"\n' "$(plain ALLOWED_ORIGINS)"
