@@ -5,10 +5,16 @@
   let lastLessonCode = '';
   let queued = false;
 
-  function setExpanded(button, body, expanded) {
+  function setExpanded(button, body, expanded, labels = {}) {
+    const closedLabel = labels.closed || 'View';
+    const openLabel = labels.open || 'Hide';
     button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    button.textContent = expanded ? 'Hide' : 'View';
+    button.textContent = expanded ? openLabel : closedLabel;
     body.hidden = !expanded;
+  }
+
+  function setDescriptionExpanded(button, description, expanded) {
+    setExpanded(button, description, expanded, { closed:'Detail', open:'Hide detail' });
   }
 
   function enhanceDescription() {
@@ -18,19 +24,21 @@
     if (!host) return;
     description.dataset.fptCollapsible = 'true';
     description.id = 'lesson-description';
+
     const bar = document.createElement('div');
     bar.className = 'phase20-description-bar';
-    const label = document.createElement('span');
-    label.textContent = 'Description';
+
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'phase20-collapse-toggle';
+    button.className = 'phase20-collapse-toggle phase20-detail-toggle';
     button.setAttribute('aria-controls', 'lesson-description');
-    button.addEventListener('click', () => setExpanded(button, description, button.getAttribute('aria-expanded') !== 'true'));
-    bar.appendChild(label);
+    button.addEventListener('click', () => {
+      setDescriptionExpanded(button, description, button.getAttribute('aria-expanded') !== 'true');
+    });
+
     bar.appendChild(button);
     host.insertBefore(bar, description);
-    setExpanded(button, description, false);
+    setDescriptionExpanded(button, description, false);
   }
 
   function enhanceSection(section) {
@@ -57,9 +65,11 @@
     const code = String(document.getElementById('lesson-code')?.textContent || '').trim();
     if (!code || code === lastLessonCode) return;
     lastLessonCode = code;
+
     const desc = document.getElementById('lesson-description');
-    const descButton = lessonContent.querySelector('.phase20-description-bar .phase20-collapse-toggle');
-    if (desc && descButton) setExpanded(descButton, desc, false);
+    const descButton = lessonContent.querySelector('.phase20-description-bar .phase20-detail-toggle');
+    if (desc && descButton) setDescriptionExpanded(descButton, desc, false);
+
     for (const section of lessonContent.querySelectorAll('.phase7-resource-section[data-fpt-collapsible="true"]')) {
       const button = Array.from(section.querySelectorAll('.phase20-collapse-toggle')).find(candidate => candidate.closest('.phase7-section-heading'));
       const body = Array.from(section.children).find(child => child.classList?.contains('phase20-collapse-body'));
@@ -79,6 +89,12 @@
     requestAnimationFrame(() => { queued = false; apply(); });
   }
 
-  new MutationObserver(queue).observe(lessonContent, { subtree:true, childList:true, characterData:true, attributes:true, attributeFilter:['hidden'] });
+  new MutationObserver(queue).observe(lessonContent, {
+    subtree:true,
+    childList:true,
+    characterData:true,
+    attributes:true,
+    attributeFilter:['hidden']
+  });
   queue();
 })();
