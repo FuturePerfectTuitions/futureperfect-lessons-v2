@@ -1,0 +1,55 @@
+name: Change 13 KV-backed preview deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/change13-kv-preview-deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Change 13 KV-backed cross-subject preview catalogue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Change 13 syntax
+        run: node --check worker/src/index-phase20-change13.js
+      - name: Verify KV-backed catalogue builder
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { kvCatalogueRowsForView } from './worker/src/index-phase20-change13.js';
+
+          const data = new Map([
+            ['curriculum:MATHS_L2', { curriculumCode: 'MATHS_L2', lessonIds: ['Y5M2', 'Y5M1'] }],
+            ['lesson:Y5M1', { lessonId: 'Y5M1', title: 'Y5M1 Fractions', description: 'Fractions description', order: 1, active: true, displayIds: { 'maths-year5': 'Y5T1M01' } }],
+            ['lesson:Y5M2', { lessonId: 'Y5M2', title: 'Y5M2 Decimals', description: 'Decimals description', order: 2, active: true, displayIds: { 'maths-year5': 'Y5T1M02' } }]
+          ]);
+          const env = {
+            LESSONS_KV: {
+              async get(key) { return data.get(key) ?? null; }
+            }
+          };
+          const rows = await kvCatalogueRowsForView(env, 'maths-year5');
+          assert.equal(rows.length, 2);
+          assert.deepEqual(rows.map(row => row.displayLessonId), ['Y5T1M01', 'Y5T1M02']);
+          assert.deepEqual(rows.map(row => row.title), ['Fractions', 'Decimals']);
+          assert.deepEqual(rows.map(row => row.description), ['Fractions description', 'Decimals description']);
+          console.log('CHANGE13_KV_CATALOGUE_PASS');
+          NODE
+      - name: Deploy Worker preserving production bindings
+        run: bash ops/deploy_current_worker_preserve.sh
+      - name: Complete
+        run: echo CHANGE13_DEPLOY_PASS
