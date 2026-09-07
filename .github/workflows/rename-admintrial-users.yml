@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     env:
@@ -21,26 +21,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Read-only D1 identity reference counts
+      - name: Read-only D1 source and target counts
         shell: bash
         run: |
           set -euo pipefail
-          SQL="SELECT 'lesson_entitlements' AS table_name, COUNT(*) AS old_rows FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'student_sessions', COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'curriculum_start_points', COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'answer_view_tokens', COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'mock_password_rate_limits', COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'student_session_profiles', COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'student_batch_assignments', COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'online_prelesson_entitlements', COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'trial_login_consumptions', COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%'
-          UNION ALL SELECT 'student_session_windows', COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%';"
-          npx --yes wrangler@4.125.0 d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/admintrial-d1-counts.json
-      - name: Upload D1 counts
+          SQL="SELECT
+          (SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%') AS lesson_old,
+          (SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'demo%') AS lesson_demo,
+          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%') AS sessions_old,
+          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'demo%') AS sessions_demo,
+          (SELECT COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%') AS starts_old,
+          (SELECT COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'demo%') AS starts_demo,
+          (SELECT COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%') AS answers_old,
+          (SELECT COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'demo%') AS answers_demo,
+          (SELECT COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%') AS mock_limits_old,
+          (SELECT COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'demo%') AS mock_limits_demo,
+          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%') AS profiles_old,
+          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'demo%') AS profiles_demo,
+          (SELECT COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%') AS batches_old,
+          (SELECT COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'demo%') AS batches_demo,
+          (SELECT COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%') AS prelesson_old,
+          (SELECT COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'demo%') AS prelesson_demo,
+          (SELECT COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%') AS trial_old,
+          (SELECT COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'demo%') AS trial_demo,
+          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%') AS windows_old,
+          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'demo%') AS windows_demo;"
+          npx --yes wrangler@4.125.0 d1 execute fpt_portal_v2_db --remote --command "$SQL" --json 2>&1 | tee /tmp/admintrial-d1-preflight.json
+      - name: Upload preflight
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: admintrial-d1-counts
-          path: /tmp/admintrial-d1-counts.json
+          name: admintrial-d1-preflight
+          path: /tmp/admintrial-d1-preflight.json
           if-no-files-found: error
           retention-days: 1
