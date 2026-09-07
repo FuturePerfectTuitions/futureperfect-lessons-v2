@@ -17,6 +17,7 @@ assert.equal(shares[1].accessLabel, 'Full lesson');
 const html = readFileSync(new URL('../phase11.html', import.meta.url), 'utf8');
 const liveEntryHtml = readFileSync(new URL('../phase11-change8.html', import.meta.url), 'utf8');
 const js = readFileSync(new URL('../assets/phase7.js', import.meta.url), 'utf8');
+const upsell = readFileSync(new URL('../assets/phase7-upsell.js', import.meta.url), 'utf8');
 const collapse = readFileSync(new URL('../assets/phase20-collapsible-lessons.js', import.meta.url), 'utf8');
 
 for (const document of [html, liveEntryHtml]) {
@@ -25,12 +26,15 @@ for (const document of [html, liveEntryHtml]) {
   assert.match(document, /phase16-ui-refinement\.css/);
   assert.match(document, /site-chrome\.css/);
   assert.match(document, /phase20-recent-collapse\.css/);
-  assert.match(document, /phase20-collapsible-lessons\.js/);
+  assert.match(document, /phase7-upsell\.js\?v=20260907-video-single-click-2/);
+  assert.match(document, /phase20-collapsible-lessons\.js\?v=20260907-video-single-click-2/);
 }
 
 assert.equal(liveEntryHtml, html, 'The live Change 8 entry page must stay byte-for-byte aligned with phase11.html');
 assert.match(js, /openSharedLesson/);
 assert.match(js, /Shared \$\{dateText\}/);
+assert.match(upsell, /function removeLegacyVideoCollapse\(\)/);
+assert.match(upsell, /removeLegacyVideoCollapse\(\);/);
 assert.match(collapse, /closed:'Detail'/);
 assert.match(collapse, /open:'Hide detail'/);
 assert.match(collapse, /phase7-resource-section/);

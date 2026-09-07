@@ -162,6 +162,27 @@
     }
   }
 
+  function removeLegacyVideoCollapse() {
+    if (!videoSection) return;
+    const heading = Array.from(videoSection.children)
+      .find(child => child.classList?.contains('phase7-section-heading'));
+    const genericButton = heading?.querySelector('.phase20-collapse-toggle') || null;
+    const genericBody = Array.from(videoSection.children)
+      .find(child => child.classList?.contains('phase20-collapse-body')) || null;
+
+    if (!genericButton && !genericBody) return;
+
+    genericButton?.remove();
+    if (genericBody) {
+      while (genericBody.firstChild) videoSection.appendChild(genericBody.firstChild);
+      genericBody.remove();
+    }
+
+    // Keep the marker so an older cached Phase 20 script cannot wrap the video
+    // section again after this cleanup runs.
+    videoSection.dataset.fptCollapsible = 'true';
+  }
+
   function toggleButton() {
     return videoRowHost?.querySelector('.phase12-video-toggle');
   }
@@ -205,6 +226,7 @@
   function syncVideoUi() {
     if (!videoSection || !videoRowHost) return;
 
+    removeLegacyVideoCollapse();
     normalizeResourceButtons();
 
     if (videoSection.hidden) {
