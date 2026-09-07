@@ -18,20 +18,13 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           p = Path('assets/phase7.js')
           s = p.read_text()
 
-          old = """      const link = document.createElement('a');
-              link.className = 'phase20-recent-share-link';
-              link.href = `#shared-${encodeURIComponent(String(item.viewId || ''))}-${encodeURIComponent(String(item.lessonId || ''))}`;
-              link.textContent = sharedLessonLabel(item);
-              link.addEventListener('click', event => {
-                event.preventDefault();
-                openSharedLesson(item);
-              });
-          """
-          new = """      const noPreLesson = item?.accessMode === 'prelesson' && item?.preLessonAvailable === false;
+          pattern = re.compile(r"(?m)^    const link = document\.createElement\('a'\);\n    link\.className = 'phase20-recent-share-link';\n    link\.href = `#shared-\$\{encodeURIComponent\(String\(item\.viewId \|\| ''\)\)\}-\$\{encodeURIComponent\(String\(item\.lessonId \|\| ''\)\)\}`;\n    link\.textContent = sharedLessonLabel\(item\);\n    link\.addEventListener\('click', event => \{\n      event\.preventDefault\(\);\n      openSharedLesson\(item\);\n    \}\);\n")
+          replacement = """    const noPreLesson = item?.accessMode === 'prelesson' && item?.preLessonAvailable === false;
               const shareClickable = item?.clickable !== false && !noPreLesson;
               const link = document.createElement(shareClickable ? 'a' : 'span');
               link.className = `phase20-recent-share-link${shareClickable ? '' : ' disabled'}`;
@@ -44,36 +37,22 @@ jobs:
                 });
               }
           """
-          if old not in s:
-              raise SystemExit('recent-share link block not found')
-          s = s.replace(old, new, 1)
+          s, n = pattern.subn(replacement, s, count=1)
+          if n != 1: raise SystemExit(f'recent-share link replacement count={n}')
 
-          old = """    for (const lesson of filtered) {
-              const row = document.createElement('button');
-              row.type = 'button';
-              row.className = 'phase6-lesson-row';
-          """
-          new = """    for (const lesson of filtered) {
+          pattern = re.compile(r"(?m)^    for \(const lesson of filtered\) \{\n      const row = document\.createElement\('button'\);\n      row\.type = 'button';\n      row\.className = 'phase6-lesson-row';\n")
+          replacement = """    for (const lesson of filtered) {
               const noPreLesson = lesson?.accessMode === 'prelesson' && lesson?.preLessonAvailable === false;
               const row = document.createElement(noPreLesson ? 'div' : 'button');
               if (!noPreLesson) row.type = 'button';
               row.className = `phase6-lesson-row${noPreLesson ? ' phase6-lesson-row-unavailable' : ''}`;
               if (noPreLesson) row.setAttribute('aria-disabled', 'true');
           """
-          if old not in s:
-              raise SystemExit('lesson row opening block not found')
-          s = s.replace(old, new, 1)
+          s, n = pattern.subn(replacement, s, count=1)
+          if n != 1: raise SystemExit(f'lesson row replacement count={n}')
 
-          old = """      const stateLabel = document.createElement('span');
-              stateLabel.className = `phase6-lesson-state${lesson.locked ? ' locked' : ''}`;
-              stateLabel.textContent = lesson.locked ? '🔒 Locked' : 'Available';
-
-              row.appendChild(main);
-              row.appendChild(stateLabel);
-              row.addEventListener('click', () => openLesson(lesson));
-              els.lessonList.appendChild(row);
-          """
-          new = """      const stateLabel = document.createElement('span');
+          pattern = re.compile(r"(?m)^      const stateLabel = document\.createElement\('span'\);\n      stateLabel\.className = `phase6-lesson-state\$\{lesson\.locked \? ' locked' : ''\}`;\n      stateLabel\.textContent = lesson\.locked \? '🔒 Locked' : 'Available';\n\n      row\.appendChild\(main\);\n      row\.appendChild\(stateLabel\);\n      row\.addEventListener\('click', \(\) => openLesson\(lesson\)\);\n      els\.lessonList\.appendChild\(row\);\n")
+          replacement = """      const stateLabel = document.createElement('span');
               stateLabel.className = `phase6-lesson-state${lesson.locked ? ' locked' : ''}${noPreLesson ? ' no-prelesson' : ''}`;
               stateLabel.textContent = noPreLesson
                 ? 'No PreLesson Sheets'
@@ -84,20 +63,16 @@ jobs:
               if (!noPreLesson) row.addEventListener('click', () => openLesson(lesson));
               els.lessonList.appendChild(row);
           """
-          if old not in s:
-              raise SystemExit('lesson state/click block not found')
-          s = s.replace(old, new, 1)
+          s, n = pattern.subn(replacement, s, count=1)
+          if n != 1: raise SystemExit(f'lesson state replacement count={n}')
 
-          old = """  async function openSharedLesson(item) {
-              recordActivity();
-          """
-          new = """  async function openSharedLesson(item) {
-              if (item?.clickable === false || (item?.accessMode === 'prelesson' && item?.preLessonAvailable === false)) return;
-              recordActivity();
-          """
-          if old not in s:
-              raise SystemExit('openSharedLesson block not found')
-          s = s.replace(old, new, 1)
+          s, n = re.subn(
+              r"(?m)^  async function openSharedLesson\(item\) \{\n    recordActivity\(\);\n",
+              "  async function openSharedLesson(item) {\n    if (item?.clickable === false || (item?.accessMode === 'prelesson' && item?.preLessonAvailable === false)) return;\n    recordActivity();\n",
+              s,
+              count=1
+          )
+          if n != 1: raise SystemExit(f'openSharedLesson replacement count={n}')
           p.write_text(s)
 
           css = Path('assets/phase20-recent-collapse.css')
@@ -117,12 +92,10 @@ jobs:
 
           for name in ('phase11.html', 'phase11-change8.html'):
               h = Path(name)
-              if not h.exists():
-                  continue
+              if not h.exists(): continue
               text = h.read_text()
-              text = text.replace('assets/phase7.js?v=20260907-live-ui-1', 'assets/phase7.js?v=20260907-prelesson-empty-1')
-              text = text.replace('assets/phase20-recent-collapse.css?v=20260907-live-ui-2', 'assets/phase20-recent-collapse.css?v=20260907-prelesson-empty-1')
-              text = text.replace('assets/phase20-recent-collapse.css?v=20260907-live-ui-1', 'assets/phase20-recent-collapse.css?v=20260907-prelesson-empty-1')
+              text = re.sub(r'assets/phase7\.js(?:\?v=[^"\']+)?', 'assets/phase7.js?v=20260907-prelesson-empty-1', text)
+              text = re.sub(r'assets/phase20-recent-collapse\.css(?:\?v=[^"\']+)?', 'assets/phase20-recent-collapse.css?v=20260907-prelesson-empty-1', text)
               h.write_text(text)
           PY
           git diff --check
