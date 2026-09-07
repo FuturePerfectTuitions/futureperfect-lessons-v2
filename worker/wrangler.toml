@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change7.js"
+main = "src/index-phase20-change8.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,15 +9,20 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. src/index-phase20-change7.js wraps the Phase 19
-# Worker. It preserves the Phase 18/19 access rules and adds the Year 6 Maths SATS
-# student/workbook alias resolver: Y6MS1-Y6MS19 map to immutable canonical lesson
-# keys Y6M51-Y6M69. The canonical keys remain entitlement/content identities.
+# Portal V2 production entrypoint. src/index-phase20-change8.js wraps Change 7
+# and surfaces imported FULL / Online PreLesson-only lesson access in the correct
+# student year/11+ navigation view without depending on the D1 batch roster.
+# Existing Phase 18/19 resource gates remain authoritative: PreLesson-only access
+# exposes only allowed PreLesson downloads; video, homework and Answer Packs stay
+# locked until FULL access exists.
+#
+# Change 7 remains responsible for the Year 6 Maths SATS student/workbook alias
+# resolver: Y6MS1-Y6MS19 map to immutable canonical lesson keys Y6M51-Y6M69.
+# The canonical keys remain entitlement/content identities.
 #
 # Online PreLesson rule remains unchanged: selected rows for Batch IDs containing
-# O may grant PreLesson-only access before completion; full lesson access still
-# comes only through the normal Completed/grant path. There is no date/time-based
-# automatic promotion from PreLesson-only to full.
+# O may grant PreLesson-only access before completion; full lesson access comes
+# only from a Completed import. There is no date/time automatic promotion.
 #
 # Trial Portal User IDs are recognised by the Trial prefix, except IDs beginning
 # admintrial, which are deliberately exempt from the Trial rule and use their
