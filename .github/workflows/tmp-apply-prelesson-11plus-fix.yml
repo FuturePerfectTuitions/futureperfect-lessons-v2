@@ -1,0 +1,307 @@
+name: One-shot apply PreLesson 11+ fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tmp-apply-prelesson-11plus-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix-prelesson-11plus-entitlement-v2
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Apply focused Worker fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # 1) Phase 18: allow Change 8 to suppress the legacy generic manualAccess overlay.
+          p = Path('worker/src/index-phase18-online-prelesson.js')
+          s = p.read_text()
+          old = """export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === EXCEL_SYNC_PATH && request.method === 'POST') return handleExcelSync(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/v1/student/home') return handleHome(request, env, ctx);
+    if (request.method === 'GET' && /^\\/api\\/v1\\/student\\/views\\/[^/]+\\/lessons$/.test(url.pathname)) return handleLessonList(request, env, ctx);
+
+    const lessonMatch = url.pathname.match(/^\\/api\\/v1\\/student\\/lessons\\/([^/]+)$/);
+    if (lessonMatch && request.method === 'GET') return handleLessonDetail(request, env, ctx, decodeURIComponent(lessonMatch[1]));
+
+    const resource = parseResourceRequest(url);
+    if (resource) return handleResourceRequest(request, env, ctx, resource);
+    return phase17Worker.fetch(request, env, ctx);
+  }
+};
+"""
+          new = """export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === EXCEL_SYNC_PATH && request.method === 'POST') return handleExcelSync(request, env);
+
+    const disableLegacyPrelessonOverlay = env?.PHASE20_DISABLE_LEGACY_PRELESSON_OVERLAY === true;
+    if (disableLegacyPrelessonOverlay) {
+      const isStudentHome = request.method === 'GET' && url.pathname === '/api/v1/student/home';
+      const isStudentList = request.method === 'GET' && /^\\/api\\/v1\\/student\\/views\\/[^/]+\\/lessons$/.test(url.pathname);
+      const isStudentDetail = request.method === 'GET' && /^\\/api\\/v1\\/student\\/lessons\\/[^/]+$/.test(url.pathname);
+      const isStudentResource = /^\\/api\\/v1\\/student\\/resources\\//.test(url.pathname);
+      if (isStudentHome || isStudentList || isStudentDetail || isStudentResource) {
+        return phase17Worker.fetch(request, env, ctx);
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/v1/student/home') return handleHome(request, env, ctx);
+    if (request.method === 'GET' && /^\\/api\\/v1\\/student\\/views\\/[^/]+\\/lessons$/.test(url.pathname)) return handleLessonList(request, env, ctx);
+
+    const lessonMatch = url.pathname.match(/^\\/api\\/v1\\/student\\/lessons\\/([^/]+)$/);
+    if (lessonMatch && request.method === 'GET') return handleLessonDetail(request, env, ctx, decodeURIComponent(lessonMatch[1]));
+
+    const resource = parseResourceRequest(url);
+    if (resource) return handleResourceRequest(request, env, ctx, resource);
+    return phase17Worker.fetch(request, env, ctx);
+  }
+};
+"""
+          assert old in s, 'Phase 18 routing block changed unexpectedly'
+          p.write_text(s.replace(old, new))
+
+          # 2) Change 8: use the authoritative release-navigation layer without Phase 18's generic overlay.
+          p = Path('worker/src/index-phase20-change8.js')
+          s = p.read_text()
+          anchor = "const norm = value => clean(value).toLowerCase();\n"
+          helper = """const norm = value => clean(value).toLowerCase();
+
+function withoutLegacyPrelessonOverlay(env) {
+  return new Proxy(env, {
+    get(target, prop) {
+      if (prop === 'PHASE20_DISABLE_LEGACY_PRELESSON_OVERLAY') return true;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
+}
+"""
+          assert anchor in s, 'Change 8 helper anchor changed unexpectedly'
+          s = s.replace(anchor, helper, 1)
+
+          old_fetch = """export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (request.method === 'GET' && url.pathname === '/api/v1/student/home') {
+      return handleHome(request, env, ctx);
+    }
+
+    const viewMatch = url.pathname.match(/^\\/api\\/v1\\/student\\/views\\/([^/]+)\\/lessons$/);
+    if (request.method === 'GET' && viewMatch) {
+      let viewId = '';
+      try { viewId = decodeURIComponent(viewMatch[1]).toLowerCase(); } catch { viewId = ''; }
+      if (viewId) return handleLessonList(request, env, ctx, viewId);
+    }
+
+    const lessonMatch = url.pathname.match(/^\\/api\\/v1\\/student\\/lessons\\/([^/]+)$/);
+    if (request.method === 'GET' && lessonMatch) {
+      let lessonId = '';
+      try { lessonId = decodeURIComponent(lessonMatch[1]); } catch { lessonId = ''; }
+      const viewId = norm(url.searchParams.get('viewId'));
+      if (lessonId && viewId) return handleLessonDetail(request, env, ctx, lessonId, viewId);
+    }
+
+    const parsed = parseResourceRequest(url);
+    if (parsed) {
+      const viewId = norm(url.searchParams.get('viewId'));
+      if (viewId) return handleResource(request, env, ctx, parsed, viewId);
+    }
+
+    return phase20Worker.fetch(request, env, ctx);
+  }
+};
+"""
+          new_fetch = """export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const releaseEnv = withoutLegacyPrelessonOverlay(env);
+    if (request.method === 'GET' && url.pathname === '/api/v1/student/home') {
+      return handleHome(request, releaseEnv, ctx);
+    }
+
+    const viewMatch = url.pathname.match(/^\\/api\\/v1\\/student\\/views\\/([^/]+)\\/lessons$/);
+    if (request.method === 'GET' && viewMatch) {
+      let viewId = '';
+      try { viewId = decodeURIComponent(viewMatch[1]).toLowerCase(); } catch { viewId = ''; }
+      if (viewId) return handleLessonList(request, releaseEnv, ctx, viewId);
+    }
+
+    const lessonMatch = url.pathname.match(/^\\/api\\/v1\\/student\\/lessons\\/([^/]+)$/);
+    if (request.method === 'GET' && lessonMatch) {
+      let lessonId = '';
+      try { lessonId = decodeURIComponent(lessonMatch[1]); } catch { lessonId = ''; }
+      const viewId = norm(url.searchParams.get('viewId'));
+      if (lessonId && viewId) return handleLessonDetail(request, releaseEnv, ctx, lessonId, viewId);
+    }
+
+    const parsed = parseResourceRequest(url);
+    if (parsed) {
+      const viewId = norm(url.searchParams.get('viewId'));
+      if (viewId) return handleResource(request, releaseEnv, ctx, parsed, viewId);
+    }
+
+    return phase20Worker.fetch(request, env, ctx);
+  }
+};
+"""
+          assert old_fetch in s, 'Change 8 fetch block changed unexpectedly'
+          p.write_text(s.replace(old_fetch, new_fetch))
+
+          # 3) Phase 9: support the live nested vr.preLesson[].sheet structure while preserving legacy flat rows.
+          p = Path('worker/src/index-phase9.js')
+          s = p.read_text()
+          old_vr = """    preLesson: preLesson.map((item, index) => {
+      const answerKey = item?.answerKey || null;
+      return {
+        index: index + 1,
+        sheet: item
+          ? {
+              displayName: String(item.displayName || item.name || `VR PreLesson Sheet ${index + 1}`),
+              r2Key: String(item.r2Key || item.r2 || '').trim()
+            }
+          : null,
+        answerKey: answerKey
+          ? {
+              displayName: String(answerKey.displayName || answerKey.name || `VR PreLesson Answer Key ${index + 1}`),
+              r2Key: String(answerKey.r2Key || answerKey.r2 || '').trim()
+            }
+          : null
+      };
+    }),
+"""
+          new_vr = """    preLesson: preLesson.map((item, index) => {
+      const sheet = item?.sheet || ((item?.r2Key || item?.r2 || item?.displayName || item?.name) ? item : null);
+      const answerKey = item?.answerKey || null;
+      return {
+        index: index + 1,
+        sheet: sheet
+          ? {
+              displayName: String(sheet.displayName || sheet.name || `VR PreLesson Sheet ${index + 1}`),
+              r2Key: String(sheet.r2Key || sheet.r2 || '').trim()
+            }
+          : null,
+        answerKey: answerKey
+          ? {
+              displayName: String(answerKey.displayName || answerKey.name || `VR PreLesson Answer Key ${index + 1}`),
+              r2Key: String(answerKey.r2Key || answerKey.r2 || '').trim()
+            }
+          : null
+      };
+    }),
+"""
+          assert old_vr in s, 'Phase 9 VR normaliser changed unexpectedly'
+          s = s.replace(old_vr, new_vr, 1)
+          export_anchor = "export default {\n"
+          assert export_anchor in s, 'Phase 9 export anchor missing'
+          s = s.replace(export_anchor, "export { normaliseVr };\n\nexport default {\n", 1)
+          p.write_text(s)
+
+          # 4) Focused regression test.
+          Path('tests/prelesson-11plus-regression.mjs').write_text("""import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { normaliseVr } from '../worker/src/index-phase9.js';
+
+const nested = normaliseVr({
+  vr:{ preLesson:[{
+    sheet:{ displayName:'Nested VR sheet', r2Key:'english/year5/lesson/vr-sheet.pdf' },
+    answerKey:{ displayName:'Nested VR answer', r2Key:'english/year5/lesson/vr-answer.pdf' }
+  }] }
+});
+assert.equal(nested.preLesson[0].sheet.displayName, 'Nested VR sheet');
+assert.equal(nested.preLesson[0].sheet.r2Key, 'english/year5/lesson/vr-sheet.pdf');
+assert.equal(nested.preLesson[0].answerKey.r2Key, 'english/year5/lesson/vr-answer.pdf');
+
+const legacy = normaliseVr({
+  vr:{ preLesson:[{
+    displayName:'Legacy VR sheet', r2Key:'legacy-sheet.pdf',
+    answerKey:{ displayName:'Legacy VR answer', r2Key:'legacy-answer.pdf' }
+  }] }
+});
+assert.equal(legacy.preLesson[0].sheet.r2Key, 'legacy-sheet.pdf');
+assert.equal(legacy.preLesson[0].answerKey.r2Key, 'legacy-answer.pdf');
+
+const phase18 = readFileSync(new URL('../worker/src/index-phase18-online-prelesson.js', import.meta.url), 'utf8');
+const change8 = readFileSync(new URL('../worker/src/index-phase20-change8.js', import.meta.url), 'utf8');
+assert.match(phase18, /PHASE20_DISABLE_LEGACY_PRELESSON_OVERLAY/);
+assert.match(phase18, /return phase17Worker\.fetch\(request, env, ctx\)/);
+assert.match(change8, /withoutLegacyPrelessonOverlay/);
+assert.match(change8, /handleHome\(request, releaseEnv, ctx\)/);
+assert.match(change8, /handleLessonList\(request, releaseEnv, ctx, viewId\)/);
+assert.match(change8, /handleLessonDetail\(request, releaseEnv, ctx, lessonId, viewId\)/);
+assert.match(change8, /handleResource\(request, releaseEnv, ctx, parsed, viewId\)/);
+
+console.log('PreLesson 11+ regression verification: PASS');
+""")
+
+          Path('.github/workflows/prelesson-11plus-regression.yml').write_text("""name: PreLesson 11+ regression verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/src/index-phase18-online-prelesson.js'
+      - 'worker/src/index-phase20-change8.js'
+      - 'worker/src/index-phase9.js'
+      - 'tests/prelesson-11plus-regression.mjs'
+      - '.github/workflows/prelesson-11plus-regression.yml'
+  push:
+    branches: [fix-prelesson-11plus-entitlement-v2]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check worker/src/index-phase18-online-prelesson.js
+      - run: node --check worker/src/index-phase20-change8.js
+      - run: node --check worker/src/index-phase9.js
+      - run: node tests/prelesson-11plus-regression.mjs
+      - run: node tests/lesson-release-navigation-verification.mjs
+      - run: node tests/admin-lesson-release-import-verification.mjs
+""")
+          PY
+
+      - name: Run focused verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase18-online-prelesson.js
+          node --check worker/src/index-phase20-change8.js
+          node --check worker/src/index-phase9.js
+          node tests/prelesson-11plus-regression.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+
+      - name: Commit fix branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/index-phase18-online-prelesson.js worker/src/index-phase20-change8.js worker/src/index-phase9.js tests/prelesson-11plus-regression.mjs .github/workflows/prelesson-11plus-regression.yml
+          git commit -m 'Fix 11+ PreLesson view and nested VR sheet'
+          git push origin HEAD:fix-prelesson-11plus-entitlement-v2
