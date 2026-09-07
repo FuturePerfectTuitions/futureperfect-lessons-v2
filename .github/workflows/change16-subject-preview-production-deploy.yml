@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/change16-subject-preview-production-deploy.yml'
+      - 'worker/src/index-phase20-change16.js'
+      - 'tests/subject-preview-enrolment-boundary-verification.mjs'
 
 permissions:
   contents: read

@@ -4,7 +4,7 @@ import {
   suppressedCrossSubjectViewIds
 } from '../worker/src/index-phase20-change16.js';
 
-// Dharm-shaped case: English Year 4 is real access from the admin CSV.
+// Dharm-shaped English case: English Year 4 is real access from the admin CSV.
 // Year 5 English exists only because Maths L2 generated a cross-subject upsell preview.
 const dharm = {
   ok:true,
@@ -41,6 +41,55 @@ assert.deepEqual(
   dharm.subjects[0].views.map(view => view.viewId),
   ['english-year4'],
   'A student with real English access must not receive extra English years from Maths cross-subject previews'
+);
+
+// Dharm-shaped Maths regression: Change 15 can merge a real L1/L2 entitlement
+// with a year-alias preview. In that merged object, source may still say
+// crossSubjectPreview even though lockedPreview=false and genuine access exists.
+// Such a level must remain visible and must never be blocked by the list guard.
+const mergedMaths = {
+  ok:true,
+  subjects:[{
+    subject:'maths',
+    views:[
+      {
+        viewId:'maths-level1',
+        label:'L1',
+        lockedPreview:false,
+        source:'crossSubjectPreview',
+        visibleLessonCount:35,
+        openLessonCount:35
+      },
+      {
+        viewId:'maths-level2',
+        label:'L2',
+        lockedPreview:false,
+        source:'crossSubjectPreview',
+        visibleLessonCount:32,
+        openLessonCount:1
+      },
+      {
+        viewId:'maths-year6',
+        label:'Year 6',
+        lockedPreview:true,
+        source:'crossSubjectPreview',
+        visibleLessonCount:20,
+        openLessonCount:0
+      }
+    ]
+  }]
+};
+
+const mathsSuppressed = suppressedCrossSubjectViewIds(mergedMaths);
+assert.equal(mathsSuppressed.has('maths-level1'), false, 'Real L1 must not be classified as a preview from source text alone');
+assert.equal(mathsSuppressed.has('maths-level2'), false, 'Real L2 must not be classified as a preview from source text alone');
+assert.equal(mathsSuppressed.has('maths-year6'), true, 'A genuinely locked preview still remains suppressible');
+
+suppressCrossSubjectPreviewsForEnrolledSubjects(mergedMaths);
+assert.deepEqual(
+  mergedMaths.subjects[0].views.map(view => view.viewId),
+  ['maths-level1','maths-level2'],
+  'Real L1/L2 entitlement views must survive cross-subject preview cleanup'
 );
 
 // Zara-shaped upsell case: student has no actual Maths access at all.

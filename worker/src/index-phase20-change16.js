@@ -4,7 +4,11 @@ const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
 function isCrossSubjectPreview(view) {
-  return view?.lockedPreview === true || norm(view?.source) === 'crosssubjectpreview';
+  // lockedPreview is the authoritative presentation/access marker.
+  // Do not classify from source alone: Change 15 may merge a genuine 11+ Maths
+  // level entitlement with a year-alias preview, leaving the historical source
+  // string behind even though lockedPreview is false and real access exists.
+  return view?.lockedPreview === true;
 }
 
 export function suppressCrossSubjectPreviewsForEnrolledSubjects(body) {
