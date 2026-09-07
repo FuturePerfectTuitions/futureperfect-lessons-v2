@@ -1,0 +1,31 @@
+name: Subject preview boundary branch verification
+
+on:
+  push:
+    branches: [fix/subject-preview-only-when-unenrolled]
+    paths:
+      - '.github/workflows/subject-preview-boundary-branch-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Change 16
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase20-change16.js
+          node tests/subject-preview-enrolment-boundary-verification.mjs
+          node tests/maths-11plus-level-navigation-verification.mjs
+          node tests/y411-admin-import-baseline-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          grep -Fq 'main = "src/index-phase20-change16.js"' worker/wrangler.toml
+          echo 'SUBJECT_PREVIEW_BOUNDARY_PASS'
