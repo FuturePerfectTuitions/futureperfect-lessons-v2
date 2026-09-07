@@ -10,322 +10,45 @@ permissions:
   contents: read
 
 jobs:
-  rename:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      WRANGLER_VERSION: '4.125.0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Stage exact KV rename with private rollback backup
+      - name: Read identity-safe KV metadata only
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs = require('fs');
-          const token = String(process.env.CLOUDFLARE_API_TOKEN || '');
-          const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '');
-          const workerName = String(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
-          const api = 'https://api.cloudflare.com/client/v4';
-          const suffixes = ['2','3','4','411','5','511','6'];
-          const mappings = suffixes.map(s => ({
-            suffix: s,
-            oldNorm: `admintrial${s}`,
-            newNorm: `demo${s}`,
-            oldKey: `user:admintrial${s}`,
-            newKey: `user:demo${s}`,
-            newDisplay: `Demo${s}`
-          }));
-
-          async function cf(pathname, init = {}) {
-            const r = await fetch(`${api}${pathname}`, {
-              ...init,
-              headers: { Authorization: `Bearer ${token}`, ...(init.body ? {'Content-Type':'application/json'} : {}), ...(init.headers || {}) }
-            });
-            const b = await r.json().catch(() => null);
-            if (!r.ok || !b?.success) throw new Error(`Cloudflare operation failed: HTTP ${r.status}`);
-            return b;
-          }
-          async function listKeys(ns) {
-            let cursor=''; const out=[];
-            do {
-              const q=new URLSearchParams({limit:'1000'}); if(cursor) q.set('cursor',cursor);
-              const p=await cf(`/accounts/${accountId}/storage/kv/namespaces/${ns}/keys?${q}`);
-              for(const x of p.result||[]) out.push(String(x?.name||''));
-              cursor=String(p?.result_info?.cursor||'');
-            } while(cursor);
-            return out;
-          }
-          async function bulkGet(ns, keys) {
-            const b=await cf(`/accounts/${accountId}/storage/kv/namespaces/${ns}/bulk/get`, {method:'POST',body:JSON.stringify({keys,type:'text',withMetadata:false})});
-            return b?.result?.values || {};
-          }
-          async function bulkPut(ns, rows) {
-            const b=await cf(`/accounts/${accountId}/storage/kv/namespaces/${ns}/bulk`, {method:'PUT',body:JSON.stringify(rows)});
-            if((b?.result?.unsuccessful_keys||[]).length) throw new Error('KV bulk write reported unsuccessful keys.');
-          }
-
-          const settings=await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
-          fs.writeFileSync('/tmp/fpt-worker-settings-before.json', JSON.stringify(settings));
-          const bindings=settings?.result?.bindings||[];
-          const environment=String(bindings.find(x=>x?.name==='ENVIRONMENT'&&x?.type==='plain_text')?.text||'');
-          if(environment!=='production') throw new Error('Refusing non-production rename.');
-          const ns=String(bindings.find(x=>x?.name==='STUDENTS_KV'&&x?.type==='kv_namespace')?.namespace_id||'');
-          if(!ns) throw new Error('STUDENTS_KV binding unavailable.');
-          const allKeys=await listKeys(ns);
-          for(const m of mappings) {
-            if(!allKeys.includes(m.oldKey)) throw new Error(`Required source key missing: ${m.oldKey}`);
-            if(allKeys.includes(m.newKey)) throw new Error(`Target key already exists: ${m.newKey}`);
-          }
-          const values=await bulkGet(ns,mappings.map(x=>x.oldKey));
-          const backup={namespaceId:ns,mappings,values:{}};
-          const writes=[];
-          for(const m of mappings) {
-            const raw=values[m.oldKey];
-            if(raw==null) throw new Error(`Could not read ${m.oldKey}`);
-            backup.values[m.oldKey]=String(raw);
-            const before=JSON.parse(String(raw));
-            if(String(before?.portalUserId||'').trim().toLowerCase()!==m.oldNorm) throw new Error(`portalUserId mismatch for ${m.oldKey}`);
-            const after=structuredClone(before);
-            after.portalUserId=m.newDisplay;
-            const a=structuredClone(before), b=structuredClone(after);
-            delete a.portalUserId; delete b.portalUserId;
-            if(JSON.stringify(a)!==JSON.stringify(b)) throw new Error(`Non-ID mutation detected for ${m.oldKey}`);
-            writes.push({key:m.newKey,value:JSON.stringify(after)});
-          }
-          fs.writeFileSync('/tmp/admintrial-kv-backup.json',JSON.stringify(backup),{mode:0o600});
-          const allow=String(bindings.find(x=>x?.name==='PROD_LOGIN_ALLOWLIST'&&x?.type==='plain_text')?.text||'');
-          fs.writeFileSync('/tmp/old-allowlist.txt',allow,{mode:0o600});
-          const map=new Map(mappings.map(x=>[x.oldNorm,x.newNorm]));
-          const newAllow=allow.split(',').map(x=>x.trim()).filter(Boolean).map(x=>map.get(x.toLowerCase())||x).join(',');
-          for(const m of mappings) {
-            if(!allow.split(',').map(x=>x.trim().toLowerCase()).includes(m.oldNorm)) throw new Error(`Old ID absent from production allowlist: ${m.oldNorm}`);
-            if(!newAllow.split(',').map(x=>x.trim().toLowerCase()).includes(m.newNorm)) throw new Error(`New ID not produced in allowlist: ${m.newNorm}`);
-          }
-          fs.writeFileSync('/tmp/new-allowlist.txt',newAllow,{mode:0o600});
-          fs.writeFileSync('/tmp/admintrial-rename-map.json',JSON.stringify(mappings.map(({oldNorm,newNorm,newDisplay})=>({oldNorm,newNorm,newDisplay}))));
-
-          await bulkPut(ns,writes);
-          const staged=await bulkGet(ns,mappings.map(x=>x.newKey));
-          for(const m of mappings) {
-            const before=JSON.parse(backup.values[m.oldKey]);
-            const after=JSON.parse(String(staged[m.newKey]||''));
-            const a=structuredClone(before), b=structuredClone(after);
-            delete a.portalUserId; delete b.portalUserId;
-            if(JSON.stringify(a)!==JSON.stringify(b) || after.portalUserId!==m.newDisplay) throw new Error(`Staged KV parity failed for ${m.newNorm}`);
-          }
-          console.log('KV_STAGE_PASS accounts=7 other_fields_unchanged=true');
-          NODE
-
-      - name: Migrate only D1 identity references
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > /tmp/admintrial-d1-rename.sql <<'SQL'
-          UPDATE lesson_entitlements SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE student_sessions SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE curriculum_start_points SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE answer_view_tokens SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE mock_password_rate_limits SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE student_session_profiles SET
-            user_json = CASE portal_user_id_norm
-              WHEN 'admintrial2' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo2') ELSE user_json END
-              WHEN 'admintrial3' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo3') ELSE user_json END
-              WHEN 'admintrial4' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo4') ELSE user_json END
-              WHEN 'admintrial411' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo411') ELSE user_json END
-              WHEN 'admintrial5' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo5') ELSE user_json END
-              WHEN 'admintrial511' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo511') ELSE user_json END
-              WHEN 'admintrial6' THEN CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId','Demo6') ELSE user_json END
-              ELSE user_json END,
-            portal_user_id_norm = CASE portal_user_id_norm
-              WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-              WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE student_batch_assignments SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE online_prelesson_entitlements SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE trial_login_consumptions SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          UPDATE student_session_windows SET portal_user_id_norm = CASE portal_user_id_norm
-            WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4'
-            WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' END
-          WHERE portal_user_id_norm IN ('admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6');
-          SQL
-          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --file /tmp/admintrial-d1-rename.sql >/tmp/d1-rename-output.txt
-
-          CHECK="SELECT
-          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%') AS sessions_old,
-          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'demo%') AS sessions_demo,
-          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%') AS profiles_old,
-          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'demo%') AS profiles_demo,
-          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%') AS windows_old,
-          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'demo%') AS windows_demo;"
-          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$CHECK" --json >/tmp/d1-after.json
-          node - <<'NODE'
-          const x=require('/tmp/d1-after.json'); const r=x?.[0]?.results?.[0]||{};
-          if(Number(r.sessions_old)!==0||Number(r.sessions_demo)!==16||Number(r.profiles_old)!==0||Number(r.profiles_demo)!==5||Number(r.windows_old)!==0||Number(r.windows_demo)!==16) throw new Error('D1 identity parity check failed.');
-          console.log('D1_RENAME_PASS sessions=16 profiles=5 windows=16');
-          NODE
-
-      - name: Replace old IDs in production login allowlist only
-        shell: bash
-        run: |
-          set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          cp /tmp/fpt-worker-settings-before.json /tmp/fpt-worker-settings-deploy.json
-          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-deploy.json >/tmp/fpt-secrets-before.json
-          plain(){ jq -r --arg n "$1" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/fpt-worker-settings-deploy.json; }
-          field(){ jq -r --arg n "$1" --arg t "$2" --arg f "$3" '[.result.bindings[]|select(.name==$n and .type==$t)|.[$f]][0] // ""' /tmp/fpt-worker-settings-deploy.json; }
-          ENTRY="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' worker/wrangler.toml | head -n1)"
-          STUDENTS="$(field STUDENTS_KV kv_namespace namespace_id)"
-          LESSONS="$(field LESSONS_KV kv_namespace namespace_id)"
-          DBID="$(field DB d1 id)"
-          R2="$(field MATERIALS_R2 r2_bucket bucket_name)"
-          NEW_ALLOW="$(cat /tmp/new-allowlist.txt)"
-          test -n "$ENTRY"; test -n "$STUDENTS"; test -n "$LESSONS"; test -n "$DBID"; test -n "$R2"
-          {
-            printf 'name = "%s"\n' "$WORKER_NAME"
-            printf 'main = "%s"\n' "$ENTRY"
-            printf 'compatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\n'
-            printf 'ENVIRONMENT = "%s"\n' "$(plain ENVIRONMENT)"
-            printf 'ALLOWED_ORIGINS = "%s"\n' "$(plain ALLOWED_ORIGINS)"
-            printf 'DEV_LOGIN_ALLOWLIST = "%s"\n' "$(plain DEV_LOGIN_ALLOWLIST)"
-            printf 'PROD_LOGIN_ALLOWLIST = "%s"\n' "$NEW_ALLOW"
-            printf 'STUDENT_LOGIN_ENABLED = "%s"\n' "$(plain STUDENT_LOGIN_ENABLED)"
-            printf '\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "%s"\n' "$STUDENTS"
-            printf '\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "%s"\n' "$LESSONS"
-            printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$R2"
-            printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
-          } > worker/wrangler.runtime-rename.toml
-          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-rename.toml --keep-vars --message "Rename AdminTrial Portal IDs to Demo"
-          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings-after.json
-          jq -e '.success == true' /tmp/fpt-worker-settings-after.json >/dev/null
-          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-after.json >/tmp/fpt-secrets-after.json
-          cmp -s /tmp/fpt-secrets-before.json /tmp/fpt-secrets-after.json
-          ACTUAL="$(jq -r '[.result.bindings[]|select(.name=="PROD_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/fpt-worker-settings-after.json)"
-          test "$ACTUAL" = "$NEW_ALLOW"
-          echo 'ALLOWLIST_RENAME_PASS'
-
-      - name: Remove old KV keys and verify exact final parity
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs=require('fs');
+          node <<'NODE' 2>&1 | tee /tmp/admintrial-kv-read-diagnostic.txt
           const token=String(process.env.CLOUDFLARE_API_TOKEN||'');
           const accountId=String(process.env.CLOUDFLARE_ACCOUNT_ID||'');
+          const workerName=String(process.env.WORKER_NAME||'fpt-portal-v2-worker');
           const api='https://api.cloudflare.com/client/v4';
-          const backup=JSON.parse(fs.readFileSync('/tmp/admintrial-kv-backup.json','utf8'));
-          async function cf(pathname,init={}){const r=await fetch(`${api}${pathname}`,{...init,headers:{Authorization:`Bearer ${token}`,...(init.body?{'Content-Type':'application/json'}:{}),...(init.headers||{})}});const b=await r.json().catch(()=>null);if(!r.ok||!b?.success)throw new Error(`CF finalization failed HTTP=${r.status}`);return b;}
-          async function get(keys){const b=await cf(`/accounts/${accountId}/storage/kv/namespaces/${backup.namespaceId}/bulk/get`,{method:'POST',body:JSON.stringify({keys,type:'text',withMetadata:false})});return b?.result?.values||{};}
-          for(const m of backup.mappings){await cf(`/accounts/${accountId}/storage/kv/namespaces/${backup.namespaceId}/values/${encodeURIComponent(m.oldKey)}`,{method:'DELETE'});}
-          const old=await get(backup.mappings.map(x=>x.oldKey));
-          const fresh=await get(backup.mappings.map(x=>x.newKey));
-          for(const m of backup.mappings){
-            if(old[m.oldKey]!=null) throw new Error(`Old key remains: ${m.oldKey}`);
-            const before=JSON.parse(backup.values[m.oldKey]); const after=JSON.parse(String(fresh[m.newKey]||''));
-            const a=structuredClone(before),b=structuredClone(after); delete a.portalUserId; delete b.portalUserId;
-            if(JSON.stringify(a)!==JSON.stringify(b)||after.portalUserId!==m.newDisplay) throw new Error(`Final KV parity failed: ${m.newKey}`);
+          async function envelope(path){const r=await fetch(`${api}${path}`,{headers:{Authorization:`Bearer ${token}`}});const b=await r.json().catch(()=>null);if(!r.ok||!b?.success)throw new Error(`Envelope read failed HTTP=${r.status}`);return b;}
+          const settings=await envelope(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
+          const ns=String((settings?.result?.bindings||[]).find(x=>x?.name==='STUDENTS_KV'&&x?.type==='kv_namespace')?.namespace_id||'');
+          if(!ns) throw new Error('STUDENTS_KV unavailable');
+          for(const suffix of ['2','3','4','411','5','511','6']){
+            const key=`user:admintrial${suffix}`;
+            const r=await fetch(`${api}/accounts/${accountId}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
+            const raw=await r.text();
+            if(!r.ok) throw new Error(`Direct KV read failed ${key} HTTP=${r.status}`);
+            let obj; try{obj=JSON.parse(raw)}catch{throw new Error(`Record is not JSON: ${key}`)}
+            console.log(`${key} portalUserId=${String(obj?.portalUserId||'')} fields=${Object.keys(obj).sort().join(',')}`);
           }
-          console.log('KV_FINAL_PASS old_keys=0 new_keys=7 other_fields_unchanged=true');
           NODE
-
-          CHECK="SELECT
-          (SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%') AS lesson_old,
-          (SELECT COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%') AS starts_old,
-          (SELECT COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%') AS answers_old,
-          (SELECT COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%') AS mock_old,
-          (SELECT COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%') AS batches_old,
-          (SELECT COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%') AS prelesson_old,
-          (SELECT COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%') AS trial_old,
-          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%') AS sessions_old,
-          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'demo%') AS sessions_demo,
-          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%') AS profiles_old,
-          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'demo%') AS profiles_demo,
-          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%') AS windows_old,
-          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'demo%') AS windows_demo;"
-          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$CHECK" --json >/tmp/final-d1.json
-          node - <<'NODE'
-          const x=require('/tmp/final-d1.json'),r=x?.[0]?.results?.[0]||{};
-          for(const k of ['lesson_old','starts_old','answers_old','mock_old','batches_old','prelesson_old','trial_old','sessions_old','profiles_old','windows_old']) if(Number(r[k]||0)!==0) throw new Error(`Old D1 reference remains: ${k}`);
-          if(Number(r.sessions_demo)!==16||Number(r.profiles_demo)!==5||Number(r.windows_demo)!==16) throw new Error('Final D1 parity mismatch.');
-          console.log('FINAL_D1_PARITY_PASS');
-          NODE
-          printf '%s\n' 'AdminTrial2 -> Demo2' 'AdminTrial3 -> Demo3' 'AdminTrial4 -> Demo4' 'AdminTrial411 -> Demo411' 'AdminTrial5 -> Demo5' 'AdminTrial511 -> Demo511' 'AdminTrial6 -> Demo6' > /tmp/admintrial-rename-result.txt
-          echo 'ADMINTRIAL_TO_DEMO_RENAME_PASS accounts=7'
-
-      - name: Roll back on any mutation failure
-        if: failure()
-        shell: bash
-        run: |
-          set +e
-          echo 'Attempting exact rollback to AdminTrial identities.'
-          if [ -f /tmp/admintrial-kv-backup.json ]; then
-            node <<'NODE'
-            const fs=require('fs'); const token=String(process.env.CLOUDFLARE_API_TOKEN||''); const accountId=String(process.env.CLOUDFLARE_ACCOUNT_ID||''); const api='https://api.cloudflare.com/client/v4';
-            const b=JSON.parse(fs.readFileSync('/tmp/admintrial-kv-backup.json','utf8'));
-            async function cf(p,i={}){const r=await fetch(`${api}${p}`,{...i,headers:{Authorization:`Bearer ${token}`,...(i.body?{'Content-Type':'application/json'}:{})}});const x=await r.json().catch(()=>null);if(!r.ok||!x?.success)throw new Error('rollback KV failure');return x;}
-            (async()=>{await cf(`/accounts/${accountId}/storage/kv/namespaces/${b.namespaceId}/bulk`,{method:'PUT',body:JSON.stringify(b.mappings.map(m=>({key:m.oldKey,value:b.values[m.oldKey]})))});for(const m of b.mappings)await cf(`/accounts/${accountId}/storage/kv/namespaces/${b.namespaceId}/values/${encodeURIComponent(m.newKey)}`,{method:'DELETE'});console.log('KV rollback complete');})().catch(e=>{console.error(e.message);process.exitCode=1});
-            NODE
-          fi
-          cat > /tmp/admintrial-d1-rollback.sql <<'SQL'
-          UPDATE lesson_entitlements SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE student_sessions SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE curriculum_start_points SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE answer_view_tokens SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE mock_password_rate_limits SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE student_session_profiles SET user_json=CASE WHEN json_valid(user_json) AND json_type(user_json,'$.portalUserId') IS NOT NULL THEN json_set(user_json,'$.portalUserId',CASE portal_user_id_norm WHEN 'demo2' THEN 'AdminTrial2' WHEN 'demo3' THEN 'AdminTrial3' WHEN 'demo4' THEN 'AdminTrial4' WHEN 'demo411' THEN 'AdminTrial411' WHEN 'demo5' THEN 'AdminTrial5' WHEN 'demo511' THEN 'AdminTrial511' WHEN 'demo6' THEN 'AdminTrial6' END) ELSE user_json END, portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE student_batch_assignments SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE online_prelesson_entitlements SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE trial_login_consumptions SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          UPDATE student_session_windows SET portal_user_id_norm=replace(portal_user_id_norm,'demo','admintrial') WHERE portal_user_id_norm IN ('demo2','demo3','demo4','demo411','demo5','demo511','demo6');
-          SQL
-          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --file /tmp/admintrial-d1-rollback.sql || true
-          if [ -f /tmp/old-allowlist.txt ] && [ -f /tmp/fpt-worker-settings-before.json ]; then
-            cp /tmp/fpt-worker-settings-before.json /tmp/rollback-settings.json
-            plain(){ jq -r --arg n "$1" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/rollback-settings.json; }
-            field(){ jq -r --arg n "$1" --arg t "$2" --arg f "$3" '[.result.bindings[]|select(.name==$n and .type==$t)|.[$f]][0] // ""' /tmp/rollback-settings.json; }
-            ENTRY="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' worker/wrangler.toml | head -n1)"
-            { printf 'name = "%s"\nmain = "%s"\ncompatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\n' "$WORKER_NAME" "$ENTRY"; printf 'ENVIRONMENT = "%s"\nALLOWED_ORIGINS = "%s"\nDEV_LOGIN_ALLOWLIST = "%s"\nPROD_LOGIN_ALLOWLIST = "%s"\nSTUDENT_LOGIN_ENABLED = "%s"\n' "$(plain ENVIRONMENT)" "$(plain ALLOWED_ORIGINS)" "$(plain DEV_LOGIN_ALLOWLIST)" "$(cat /tmp/old-allowlist.txt)" "$(plain STUDENT_LOGIN_ENABLED)"; printf '\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "%s"\n' "$(field STUDENTS_KV kv_namespace namespace_id)"; printf '\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "%s"\n' "$(field LESSONS_KV kv_namespace namespace_id)"; printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$(field MATERIALS_R2 r2_bucket bucket_name)"; printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$(field DB d1 id)"; } > worker/wrangler.runtime-rollback.toml
-            npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-rollback.toml --keep-vars --message "Rollback AdminTrial rename" || true
-          fi
-          echo 'Rollback attempt finished.'
-
-      - name: Publish safe rename result
-        if: success()
+      - name: Upload safe KV read diagnostic
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: admintrial-rename-result
-          path: /tmp/admintrial-rename-result.txt
+          name: admintrial-kv-read-diagnostic
+          path: /tmp/admintrial-kv-read-diagnostic.txt
           if-no-files-found: error
           retention-days: 1
