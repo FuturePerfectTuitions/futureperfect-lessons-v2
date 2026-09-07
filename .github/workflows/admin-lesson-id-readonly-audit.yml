@@ -19,7 +19,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
     steps:
-      - name: Read exact displayIds metadata
+      - name: List current curriculum keys
         shell: bash
         run: |
           set -euo pipefail
@@ -28,9 +28,5 @@ jobs:
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
           LESSONS="$(jq -r '[.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' /tmp/settings.json)"
           test -n "$LESSONS"
-          for id in Y3M1 Y5E2; do
-            key="lesson:$id"
-            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
-            curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS/values/$encoded" -H "$AUTH" -o "/tmp/$id.json"
-            echo "DISPLAY_META id=$id title=$(jq -r '.title' "/tmp/$id.json") displayIds=$(jq -c '.displayIds // null' "/tmp/$id.json") displayLessonIds=$(jq -c '.displayLessonIds // null' "/tmp/$id.json") presentation=$(jq -c '.presentation // null' "/tmp/$id.json")"
-          done
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS/keys?limit=1000" -H "$AUTH" -o /tmp/keys.json
+          jq -r '.result[].name | select(startswith("curriculum:"))' /tmp/keys.json | sort
