@@ -111,26 +111,65 @@
   color: var(--phase5-navy);
 }
 
-/* Keep the portal back controls visibly inverse over lesson/page content.
-   This is intentionally in the last-loaded stylesheet so earlier presentation
-   layers cannot regress the button to a pale background with dark text. */
+/* Floating portal back controls: keep the full label visible, detached from the
+   viewport edge, and retain the high-contrast navy/white presentation. */
 body.phase11-change8 .phase6-back-button {
-  border-color: #012169 !important;
+  position: fixed !important;
+  left: max(22px, calc((100vw - 1120px) / 2 + 22px)) !important;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px)) !important;
+  z-index: 90 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 44px !important;
+  padding: 10px 17px !important;
+  overflow: visible !important;
+  border: 1px solid #012169 !important;
+  border-radius: 999px !important;
   background: #012169 !important;
   color: #fff !important;
-  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.18);
+  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.20) !important;
+  white-space: nowrap !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease !important;
 }
 
 body.phase11-change8 .phase6-back-button::before,
 body.phase11-change8 .phase6-back-button::after {
-  color: #fff !important;
+  content: none !important;
+  display: none !important;
 }
 
 body.phase11-change8 .phase6-back-button:hover,
 body.phase11-change8 .phase6-back-button:focus-visible {
+  width: auto !important;
+  padding: 10px 17px !important;
   border-color: #00184d !important;
   background: #00184d !important;
   color: #fff !important;
+  box-shadow: 0 12px 30px rgba(1, 33, 105, 0.24) !important;
+  outline: none !important;
+  transform: translateY(-1px);
+}
+
+/* Log out is a destructive/session-ending action, so distinguish it clearly. */
+.phase5-logout-button {
+  border: 1px solid var(--phase5-red) !important;
+  background: var(--phase5-red) !important;
+  color: #fff !important;
+}
+
+.phase5-logout-button:hover,
+.phase5-logout-button:focus-visible {
+  border-color: #b31218 !important;
+  background: #b31218 !important;
+  color: #fff !important;
+  outline: none;
 }
 
 @media (max-width: 640px) {
@@ -144,5 +183,18 @@ body.phase11-change8 .phase6-back-button:focus-visible {
 
   .legal-logo {
     height: 44px;
+  }
+
+  body.phase11-change8 .phase6-back-button {
+    left: 18px !important;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px)) !important;
+    min-height: 42px !important;
+    padding: 9px 15px !important;
+    font-size: 13px !important;
+  }
+
+  body.phase11-change8 .phase6-back-button:hover,
+  body.phase11-change8 .phase6-back-button:focus-visible {
+    padding: 9px 15px !important;
   }
 }
