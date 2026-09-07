@@ -1,0 +1,29 @@
+name: Year 4 11+ import branch verification
+
+on:
+  push:
+    branches: [fix/video-y411-entitlements]
+    paths:
+      - '.github/workflows/y411-branch-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Y411 and existing importer verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase20-change14.js
+          node tests/y411-admin-import-baseline-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          grep -Fq 'main = "src/index-phase20-change14.js"' worker/wrangler.toml
+          echo 'Y411_BRANCH_VERIFY_PASS'
