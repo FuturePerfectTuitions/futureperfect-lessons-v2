@@ -10,6 +10,16 @@ import {
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
+function withoutLegacyPrelessonOverlay(env) {
+  return new Proxy(env, {
+    get(target, prop) {
+      if (prop === 'PHASE20_DISABLE_LEGACY_PRELESSON_OVERLAY') return true;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
+}
+
 function allowedOrigins(env) {
   return new Set([
     'https://futureperfecttuitions.github.io',
@@ -467,15 +477,16 @@ export {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const releaseEnv = withoutLegacyPrelessonOverlay(env);
     if (request.method === 'GET' && url.pathname === '/api/v1/student/home') {
-      return handleHome(request, env, ctx);
+      return handleHome(request, releaseEnv, ctx);
     }
 
     const viewMatch = url.pathname.match(/^\/api\/v1\/student\/views\/([^/]+)\/lessons$/);
     if (request.method === 'GET' && viewMatch) {
       let viewId = '';
       try { viewId = decodeURIComponent(viewMatch[1]).toLowerCase(); } catch { viewId = ''; }
-      if (viewId) return handleLessonList(request, env, ctx, viewId);
+      if (viewId) return handleLessonList(request, releaseEnv, ctx, viewId);
     }
 
     const lessonMatch = url.pathname.match(/^\/api\/v1\/student\/lessons\/([^/]+)$/);
@@ -483,13 +494,13 @@ export default {
       let lessonId = '';
       try { lessonId = decodeURIComponent(lessonMatch[1]); } catch { lessonId = ''; }
       const viewId = norm(url.searchParams.get('viewId'));
-      if (lessonId && viewId) return handleLessonDetail(request, env, ctx, lessonId, viewId);
+      if (lessonId && viewId) return handleLessonDetail(request, releaseEnv, ctx, lessonId, viewId);
     }
 
     const parsed = parseResourceRequest(url);
     if (parsed) {
       const viewId = norm(url.searchParams.get('viewId'));
-      if (viewId) return handleResource(request, env, ctx, parsed, viewId);
+      if (viewId) return handleResource(request, releaseEnv, ctx, parsed, viewId);
     }
 
     return phase20Worker.fetch(request, env, ctx);
