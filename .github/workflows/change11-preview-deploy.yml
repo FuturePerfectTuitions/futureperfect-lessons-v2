@@ -1,0 +1,66 @@
+name: Change 11 Full Library preview deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/change11-preview-deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Change 11 Full Library subject preview support
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Change 11 syntax
+        run: node --check worker/src/index-phase20-change11.js
+      - name: Verify Full Library preview adapter
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {
+            syntheticPreviewRows,
+            isPhase19PreviewQuery,
+            mergePreviewRows
+          } from './worker/src/index-phase20-change11.js';
+
+          const rows = syntheticPreviewRows({
+            fullLibraries: ['ENGLISH_Y3_FULL', 'ENGLISH_Y4_FULL', 'ENGLISH_Y5_FULL']
+          });
+          assert.deepEqual(rows.map(row => [row.subject, row.school_year, row.stream]), [
+            ['english', 3, 'normal'],
+            ['english', 4, 'normal'],
+            ['english', 5, 'normal']
+          ]);
+
+          const previewSql = `SELECT a.batch_key, b.subject, b.school_year, b.stream, b.maths_level
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key = a.batch_key`;
+          assert.equal(isPhase19PreviewQuery(previewSql), true);
+          assert.equal(isPhase19PreviewQuery('SELECT * FROM lesson_entitlements'), false);
+
+          const merged = mergePreviewRows(
+            [{ batch_key: 'REAL', subject: 'english', school_year: 4, stream: 'normal', maths_level: null }],
+            rows
+          );
+          assert.equal(merged.filter(row => row.subject === 'english' && row.school_year === 4 && row.stream === 'normal').length, 1);
+          assert.equal(merged.some(row => row.subject === 'english' && row.school_year === 3), true);
+          assert.equal(merged.some(row => row.subject === 'english' && row.school_year === 5), true);
+          console.log('CHANGE11_PREVIEW_ADAPTER_PASS');
+          NODE
+      - name: Deploy Worker preserving production bindings
+        run: bash ops/deploy_current_worker_preserve.sh
+      - name: Complete
+        run: echo CHANGE11_DEPLOY_PASS
