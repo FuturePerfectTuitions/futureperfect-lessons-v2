@@ -217,10 +217,10 @@ async function existingAccess(env, item) {
   const [full, pre] = await Promise.all([
     env.DB.prepare(`SELECT core_access FROM lesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ?`)
       .bind(item.portalUserIdNorm, item.lessonId).first(),
-    env.DB.prepare(`SELECT batch_key FROM online_prelesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ? LIMIT 1`)
+    env.DB.prepare(`SELECT batch_key, first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ? LIMIT 1`)
       .bind(item.portalUserIdNorm, item.lessonId).first()
   ]);
-  return { full:Number(full?.core_access) === 1, pre:Boolean(pre) };
+  return { full:Number(full?.core_access) === 1, pre:Boolean(pre), preFirstGrantedAt:clean(pre?.first_granted_at) };
 }
 
 async function previewRows(env, rows) {
@@ -325,7 +325,7 @@ async function grantPrelesson(env, item, validation) {
     item.lessonDate,
     vrAccess,
     item.syncRowId,
-    now,
+    access.preFirstGrantedAt || now,
     now
   );
 

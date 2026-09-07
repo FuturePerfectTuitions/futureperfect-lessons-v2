@@ -19,6 +19,8 @@
     mathsChoice: document.getElementById('maths-choice'),
     englishChoice: document.getElementById('english-choice'),
     subjectsMessage: document.getElementById('phase7-message'),
+    recentSharesPanel: document.getElementById('recent-shares-panel'),
+    recentSharesList: document.getElementById('recent-shares-list'),
     screenSubjects: document.getElementById('screen-subjects'),
     screenViews: document.getElementById('screen-views'),
     screenLessons: document.getElementById('screen-lessons'),
@@ -87,6 +89,59 @@
     els.subjectsMessage.hidden = !message;
   }
 
+  function formatSharedDate(value) {
+    const date = new Date(String(value || ''));
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('en-GB', {
+      day:'numeric', month:'short', year:'numeric', timeZone:'Europe/London'
+    }).format(date);
+  }
+
+  function sharedLessonLabel(item) {
+    const code = String(item?.displayLessonId || item?.lessonId || '').trim();
+    const title = String(item?.title || '').trim();
+    if (!code) return title || 'Lesson';
+    if (!title || title.toLowerCase().startsWith(code.toLowerCase())) return title || code;
+    return `${code} ${title}`;
+  }
+
+  function renderRecentShares(items = []) {
+    if (!els.recentSharesPanel || !els.recentSharesList) return;
+    els.recentSharesList.innerHTML = '';
+    const rows = Array.isArray(items) ? items : [];
+    els.recentSharesPanel.hidden = rows.length === 0;
+    if (!rows.length) return;
+
+    for (const item of rows) {
+      const row = document.createElement('article');
+      row.className = 'phase20-recent-share-row';
+
+      const link = document.createElement('a');
+      link.className = 'phase20-recent-share-link';
+      link.href = `#shared-${encodeURIComponent(String(item.viewId || ''))}-${encodeURIComponent(String(item.lessonId || ''))}`;
+      link.textContent = sharedLessonLabel(item);
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        openSharedLesson(item);
+      });
+
+      const meta = document.createElement('div');
+      meta.className = 'phase20-recent-share-meta';
+      const access = document.createElement('span');
+      access.className = `phase20-recent-share-access ${item.accessMode === 'prelesson' ? 'prelesson' : 'full'}`;
+      access.textContent = String(item.accessLabel || (item.accessMode === 'prelesson' ? 'PreLesson Sheets only' : 'Full lesson'));
+      const dateText = formatSharedDate(item.sharedAt);
+      const date = document.createElement('span');
+      date.textContent = dateText ? `Shared ${dateText}` : 'Recently shared';
+      meta.appendChild(access);
+      meta.appendChild(date);
+
+      row.appendChild(link);
+      row.appendChild(meta);
+      els.recentSharesList.appendChild(row);
+    }
+  }
+
   function resetPasswordVisibility() {
     els.password.type = 'password';
     els.togglePassword.setAttribute('aria-label', 'Show password');
@@ -130,12 +185,18 @@
     els.otherList.innerHTML = '';
   }
 
+  function resetRecentShares() {
+    if (els.recentSharesList) els.recentSharesList.innerHTML = '';
+    if (els.recentSharesPanel) els.recentSharesPanel.hidden = true;
+  }
+
   function resetNavigation() {
     state.home = null;
     state.subjectKey = null;
     state.subjectLabel = null;
     state.view = null;
     state.lessons = [];
+    resetRecentShares();
     els.viewGrid.innerHTML = '';
     els.lessonList.innerHTML = '';
     els.lessonEmpty.hidden = true;
@@ -189,6 +250,7 @@
         return null;
       }
       state.home = body;
+      renderRecentShares(body.recentShares);
       return body;
     } catch (_) {
       state.home = null;
@@ -445,6 +507,59 @@
       row.appendChild(stateLabel);
       row.addEventListener('click', () => openLesson(lesson));
       els.lessonList.appendChild(row);
+    }
+  }
+
+  async function openSharedLesson(item) {
+    recordActivity();
+    if (!state.home) {
+      const home = await loadHome();
+      if (!home) return;
+    }
+
+    const subjectKey = String(item?.subject || '').toLowerCase();
+    const subjectLabel = subjectKey === 'english' ? 'English' : 'Maths';
+    const subject = subjectFromHome(subjectKey);
+    const viewSummary = (Array.isArray(subject.views) ? subject.views : [])
+      .find(view => String(view?.viewId || '').toLowerCase() === String(item?.viewId || '').toLowerCase()) || {
+        viewId:String(item?.viewId || ''),
+        label:String(item?.viewLabel || 'Lessons'),
+        subject:subjectKey,
+        catalogueAvailable:true
+      };
+
+    if (!viewSummary.viewId || !item?.lessonId) return;
+    state.subjectKey = subjectKey;
+    state.subjectLabel = subjectLabel;
+    resetLessonPanel();
+    showPortalScreen('lesson');
+    els.lessonLoading.hidden = false;
+
+    const body = await fetchViewLessons(viewSummary);
+    if (!body) {
+      els.lessonLoading.hidden = true;
+      els.lessonError.textContent = 'This lesson is temporarily unavailable. Please try again.';
+      els.lessonError.hidden = false;
+      return;
+    }
+
+    state.view = body.view || viewSummary;
+    state.lessons = Array.isArray(body.lessons) ? body.lessons : [];
+    const listed = state.lessons.find(lesson => String(lesson?.lessonId || '') === String(item.lessonId));
+    if (!listed || listed.locked) {
+      els.lessonLoading.hidden = true;
+      els.lessonError.textContent = 'This shared lesson is no longer available.';
+      els.lessonError.hidden = false;
+      return;
+    }
+
+    try {
+      const lesson = await fetchLesson(item.lessonId);
+      if (lesson) renderLesson(lesson);
+    } catch (_) {
+      els.lessonLoading.hidden = true;
+      els.lessonError.textContent = 'This lesson is temporarily unavailable. Please try again.';
+      els.lessonError.hidden = false;
     }
   }
 

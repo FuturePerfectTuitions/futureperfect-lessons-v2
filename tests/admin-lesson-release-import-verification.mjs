@@ -253,6 +253,10 @@ assert.equal(
   'Batch may be retained as audit metadata without requiring a D1 batch definition'
 );
 assert.equal(db.entitlements.has('pre0101|Y5E2'), false);
+const firstPreGrantedAt = [...db.prelessons.values()][0]?.first_granted_at;
+const repeatPre = await call('/api/v1/admin/lesson-releases/confirm', { rows:[onlineReady] }, token);
+assert.equal(repeatPre.response.status, 200);
+assert.equal([...db.prelessons.values()][0]?.first_granted_at, firstPreGrantedAt, 'Idempotent PreLesson confirmation must preserve the original shared timestamp');
 
 const upgradeRow = { ...onlineReady, LessonStatus:'Completed' };
 const upgrade = await call(

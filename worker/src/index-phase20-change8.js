@@ -138,6 +138,37 @@ function viewIdForAccess(lesson, batchKey = '') {
   return '';
 }
 
+function displayLessonIdForView(lesson, viewId) {
+  const id = norm(viewId);
+  for (const source of [lesson?.displayIds, lesson?.displayLessonIds, lesson?.presentation?.displayIds]) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    const exact = clean(source[viewId]);
+    if (exact) return exact;
+    const matchedKey = Object.keys(source).find(key => norm(key) === id);
+    if (matchedKey && clean(source[matchedKey])) return clean(source[matchedKey]);
+  }
+  return clean(lesson?.lessonId);
+}
+
+function recentShareItems(accessRows, limit = 20) {
+  return accessRows
+    .filter(row => row?.lesson && row?.viewId && row?.sharedAt)
+    .sort((a, b) => String(b.sharedAt).localeCompare(String(a.sharedAt)))
+    .slice(0, Math.max(1, Number(limit) || 20))
+    .map(row => ({
+      lessonId:row.lessonId,
+      displayLessonId:displayLessonIdForView(row.lesson, row.viewId),
+      title:clean(row.lesson?.title) || displayLessonIdForView(row.lesson, row.viewId),
+      subject:viewSubject(row.viewId),
+      viewId:row.viewId,
+      viewLabel:viewLabel(row.viewId),
+      accessMode:row.mode,
+      accessLabel:row.mode === 'prelesson' ? 'PreLesson Sheets only' : 'Full lesson',
+      sharedAt:row.sharedAt,
+      lessonDate:row.lessonDate
+    }));
+}
+
 function fullLibraryForView(viewId) {
   const id = clean(viewId).toLowerCase();
   let match = id.match(/^english-year([2-6])(-11plus)?$/);
@@ -186,12 +217,12 @@ async function rawAccessRows(env, portalUserIdNorm) {
   if (!portalUserIdNorm) return [];
   const [full, pre] = await Promise.all([
     env.DB.prepare(
-      `SELECT lesson_id, vr_access, source_batch_code, source_lesson_date
+      `SELECT lesson_id, vr_access, source_batch_code, source_lesson_date, first_granted_at
        FROM lesson_entitlements
        WHERE portal_user_id_norm = ? AND core_access = 1`
     ).bind(portalUserIdNorm).all(),
     env.DB.prepare(
-      `SELECT lesson_id, vr_access, batch_key, lesson_date
+      `SELECT lesson_id, vr_access, batch_key, lesson_date, first_granted_at
        FROM online_prelesson_entitlements
        WHERE portal_user_id_norm = ?`
     ).bind(portalUserIdNorm).all()
@@ -206,7 +237,8 @@ async function rawAccessRows(env, portalUserIdNorm) {
       mode: 'full',
       vrAccess: Number(row.vr_access) === 1,
       batchKey: clean(row.source_batch_code),
-      lessonDate: clean(row.source_lesson_date)
+      lessonDate: clean(row.source_lesson_date),
+      sharedAt: clean(row.first_granted_at)
     });
   }
   for (const row of Array.isArray(pre?.results) ? pre.results : []) {
@@ -217,7 +249,8 @@ async function rawAccessRows(env, portalUserIdNorm) {
       mode: 'prelesson',
       vrAccess: Number(row.vr_access) === 1,
       batchKey: clean(row.batch_key),
-      lessonDate: clean(row.lesson_date)
+      lessonDate: clean(row.lesson_date),
+      sharedAt: clean(row.first_granted_at)
     });
   }
   return [...byLesson.values()];
@@ -301,7 +334,8 @@ async function handleHome(request, env, ctx) {
   if (!body?.ok || !portalUserIdNorm) return response;
 
   const accessRows = await resolvedAccessRows(env, portalUserIdNorm);
-  if (!accessRows.length) return response;
+  body.recentShares = recentShareItems(accessRows);
+  if (!accessRows.length) return jsonLike(response, body);
   const grouped = new Map();
   for (const row of accessRows) {
     if (!grouped.has(row.viewId)) grouped.set(row.viewId, []);
@@ -471,7 +505,9 @@ export {
   viewIdForAccess,
   fullLibraryForView,
   academicYearStart,
-  currentFromDates
+  currentFromDates,
+  displayLessonIdForView,
+  recentShareItems
 };
 
 export default {
