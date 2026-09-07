@@ -10,300 +10,53 @@ permissions:
   contents: read
 
 jobs:
-  rename:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Stage exact identity rename and preserve all account data
+      - name: Read-only locate AdminTrial identities
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-
           node <<'NODE'
-          const fs = require('fs');
           const token = String(process.env.CLOUDFLARE_API_TOKEN || '');
           const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '');
           const workerName = String(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
           const api = 'https://api.cloudflare.com/client/v4';
-
-          async function cf(pathname, init = {}) {
-            const response = await fetch(`${api}${pathname}`, {
-              ...init,
-              headers: {
-                Authorization: `Bearer ${token}`,
-                ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-                ...(init.headers || {})
-              }
-            });
-            const body = await response.json().catch(() => null);
-            if (!response.ok || !body?.success) {
-              throw new Error(`Cloudflare operation failed: HTTP ${response.status}`);
-            }
-            return body;
+          async function cf(pathname) {
+            const r = await fetch(`${api}${pathname}`, { headers: { Authorization: `Bearer ${token}` } });
+            const b = await r.json().catch(() => null);
+            if (!r.ok || !b?.success) throw new Error(`CF_READ_FAILED ${pathname} HTTP=${r.status} errors=${JSON.stringify(b?.errors || [])}`);
+            return b;
           }
-
-          async function listAllKeys(namespaceId) {
-            const names = [];
-            let cursor = '';
-            do {
-              const query = new URLSearchParams({ limit: '1000' });
-              if (cursor) query.set('cursor', cursor);
-              const body = await cf(`/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/keys?${query}`);
-              for (const row of body.result || []) names.push(String(row?.name || ''));
-              cursor = String(body?.result_info?.cursor || '');
-            } while (cursor);
-            return names.filter(Boolean);
-          }
-
-          async function bulkGet(namespaceId, keys) {
-            if (!keys.length) return {};
-            const body = await cf(`/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/bulk/get`, {
-              method: 'POST',
-              body: JSON.stringify({ keys, type: 'text', withMetadata: false })
-            });
-            return body?.result?.values || {};
-          }
-
-          async function bulkPut(namespaceId, rows) {
-            if (!rows.length) return;
-            const body = await cf(`/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/bulk`, {
-              method: 'PUT', body: JSON.stringify(rows)
-            });
-            if ((body?.result?.unsuccessful_keys || []).length) throw new Error('KV bulk write reported unsuccessful keys.');
-          }
-
-          async function d1(dbId, payload) {
-            return cf(`/accounts/${accountId}/d1/database/${dbId}/query`, {
-              method: 'POST', body: JSON.stringify(payload)
-            });
-          }
-
           const settings = await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
-          fs.writeFileSync('/tmp/fpt-worker-settings-before.json', JSON.stringify(settings));
           const bindings = settings?.result?.bindings || [];
-          const environment = String(bindings.find(x => x?.name === 'ENVIRONMENT' && x?.type === 'plain_text')?.text || '');
-          if (environment !== 'production') throw new Error('Refusing to rename against a non-production Worker.');
-          const studentsId = String(bindings.find(x => x?.name === 'STUDENTS_KV' && x?.type === 'kv_namespace')?.namespace_id || '');
-          const dbId = String(bindings.find(x => x?.name === 'DB' && x?.type === 'd1')?.id || '');
-          if (!studentsId || !dbId) throw new Error('Required production STUDENTS_KV / D1 bindings are unavailable.');
-
-          const keys = await listAllKeys(studentsId);
-          const oldKeys = keys.filter(key => /^(user|student):admintrial.*$/i.test(key));
-          if (!oldKeys.length) throw new Error('No AdminTrial account keys were found; no write was made.');
-
-          const mappingsByOld = new Map();
-          const keyPlans = [];
-          for (const oldKey of oldKeys) {
-            const match = oldKey.match(/^([^:]+):(admintrial)(.*)$/i);
-            if (!match) continue;
-            const prefix = match[1];
-            const suffix = match[3];
-            const oldNorm = `admintrial${suffix}`.toLowerCase();
-            const newNorm = `demo${suffix}`.toLowerCase();
-            const newKey = `${prefix}:${newNorm}`;
-            if (keys.includes(newKey)) throw new Error(`Target account key already exists for ${newNorm}.`);
-            mappingsByOld.set(oldNorm, newNorm);
-            keyPlans.push({ oldKey, newKey, oldNorm, newNorm, displayId: `Demo${suffix}` });
-          }
-          const mappings = [...mappingsByOld.entries()].map(([oldNorm, newNorm]) => ({ oldNorm, newNorm, displayId: `Demo${oldNorm.slice('admintrial'.length)}` }));
-          if (!mappings.length) throw new Error('No valid AdminTrial mappings were produced.');
-
-          const rawValues = await bulkGet(studentsId, oldKeys);
-          const writes = [];
-          const originals = {};
-          for (const plan of keyPlans) {
-            const raw = rawValues[plan.oldKey];
-            if (raw == null) throw new Error(`Could not read ${plan.oldKey}.`);
-            originals[plan.oldKey] = String(raw);
-            const before = JSON.parse(String(raw));
-            const after = structuredClone(before);
-            if (Object.prototype.hasOwnProperty.call(after, 'portalUserId')) after.portalUserId = plan.displayId;
-            const stripId = value => {
-              const clone = structuredClone(value);
-              delete clone.portalUserId;
-              return JSON.stringify(clone);
-            };
-            if (stripId(before) !== stripId(after)) throw new Error(`Non-identity mutation detected for ${plan.oldNorm}.`);
-            writes.push({ key: plan.newKey, value: JSON.stringify(after) });
-          }
-
-          const tablesBody = await d1(dbId, { sql: "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name" });
-          const allTables = (tablesBody?.result?.[0]?.results || []).map(row => String(row.name || '')).filter(name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
-          const userTables = [];
-          for (const table of allTables) {
-            const info = await d1(dbId, { sql: `PRAGMA table_info(\"${table}\")` });
-            const columns = (info?.result?.[0]?.results || []).map(row => String(row.name || ''));
-            if (columns.includes('portal_user_id_norm')) userTables.push(table);
-          }
-          if (!userTables.length) throw new Error('No D1 user-reference tables were found.');
-
-          const beforeCounts = {};
-          for (const { oldNorm, newNorm } of mappings) {
-            beforeCounts[oldNorm] = {};
-            for (const table of userTables) {
-              const counts = await d1(dbId, {
-                sql: `SELECT SUM(CASE WHEN portal_user_id_norm = ? THEN 1 ELSE 0 END) AS old_count, SUM(CASE WHEN portal_user_id_norm = ? THEN 1 ELSE 0 END) AS new_count FROM \"${table}\"`,
-                params: [oldNorm, newNorm]
-              });
-              const row = counts?.result?.[0]?.results?.[0] || {};
-              const oldCount = Number(row.old_count || 0);
-              const newCount = Number(row.new_count || 0);
-              if (newCount !== 0) throw new Error(`D1 target collision for ${newNorm} in ${table}.`);
-              beforeCounts[oldNorm][table] = oldCount;
-            }
-          }
-
-          const currentAllowlist = String(bindings.find(x => x?.name === 'PROD_LOGIN_ALLOWLIST' && x?.type === 'plain_text')?.text || '');
-          const allowTokens = currentAllowlist.split(',').map(x => x.trim()).filter(Boolean);
-          const mappingMap = new Map(mappings.map(x => [x.oldNorm, x.newNorm]));
-          const newAllowTokens = allowTokens.map(tokenValue => mappingMap.get(tokenValue.toLowerCase()) || tokenValue);
-          const newAllowlist = newAllowTokens.join(',');
-
-          await bulkPut(studentsId, writes);
-          const statements = [];
-          for (const { oldNorm, newNorm } of mappings) {
-            for (const table of userTables) {
-              statements.push({ sql: `UPDATE \"${table}\" SET portal_user_id_norm = ? WHERE portal_user_id_norm = ?`, params: [newNorm, oldNorm] });
-            }
-          }
-          if (statements.length) await d1(dbId, { batch: statements });
-
-          const plan = { studentsId, dbId, mappings, keyPlans, originals, userTables, beforeCounts, currentAllowlist, newAllowlist };
-          fs.writeFileSync('/tmp/rename-plan.json', JSON.stringify(plan));
-          fs.writeFileSync('/tmp/new-allowlist.txt', newAllowlist);
-          console.log(`STAGED_ADMINTRIAL_RENAME accounts=${mappings.length} kv_keys=${keyPlans.length} d1_tables=${userTables.length}`);
-          console.log('IDs: ' + mappings.map(x => `${x.oldNorm}->${x.newNorm}`).join(', '));
-          NODE
-
-      - name: Update only the production login identity allowlist
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          import json, re
-          settings = json.load(open('/tmp/fpt-worker-settings-before.json'))['result']
-          new_allow = open('/tmp/new-allowlist.txt').read()
-          text = open('worker/wrangler.toml').read()
-          m = re.search(r'^main\s*=\s*"([^"]+)"', text, re.M)
-          if not m:
-              raise SystemExit('Production entrypoint not found')
-          entry = m.group(1)
-          bindings = settings.get('bindings') or []
-          def plain(name):
-              for b in bindings:
-                  if b.get('name') == name and b.get('type') == 'plain_text':
-                      return str(b.get('text') or '')
-              return ''
-          lines = [
-              f'name = {json.dumps("fpt-portal-v2-worker")}',
-              f'main = {json.dumps(entry)}',
-              f'compatibility_date = {json.dumps(settings.get("compatibility_date") or "2026-08-20")}',
-              'keep_vars = true',
-              'workers_dev = true', '', '[vars]'
-          ]
-          for name in ['ENVIRONMENT','ALLOWED_ORIGINS','DEV_LOGIN_ALLOWLIST','PROD_LOGIN_ALLOWLIST','STUDENT_LOGIN_ENABLED']:
-              value = new_allow if name == 'PROD_LOGIN_ALLOWLIST' else plain(name)
-              lines.append(f'{name} = {json.dumps(value)}')
-          for b in bindings:
-              t, name = b.get('type'), b.get('name')
-              if t == 'kv_namespace' and name in ('STUDENTS_KV','LESSONS_KV'):
-                  lines += ['', '[[kv_namespaces]]', f'binding = {json.dumps(name)}', f'id = {json.dumps(str(b.get("namespace_id") or ""))}']
-              elif t == 'r2_bucket' and name == 'MATERIALS_R2':
-                  lines += ['', '[[r2_buckets]]', f'binding = {json.dumps(name)}', f'bucket_name = {json.dumps(str(b.get("bucket_name") or ""))}']
-              elif t == 'd1' and name == 'DB':
-                  lines += ['', '[[d1_databases]]', f'binding = {json.dumps(name)}', 'database_name = "fpt_portal_v2_db"', f'database_id = {json.dumps(str(b.get("id") or ""))}']
-          open('worker/wrangler.runtime-rename.toml','w').write('\n'.join(lines)+'\n')
-          PY
-
-          jq -c '[.result.bindings[] | select((.type // "") | test("secret";"i")) | .name] | sort' /tmp/fpt-worker-settings-before.json > /tmp/secrets-before.json
-          npx --yes wrangler@4.125.0 deploy --config worker/wrangler.runtime-rename.toml --keep-vars --message "Rename AdminTrial Portal IDs to Demo"
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/fpt-worker-settings-after.json
-          jq -e '.success == true' /tmp/fpt-worker-settings-after.json >/dev/null
-          jq -c '[.result.bindings[] | select((.type // "") | test("secret";"i")) | .name] | sort' /tmp/fpt-worker-settings-after.json > /tmp/secrets-after.json
-          cmp -s /tmp/secrets-before.json /tmp/secrets-after.json
-          ACTUAL_ALLOW="$(jq -r '[.result.bindings[]|select(.name=="PROD_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/fpt-worker-settings-after.json)"
-          EXPECTED_ALLOW="$(cat /tmp/new-allowlist.txt)"
-          test "$ACTUAL_ALLOW" = "$EXPECTED_ALLOW"
-
-      - name: Finalize old-key removal and verify exact parity
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs = require('fs');
-          const token = String(process.env.CLOUDFLARE_API_TOKEN || '');
-          const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '');
-          const plan = JSON.parse(fs.readFileSync('/tmp/rename-plan.json', 'utf8'));
-          const api = 'https://api.cloudflare.com/client/v4';
-
-          async function cf(pathname, init = {}) {
-            const response = await fetch(`${api}${pathname}`, {
-              ...init,
-              headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers || {}) }
-            });
-            const body = await response.json().catch(() => null);
-            if (!response.ok || !body?.success) throw new Error(`Cloudflare verification failed: HTTP ${response.status}`);
-            return body;
-          }
-          async function bulkGet(keys) {
-            const body = await cf(`/accounts/${accountId}/storage/kv/namespaces/${plan.studentsId}/bulk/get`, {
-              method: 'POST', body: JSON.stringify({ keys, type: 'text', withMetadata: false })
-            });
-            return body?.result?.values || {};
-          }
-          async function d1(sql, params = []) {
-            return cf(`/accounts/${accountId}/d1/database/${plan.dbId}/query`, { method: 'POST', body: JSON.stringify({ sql, params }) });
-          }
-
-          for (const item of plan.keyPlans) {
-            const response = await fetch(`${api}/accounts/${accountId}/storage/kv/namespaces/${plan.studentsId}/values/${encodeURIComponent(item.oldKey)}`, {
-              method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
-            });
-            const body = await response.json().catch(() => null);
-            if (!response.ok || !body?.success) throw new Error(`Could not remove old key ${item.oldKey}.`);
-          }
-
-          const newValues = await bulkGet(plan.keyPlans.map(x => x.newKey));
-          const oldValues = await bulkGet(plan.keyPlans.map(x => x.oldKey));
-          for (const item of plan.keyPlans) {
-            if (oldValues[item.oldKey] != null) throw new Error(`Old key still exists: ${item.oldKey}.`);
-            const raw = newValues[item.newKey];
-            if (raw == null) throw new Error(`New key missing: ${item.newKey}.`);
-            const before = JSON.parse(plan.originals[item.oldKey]);
-            const after = JSON.parse(String(raw));
-            const oldPortal = before.portalUserId;
-            const newPortal = after.portalUserId;
-            delete before.portalUserId;
-            delete after.portalUserId;
-            if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error(`Non-identity KV field changed for ${item.newNorm}.`);
-            if (oldPortal !== undefined && String(newPortal) !== item.displayId) throw new Error(`portalUserId was not renamed for ${item.newNorm}.`);
-          }
-
-          for (const { oldNorm, newNorm } of plan.mappings) {
-            for (const table of plan.userTables) {
-              const body = await d1(`SELECT SUM(CASE WHEN portal_user_id_norm = ? THEN 1 ELSE 0 END) AS old_count, SUM(CASE WHEN portal_user_id_norm = ? THEN 1 ELSE 0 END) AS new_count FROM \"${table}\"`, [oldNorm, newNorm]);
-              const row = body?.result?.[0]?.results?.[0] || {};
-              const oldCount = Number(row.old_count || 0);
-              const newCount = Number(row.new_count || 0);
-              const expected = Number(plan.beforeCounts?.[oldNorm]?.[table] || 0);
-              if (oldCount !== 0 || newCount !== expected) throw new Error(`D1 parity failed for ${oldNorm} in ${table}.`);
-            }
-          }
-
-          console.log(`ADMINTRIAL_RENAME_PASS accounts=${plan.mappings.length}`);
-          console.log('Renamed: ' + plan.mappings.map(x => `${x.oldNorm}->${x.newNorm}`).join(', '));
+          console.log('BINDINGS=' + bindings.map(x => `${x.name}:${x.type}`).join(','));
+          const students = String(bindings.find(x => x?.name === 'STUDENTS_KV' && x?.type === 'kv_namespace')?.namespace_id || '');
+          const db = bindings.find(x => x?.name === 'DB');
+          console.log(`STUDENTS_BOUND=${Boolean(students)} DB_TYPE=${String(db?.type || '')} DB_ID_FIELD=${Boolean(db?.id)} DB_DATABASE_ID_FIELD=${Boolean(db?.database_id)}`);
+          if (!students) throw new Error('STUDENTS_KV_NOT_FOUND');
+          let cursor = '';
+          const names = [];
+          do {
+            const q = new URLSearchParams({ limit: '1000' });
+            if (cursor) q.set('cursor', cursor);
+            const page = await cf(`/accounts/${accountId}/storage/kv/namespaces/${students}/keys?${q.toString()}`);
+            for (const x of page.result || []) names.push(String(x?.name || ''));
+            cursor = String(page?.result_info?.cursor || '');
+          } while (cursor);
+          const matches = names.filter(x => x.toLowerCase().includes('admintrial'));
+          console.log(`KV_TOTAL_KEYS=${names.length}`);
+          console.log(`ADMINTRIAL_MATCH_COUNT=${matches.length}`);
+          console.log('ADMINTRIAL_KEYS=' + matches.join(','));
+          const prefixes = [...new Set(names.filter(x => x.includes(':')).map(x => x.split(':')[0]))].sort();
+          console.log('KV_PREFIXES=' + prefixes.join(','));
           NODE
