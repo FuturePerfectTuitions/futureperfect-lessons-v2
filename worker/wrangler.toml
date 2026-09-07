@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change16.js"
+main = "src/index-phase20-change17-parent-email.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,12 +9,21 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 16 restricts cross-subject upsell previews
-# to subjects in which the student has no actual entitlement. If a student already
-# has any real English access, English year/level navigation comes only from
-# explicit English entitlements/imports; Maths access cannot add extra English
-# year cards. The same rule applies in reverse for Maths. This preserves the
-# unenrolled-subject upsell catalogue while preventing over-broad navigation.
+[[send_email]]
+name = "EMAIL"
+
+# Portal V2 production entrypoint. Change 17 adds transactional parent email
+# delivery to the confirmed admin CSV import. The existing entitlement importer
+# remains authoritative for Portal access; emails are sent only after confirm.
+# Normal Year 4/5/6 CSV L-prefixes are corrected to Y4/Y5/Y6 for Portal lookup and
+# email display, while genuine 11+ L1/L2/L3 lesson codes remain unchanged.
+#
+# Change 16 restricts cross-subject upsell previews to subjects in which the
+# student has no actual entitlement. If a student already has any real English
+# access, English year/level navigation comes only from explicit English
+# entitlements/imports; Maths access cannot add extra English year cards. The same
+# rule applies in reverse for Maths. This preserves the unenrolled-subject upsell
+# catalogue while preventing over-broad navigation.
 #
 # Change 15 fixes Maths 11+ navigation presentation: students with 11+ Maths access
 # see L1/L2/L3 rather than normal Year 4/5/6 aliases for the same curricula.
