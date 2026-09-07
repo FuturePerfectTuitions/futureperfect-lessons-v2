@@ -1,0 +1,75 @@
+name: Maths 11+ navigation production deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/maths-11plus-navigation-production-deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Portal V2 Maths 11+ L1 L2 L3 navigation
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Change 15 navigation regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-phase20-change15.js
+          node tests/maths-11plus-level-navigation-verification.mjs
+          node tests/y411-admin-import-baseline-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          grep -Fq 'main = "src/index-phase20-change15.js"' worker/wrangler.toml
+          echo 'MATHS_11PLUS_NAV_STATIC_PASS'
+
+      - name: Require production bindings and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/maths11-settings.json
+          jq -e '.success == true' /tmp/maths11-settings.json >/dev/null
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
+            jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/maths11-settings.json >/dev/null
+          done
+          echo 'MATHS_11PLUS_NAV_BINDINGS_PASS'
+
+      - name: Deploy current production Worker preserving bindings and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+          echo 'MATHS_11PLUS_NAV_DEPLOY_PASS'
+
+      - name: Verify live Worker security boundary after deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --output /tmp/maths11-home.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" \
+            "$BASE/api/v1/student/home")"
+          test "$code" = '401'
+          echo 'MATHS_11PLUS_NAV_LIVE_SECURITY_PASS'
