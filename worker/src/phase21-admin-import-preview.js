@@ -45,7 +45,7 @@ function publicRow(row) {
   };
 }
 
-async function normaliseCsvRows(csvText) {
+async function normaliseCsvRows(env, csvText) {
   const parsed = parseCsv(csvText);
   if (parsed.error) return parsed;
   const rows = [];
@@ -99,7 +99,7 @@ async function normaliseCsvRows(csvText) {
       continue;
     }
 
-    const resolved = resolveLessonCode(csvLessonId);
+    const resolved = await resolveLessonCode(env, csvLessonId, csvLessonTitle);
     if (resolved.error) {
       Object.assign(row, { status: resolved.error, category: 'error', message: resolved.message });
       rows.push(row);
@@ -278,7 +278,7 @@ function previewSummary(rows) {
 
 async function buildPreview(env, csvText, filename = '') {
   const digest = await sha256Hex(csvText);
-  const normalised = await normaliseCsvRows(csvText);
+  const normalised = await normaliseCsvRows(env, csvText);
   if (normalised.error) return { error: normalised.error, message: normalised.message };
   const rows = normalised.rows;
   markFileDuplicates(rows);
