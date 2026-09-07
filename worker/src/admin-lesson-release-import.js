@@ -43,6 +43,77 @@ function extractLessonId(value) {
   return canonicalLessonId(first.replace(/^["']|["',;:]$/g, ''));
 }
 
+function curriculumCandidatesForDisplayId(value) {
+  const id = clean(value).toUpperCase();
+  let match = id.match(/^Y([2-6])T\d+E{1,2}\d+$/);
+  if (match) return [`ENGLISH_Y${match[1]}`];
+
+  match = id.match(/^L([1-3])T\d+M\d+$/);
+  if (match) return [`MATHS_L${match[1]}`];
+
+  match = id.match(/^Y([2-6])T\d+M\d+$/);
+  if (!match) return [];
+  const year = Number(match[1]);
+  if (year === 2 || year === 3) return [`MATHS_Y${year}`];
+  if (year === 4) return ['MATHS_L1'];
+  if (year === 5) return ['MATHS_L2'];
+  return ['MATHS_L3', 'MATHS_Y6_EXTRA'];
+}
+
+function createLessonResolver(env) {
+  const inputCache = new Map();
+  const curriculumCache = new Map();
+
+  async function curriculumDisplayMap(code) {
+    if (curriculumCache.has(code)) return curriculumCache.get(code);
+    const promise = (async () => {
+      const curriculum = await env.LESSONS_KV.get(`curriculum:${code}`, { type:'json' });
+      const lessonIds = Array.isArray(curriculum?.lessonIds) ? curriculum.lessonIds.map(clean).filter(Boolean) : [];
+      const lessons = await Promise.all(lessonIds.map(id => env.LESSONS_KV.get(`lesson:${id}`, { type:'json' })));
+      const map = new Map();
+      for (const lesson of lessons) {
+        if (!lesson || lesson.active === false || !clean(lesson.lessonId)) continue;
+        for (const displayId of Object.values(lesson.displayIds || {})) {
+          const key = norm(displayId);
+          if (!key) continue;
+          if (!map.has(key)) map.set(key, []);
+          map.get(key).push({ lessonId:clean(lesson.lessonId), lesson });
+        }
+      }
+      return map;
+    })();
+    curriculumCache.set(code, promise);
+    return promise;
+  }
+
+  return async inputLessonId => {
+    const supplied = clean(inputLessonId);
+    const cacheKey = norm(supplied);
+    if (inputCache.has(cacheKey)) return inputCache.get(cacheKey);
+
+    const promise = (async () => {
+      const directId = canonicalLessonId(supplied);
+      const directLesson = await env.LESSONS_KV.get(`lesson:${directId}`, { type:'json' });
+      if (directLesson && clean(directLesson.lessonId) === directId && directLesson.active !== false) {
+        return { lessonId:directId, lesson:directLesson };
+      }
+
+      const matches = [];
+      for (const curriculumCode of curriculumCandidatesForDisplayId(supplied)) {
+        const map = await curriculumDisplayMap(curriculumCode);
+        for (const match of map.get(norm(supplied)) || []) matches.push(match);
+      }
+      const unique = new Map(matches.map(match => [match.lessonId, match]));
+      if (unique.size === 1) return [...unique.values()][0];
+      if (unique.size > 1) return { error:'AMBIGUOUS_LESSON_DISPLAY_ID', message:'CSV lesson ID matches more than one active Portal lesson.' };
+      return { error:'LESSON_NOT_FOUND', message:'CSV lesson ID does not match an active Portal display ID or canonical lesson ID.' };
+    })();
+
+    inputCache.set(cacheKey, promise);
+    return promise;
+  };
+}
+
 function isoDate(year, month, day) {
   const y = Number(year), m = Number(month), d = Number(day);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -91,6 +162,7 @@ function normaliseCsvRow(row, index) {
     portalUserIdNorm: norm(portalUserId),
     batchKey,
     lessonId,
+    inputLessonId:lessonId,
     lessonDate,
     releaseType,
     lessonStatus,
@@ -117,10 +189,10 @@ function isBlocked(student, lessonId) {
   return new Set(Array.isArray(student?.blockedLessons) ? student.blockedLessons.map(String) : []).has(lessonId);
 }
 
-async function validatePortalState(env, item) {
+async function validatePortalState(env, item, resolvedLesson = null) {
   const [student, lesson, batch] = await Promise.all([
     env.STUDENTS_KV.get(`user:${item.portalUserIdNorm}`, { type: 'json' }),
-    env.LESSONS_KV.get(`lesson:${item.lessonId}`, { type: 'json' }),
+    resolvedLesson ? Promise.resolve(resolvedLesson) : env.LESSONS_KV.get(`lesson:${item.lessonId}`, { type: 'json' }),
     env.DB.prepare(`SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions WHERE batch_key = ?`).bind(item.batchKey).first()
   ]);
   if (!student) return { error: 'STUDENT_NOT_FOUND', message: 'Portal student does not exist.' };
@@ -147,25 +219,40 @@ async function existingAccess(env, item) {
 
 async function previewRows(env, rows) {
   const normalized = rows.map(normaliseCsvRow);
+  const resolveLesson = createLessonResolver(env);
   const results = [];
   const seen = new Set();
-  for (const item of normalized) {
+  for (const sourceItem of normalized) {
+    const shape = shapeError(sourceItem);
+    if (shape) {
+      results.push({ ...sourceItem, ok: false, action: shape[0], message: shape[1] });
+      continue;
+    }
+    if (sourceItem.releaseType === 'SKIP') {
+      const key = `${sourceItem.portalUserIdNorm}|${sourceItem.lessonId}|${sourceItem.batchKey}|${sourceItem.releaseType}`;
+      if (seen.has(key)) {
+        results.push({ ...sourceItem, ok: true, action: 'SKIP_DUPLICATE', message: 'Duplicate CSV row; no second action will be applied.' });
+      } else {
+        seen.add(key);
+        results.push({ ...sourceItem, ok: true, action: 'NO_RELEASE', message: 'Face-to-face lesson is not Completed, so nothing will be released.' });
+      }
+      continue;
+    }
+
+    const resolved = await resolveLesson(sourceItem.lessonId);
+    if (resolved.error) {
+      results.push({ ...sourceItem, ok:false, action:resolved.error, message:resolved.message });
+      continue;
+    }
+    const item = { ...sourceItem, lessonId:resolved.lessonId };
     const key = `${item.portalUserIdNorm}|${item.lessonId}|${item.batchKey}|${item.releaseType}`;
     if (seen.has(key)) {
       results.push({ ...item, ok: true, action: 'SKIP_DUPLICATE', message: 'Duplicate CSV row; no second action will be applied.' });
       continue;
     }
     seen.add(key);
-    const shape = shapeError(item);
-    if (shape) {
-      results.push({ ...item, ok: false, action: shape[0], message: shape[1] });
-      continue;
-    }
-    if (item.releaseType === 'SKIP') {
-      results.push({ ...item, ok: true, action: 'NO_RELEASE', message: 'Face-to-face lesson is not Completed, so nothing will be released.' });
-      continue;
-    }
-    const validation = await validatePortalState(env, item);
+
+    const validation = await validatePortalState(env, item, resolved.lesson);
     if (validation.error) {
       results.push({ ...item, ok: false, action: validation.error, message: validation.message });
       continue;
@@ -305,4 +392,4 @@ export async function handleAdminLessonReleaseImport(request, env) {
   return handleConfirm(request, env);
 }
 
-export { normaliseCsvRow, parseLessonDate, extractLessonId, previewRows };
+export { normaliseCsvRow, parseLessonDate, extractLessonId, previewRows, curriculumCandidatesForDisplayId, createLessonResolver };
