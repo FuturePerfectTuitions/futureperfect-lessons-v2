@@ -1,0 +1,61 @@
+name: Change 15 postdeploy diagnostic
+
+on:
+  push:
+    branches: [diag/change15-postdeploy]
+    paths:
+      - '.github/workflows/change15-postdeploy-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Inspect current Worker bindings safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          echo 'Current secret binding names:'
+          jq -r '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | sort | .[]' /tmp/settings.json
+          echo 'Current secret binding count:'
+          jq -r '[.result.bindings[] | select((.type // "") | test("secret"; "i"))] | length' /tmp/settings.json
+          for required in ADMIN_IMPORT_PASSWORD ADMIN_IMPORT_SESSION_SECRET EXCEL_SYNC_TOKEN; do
+            jq -e --arg n "$required" '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | index($n) != null' /tmp/settings.json >/dev/null
+          done
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
+            jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/settings.json >/dev/null
+          done
+          echo 'REQUIRED_BINDINGS_PRESENT_PASS'
+
+      - name: Verify live unauthenticated security boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --output /tmp/home.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" "$BASE/api/v1/student/home")"
+          echo "student_home_http=$code"
+          test "$code" = '401'
+          code="$(curl --silent --show-error --output /tmp/admin.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --request POST --data '{"password":"__deliberately_wrong__"}' \
+            "$BASE/api/v1/admin/lesson-releases/login")"
+          echo "admin_login_http=$code"
+          test "$code" = '401'
+          echo 'LIVE_SECURITY_PASS'
