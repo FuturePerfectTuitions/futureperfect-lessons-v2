@@ -1,0 +1,157 @@
+name: Finalize Demo account rename v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-demo-rename-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: '4.125.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify staged KV records and prepare new login allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const worker=process.env.WORKER_NAME;
+          const api='https://api.cloudflare.com/client/v4';
+          const ids=['2','3','4','411','5','511','6'];
+          const sr=await fetch(`${api}/accounts/${account}/workers/scripts/${worker}/settings`,{headers:{Authorization:`Bearer ${token}`}});
+          const settings=await sr.json();
+          if(!sr.ok||!settings?.success) throw new Error('Worker settings unavailable');
+          const bindings=settings.result.bindings||[];
+          if(String(bindings.find(x=>x.name==='ENVIRONMENT'&&x.type==='plain_text')?.text||'')!=='production') throw new Error('Not production');
+          const ns=String(bindings.find(x=>x.name==='STUDENTS_KV'&&x.type==='kv_namespace')?.namespace_id||'');
+          const allow=String(bindings.find(x=>x.name==='PROD_LOGIN_ALLOWLIST'&&x.type==='plain_text')?.text||'');
+          if(!ns||!allow) throw new Error('Required binding missing');
+          const parts=allow.split(',').map(x=>x.trim()).filter(Boolean);
+          const lower=parts.map(x=>x.toLowerCase());
+          for(const n of ids){if(!lower.includes(`admintrial${n}`)||lower.includes(`demo${n}`)) throw new Error(`Allowlist precondition failed ${n}`);}
+          const rename=new Map(ids.map(n=>[`admintrial${n}`,`Demo${n}`]));
+          const next=parts.map(x=>rename.get(x.toLowerCase())||x).join(',');
+          async function read(k){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k)}`,{headers:{Authorization:`Bearer ${token}`}});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read ${k}`);return r.text();}
+          for(const n of ids){
+            const [aRaw,bRaw]=await Promise.all([read(`user:admintrial${n}`),read(`user:demo${n}`)]);
+            if(!aRaw||!bRaw) throw new Error(`Staged KV missing ${n}`);
+            const a=JSON.parse(aRaw),b=JSON.parse(bRaw);
+            if(a.portalUserId!==`AdminTrial${n}`||b.portalUserId!==`Demo${n}`) throw new Error(`ID mismatch ${n}`);
+            const ac=structuredClone(a),bc=structuredClone(b);delete ac.portalUserId;delete bc.portalUserId;
+            if(JSON.stringify(ac)!==JSON.stringify(bc)) throw new Error(`Non-ID difference ${n}`);
+          }
+          fs.writeFileSync('/tmp/new-allowlist.txt',next);
+          fs.writeFileSync('/tmp/students-ns.txt',ns);
+          console.log('PREFLIGHT_PASS accounts=7');
+          NODE
+
+      - name: Capture D1 totals
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL="SELECT
+          (SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS lesson_total,
+          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS sessions_total,
+          (SELECT COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS starts_total,
+          (SELECT COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS answers_total,
+          (SELECT COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS mock_limits_total,
+          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS profiles_total,
+          (SELECT COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS batches_total,
+          (SELECT COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS prelesson_total,
+          (SELECT COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS trial_total,
+          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS windows_total;"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --json > /tmp/d1-before.json
+
+      - name: Rename Portal User ID references in D1 batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          CASE_NORM="CASE portal_user_id_norm WHEN 'admintrial2' THEN 'demo2' WHEN 'admintrial3' THEN 'demo3' WHEN 'admintrial4' THEN 'demo4' WHEN 'admintrial411' THEN 'demo411' WHEN 'admintrial5' THEN 'demo5' WHEN 'admintrial511' THEN 'demo511' WHEN 'admintrial6' THEN 'demo6' ELSE portal_user_id_norm END"
+          CASE_DISPLAY="CASE portal_user_id_norm WHEN 'admintrial2' THEN 'Demo2' WHEN 'admintrial3' THEN 'Demo3' WHEN 'admintrial4' THEN 'Demo4' WHEN 'admintrial411' THEN 'Demo411' WHEN 'admintrial5' THEN 'Demo5' WHEN 'admintrial511' THEN 'Demo511' WHEN 'admintrial6' THEN 'Demo6' ELSE json_extract(user_json,'$.portalUserId') END"
+          IDS="'admintrial2','admintrial3','admintrial4','admintrial411','admintrial5','admintrial511','admintrial6'"
+          SQL="UPDATE lesson_entitlements SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE student_sessions SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE curriculum_start_points SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE answer_view_tokens SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE mock_password_rate_limits SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE student_session_profiles SET user_json=json_set(user_json,'$.portalUserId',$CASE_DISPLAY), portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE student_batch_assignments SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE online_prelesson_entitlements SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE trial_login_consumptions SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);
+          UPDATE student_session_windows SET portal_user_id_norm=$CASE_NORM WHERE portal_user_id_norm IN ($IDS);"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/d1-migrate.json
+
+      - name: Switch only production login IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('ops/deploy_current_worker_preserve.sh').read_text()
+          needle='printf \'PROD_LOGIN_ALLOWLIST = "%s"\\n\' "$(plain PROD_LOGIN_ALLOWLIST)"'
+          repl='printf \'PROD_LOGIN_ALLOWLIST = "%s"\\n\' "${PROD_LOGIN_ALLOWLIST_OVERRIDE:-$(plain PROD_LOGIN_ALLOWLIST)}"'
+          if needle not in src: raise SystemExit('Preserve deploy script changed')
+          Path('/tmp/deploy-preserve.sh').write_text(src.replace(needle,repl,1))
+          PY
+          chmod +x /tmp/deploy-preserve.sh
+          export PROD_LOGIN_ALLOWLIST_OVERRIDE="$(cat /tmp/new-allowlist.txt)"
+          export DEPLOY_MESSAGE="Rename AdminTrial Portal IDs to Demo only"
+          /tmp/deploy-preserve.sh
+
+      - name: Verify D1 and allowlist parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL="SELECT
+          (SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%') AS lesson_old,
+          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%') AS sessions_old,
+          (SELECT COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%') AS starts_old,
+          (SELECT COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%') AS answers_old,
+          (SELECT COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%') AS mock_limits_old,
+          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%') AS profiles_old,
+          (SELECT COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%') AS batches_old,
+          (SELECT COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%') AS prelesson_old,
+          (SELECT COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%') AS trial_old,
+          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%') AS windows_old,
+          (SELECT COUNT(*) FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS lesson_total,
+          (SELECT COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS sessions_total,
+          (SELECT COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS starts_total,
+          (SELECT COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS answers_total,
+          (SELECT COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS mock_limits_total,
+          (SELECT COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS profiles_total,
+          (SELECT COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS batches_total,
+          (SELECT COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS prelesson_total,
+          (SELECT COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS trial_total,
+          (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS windows_total;"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --json > /tmp/d1-after.json
+          node <<'NODE'
+          const fs=require('fs');const row=f=>JSON.parse(fs.readFileSync(f,'utf8'))[0].results[0];const a=row('/tmp/d1-before.json'),b=row('/tmp/d1-after.json');for(const[k,v]of Object.entries(b))if(k.endsWith('_old')&&Number(v)!==0)throw new Error(`Old D1 refs ${k}`);for(const k of Object.keys(a))if(k.endsWith('_total')&&Number(a[k])!==Number(b[k]))throw new Error(`D1 total changed ${k}`);
+          NODE
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const token=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID,worker=process.env.WORKER_NAME;const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${worker}/settings`,{headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||!j?.success)throw new Error('Settings verify failed');const actual=String((j.result.bindings||[]).find(x=>x.name==='PROD_LOGIN_ALLOWLIST'&&x.type==='plain_text')?.text||'');if(actual!==fs.readFileSync('/tmp/new-allowlist.txt','utf8'))throw new Error('Allowlist mismatch');const lower=actual.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);for(const n of ['2','3','4','411','5','511','6'])if(lower.includes(`admintrial${n}`)||!lower.includes(`demo${n}`))throw new Error(`Allowlist incomplete ${n}`);console.log('D1_ALLOWLIST_PASS');
+          NODE
+
+      - name: Delete old KV keys and verify final Demo IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const token=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID,api='https://api.cloudflare.com/client/v4',ns=fs.readFileSync('/tmp/students-ns.txt','utf8').trim(),ids=['2','3','4','411','5','511','6'];async function read(k){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k)}`,{headers:{Authorization:`Bearer ${token}`}});if(r.status===404)return null;if(!r.ok)throw new Error(`Read ${k}`);return r.text();}async function del(k){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k)}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||!j?.success)throw new Error(`Delete ${k}`);}for(const n of ids)await del(`user:admintrial${n}`);for(const n of ids){if(await read(`user:admintrial${n}`))throw new Error(`Old key remains ${n}`);const raw=await read(`user:demo${n}`);if(!raw||JSON.parse(raw).portalUserId!==`Demo${n}`)throw new Error(`Demo verify ${n}`);}console.log('ADMINTRIAL_TO_DEMO_RENAME_PASS accounts=7 other_fields_preserved=true');
+          NODE
