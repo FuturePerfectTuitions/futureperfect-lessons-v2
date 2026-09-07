@@ -218,7 +218,7 @@ function buildLockedLesson(record, row) {
         ? lockedResource(resourceName(pair.answerPack, 'Answer Pack'), true)
         : null
     })),
-    otherResources: other.map(item => lockedResource(resourceName(item, 'Resource'))
+    otherResources: other.map(item => lockedResource(resourceName(item, 'Resource')))
   };
 }
 
