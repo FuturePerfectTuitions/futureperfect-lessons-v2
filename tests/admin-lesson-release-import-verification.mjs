@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { handleAdminLessonReleaseImport, normaliseCsvRow, parseLessonDate, extractLessonId } from '../worker/src/admin-lesson-release-import.js';
+import { handleAdminLessonReleaseImport, normaliseCsvRow, parseLessonDate, extractLessonId, curriculumCandidatesForDisplayId } from '../worker/src/admin-lesson-release-import.js';
 
 class BoundStatement {
   constructor(db, sql, args = []) {
@@ -92,8 +92,16 @@ const students = new Map([
   ['user:full0202', { name:'Synthetic Full', vrEligible:false, blockedLessons:[] }]
 ]);
 const lessons = new Map([
-  ['lesson:Y5T1E01', { lessonId:'Y5T1E01', subject:'English', active:true }],
-  ['lesson:Y3T1M01', { lessonId:'Y3T1M01', subject:'Maths', active:true }]
+  ['curriculum:ENGLISH_Y5', { curriculumCode:'ENGLISH_Y5', lessonIds:['Y5E2'] }],
+  ['curriculum:MATHS_Y3', { curriculumCode:'MATHS_Y3', lessonIds:['Y3M1'] }],
+  ['lesson:Y5E2', {
+    lessonId:'Y5E2', subject:'English', active:true,
+    displayIds:{ 'english-year5':'Y5T1E01', 'english-year5-11plus':'Y5T1EE01' }
+  }],
+  ['lesson:Y3M1', {
+    lessonId:'Y3M1', subject:'Maths', active:true,
+    displayIds:{ 'maths-year3':'Y3T1M01' }
+  }]
 ]);
 const db = new MemoryDB();
 const env = {
@@ -119,6 +127,12 @@ const faceToFaceCompleted = {
 assert.equal(parseLessonDate('7th September 2026'), '2026-09-07');
 assert.equal(parseLessonDate('07/09/2026'), '2026-09-07');
 assert.equal(extractLessonId('Y6MS1 SATS Preparation'), 'Y6M51');
+assert.deepEqual(curriculumCandidatesForDisplayId('Y5T1E01'), ['ENGLISH_Y5']);
+assert.deepEqual(curriculumCandidatesForDisplayId('Y5T1EE01'), ['ENGLISH_Y5']);
+assert.deepEqual(curriculumCandidatesForDisplayId('Y3T1M01'), ['MATHS_Y3']);
+assert.deepEqual(curriculumCandidatesForDisplayId('Y4T2M07'), ['MATHS_L1']);
+assert.deepEqual(curriculumCandidatesForDisplayId('L2T3M09'), ['MATHS_L2']);
+assert.deepEqual(curriculumCandidatesForDisplayId('Y6T1M01'), ['MATHS_L3','MATHS_Y6_EXTRA']);
 assert.equal(normaliseCsvRow(onlineReady, 0).releaseType, 'PRELESSON_ONLY');
 assert.equal(normaliseCsvRow(faceToFaceCompleted, 1).releaseType, 'FULL');
 assert.equal(normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Ready' }, 2).releaseType, 'SKIP');
@@ -151,6 +165,8 @@ assert.equal(preview.body.summary.releasable, 2);
 assert.equal(preview.body.summary.errors, 0);
 assert.deepEqual(preview.body.results.map(r => r.releaseType), ['PRELESSON_ONLY', 'FULL']);
 assert.deepEqual(preview.body.results.map(r => r.action), ['GRANT_PRELESSON', 'GRANT_FULL']);
+assert.deepEqual(preview.body.results.map(r => r.lessonId), ['Y5E2', 'Y3M1']);
+assert.deepEqual(preview.body.results.map(r => r.inputLessonId), ['Y5T1E01', 'Y3T1M01']);
 assert.equal(db.prelessons.size, 0, 'Preview must not write PreLesson access');
 assert.equal(db.entitlements.size, 0, 'Preview must not write full access');
 
@@ -160,19 +176,25 @@ assert.equal(confirm.body.summary.total, 2);
 assert.equal(confirm.body.summary.succeeded, 2);
 assert.equal(confirm.body.summary.failed, 0);
 assert.equal(db.prelessons.size, 1);
-assert.equal(db.entitlements.get('full0202|Y3T1M01')?.core_access, 1);
-assert.equal(db.entitlements.has('pre0101|Y5T1E01'), false);
+assert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);
+assert.equal(db.entitlements.has('pre0101|Y5E2'), false);
 
 const upgradeRow = { ...onlineReady, LessonStatus:'Completed' };
 const upgrade = await call('/api/v1/admin/lesson-releases/confirm', { rows:[upgradeRow] }, token);
 assert.equal(upgrade.response.status, 200);
-assert.equal(db.entitlements.get('pre0101|Y5T1E01')?.core_access, 1);
-assert.equal([...db.prelessons.values()].some(r => r.portal_user_id_norm === 'pre0101' && r.lesson_id === 'Y5T1E01'), false, 'FULL must clear stale PreLesson-only access');
+assert.equal(db.entitlements.get('pre0101|Y5E2')?.core_access, 1);
+assert.equal([...db.prelessons.values()].some(r => r.portal_user_id_norm === 'pre0101' && r.lesson_id === 'Y5E2'), false, 'FULL must clear stale PreLesson-only access');
 
 const noDowngrade = await call('/api/v1/admin/lesson-releases/confirm', { rows:[onlineReady] }, token);
 assert.equal(noDowngrade.response.status, 200);
 assert.equal(noDowngrade.body.results[0].status, 'ALREADY_FULL');
-assert.equal(db.entitlements.get('pre0101|Y5T1E01')?.core_access, 1);
-assert.equal([...db.prelessons.values()].some(r => r.portal_user_id_norm === 'pre0101' && r.lesson_id === 'Y5T1E01'), false);
+assert.equal(db.entitlements.get('pre0101|Y5E2')?.core_access, 1);
+assert.equal([...db.prelessons.values()].some(r => r.portal_user_id_norm === 'pre0101' && r.lesson_id === 'Y5E2'), false);
 
-console.log('Lesson release importer mixed FULL/PRELESSON_ONLY verification: PASS');
+const elevenPlusDisplayAlias = { ...onlineReady, Lesson:'Y5T1EE01 Descriptive Writing Settings and Atmosphere' };
+const aliasPreview = await call('/api/v1/admin/lesson-releases/preview', { rows:[elevenPlusDisplayAlias] }, token);
+assert.equal(aliasPreview.response.status, 200);
+assert.equal(aliasPreview.body.results[0].lessonId, 'Y5E2');
+assert.equal(aliasPreview.body.results[0].action, 'ALREADY_FULL');
+
+console.log('Lesson release importer display-ID + mixed FULL/PRELESSON_ONLY verification: PASS');
