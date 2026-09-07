@@ -112,7 +112,7 @@
 }
 
 /* Floating portal back controls: keep the full label visible, detached from the
-   viewport edge, and retain the high-contrast navy/white presentation. */
+   viewport edge, and use the same red/white treatment as Log out. */
 body.phase11-change8 .phase6-back-button {
   position: fixed !important;
   left: max(22px, calc((100vw - 1120px) / 2 + 22px)) !important;
@@ -127,11 +127,11 @@ body.phase11-change8 .phase6-back-button {
   min-height: 44px !important;
   padding: 10px 17px !important;
   overflow: visible !important;
-  border: 1px solid #012169 !important;
+  border: 1px solid var(--phase5-red) !important;
   border-radius: 999px !important;
-  background: #012169 !important;
+  background: var(--phase5-red) !important;
   color: #fff !important;
-  box-shadow: 0 10px 28px rgba(1, 33, 105, 0.20) !important;
+  box-shadow: 0 10px 28px rgba(215, 25, 32, 0.20) !important;
   white-space: nowrap !important;
   font-size: 14px !important;
   font-weight: 900 !important;
@@ -149,10 +149,10 @@ body.phase11-change8 .phase6-back-button:hover,
 body.phase11-change8 .phase6-back-button:focus-visible {
   width: auto !important;
   padding: 10px 17px !important;
-  border-color: #00184d !important;
-  background: #00184d !important;
+  border-color: #b31218 !important;
+  background: #b31218 !important;
   color: #fff !important;
-  box-shadow: 0 12px 30px rgba(1, 33, 105, 0.24) !important;
+  box-shadow: 0 12px 30px rgba(215, 25, 32, 0.24) !important;
   outline: none !important;
   transform: translateY(-1px);
 }
