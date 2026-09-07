@@ -12,75 +12,35 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Read-only collision check
+      - name: Read-only D1 identity reference counts
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE' | tee /tmp/admintrial-collision-check.txt
-          const token = String(process.env.CLOUDFLARE_API_TOKEN || '');
-          const accountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '');
-          const workerName = String(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
-          const api = 'https://api.cloudflare.com/client/v4';
-          async function cf(pathname, init = {}) {
-            const r = await fetch(`${api}${pathname}`, {
-              ...init,
-              headers: { Authorization: `Bearer ${token}`, ...(init.body ? {'Content-Type':'application/json'} : {}), ...(init.headers || {}) }
-            });
-            const b = await r.json().catch(() => null);
-            if (!r.ok || !b?.success) throw new Error(`CF_READ_FAILED HTTP=${r.status}`);
-            return b;
-          }
-          const settings = await cf(`/accounts/${accountId}/workers/scripts/${workerName}/settings`);
-          const bindings = settings?.result?.bindings || [];
-          const students = String(bindings.find(x => x?.name === 'STUDENTS_KV' && x?.type === 'kv_namespace')?.namespace_id || '');
-          const db = String(bindings.find(x => x?.name === 'DB' && x?.type === 'd1')?.id || '');
-          if (!students || !db) throw new Error('REQUIRED_BINDING_MISSING');
-          let cursor = ''; const names = [];
-          do {
-            const q = new URLSearchParams({limit:'1000'}); if (cursor) q.set('cursor', cursor);
-            const p = await cf(`/accounts/${accountId}/storage/kv/namespaces/${students}/keys?${q}`);
-            for (const x of p.result || []) names.push(String(x?.name || ''));
-            cursor = String(p?.result_info?.cursor || '');
-          } while (cursor);
-          const oldKeys = names.filter(x => /^user:admintrial(?:2|3|4|411|5|511|6)$/i.test(x)).sort();
-          const demoKeys = names.filter(x => /^user:demo(?:2|3|4|411|5|511|6)$/i.test(x)).sort();
-          console.log('OLD_KEYS=' + oldKeys.join(','));
-          console.log('DEMO_KEYS=' + demoKeys.join(','));
-          console.log(`OLD_COUNT=${oldKeys.length} DEMO_COLLISION_COUNT=${demoKeys.length}`);
-          const allow = String(bindings.find(x => x?.name === 'PROD_LOGIN_ALLOWLIST' && x?.type === 'plain_text')?.text || '');
-          const tokens = allow.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-          console.log('ALLOW_OLD=' + tokens.filter(x => /^admintrial(?:2|3|4|411|5|511|6)$/.test(x)).join(','));
-          console.log('ALLOW_DEMO=' + tokens.filter(x => /^demo(?:2|3|4|411|5|511|6)$/.test(x)).join(','));
-          const q = async (sql, params=[]) => cf(`/accounts/${accountId}/d1/database/${db}/query`, {method:'POST', body:JSON.stringify({sql,params})});
-          const tables = await q("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-          const userTables=[];
-          for (const r of tables?.result?.[0]?.results || []) {
-            const t=String(r.name||''); if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(t)) continue;
-            const info=await q(`PRAGMA table_info(\"${t}\")`);
-            const cols=(info?.result?.[0]?.results||[]).map(x=>String(x.name||''));
-            if (cols.includes('portal_user_id_norm')) userTables.push(t);
-          }
-          console.log('USER_TABLES=' + userTables.join(','));
-          for (const t of userTables) {
-            const row=(await q(`SELECT COUNT(*) AS n FROM \"${t}\" WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%'`))?.result?.[0]?.results?.[0]||{};
-            console.log(`D1_${t}=${Number(row.n||0)}`);
-          }
-          NODE
-      - name: Upload safe collision check
+          SQL="SELECT 'lesson_entitlements' AS table_name, COUNT(*) AS old_rows FROM lesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'student_sessions', COUNT(*) FROM student_sessions WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'curriculum_start_points', COUNT(*) FROM curriculum_start_points WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'answer_view_tokens', COUNT(*) FROM answer_view_tokens WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'mock_password_rate_limits', COUNT(*) FROM mock_password_rate_limits WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'student_session_profiles', COUNT(*) FROM student_session_profiles WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'student_batch_assignments', COUNT(*) FROM student_batch_assignments WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'online_prelesson_entitlements', COUNT(*) FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'trial_login_consumptions', COUNT(*) FROM trial_login_consumptions WHERE portal_user_id_norm LIKE 'admintrial%'
+          UNION ALL SELECT 'student_session_windows', COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%';"
+          npx --yes wrangler@4.125.0 d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/admintrial-d1-counts.json
+      - name: Upload D1 counts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: admintrial-collision-check
-          path: /tmp/admintrial-collision-check.txt
+          name: admintrial-d1-counts
+          path: /tmp/admintrial-d1-counts.json
           if-no-files-found: error
           retention-days: 1
