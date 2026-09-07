@@ -1,0 +1,26 @@
+name: Live video postdeploy check
+
+on:
+  push:
+    branches: [fix/video-y411-entitlements]
+    paths:
+      - '.github/workflows/live-video-postdeploy-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify custom-domain live files
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          curl -fsSL "$BASE/" -o /tmp/live.html
+          grep -Fq 'assets/phase20-collapsible-lessons.js?v=20260907-video-single-click-live-1' /tmp/live.html
+          curl -fsSL "$BASE/assets/phase20-collapsible-lessons.js?v=20260907-video-single-click-live-1" -o /tmp/p20.js
+          grep -Fq "if (section.id === 'video-section') return;" /tmp/p20.js
+          echo 'LIVE_VIDEO_SINGLE_CLICK_SOURCE_PASS'
