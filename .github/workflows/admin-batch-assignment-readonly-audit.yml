@@ -37,8 +37,8 @@ jobs:
               --data-binary @/tmp/query.json
           }
 
-          echo '=== RELEVANT BATCH DEFINITIONS ==='
-          query "SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions WHERE batch_key IN ('Y511OE1','Y3FM') OR (LOWER(subject)='english' AND school_year='Y5') OR (LOWER(subject)='maths' AND school_year='Y3') ORDER BY batch_key" | jq -c '.result[].results[]'
+          echo '=== YEAR 5 ENGLISH / RELEVANT BATCH DEFINITIONS ==='
+          query "SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions WHERE batch_key IN ('Y511OE1','Y3FM') OR (LOWER(subject)='english' AND school_year=5) OR batch_key LIKE 'Y5%' ORDER BY batch_key" | jq -c '.result[].results[]'
 
           echo '=== STUDENT ASSIGNMENTS ==='
           query "SELECT assignment_id, portal_user_id_norm, batch_key, effective_from, effective_to FROM student_batch_assignments WHERE portal_user_id_norm IN ('ann3009','meh0510') ORDER BY portal_user_id_norm, effective_from, batch_key" | jq -c '.result[].results[]'
