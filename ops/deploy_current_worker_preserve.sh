@@ -13,6 +13,23 @@ test -n "$WORKER_ENTRYPOINT"
 test -f "$CONFIG_DIR/$WORKER_ENTRYPOINT"
 echo "Production Worker entrypoint: $WORKER_ENTRYPOINT"
 
+# The checked-in navigation manifest is deliberately only a fail-safe placeholder.
+# Every production Worker bundle that imports Phase 11 navigation must regenerate the
+# immutable canonical navigation manifest before Wrangler bundles the entrypoint.
+# Without this step, canonicalCatalogueRowsForView() has no bundled catalogue and
+# entitlement-backed L1/L2 lesson-list recovery cannot build the requested list.
+rm -rf /tmp/fpt-navigation-package
+node --experimental-default-type=module scripts/phase11-apply-package.mjs \
+  --write-dir /tmp/fpt-navigation-package \
+  >/tmp/fpt-navigation-package.log
+MANIFEST='worker/src/phase11-navigation-manifest.generated.js'
+grep -Fq 'Generated from the immutable Phase 11 canonical catalogue.' "$MANIFEST"
+grep -Fq 'Navigation manifest SHA-256: d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' "$MANIFEST"
+grep -Fq 'const PHASE11_NAVIGATION_MANIFEST = {' "$MANIFEST"
+jq -e '.navigationManifestLessons == 369 and .navigationManifestCurricula == 11 and .navigationManifestSha256 == "d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083"' \
+  /tmp/fpt-navigation-package/phase11-apply-summary.json >/dev/null
+echo 'Canonical bundled navigation manifest generated for production bundle.'
+
 API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
 AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings.json
