@@ -1,0 +1,81 @@
+name: Dharm access diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [diag/dharm-access]
+    paths:
+      - '.github/workflows/dharm-access-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      USER_ID: dha2806
+    steps:
+      - name: Inspect Dharm access state without exposing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          DB_ID=$(jq -r '.result.bindings[] | select(.name=="DB") | (.id // .database_id // .database_id)' /tmp/settings.json | head -1)
+          STUDENTS_NS=$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | (.namespace_id // .id)' /tmp/settings.json | head -1)
+          LESSONS_NS=$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | (.namespace_id // .id)' /tmp/settings.json | head -1)
+          test -n "$DB_ID" && test "$DB_ID" != null
+          test -n "$STUDENTS_NS" && test "$STUDENTS_NS" != null
+          test -n "$LESSONS_NS" && test "$LESSONS_NS" != null
+
+          query() {
+            local sql="$1"
+            curl --fail --silent --show-error "$API/d1/database/${DB_ID}/query" \
+              -H "$AUTH" -H 'Content-Type: application/json' \
+              --data "$(jq -nc --arg sql "$sql" '{sql:$sql}')"
+          }
+
+          echo '=== LESSON ENTITLEMENTS ==='
+          query "SELECT lesson_id, core_access, vr_access, source, source_batch_code, source_lesson_date, first_granted_at, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm='${USER_ID}' ORDER BY lesson_id" \
+            | jq -c '.result[0].results // []'
+
+          echo '=== PRELESSON ENTITLEMENTS ==='
+          query "SELECT lesson_id, batch_key, lesson_date, first_granted_at, last_confirmed_at FROM online_prelesson_entitlements WHERE portal_user_id_norm='${USER_ID}' ORDER BY lesson_id" \
+            | jq -c '.result[0].results // []'
+
+          echo '=== BATCH ASSIGNMENTS ==='
+          query "SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm='${USER_ID}' ORDER BY a.batch_key" \
+            | jq -c '.result[0].results // []'
+
+          echo '=== STUDENT ACCESS METADATA ==='
+          code=$(curl --silent --show-error -o /tmp/student.json -w '%{http_code}' "$API/storage/kv/namespaces/${STUDENTS_NS}/values/user:${USER_ID}" -H "$AUTH")
+          echo "student_kv_http=$code"
+          if [ "$code" = 200 ]; then
+            jq -c '{schoolYear,batches,fullLibraries,blockedLessons,vrEligible,manualAccess}' /tmp/student.json
+          fi
+
+          echo '=== L1/L2 CURRICULA ==='
+          for c in MATHS_L1 MATHS_L2; do
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/${LESSONS_NS}/values/curriculum:${c}" -H "$AUTH" -o "/tmp/${c}.json"
+            jq -c --arg c "$c" '{curriculum:$c,count:(.lessonIds//.lessons//.items//[]|length),first:(.lessonIds//.lessons//.items//[]|.[0:5])}' "/tmp/${c}.json"
+          done
+
+          echo '=== ENTITLED LESSON RECORD VIEW IDS ==='
+          query "SELECT lesson_id,source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm='${USER_ID}' AND core_access=1 ORDER BY lesson_id" \
+            | jq -r '.result[0].results[]? | [.lesson_id,.source_batch_code] | @tsv' > /tmp/ent.tsv
+          while IFS=$'\t' read -r lesson batch; do
+            [ -n "$lesson" ] || continue
+            code=$(curl --silent --show-error -o /tmp/lesson.json -w '%{http_code}' "$API/storage/kv/namespaces/${LESSONS_NS}/values/lesson:${lesson}" -H "$AUTH")
+            if [ "$code" = 200 ]; then
+              jq -c --arg lesson "$lesson" --arg batch "$batch" '{lessonId:$lesson,batch:$batch,subject,displayIds,active}' /tmp/lesson.json
+            else
+              echo "{\"lessonId\":\"$lesson\",\"batch\":\"$batch\",\"lessonKvHttp\":$code}"
+            fi
+          done < /tmp/ent.tsv
