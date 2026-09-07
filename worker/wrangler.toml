@@ -14,11 +14,12 @@ STUDENT_LOGIN_ENABLED = "true"
 # adds a separate authenticated browser-admin CSV preview/confirm workflow for
 # lesson releases exported by FuturePerfectLive.
 #
-# The browser admin importer requires the Cloudflare-managed ADMIN_IMPORT_PASSWORD
-# Worker secret. It must be a strong value of at least 16 characters and is never
-# committed to this repository. The password is exchanged only for a short-lived,
-# origin-bound signed admin session token; EXCEL_SYNC_TOKEN is never sent to the
-# browser.
+# The browser admin importer requires TWO Cloudflare-managed Worker secrets:
+#   ADMIN_IMPORT_PASSWORD       strong admin sign-in password (minimum 16 chars)
+#   ADMIN_IMPORT_SESSION_SECRET independent random signing secret (minimum 32 chars)
+# Neither value is committed to this repository. The password is exchanged for
+# a short-lived, origin-bound signed admin session token. EXCEL_SYNC_TOKEN is
+# never sent to the browser and the existing Excel sync route remains unchanged.
 #
 # Online PreLesson rule remains unchanged: selected rows for Batch IDs containing
 # O may grant PreLesson-only access before completion; full lesson access still
