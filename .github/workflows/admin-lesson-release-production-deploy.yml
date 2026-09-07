@@ -1,0 +1,123 @@
+name: Admin lesson release production deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-lesson-release-production-deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Portal V2 admin lesson release CSV importer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify importer source and mixed-access regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/index-phase20-change7.js
+          node --check assets/admin-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          grep -Fq "handleAdminLessonReleaseImport" worker/src/index-phase20-change7.js
+          grep -Fq 'main = "src/index-phase20-change7.js"' ops/deploy_current_worker_preserve.sh
+          grep -Fq 'assets/admin-import.js' admin-import.html
+          echo 'ADMIN_IMPORT_STATIC_PASS'
+
+      - name: Require both Cloudflare admin-import secrets before deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/admin-import-settings.json
+          jq -e '.success == true' /tmp/admin-import-settings.json >/dev/null
+          jq -e '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | index("ADMIN_IMPORT_PASSWORD") != null' /tmp/admin-import-settings.json >/dev/null
+          jq -e '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | index("ADMIN_IMPORT_SESSION_SECRET") != null' /tmp/admin-import-settings.json >/dev/null
+          echo 'ADMIN_IMPORT_SECRETS_PRESENT_PASS'
+
+      - name: Deploy current production Worker preserving bindings and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+          echo 'ADMIN_IMPORT_DEPLOY_PASS'
+
+      - name: Verify live admin routes and legacy sync isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+
+          code="$(curl --silent --show-error --output /tmp/admin-login.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"password":"__deliberately_wrong__"}' \
+            "$BASE/api/v1/admin/lesson-releases/login")"
+          test "$code" = '401'
+          jq -e '.error == "UNAUTHORISED"' /tmp/admin-login.json >/dev/null
+
+          code="$(curl --silent --show-error --output /tmp/admin-preview.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"rows":[]}' \
+            "$BASE/api/v1/admin/lesson-releases/preview")"
+          test "$code" = '401'
+          jq -e '.error == "UNAUTHORISED"' /tmp/admin-preview.json >/dev/null
+
+          curl --silent --show-error --dump-header /tmp/admin-options.headers --output /tmp/admin-options.json \
+            --header "Origin: $ORIGIN" \
+            --header 'Access-Control-Request-Method: POST' \
+            --request OPTIONS \
+            "$BASE/api/v1/admin/lesson-releases/login"
+          grep -iq '^access-control-allow-origin: https://futureperfecttuitions.github.io' /tmp/admin-options.headers
+          grep -iq '^access-control-allow-methods:.*POST' /tmp/admin-options.headers
+
+          code="$(curl --silent --show-error --output /tmp/legacy-browser.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"items":[{"syncRowId":"browser-isolation-check","operation":"grant","portalUserId":"missing","lessonId":"missing","batchKey":"missing","lessonDate":"2026-09-07"}]}' \
+            "$BASE/api/v1/admin/excel-entitlements/sync")"
+          test "$code" = '403'
+          jq -e '.error == "BROWSER_REQUEST_NOT_ALLOWED"' /tmp/legacy-browser.json >/dev/null
+          echo 'ADMIN_IMPORT_LIVE_ROUTES_PASS'
+
+      - name: Wait for GitHub Pages admin importer
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://futureperfecttuitions.github.io/futureperfect-lessons-v2/admin-import.html'
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$URL" --output /tmp/admin-import.html \
+              && grep -Fq 'Lesson Release Import' /tmp/admin-import.html \
+              && grep -Fq 'assets/admin-import.js' /tmp/admin-import.html; then
+              echo 'ADMIN_IMPORT_PAGE_PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Admin importer page did not become visible in time.' >&2
+          exit 1
