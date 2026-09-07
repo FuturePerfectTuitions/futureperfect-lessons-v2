@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change11.js"
+main = "src/index-phase20-change12.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,14 +9,18 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 11 wraps Change 10 and makes an
-# explicit Full Library enrolment participate in cross-subject preview discovery
-# even when there is no matching active D1 batch assignment. The synthetic row is
-# request-local and preview-only: it never creates batch membership, never writes
-# D1/KV and never grants lesson/resource access. The existing Phase 19 server-side
-# preview gate remains authoritative, so the counterpart subject catalogue and
-# full lesson descriptions may be browsed while all resources stay locked unless
-# an independent entitlement already grants access.
+# Portal V2 production entrypoint. Change 12 derives the unenrolled-subject
+# preview from the student's actual visible Year/Level views returned by the
+# underlying Portal, rather than from one particular entitlement source. This
+# makes the agreed upsell catalogue work for Full Libraries, manual access,
+# retained/direct entitlements and batch-backed views alike. The counterpart
+# view is presentation-only: all resources remain locked unless independent
+# access already exists.
+#
+# Change 11 wraps Change 10 and makes an explicit Full Library enrolment
+# participate in the older cross-subject preview discovery path even when there
+# is no matching active D1 batch assignment. It remains in the chain for
+# backwards compatibility, but Change 12 no longer depends on that source.
 #
 # Change 10 wraps Change 9 and verifies that an imported PRELESSON_ONLY release
 # actually has at least one usable PreLesson resource before it is presented as
@@ -52,7 +56,7 @@ STUDENT_LOGIN_ENABLED = "true"
 # session cookie and must authenticate again.
 #
 # Students may browse the corresponding unenrolled subject catalogue for their
-# active normal/11+ programme. Full lesson descriptions are visible, while all
+# visible Year/Level programme. Full lesson descriptions are visible, while all
 # lesson resources remain server-side locked unless an independent entitlement
 # already grants access.
 #
