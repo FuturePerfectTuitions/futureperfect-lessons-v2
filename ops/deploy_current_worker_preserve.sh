@@ -4,6 +4,15 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?}"
 : "${WORKER_NAME:=fpt-portal-v2-worker}"
 : "${WRANGLER_VERSION:=4.125.0}"
+: "${WORKER_CONFIG_FILE:=worker/wrangler.toml}"
+
+CONFIG_DIR="$(dirname "$WORKER_CONFIG_FILE")"
+CONFIG_ENTRYPOINT="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$WORKER_CONFIG_FILE" | head -n 1)"
+WORKER_ENTRYPOINT="${WORKER_ENTRYPOINT:-$CONFIG_ENTRYPOINT}"
+test -n "$WORKER_ENTRYPOINT"
+test -f "$CONFIG_DIR/$WORKER_ENTRYPOINT"
+echo "Production Worker entrypoint: $WORKER_ENTRYPOINT"
+
 API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
 AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings.json
@@ -19,7 +28,7 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings.json >/tmp/fpt-secrets-before.json
 {
   printf 'name = "%s"\n' "$WORKER_NAME"
-  printf 'main = "src/index-phase20-change7.js"\n'
+  printf 'main = "%s"\n' "$WORKER_ENTRYPOINT"
   printf 'compatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\n'
   printf 'ENVIRONMENT = "%s"\n' "$(plain ENVIRONMENT)"
   printf 'ALLOWED_ORIGINS = "%s"\n' "$(plain ALLOWED_ORIGINS)"
@@ -31,6 +40,8 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
   printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$R2"
   printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
 } > worker/wrangler.runtime-preserve.toml
+
+grep -Fq "main = \"$WORKER_ENTRYPOINT\"" worker/wrangler.runtime-preserve.toml
 npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-preserve.toml --keep-vars --message "${DEPLOY_MESSAGE:-Portal V2 production update}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings-after.json
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-after.json >/tmp/fpt-secrets-after.json
