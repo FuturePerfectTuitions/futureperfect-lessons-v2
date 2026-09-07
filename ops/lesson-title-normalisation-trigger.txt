@@ -1,0 +1,3 @@
+Apply Drive-style lesson title normalisation to live LESSONS_KV.
+Rule: remove only an embedded display-code prefix and legacy leading "Lesson <number>" / "Lesson <number.number>" label from core Years 2–6 Maths/English catalogue titles. Preserve the remaining title exactly, including legitimate suffix numbers such as Statistics 2, Fractions 4 and Money 2.
+Triggered: 2026-09-07
