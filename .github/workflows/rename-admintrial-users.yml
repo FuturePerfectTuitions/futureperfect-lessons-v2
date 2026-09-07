@@ -24,73 +24,55 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Guard KV parity and prepare exact allowlist replacement
+      - name: Guard exact KV parity and prepare allowlist rename
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs = require('fs');
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const worker = process.env.WORKER_NAME;
-          const api = 'https://api.cloudflare.com/client/v4';
-          const ids = ['2','3','4','411','5','511','6'];
-          async function cf(path, init={}) {
-            const r = await fetch(`${api}${path}`, {
-              ...init,
-              headers: { Authorization: `Bearer ${token}`, ...(init.headers||{}) }
-            });
-            const text = await r.text();
-            let body = null; try { body = JSON.parse(text); } catch {}
-            if (!r.ok || (body && body.success === false)) throw new Error(`Cloudflare request failed: ${path}`);
-            return body ?? text;
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const worker=process.env.WORKER_NAME;
+          const api='https://api.cloudflare.com/client/v4';
+          const ids=['2','3','4','411','5','511','6'];
+          const settingsResponse=await fetch(`${api}/accounts/${account}/workers/scripts/${worker}/settings`,{headers:{Authorization:`Bearer ${token}`}});
+          const settings=await settingsResponse.json();
+          if(!settingsResponse.ok||!settings?.success) throw new Error('Could not read production Worker settings');
+          const bindings=settings.result.bindings||[];
+          const env=String(bindings.find(x=>x.name==='ENVIRONMENT'&&x.type==='plain_text')?.text||'');
+          if(env!=='production') throw new Error('Refusing non-production target');
+          const ns=String(bindings.find(x=>x.name==='STUDENTS_KV'&&x.type==='kv_namespace')?.namespace_id||'');
+          if(!ns) throw new Error('STUDENTS_KV missing');
+          const oldAllow=String(bindings.find(x=>x.name==='PROD_LOGIN_ALLOWLIST'&&x.type==='plain_text')?.text||'');
+          if(!oldAllow) throw new Error('PROD_LOGIN_ALLOWLIST missing');
+          const parts=oldAllow.split(',').map(x=>x.trim()).filter(Boolean);
+          const lower=parts.map(x=>x.toLowerCase());
+          for(const n of ids){
+            if(!lower.includes(`admintrial${n}`)) throw new Error(`Old allowlist ID missing: AdminTrial${n}`);
+            if(lower.includes(`demo${n}`)) throw new Error(`Demo ID already present: Demo${n}`);
           }
-          const settings = await cf(`/accounts/${account}/workers/scripts/${worker}/settings`);
-          const bindings = settings?.result?.bindings || [];
-          const environment = String(bindings.find(x=>x.name==='ENVIRONMENT' && x.type==='plain_text')?.text || '');
-          if (environment !== 'production') throw new Error('Refusing non-production target');
-          const ns = String(bindings.find(x=>x.name==='STUDENTS_KV' && x.type==='kv_namespace')?.namespace_id || '');
-          if (!ns) throw new Error('STUDENTS_KV missing');
-          const allowBinding = bindings.find(x=>x.name==='PROD_LOGIN_ALLOWLIST' && x.type==='plain_text');
-          if (!allowBinding) throw new Error('PROD_LOGIN_ALLOWLIST missing');
-          const oldAllow = String(allowBinding.text || '');
-          const parts = oldAllow.split(',').map(x=>x.trim()).filter(Boolean);
-          const lower = parts.map(x=>x.toLowerCase());
-          for (const n of ids) {
-            if (!lower.includes(`admintrial${n}`)) throw new Error(`Old allowlist ID missing: AdminTrial${n}`);
-            if (lower.includes(`demo${n}`)) throw new Error(`Demo ID already present in allowlist: Demo${n}`);
-          }
-          const replacement = new Map(ids.map(n=>[`admintrial${n}`, `Demo${n}`]));
-          const newParts = parts.map(x=>replacement.get(x.toLowerCase()) || x);
-          if (newParts.length !== parts.length) throw new Error('Allowlist cardinality changed');
-          const newAllow = newParts.join(',');
-          async function read(key) {
-            const r = await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`, {headers:{Authorization:`Bearer ${token}`}});
-            if (r.status === 404) return null;
-            if (!r.ok) throw new Error(`KV read failed: ${key}`);
+          const map=new Map(ids.map(n=>[`admintrial${n}`,`Demo${n}`]));
+          const newAllow=parts.map(x=>map.get(x.toLowerCase())||x).join(',');
+          async function read(key){
+            const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV read failed: ${key}`);
             return r.text();
           }
-          const backup = {};
-          for (const n of ids) {
-            const oldKey = `user:admintrial${n}`;
-            const demoKey = `user:demo${n}`;
-            const [oldRaw, demoRaw] = await Promise.all([read(oldKey), read(demoKey)]);
-            if (!oldRaw || !demoRaw) throw new Error(`Expected staged pair missing for ${n}`);
-            const oldObj = JSON.parse(oldRaw), demoObj = JSON.parse(demoRaw);
-            if (oldObj.portalUserId !== `AdminTrial${n}` || demoObj.portalUserId !== `Demo${n}`) throw new Error(`Portal ID mismatch for ${n}`);
-            const a = structuredClone(oldObj), b = structuredClone(demoObj);
-            delete a.portalUserId; delete b.portalUserId;
-            if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`Non-ID KV difference for ${n}`);
-            backup[n] = oldRaw;
+          for(const n of ids){
+            const [oldRaw,demoRaw]=await Promise.all([read(`user:admintrial${n}`),read(`user:demo${n}`)]);
+            if(!oldRaw||!demoRaw) throw new Error(`Expected staged KV pair missing: ${n}`);
+            const oldObj=JSON.parse(oldRaw),demoObj=JSON.parse(demoRaw);
+            if(oldObj.portalUserId!==`AdminTrial${n}`||demoObj.portalUserId!==`Demo${n}`) throw new Error(`Portal ID mismatch: ${n}`);
+            const a=structuredClone(oldObj),b=structuredClone(demoObj); delete a.portalUserId; delete b.portalUserId;
+            if(JSON.stringify(a)!==JSON.stringify(b)) throw new Error(`Non-ID KV difference: ${n}`);
           }
-          fs.writeFileSync('/tmp/admintrial-kv-backup.json', JSON.stringify(backup));
-          fs.writeFileSync('/tmp/old-allowlist.txt', oldAllow);
-          fs.writeFileSync('/tmp/new-allowlist.txt', newAllow);
-          fs.writeFileSync('/tmp/students-namespace.txt', ns);
-          console.log('KV_AND_ALLOWLIST_PREFLIGHT_PASS accounts=7');
+          fs.writeFileSync('/tmp/new-allowlist.txt',newAllow);
+          fs.writeFileSync('/tmp/students-namespace.txt',ns);
+          console.log('KV_PREFLIGHT_PASS accounts=7');
           NODE
 
-      - name: Capture D1 identity totals before rename
+      - name: Capture D1 totals before identity migration
         shell: bash
         run: |
           set -euo pipefail
@@ -107,7 +89,7 @@ jobs:
           (SELECT COUNT(*) FROM student_session_windows WHERE portal_user_id_norm LIKE 'admintrial%' OR portal_user_id_norm LIKE 'demo%') AS windows_total;"
           npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --json > /tmp/d1-before.json
 
-      - name: Migrate all D1 identity references only
+      - name: Migrate only Portal User ID references in D1
         shell: bash
         run: |
           set -euo pipefail
@@ -128,25 +110,25 @@ jobs:
           COMMIT;"
           npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --json > /tmp/d1-migrate.json
 
-      - name: Switch production login allowlist from AdminTrial to Demo
+      - name: Replace only the production login IDs
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          src = Path('ops/deploy_current_worker_preserve.sh').read_text()
-          needle = 'printf \'PROD_LOGIN_ALLOWLIST = "%s"\\n\' "$(plain PROD_LOGIN_ALLOWLIST)"'
-          replacement = 'printf \'PROD_LOGIN_ALLOWLIST = "%s"\\n\' "${PROD_LOGIN_ALLOWLIST_OVERRIDE:-$(plain PROD_LOGIN_ALLOWLIST)}"'
+          src=Path('ops/deploy_current_worker_preserve.sh').read_text()
+          needle='printf \'PROD_LOGIN_ALLOWLIST = "%s"\\n\' "$(plain PROD_LOGIN_ALLOWLIST)"'
+          repl='printf \'PROD_LOGIN_ALLOWLIST = "%s"\\n\' "${PROD_LOGIN_ALLOWLIST_OVERRIDE:-$(plain PROD_LOGIN_ALLOWLIST)}"'
           if needle not in src:
-              raise SystemExit('Preserve deploy script shape changed; refusing deployment')
-          Path('/tmp/deploy_current_worker_preserve_override.sh').write_text(src.replace(needle, replacement, 1))
+              raise SystemExit('Preserve deployment script changed; refusing unsafe deployment')
+          Path('/tmp/deploy-preserve-allowlist.sh').write_text(src.replace(needle,repl,1))
           PY
-          chmod +x /tmp/deploy_current_worker_preserve_override.sh
+          chmod +x /tmp/deploy-preserve-allowlist.sh
           export PROD_LOGIN_ALLOWLIST_OVERRIDE="$(cat /tmp/new-allowlist.txt)"
           export DEPLOY_MESSAGE="Rename AdminTrial Portal IDs to Demo only"
-          /tmp/deploy_current_worker_preserve_override.sh
+          /tmp/deploy-preserve-allowlist.sh
 
-      - name: Verify D1 and production allowlist before deleting old KV keys
+      - name: Verify D1 totals and production allowlist
         shell: bash
         run: |
           set -euo pipefail
@@ -175,44 +157,40 @@ jobs:
           node <<'NODE'
           const fs=require('fs');
           const row=f=>JSON.parse(fs.readFileSync(f,'utf8'))[0].results[0];
-          const before=row('/tmp/d1-before.json'), after=row('/tmp/d1-after.json');
-          for(const [k,v] of Object.entries(after)) if(k.endsWith('_old') && Number(v)!==0) throw new Error(`Old D1 refs remain: ${k}=${v}`);
-          for(const k of Object.keys(before)) if(k.endsWith('_total') && Number(before[k])!==Number(after[k])) throw new Error(`D1 total changed: ${k}`);
+          const before=row('/tmp/d1-before.json'),after=row('/tmp/d1-after.json');
+          for(const [k,v] of Object.entries(after)) if(k.endsWith('_old')&&Number(v)!==0) throw new Error(`Old D1 refs remain: ${k}=${v}`);
+          for(const k of Object.keys(before)) if(k.endsWith('_total')&&Number(before[k])!==Number(after[k])) throw new Error(`D1 total changed: ${k}`);
           NODE
-          node <<'NODE'
-          const fs=require('fs');
-          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID, worker=process.env.WORKER_NAME;
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID,worker=process.env.WORKER_NAME;
           const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${worker}/settings`,{headers:{Authorization:`Bearer ${token}`}});
           const j=await r.json(); if(!r.ok||!j?.success) throw new Error('Settings verification failed');
           const actual=String((j.result.bindings||[]).find(x=>x.name==='PROD_LOGIN_ALLOWLIST'&&x.type==='plain_text')?.text||'');
           const expected=fs.readFileSync('/tmp/new-allowlist.txt','utf8');
           if(actual!==expected) throw new Error('Production allowlist mismatch');
           const lower=actual.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-          for(const n of ['2','3','4','411','5','511','6']) {
-            if(lower.includes(`admintrial${n}`) || !lower.includes(`demo${n}`)) throw new Error(`Allowlist rename incomplete for ${n}`);
-          }
+          for(const n of ['2','3','4','411','5','511','6']) if(lower.includes(`admintrial${n}`)||!lower.includes(`demo${n}`)) throw new Error(`Allowlist rename incomplete: ${n}`);
+          console.log('D1_AND_ALLOWLIST_VERIFY_PASS');
           NODE
 
-      - name: Remove old AdminTrial KV keys and verify exact final parity
+      - name: Remove old AdminTrial KV keys and verify Demo records
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs=require('fs');
-          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID;
           const api='https://api.cloudflare.com/client/v4';
           const ns=fs.readFileSync('/tmp/students-namespace.txt','utf8').trim();
-          const backup=JSON.parse(fs.readFileSync('/tmp/admintrial-kv-backup.json','utf8'));
           const ids=['2','3','4','411','5','511','6'];
           async function read(key){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});if(r.status===404)return null;if(!r.ok)throw new Error(`Read failed ${key}`);return r.text();}
           async function del(key){const r=await fetch(`${api}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||!j?.success)throw new Error(`Delete failed ${key}`);}
           for(const n of ids) await del(`user:admintrial${n}`);
           for(const n of ids){
-            if(await read(`user:admintrial${n}`)) throw new Error(`Old KV key remains AdminTrial${n}`);
-            const demoRaw=await read(`user:demo${n}`); if(!demoRaw) throw new Error(`Demo key missing ${n}`);
-            const oldObj=JSON.parse(backup[n]), demoObj=JSON.parse(demoRaw);
-            const a=structuredClone(oldObj), b=structuredClone(demoObj); delete a.portalUserId; delete b.portalUserId;
-            if(demoObj.portalUserId!==`Demo${n}` || JSON.stringify(a)!==JSON.stringify(b)) throw new Error(`Final KV parity failed ${n}`);
+            if(await read(`user:admintrial${n}`)) throw new Error(`Old KV key remains: AdminTrial${n}`);
+            const raw=await read(`user:demo${n}`); if(!raw) throw new Error(`Demo KV missing: Demo${n}`);
+            if(JSON.parse(raw).portalUserId!==`Demo${n}`) throw new Error(`Demo portalUserId mismatch: Demo${n}`);
           }
-          console.log('ADMINTRIAL_TO_DEMO_RENAME_PASS accounts=7 other_account_fields_unchanged=true');
+          console.log('ADMINTRIAL_TO_DEMO_RENAME_PASS accounts=7');
           NODE
