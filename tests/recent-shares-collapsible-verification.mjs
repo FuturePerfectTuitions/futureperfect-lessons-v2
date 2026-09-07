@@ -35,4 +35,6 @@ assert.match(collapse, /closed:'Detail'/);
 assert.match(collapse, /open:'Hide detail'/);
 assert.match(collapse, /phase7-resource-section/);
 assert.match(collapse, /closedLabel = labels\.closed \|\| 'View'/);
+assert.match(collapse, /if \(section\.id === 'video-section'\) return;/,
+  'Lesson Video must not receive the generic collapsible View button because it already has its own View/Hide control');
 console.log('Recent shares + live entry + collapsible lesson UI verification: PASS');
