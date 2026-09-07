@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#012169">
+  <title>Future Perfect Tuitions — Import Lesson Releases</title>
+  <link rel="icon" href="favicon.ico">
+  <link rel="stylesheet" href="assets/admin-import.css">
+</head>
+<body>
+  <main class="admin-shell">
+    <header class="admin-header">
+      <a href="https://futureperfect.education/" aria-label="Future Perfect Tuitions">
+        <img src="assets/fpt-logo.png" alt="Future Perfect Tuitions" class="admin-logo">
+      </a>
+      <div>
+        <p class="eyebrow">Portal V2 administration</p>
+        <h1>Import Lesson Releases</h1>
+        <p class="subtle">Upload the CSV exported by FuturePerfectLive. Preview is read-only; Portal access changes happen only after Confirm Import.</p>
+      </div>
+    </header>
+
+    <section id="login-panel" class="panel">
+      <h2>Admin sign in</h2>
+      <form id="login-form" class="stack">
+        <label for="admin-password">Admin import password</label>
+        <input id="admin-password" type="password" autocomplete="current-password" required>
+        <button type="submit" class="primary">Sign in</button>
+        <p id="login-message" class="message" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section id="import-panel" class="panel" hidden>
+      <div class="panel-heading">
+        <div>
+          <h2>CSV release queue</h2>
+          <p class="subtle">Required columns are read directly from the existing export: Student, Mode, Lesson, LessonDated and LessonStatus.</p>
+        </div>
+        <button id="sign-out" type="button" class="secondary">Sign out</button>
+      </div>
+
+      <div class="file-row">
+        <label for="csv-file" class="file-label">Choose CSV</label>
+        <input id="csv-file" type="file" accept=".csv,text/csv">
+        <button id="preview-button" type="button" class="primary" disabled>Preview Import</button>
+      </div>
+      <p id="file-name" class="subtle"></p>
+      <p id="import-message" class="message" role="alert" hidden></p>
+
+      <div id="preview-area" hidden>
+        <div id="summary" class="summary-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>CSV row</th>
+                <th>Student</th>
+                <th>Portal User ID</th>
+                <th>Batch</th>
+                <th>CSV lesson</th>
+                <th>Portal lesson</th>
+                <th>Date</th>
+                <th>Release</th>
+                <th>Status</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="preview-body"></tbody>
+          </table>
+        </div>
+        <div class="confirm-bar">
+          <p class="subtle">Confirm revalidates the same CSV on the server before any entitlement is written.</p>
+          <button id="confirm-button" type="button" class="danger" disabled>Confirm Import</button>
+        </div>
+      </div>
+
+      <div id="result-area" hidden>
+        <h2>Import results</h2>
+        <div id="result-summary" class="summary-grid"></div>
+        <button id="download-results" type="button" class="secondary">Download Results CSV</button>
+      </div>
+    </section>
+  </main>
+  <script src="assets/admin-import.js"></script>
+</body>
+</html>
