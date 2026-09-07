@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change10.js"
+main = "src/index-phase20-change11.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,10 +9,19 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 10 wraps Change 9 and verifies that an
-# imported PRELESSON_ONLY release actually has at least one usable PreLesson
-# resource before it is presented as clickable/available. Empty PreLesson releases
-# stay visible for information as "No PreLesson Sheets" but are not openable.
+# Portal V2 production entrypoint. Change 11 wraps Change 10 and makes an
+# explicit Full Library enrolment participate in cross-subject preview discovery
+# even when there is no matching active D1 batch assignment. The synthetic row is
+# request-local and preview-only: it never creates batch membership, never writes
+# D1/KV and never grants lesson/resource access. The existing Phase 19 server-side
+# preview gate remains authoritative, so the counterpart subject catalogue and
+# full lesson descriptions may be browsed while all resources stay locked unless
+# an independent entitlement already grants access.
+#
+# Change 10 wraps Change 9 and verifies that an imported PRELESSON_ONLY release
+# actually has at least one usable PreLesson resource before it is presented as
+# clickable/available. Empty PreLesson releases stay visible for information as
+# "No PreLesson Sheets" but are not openable.
 #
 # Change 9 normalises every student-facing 11+ Year/Level label to one convention:
 # "Year N 11+" / "Level N 11+" (no mixed parenthesised/non-parenthesised forms).
