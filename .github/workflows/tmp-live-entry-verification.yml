@@ -1,0 +1,29 @@
+name: Temporary live entry verification
+on:
+  push:
+    branches: [fix-live-entry-page-20260907]
+    paths:
+      - '.github/workflows/tmp-live-entry-verification.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify live portal entry, recent shares and collapsed detail
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/phase20-collapsible-lessons.js
+          node tests/recent-shares-collapsible-verification.mjs
+          cmp -s phase11.html phase11-change8.html
+          grep -Fq 'Just shared with you' phase11-change8.html
+          grep -Fq 'phase16-ui-refinement.css' phase11-change8.html
+          grep -Fq 'site-chrome.css' phase11-change8.html
+          grep -Fq 'phase20-collapsible-lessons.js' phase11-change8.html
+          grep -Fq "closed:'Detail'" assets/phase20-collapsible-lessons.js
+          grep -Fq 'background: #012169 !important;' assets/site-chrome.css
