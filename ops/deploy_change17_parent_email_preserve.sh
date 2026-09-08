@@ -2,7 +2,13 @@
 set -euo pipefail
 : "${CLOUDFLARE_API_TOKEN:?}"
 : "${CLOUDFLARE_ACCOUNT_ID:?}"
-: "${PARENT_EMAIL_TEST_TO:?Parent email deployment requires a safe test recipient}"
+: "${PARENT_EMAIL_LIVE:=0}"
+if [[ "$PARENT_EMAIL_LIVE" == "1" ]]; then
+  test -z "${PARENT_EMAIL_TEST_TO:-}"
+  PARENT_EMAIL_TEST_TO=""
+else
+  : "${PARENT_EMAIL_TEST_TO:?Parent email deployment requires a safe test recipient unless PARENT_EMAIL_LIVE=1}"
+fi
 : "${WORKER_NAME:=fpt-portal-v2-worker}"
 : "${WRANGLER_VERSION:=4.125.0}"
 : "${WORKER_CONFIG_FILE:=worker/wrangler.toml}"
@@ -64,7 +70,7 @@ grep -Fq 'name = "EMAIL"' worker/wrangler.change17.runtime.toml
 npx --yes wrangler@"$WRANGLER_VERSION" deploy \
   --config worker/wrangler.change17.runtime.toml \
   --keep-vars \
-  --message "${DEPLOY_MESSAGE:-Portal V2 parent email test mode on current production wrapper}"
+  --message "${DEPLOY_MESSAGE:-Portal V2 parent email deployment on current production wrapper}"
 
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-change17-settings-after.json
 jq -e '.success == true' /tmp/fpt-change17-settings-after.json >/dev/null
@@ -72,4 +78,8 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 cmp -s /tmp/fpt-change17-secrets-before.json /tmp/fpt-change17-secrets-after.json
 jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-change17-settings-after.json >/dev/null
 jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/fpt-change17-settings-after.json >/dev/null
-echo 'PARENT_EMAIL_DEPLOYED_IN_TEST_MODE_ON_CURRENT_WRAPPER'
+if [[ "$PARENT_EMAIL_LIVE" == "1" ]]; then
+  echo 'PARENT_EMAIL_DEPLOYED_LIVE_ON_CURRENT_WRAPPER'
+else
+  echo 'PARENT_EMAIL_DEPLOYED_IN_TEST_MODE_ON_CURRENT_WRAPPER'
+fi
