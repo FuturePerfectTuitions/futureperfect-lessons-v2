@@ -1,0 +1,37 @@
+name: Admin superuser production deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/src/index-phase20-change18-admin-superuser.js'
+      - 'worker/wrangler.toml'
+      - 'tests/admin-superuser-static-verification.mjs'
+      - '.github/workflows/admin-superuser-production-deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Authenticated Admin superuser access
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify admin superuser source syntax
+        run: node --check worker/src/index-phase20-change18-admin-superuser.js
+      - name: Verify admin superuser production wiring
+        run: node tests/admin-superuser-static-verification.mjs
+      - name: Deploy Worker preserving bindings and secrets
+        run: bash ops/deploy_current_worker_preserve.sh
+      - name: Complete
+        run: echo ADMIN_SUPERUSER_PRODUCTION_DEPLOY_PASS
