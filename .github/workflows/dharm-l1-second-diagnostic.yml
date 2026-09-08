@@ -1,0 +1,42 @@
+name: Dharm L1 second diagnostic
+
+on:
+  push:
+    branches: [diag/dharm-l1-live2]
+    paths:
+      - '.github/workflows/dharm-l1-second-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Inspect Dharm live access state
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          DB_ID=$(jq -r '.result.bindings[] | select(.name=="DB") | (.id // .database_id)' /tmp/settings.json | head -1)
+          LESSONS_NS=$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | (.namespace_id // .id)' /tmp/settings.json | head -1)
+          STUDENTS_NS=$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | (.namespace_id // .id)' /tmp/settings.json | head -1)
+          query() {
+            local sql="$1"
+            curl --fail --silent --show-error "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data "$(jq -nc --arg sql "$sql" '{sql:$sql}')"
+          }
+          echo '=== USER ACCESS FLAGS ==='
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_NS}/values/user:dha2806" -H "$AUTH" | jq '{blockedLessons,fullLibraries,batches,schoolYear}'
+          echo '=== Y4M1/Y4M2 ENTITLEMENTS ==='
+          query "SELECT lesson_id,core_access,source,source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm='dha2806' AND lesson_id IN ('Y4M1','Y4M2') ORDER BY lesson_id" | jq -c '.result[0].results // []'
+          echo '=== LIVE LESSON Y4M1 ==='
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${LESSONS_NS}/values/lesson:Y4M1" -H "$AUTH" | jq '{lessonId,title,displayIds,active,subject}'
+          echo '=== LIVE LESSON Y4M2 ==='
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${LESSONS_NS}/values/lesson:Y4M2" -H "$AUTH" | jq '{lessonId,title,displayIds,active,subject}'
