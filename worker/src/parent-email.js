@@ -1,13 +1,10 @@
-import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
-
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
 const DEFAULT_FROM = 'sej@futureperfect.education';
 const DEFAULT_FROM_NAME = 'Sejal Dalal';
 const DEFAULT_CC = 'barkha@futureperfect.education';
-const SIGNATURE_CID = 'fpt-email-signature';
-const SIGNATURE_FILENAME = 'fpt-email-signature.png';
+const SIGNATURE_URL = 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/public/email-signature-v1.png';
 
 function onlineMode(value) {
   return clean(value).toUpperCase().includes('O');
@@ -81,7 +78,7 @@ function htmlShell(content) {
 ${content}
 <p style="margin:0 0 20px 0;">Warmly,</p>
 <p style="margin:0 0 24px 0;">Sej</p>
-<img src="cid:${SIGNATURE_CID}" width="700" alt="Sejal Dalal — Future Perfect Tuitions" style="display:block;width:700px;max-width:100%;height:auto;border:0;">
+<img src="${SIGNATURE_URL}" width="700" alt="Sejal Dalal — Future Perfect Tuitions" style="display:block;width:700px;max-width:100%;height:auto;border:0;">
 </div>`;
 }
 
@@ -223,14 +220,7 @@ async function sendParentEmail(env, item) {
     to: deliveredTo,
     subject: built.subject,
     html: built.html,
-    text: built.text,
-    attachments: [{
-      content:FPT_EMAIL_SIGNATURE_PNG_BASE64,
-      filename:SIGNATURE_FILENAME,
-      type:'image/png',
-      disposition:'inline',
-      contentId:SIGNATURE_CID
-    }]
+    text: built.text
   };
   if (!testMode) payload.cc = { email:ccEmail, name:'Barkha' };
 
@@ -266,5 +256,6 @@ export {
   buildParentEmail,
   sendParentEmail,
   completedStatus,
-  slideText
+  slideText,
+  SIGNATURE_URL
 };
