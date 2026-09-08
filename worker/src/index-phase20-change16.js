@@ -1,10 +1,11 @@
 import change15Worker from './index-phase20-change15.js';
 
-// Performance note: the imported Change 13 home builder now derives cross-subject
-// preview counts from live curriculum membership only. It no longer downloads
-// every lesson record for the unselected subject during login/home navigation.
+// Performance note: the imported Change 12/13 home builders now keep the home
+// response lightweight. The other subject's full lesson descriptions are not
+// fetched until that subject is actually opened; home only prepares summaries
+// and live curriculum counts.
 // This file is intentionally touched so the production deployment workflow
-// bundles and publishes that imported performance change.
+// bundles and publishes those imported performance changes.
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
