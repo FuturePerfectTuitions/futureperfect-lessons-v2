@@ -1,5 +1,6 @@
 import phase20Worker from './index-phase20-change7.js';
 import { canonicalCatalogueRowsForView } from './index-phase12.js';
+import { VIEW_CURRICULA } from './phase11-navigation-cache.js';
 import {
   PRELESSON_MESSAGE,
   PRELESSON_DOWNLOAD_KINDS,
@@ -86,6 +87,117 @@ function viewRank(viewId) {
 
 function batchIsElevenPlus(batchKey) {
   return /11/.test(clean(batchKey));
+}
+
+const ACCESS_VIEW_IDS = Object.freeze([
+  'maths-year2', 'maths-year3', 'maths-year4', 'maths-year5', 'maths-year6',
+  'maths-level1', 'maths-level2', 'maths-level3',
+  'english-year2', 'english-year3', 'english-year4', 'english-year5', 'english-year6',
+  'english-year4-11plus', 'english-year5-11plus'
+]);
+
+const BUNDLED_ACCESS_INDEX = (() => {
+  const index = new Map();
+  for (const viewId of ACCESS_VIEW_IDS) {
+    for (const row of canonicalCatalogueRowsForView(viewId)) {
+      if (!index.has(row.lessonId)) index.set(row.lessonId, []);
+      index.get(row.lessonId).push({ viewId, row });
+    }
+  }
+  return index;
+})();
+
+const LIVE_VIEW_MEMBERSHIP_TTL_MS = 10000;
+let liveViewMembershipPromise = null;
+let liveViewMembershipExpiresAt = 0;
+
+function curriculumLessonIds(raw) {
+  const items = Array.isArray(raw)
+    ? raw
+    : (Array.isArray(raw?.lessonIds)
+        ? raw.lessonIds
+        : (Array.isArray(raw?.lessons)
+            ? raw.lessons
+            : (Array.isArray(raw?.items) ? raw.items : [])));
+  return items
+    .map(item => typeof item === 'string' ? clean(item) : clean(item?.lessonId))
+    .filter(Boolean);
+}
+
+async function liveViewMembership(env) {
+  const now = Date.now();
+  if (liveViewMembershipPromise && now < liveViewMembershipExpiresAt) {
+    return liveViewMembershipPromise;
+  }
+
+  const promise = (async () => {
+    const codes = [...new Set(ACCESS_VIEW_IDS.flatMap(viewId => VIEW_CURRICULA[viewId] || []))];
+    const records = await Promise.all(codes.map(async code => [
+      code,
+      await env.LESSONS_KV.get(`curriculum:${code}`, { type:'json' }).catch(() => null)
+    ]));
+    const byCode = new Map(records);
+    const membership = new Map();
+    for (const viewId of ACCESS_VIEW_IDS) {
+      const lessonIds = new Set();
+      for (const code of VIEW_CURRICULA[viewId] || []) {
+        for (const lessonId of curriculumLessonIds(byCode.get(code))) lessonIds.add(lessonId);
+      }
+      membership.set(viewId, lessonIds);
+    }
+    return membership;
+  })();
+
+  liveViewMembershipPromise = promise;
+  liveViewMembershipExpiresAt = now + LIVE_VIEW_MEMBERSHIP_TTL_MS;
+  promise.catch(() => {
+    if (liveViewMembershipPromise === promise) {
+      liveViewMembershipPromise = null;
+      liveViewMembershipExpiresAt = 0;
+    }
+  });
+  return promise;
+}
+
+function bundledAccessResolution(row, membership) {
+  const candidates = BUNDLED_ACCESS_INDEX.get(row.lessonId) || [];
+  if (!candidates.length) return null;
+  const elevenPlus = batchIsElevenPlus(row.batchKey);
+
+  const liveCandidates = candidates.filter(candidate =>
+    membership?.get(candidate.viewId)?.has(row.lessonId)
+  );
+  if (!liveCandidates.length) return null;
+
+  const preferred = liveCandidates.filter(candidate => {
+    const subject = viewSubject(candidate.viewId);
+    if (subject === 'maths') {
+      return elevenPlus
+        ? /^maths-level[1-3]$/.test(candidate.viewId)
+        : /^maths-year[2-6]$/.test(candidate.viewId);
+    }
+    if (subject === 'english') {
+      return elevenPlus
+        ? /-11plus$/.test(candidate.viewId)
+        : /^english-year[2-6]$/.test(candidate.viewId);
+    }
+    return false;
+  });
+
+  const chosen = preferred[0] || (liveCandidates.length === 1 ? liveCandidates[0] : null);
+  if (!chosen) return null;
+
+  return {
+    ...row,
+    viewId: chosen.viewId,
+    lesson: {
+      lessonId: row.lessonId,
+      title: chosen.row.title,
+      subject: viewSubject(chosen.viewId),
+      active: true,
+      displayIds: { [chosen.viewId]: chosen.row.displayLessonId }
+    }
+  };
 }
 
 function displayViewIds(lesson) {
@@ -257,14 +369,32 @@ async function rawAccessRows(env, portalUserIdNorm) {
 }
 
 async function resolvedAccessRows(env, portalUserIdNorm) {
-  const rows = await rawAccessRows(env, portalUserIdNorm);
-  const lessons = await Promise.all(rows.map(row => env.LESSONS_KV.get(`lesson:${row.lessonId}`, { type:'json' })));
-  return rows.map((row, index) => {
-    const lesson = lessons[index];
-    if (!lesson || lesson.active === false) return null;
-    const viewId = viewIdForAccess(lesson, row.batchKey);
-    return viewId ? { ...row, viewId, lesson } : null;
-  }).filter(Boolean);
+  const [rows, membership] = await Promise.all([
+    rawAccessRows(env, portalUserIdNorm),
+    liveViewMembership(env)
+  ]);
+
+  const resolved = new Array(rows.length);
+  const fallback = [];
+  rows.forEach((row, index) => {
+    const fast = bundledAccessResolution(row, membership);
+    if (fast) resolved[index] = fast;
+    else fallback.push({ row, index });
+  });
+
+  if (fallback.length) {
+    const lessons = await Promise.all(fallback.map(item =>
+      env.LESSONS_KV.get(`lesson:${item.row.lessonId}`, { type:'json' })
+    ));
+    fallback.forEach((item, offset) => {
+      const lesson = lessons[offset];
+      if (!lesson || lesson.active === false) return;
+      const viewId = viewIdForAccess(lesson, item.row.batchKey);
+      if (viewId) resolved[item.index] = { ...item.row, viewId, lesson };
+    });
+  }
+
+  return resolved.filter(Boolean);
 }
 
 function ensureSubject(body, subjectName) {
