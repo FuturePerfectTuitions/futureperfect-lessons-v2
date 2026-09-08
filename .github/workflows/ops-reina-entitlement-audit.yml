@@ -17,7 +17,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      TARGET_STEM_SHA256: fdc97875a4c7d08653f1878804c341a04e341a1c5498f58666c5b86237ea2101
+      TARGET_STEM_SHA256: b0d543af330c2df5a4c5c40ea8b810fcaae510f2013fa53f06717c658327c64c
 
     steps:
       - uses: actions/setup-node@v4
