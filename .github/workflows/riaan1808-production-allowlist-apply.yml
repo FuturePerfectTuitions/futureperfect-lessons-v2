@@ -1,0 +1,147 @@
+name: Apply Riaan1808 production login allowlist
+
+on:
+  push:
+    branches: [ops/cloudflare-audit]
+    paths:
+      - '.github/workflows/riaan1808-production-allowlist-apply.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WORKER_ENTRYPOINT: src/index-phase20-change20-configured-upsell.js
+      WRANGLER_VERSION: 4.130.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Regenerate production navigation manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/riaan-navigation-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/riaan-navigation-package >/tmp/riaan-navigation.log
+          grep -Fq 'Navigation manifest SHA-256: d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' worker/src/phase11-navigation-manifest.generated.js
+
+      - name: Build preserve config with Riaan appended to live allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/riaan-settings-before.json
+          jq -e '.success == true' /tmp/riaan-settings-before.json >/dev/null
+          plain(){ jq -r --arg n "$1" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/riaan-settings-before.json; }
+          field(){ jq -r --arg n "$1" --arg t "$2" --arg f "$3" '[.result.bindings[]|select(.name==$n and .type==$t)|.[$f]][0] // ""' /tmp/riaan-settings-before.json; }
+
+          CURRENT="$(plain PROD_LOGIN_ALLOWLIST)"
+          BEFORE_COUNT="$(printf '%s' "$CURRENT" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | wc -l | tr -d ' ')"
+          if printf '%s' "$CURRENT" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' | grep -Fxq 'riaan1808'; then
+            NEW_ALLOWLIST="$CURRENT"
+            EXPECTED_COUNT="$BEFORE_COUNT"
+          else
+            if [ -n "$CURRENT" ]; then NEW_ALLOWLIST="${CURRENT},riaan1808"; else NEW_ALLOWLIST='riaan1808'; fi
+            EXPECTED_COUNT="$((BEFORE_COUNT + 1))"
+          fi
+          echo "allowlist_before_count=$BEFORE_COUNT"
+          echo "allowlist_expected_after_count=$EXPECTED_COUNT"
+          test "$EXPECTED_COUNT" -ge 1
+
+          STUDENTS="$(field STUDENTS_KV kv_namespace namespace_id)"
+          LESSONS="$(field LESSONS_KV kv_namespace namespace_id)"
+          DBID="$(field DB d1 id)"
+          R2="$(field MATERIALS_R2 r2_bucket bucket_name)"
+          for value in "$STUDENTS" "$LESSONS" "$DBID" "$R2"; do test -n "$value"; done
+
+          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/riaan-settings-before.json >/tmp/riaan-secrets-before.json
+          jq -c '[.result.bindings[]|{name,type,namespace_id,bucket_name,database_id,id,service,environment}]|sort_by(.name)' /tmp/riaan-settings-before.json >/tmp/riaan-binding-shape-before.json
+
+          {
+            printf 'name = "%s"\n' "$WORKER_NAME"
+            printf 'main = "%s"\n' "$WORKER_ENTRYPOINT"
+            printf 'compatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n\n[vars]\n'
+            printf 'ENVIRONMENT = "%s"\n' "$(plain ENVIRONMENT)"
+            printf 'ALLOWED_ORIGINS = "%s"\n' "$(plain ALLOWED_ORIGINS)"
+            printf 'DEV_LOGIN_ALLOWLIST = "%s"\n' "$(plain DEV_LOGIN_ALLOWLIST)"
+            printf 'PROD_LOGIN_ALLOWLIST = "%s"\n' "$NEW_ALLOWLIST"
+            printf 'STUDENT_LOGIN_ENABLED = "%s"\n' "$(plain STUDENT_LOGIN_ENABLED)"
+            printf 'PARENT_EMAIL_TEST_TO = "%s"\n' "$(plain PARENT_EMAIL_TEST_TO)"
+            printf '\n[[send_email]]\nname = "EMAIL"\n'
+            printf '\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "%s"\n' "$STUDENTS"
+            printf '\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "%s"\n' "$LESSONS"
+            printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$R2"
+            printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
+          } > worker/wrangler.riaan.runtime.toml
+          echo "$EXPECTED_COUNT" >/tmp/riaan-expected-count.txt
+
+      - name: Deploy identical production bundle with updated allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.riaan.runtime.toml --keep-vars --message 'Allow Riaan1808 production student login'
+
+      - name: Verify Riaan and all production bindings after deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/riaan-settings-after.json
+          jq -e '.success == true' /tmp/riaan-settings-after.json >/dev/null
+          VALUE="$(jq -r '[.result.bindings[]|select(.name=="PROD_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/riaan-settings-after.json)"
+          COUNT="$(printf '%s' "$VALUE" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | wc -l | tr -d ' ')"
+          EXPECTED="$(cat /tmp/riaan-expected-count.txt)"
+          test "$COUNT" = "$EXPECTED"
+          printf '%s' "$VALUE" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' | grep -Fxq 'riaan1808'
+          echo "allowlist_after_count=$COUNT"
+          echo 'riaan1808_in_prod_allowlist=true'
+
+          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/riaan-settings-after.json >/tmp/riaan-secrets-after.json
+          cmp -s /tmp/riaan-secrets-before.json /tmp/riaan-secrets-after.json
+          jq -e '.result.bindings[]|select(.name=="EMAIL" and .type=="send_email")' /tmp/riaan-settings-after.json >/dev/null
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do jq -e --arg n "$binding" '.result.bindings[]|select(.name==$n)' /tmp/riaan-settings-after.json >/dev/null; done
+
+          jq -c '[.result.bindings[]|{name,type,namespace_id,bucket_name,database_id,id,service,environment}]|sort_by(.name)' /tmp/riaan-settings-after.json >/tmp/riaan-binding-shape-after.json
+          cmp -s /tmp/riaan-binding-shape-before.json /tmp/riaan-binding-shape-after.json
+          echo 'PRODUCTION_BINDINGS_AND_SECRETS_PRESERVED'
+
+      - name: Verify deployed code bundle stayed identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error --dump-header /tmp/riaan-live.headers "$API/workers/scripts/${WORKER_NAME}" -H "$AUTH" -o /tmp/riaan-live.bin
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib,re
+          h=open('/tmp/riaan-live.headers','rb').read().decode('latin-1','replace')
+          b=open('/tmp/riaan-live.bin','rb').read()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',h)
+          ct=m.group(1).strip() if m else ''
+          msg=BytesParser(policy=default).parsebytes(('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+b)
+          parts=[]
+          for p in msg.iter_parts():
+              payload=p.get_payload(decode=True) or b''
+              name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or ''
+              if name.endswith('.js'): parts.append((name,payload))
+          assert len(parts)==1, parts
+          digest=hashlib.sha256(parts[0][1]).hexdigest()
+          expected='7c9164863dc82c18043ba292e2559a9e82cfbedfe155fbcfd972037b8d1f68ab'
+          print('live_bundle_sha256='+digest)
+          assert digest==expected, (digest,expected)
+          print('RIAAN1808_ALLOWLIST_APPLY_PASS')
+          PY
