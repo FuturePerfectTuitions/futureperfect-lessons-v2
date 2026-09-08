@@ -6,8 +6,9 @@ on:
     paths:
       - '.github/workflows/change17-fast-navigation-production-deploy.yml'
       - 'worker/src/index-phase20-change17.js'
+      - 'worker/src/index-phase20-change17-parent-email.js'
       - 'worker/wrangler.toml'
-      - 'ops/deploy_current_worker_preserve.sh'
+      - 'ops/deploy_change17_parent_email_preserve.sh'
       - 'scripts/phase11-apply-package.mjs'
       - 'scripts/phase11-navigation-manifest.mjs'
 
@@ -23,8 +24,10 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
+      WORKER_ENTRYPOINT: src/index-phase20-change17-parent-email.js
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Portal V2 Change 17 fast navigation
+      PARENT_EMAIL_TEST_TO: sejal.mail@gmail.com
+      DEPLOY_MESSAGE: Portal V2 fast navigation integrated with parent email
 
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +36,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify Change 17 and canonical navigation bundle
+      - name: Verify integrated fast navigation and canonical bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -41,15 +44,17 @@ jobs:
           node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/change17-navigation-package >/tmp/change17-navigation.log
           jq -e '.navigationManifestLessons == 369 and .navigationManifestCurricula == 11' /tmp/change17-navigation-package/phase11-apply-summary.json >/dev/null
           node --check worker/src/index-phase20-change17.js
-          node --check worker/src/index-phase20-change16.js
+          node --check worker/src/index-phase20-change17-parent-email.js
           node tests/subject-preview-enrolment-boundary-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
+          node tests/live-student-catalogue-overlay-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
-          grep -Fq 'main = "src/index-phase20-change17.js"' worker/wrangler.toml
-          grep -Fq 'phase11-apply-package.mjs' ops/deploy_current_worker_preserve.sh
-          echo 'CHANGE17_STATIC_AND_NAVIGATION_PASS'
+          grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
+          grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
+          grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
+          echo 'CHANGE17_FAST_NAV_INTEGRATION_PASS'
 
       - name: Require production bindings and secrets
         shell: bash
@@ -57,6 +62,7 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$PARENT_EMAIL_TEST_TO" = 'sejal.mail@gmail.com'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -68,41 +74,31 @@ jobs:
           for required in ADMIN_IMPORT_PASSWORD ADMIN_IMPORT_SESSION_SECRET EXCEL_SYNC_TOKEN; do
             jq -e --arg n "$required" '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | index($n) != null' /tmp/change17-settings-before.json >/dev/null
           done
-          echo 'CHANGE17_BINDINGS_PASS'
+          echo 'CHANGE17_FAST_NAV_BINDINGS_PASS'
 
-      - name: Deploy current production Worker preserving bindings and secrets
+      - name: Deploy integrated Worker preserving parent email bindings
         shell: bash
         run: |
-          set -u -o pipefail
-          set +e
-          bash ops/deploy_current_worker_preserve.sh
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ]; then
-            echo "Preserve script returned $rc after deployment attempt; validating live Worker bindings."
-          fi
-          sleep 4
+          set -euo pipefail
+          bash ops/deploy_change17_parent_email_preserve.sh
+
+      - name: Verify live fast navigation and parent email outer layer
+        shell: bash
+        run: |
+          set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/change17-settings-after.json
           jq -e '.success == true' /tmp/change17-settings-after.json >/dev/null
-          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
-            jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/change17-settings-after.json >/dev/null
-          done
-          echo 'CHANGE17_DEPLOY_BINDINGS_PASS'
-
-      - name: Verify live Worker contains fast navigation
-        shell: bash
-        run: |
-          set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/change17-settings-after.json >/dev/null
+          jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/change17-settings-after.json >/dev/null
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/change17-worker-after.bin
           grep -aFq '/api/v1/student/navigation' /tmp/change17-worker-after.bin
           grep -aFq 'fast-v1' /tmp/change17-worker-after.bin
-          grep -aFq 'catalogueSha256' /tmp/change17-worker-after.bin
+          grep -aFq 'live-kv-v1' /tmp/change17-worker-after.bin
           echo 'CHANGE17_LIVE_FAST_NAVIGATION_PASS'
 
       - name: Verify live security boundary
