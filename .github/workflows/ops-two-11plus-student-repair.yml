@@ -1,0 +1,178 @@
+name: Guarded two-student 11+ entitlement repair
+
+on:
+  push:
+    branches: [ops/annisha-l2-rule]
+    paths:
+      - '.github/workflows/ops-two-11plus-student-repair.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      TARGET_A_HASH: d3063561ea7340edab0a17b4ce6f2bcf74affee68e953f6351b85cef4b1e27dd
+      TARGET_B_HASH: cf9ea887e81f079ae544647b4b69c8af4be497b31c4ca8c2291959165f34c1d2
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard production and resolve bindings
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          STUDENTS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DBID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id // empty)' /tmp/settings.json | head -n1)"
+          test -n "$STUDENTS" && test "$STUDENTS" != null
+          test -n "$DBID" && test "$DBID" != null
+          echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
+          echo "dbid=$DBID" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_GUARD=true'
+
+      - name: Locate two exact targets and prepare entitlement-only profiles
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, sys
+          targets={os.environ['TARGET_A_HASH']:'A',os.environ['TARGET_B_HASH']:'B'}
+          found={}
+          for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
+              key=str(item.get('name') or '')
+              if not key.startswith('user:'): continue
+              suffix=key[5:].strip().lower()
+              label=targets.get(hashlib.sha256(suffix.encode()).hexdigest())
+              if not label: continue
+              p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+              if p.returncode: sys.exit(3)
+              user=json.loads(p.stdout)
+              if str(user.get('role') or '').strip().lower()=='admin': sys.exit(4)
+              before=json.loads(json.dumps(user))
+              user['fullLibraries']=['ENGLISH_Y4_11PLUS_FULL','MATHS_L1_FULL','MATHS_L2_FULL']
+              user['upsellViews']=[]
+              user['trialViews']=[]
+              user['vrEligible']=True
+              manual=user.get('manualAccess') if isinstance(user.get('manualAccess'),dict) else {}
+              manual=json.loads(json.dumps(manual))
+              specials=manual.get('specialBuckets') if isinstance(manual.get('specialBuckets'),list) else []
+              manual['specialBuckets']=sorted(set([str(x) for x in specials if str(x).strip()] + ['VR_HOWTO']))
+              user['manualAccess']=manual
+              before_other=json.loads(json.dumps(before)); after_other=json.loads(json.dumps(user))
+              for f in ('fullLibraries','upsellViews','trialViews','vrEligible','manualAccess'):
+                  before_other.pop(f,None); after_other.pop(f,None)
+              if before_other != after_other: sys.exit(5)
+              found[label]={'key':key,'norm':suffix,'before':before,'after':user}
+          if set(found) != {'A','B'}:
+              print('TARGET_COUNT=' + str(len(found))); sys.exit(2)
+          for label,data in found.items():
+              open(f'/tmp/key-{label}','w').write(data['key'])
+              open(f'/tmp/norm-{label}','w').write(data['norm'])
+              json.dump(data['before'],open(f'/tmp/before-{label}.json','w'),separators=(',',':'))
+              json.dump(data['after'],open(f'/tmp/after-{label}.json','w'),separators=(',',':'))
+          print('TARGET_COUNT=2')
+          print('PROFILE_PATCHES_READY=true')
+          PY
+
+      - name: Persist only the two target profiles
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for label in A B; do
+            KEY="$(cat /tmp/key-$label)"
+            ENCODED="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$KEY")"
+            curl --fail --silent --show-error \
+              --request PUT \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data-binary @/tmp/after-$label.json \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${ENCODED}" \
+              > /tmp/put-$label.json
+            jq -e '.success == true' /tmp/put-$label.json >/dev/null
+          done
+          echo 'KV_PATCHES_APPLIED=true'
+
+      - name: Ensure existing 11+ English releases include VR
+        env:
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          def q(sql,params):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':params}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(10)
+              return ((body.get('result') or [{}])[0].get('results') or [])
+          for label in ('A','B'):
+              target=open(f'/tmp/norm-{label}').read().strip()
+              q("UPDATE lesson_entitlements SET vr_access=1 WHERE portal_user_id_norm=? AND source_batch_code IN (SELECT batch_key FROM batch_definitions WHERE subject='english' AND stream='11plus')",[target])
+              q("UPDATE online_prelesson_entitlements SET vr_access=1 WHERE portal_user_id_norm=? AND batch_key IN (SELECT batch_key FROM batch_definitions WHERE subject='english' AND stream='11plus')",[target])
+          print('EXISTING_11PLUS_ENGLISH_VR_RECONCILED=true')
+          PY
+
+      - name: Verify exact full libraries, VR and no forbidden full access
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for label in A B; do
+            KEY="$(cat /tmp/key-$label)"
+            npx --yes wrangler@latest kv key get "$KEY" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/verify-$label.json 2>/dev/null
+          done
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          required=['ENGLISH_Y4_11PLUS_FULL','MATHS_L1_FULL','MATHS_L2_FULL']
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          def q(sql,params):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':params}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(20)
+              return ((body.get('result') or [{}])[0].get('results') or [])
+          for label in ('A','B'):
+              before=json.load(open(f'/tmp/before-{label}.json')); verify=json.load(open(f'/tmp/verify-{label}.json'))
+              if verify.get('fullLibraries') != required: sys.exit(2)
+              if verify.get('upsellViews') != [] or verify.get('trialViews') != []: sys.exit(3)
+              if verify.get('vrEligible') is not True: sys.exit(4)
+              manual=verify.get('manualAccess') if isinstance(verify.get('manualAccess'),dict) else {}
+              if 'VR_HOWTO' not in (manual.get('specialBuckets') or []): sys.exit(5)
+              if 'MATHS_L3_FULL' in verify.get('fullLibraries',[]) or 'ENGLISH_Y5_11PLUS_FULL' in verify.get('fullLibraries',[]): sys.exit(6)
+              target=open(f'/tmp/norm-{label}').read().strip()
+              bad=q("SELECT COUNT(*) c FROM lesson_entitlements e JOIN batch_definitions b ON b.batch_key=e.source_batch_code WHERE e.portal_user_id_norm=? AND b.subject='english' AND b.stream='11plus' AND COALESCE(e.vr_access,0)<>1",[target])
+              badpre=q("SELECT COUNT(*) c FROM online_prelesson_entitlements e JOIN batch_definitions b ON b.batch_key=e.batch_key WHERE e.portal_user_id_norm=? AND b.subject='english' AND b.stream='11plus' AND COALESCE(e.vr_access,0)<>1",[target])
+              if int((bad[0] if bad else {}).get('c') or 0) or int((badpre[0] if badpre else {}).get('c') or 0): sys.exit(7)
+              before_other=json.loads(json.dumps(before)); verify_other=json.loads(json.dumps(verify))
+              for f in ('fullLibraries','upsellViews','trialViews','vrEligible','manualAccess'):
+                  before_other.pop(f,None); verify_other.pop(f,None)
+              if before_other != verify_other: sys.exit(8)
+          print('BOTH_FULL_LIBRARY_SETS_VERIFY=true')
+          print('BOTH_VR_ELIGIBLE_VERIFY=true')
+          print('BOTH_VR_HOWTO_VERIFY=true')
+          print('NO_L3_FULL_VERIFY=true')
+          print('NO_Y5_11PLUS_ENGLISH_FULL_VERIFY=true')
+          print('EXISTING_ENGLISH_11PLUS_VR_ROWS_VERIFY=true')
+          print('UNRELATED_PROFILE_FIELDS_UNCHANGED=true')
+          PY
