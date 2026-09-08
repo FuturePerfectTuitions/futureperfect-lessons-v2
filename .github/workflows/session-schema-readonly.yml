@@ -1,0 +1,27 @@
+name: Session schema read-only diagnostic
+
+on:
+  push:
+    branches: [ops/cloudflare-audit]
+    paths:
+      - '.github/workflows/session-schema-readonly.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect live session schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.130.0 d1 execute fpt_portal_v2_db --remote --command "SELECT type,name,sql FROM sqlite_master WHERE (type='table' AND name IN ('student_sessions','student_session_profiles','student_session_windows')) OR (type='trigger' AND tbl_name='student_sessions') ORDER BY type,name;"
+          npx --yes wrangler@4.130.0 d1 execute fpt_portal_v2_db --remote --command "PRAGMA table_info('student_sessions');"
+      - name: Confirm no writes
+        run: echo 'READ_ONLY_SESSION_SCHEMA_DIAGNOSTIC_PASS'
