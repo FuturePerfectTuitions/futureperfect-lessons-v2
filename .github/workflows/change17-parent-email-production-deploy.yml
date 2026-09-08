@@ -10,6 +10,7 @@ on:
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
+      - 'worker/src/index-phase20-change13.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
       - 'worker/src/phase11-navigation-cache.js'
       - 'tests/phase11-navigation-cache-static-verification.mjs'
@@ -53,6 +54,7 @@ jobs:
           node --check worker/src/admin-lesson-release-import-email.js
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
+          node --check worker/src/index-phase20-change13.js
           node --check worker/src/index-phase20-change17-parent-email.js
           node --check worker/src/phase11-navigation-cache.js
           node --check assets/admin-import.js
