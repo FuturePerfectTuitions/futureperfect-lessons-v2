@@ -156,48 +156,44 @@ assert.equal(preview.results[0].parent, 'Sheetal');
 assert.equal(preview.results[0].parentEmail, 'sara_shinde@hotmail.co.uk');
 assert.equal(preview.summary.emailEligible, 1);
 
-// Cloudflare Email Sending now receives an explicit raw RFC 5322 MIME message.
-// The same MIME has To=parent and Cc=Barkha, while both addresses are supplied as
-// envelope recipients. The signature part has a literal matching Content-ID.
+// Cloudflare Email Sending structured payload must use the documented inline
+// attachment field `content_id` (snake case), with base64 content.
 const TEST_SIGNATURE_BASE64 = 'dGVzdC1zaWduYXR1cmU=';
 const sentPayloads = [];
 const env = {
   PARENT_EMAIL_SIGNATURE_BASE64: TEST_SIGNATURE_BASE64,
-  __EMAIL_MESSAGE_FACTORY(from, to, raw) { return { from, to, raw }; },
   EMAIL:{
     async send(payload) {
       sentPayloads.push(payload);
-      return { messageId:`synthetic-${sentPayloads.length}` };
+      return { messageId:'synthetic-message-id' };
     }
   }
 };
 const sent = await sendParentEmail(env, upcoming);
 assert.equal(sent.ok, true);
 assert.equal(sent.status, 'SENT');
-assert.equal(sent.messageId, 'synthetic-1');
-assert.equal(sentPayloads.length, 2);
-assert.equal(sentPayloads[0].from, 'sej@futureperfect.education');
-assert.equal(sentPayloads[0].to, 'sara_shinde@hotmail.co.uk');
-assert.equal(sentPayloads[1].to, 'barkha@futureperfect.education');
-assert.equal(sentPayloads[0].raw, sentPayloads[1].raw);
-assert.match(sentPayloads[0].raw, /From: Sejal Dalal <sej@futureperfect\.education>/);
-assert.match(sentPayloads[0].raw, /To: sara_shinde@hotmail\.co\.uk/);
-assert.match(sentPayloads[0].raw, /Cc: Barkha <barkha@futureperfect\.education>/);
-assert.match(sentPayloads[0].raw, /Content-Type: multipart\/related/);
-assert.match(sentPayloads[0].raw, /Content-ID: <fpt-email-signature-clean>/);
-assert.match(sentPayloads[0].raw, /X-Attachment-Id: fpt-email-signature-clean/);
-assert.match(sentPayloads[0].raw, /Content-Disposition: inline; filename="fpt-email-signature\.png"/);
-assert.match(sentPayloads[0].raw, /dGVzdC1zaWduYXR1cmU=/);
+assert.equal(sent.messageId, 'synthetic-message-id');
+assert.equal(sentPayloads.length, 1);
+const payload = sentPayloads[0];
+assert.deepEqual(payload.from, { email:'sej@futureperfect.education', name:'Sejal Dalal' });
+assert.equal(payload.to, 'sara_shinde@hotmail.co.uk');
+assert.deepEqual(payload.cc, { email:'barkha@futureperfect.education', name:'Barkha' });
+assert.equal(payload.attachments.length, 1);
+assert.equal(payload.attachments[0].filename, 'fpt-email-signature.png');
+assert.equal(payload.attachments[0].type, 'image/png');
+assert.equal(payload.attachments[0].disposition, 'inline');
+assert.equal(payload.attachments[0].content_id, 'fpt-email-signature-clean');
+assert.equal('contentId' in payload.attachments[0], false);
+assert.equal(payload.attachments[0].content, TEST_SIGNATURE_BASE64);
 
 // A delivery failure is reported as an email failure; it does not throw and
 // therefore cannot roll back a Portal entitlement already committed before send.
 const failed = await sendParentEmail({
   PARENT_EMAIL_SIGNATURE_BASE64: TEST_SIGNATURE_BASE64,
-  __EMAIL_MESSAGE_FACTORY(from, to, raw) { return { from, to, raw }; },
   EMAIL:{ async send() { throw Object.assign(new Error('Synthetic delivery failure'), { code:'DELIVERY_FAILURE' }); } }
 }, completed);
 assert.equal(failed.ok, false);
 assert.equal(failed.status, 'DELIVERY_FAILURE');
 assert.match(failed.message, /Synthetic delivery failure/);
 
-console.log('Parent CSV email triggers, formatting, runtime signature loading, raw MIME CID linkage, L-prefix normalisation and Cloudflare delivery: PASS');
+console.log('Parent CSV email triggers, formatting, runtime signature loading, documented content_id linkage, L-prefix normalisation and Cloudflare delivery: PASS');
