@@ -1,0 +1,232 @@
+name: Verify live Cumulative Homework repair
+
+on:
+  push:
+    branches:
+      - ops/cumulative-homework-audit-20260908
+    paths:
+      - .github/workflows/cumulative-homework-postfix-verify.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      CF_API: https://api.cloudflare.com/client/v4
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve production bindings and R2 cumulative inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p cumulative-verify
+          curl -fsS \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            > cumulative-verify/worker-settings.json
+          jq -e '.success == true' cumulative-verify/worker-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' cumulative-verify/worker-settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id // empty' cumulative-verify/worker-settings.json)"
+          MATERIALS_R2_BUCKET="$(jq -r '.result.bindings[] | select(.name=="MATERIALS_R2") | .bucket_name // empty' cumulative-verify/worker-settings.json)"
+          test -n "$LESSONS_KV_ID"
+          test -n "$MATERIALS_R2_BUCKET"
+          printf '%s' "$LESSONS_KV_ID" > cumulative-verify/lessons-kv-id.txt
+          printf '%s' "$MATERIALS_R2_BUCKET" > cumulative-verify/r2-bucket.txt
+
+          printf '[]' > cumulative-verify/r2-objects.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${MATERIALS_R2_BUCKET}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              encoded="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded}"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key,size,etag,last_modified}]' <<<"$page" > cumulative-verify/page.json
+            jq -s '.[0] + .[1]' cumulative-verify/r2-objects.json cumulative-verify/page.json > cumulative-verify/next.json
+            mv cumulative-verify/next.json cumulative-verify/r2-objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+
+      - name: Snapshot all live lesson records after propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          NS="$(cat cumulative-verify/lessons-kv-id.txt)"
+          printf '[]' > cumulative-verify/lesson-keys.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS}/keys?limit=1000&prefix=lesson%3A"
+            if [ -n "$cursor" ]; then
+              encoded="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded}"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | .name]' <<<"$page" > cumulative-verify/page-keys.json
+            jq -s '.[0] + .[1]' cumulative-verify/lesson-keys.json cumulative-verify/page-keys.json > cumulative-verify/next.json
+            mv cumulative-verify/next.json cumulative-verify/lesson-keys.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          jq -r '.[]' cumulative-verify/lesson-keys.json | LC_ALL=C sort -u > cumulative-verify/lesson-keys.txt
+          : > cumulative-verify/live-lessons.ndjson
+          while IFS= read -r key; do
+            encoded="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            value="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS}/values/${encoded}")"
+            jq -cn --arg key "$key" --argjson record "$value" '{kvKey:$key,record:$record}' >> cumulative-verify/live-lessons.ndjson
+          done < cumulative-verify/lesson-keys.txt
+          echo "Live lesson records verified: $(wc -l < cumulative-verify/live-lessons.ndjson | tr -d ' ')"
+
+      - name: Validate catalogue-wide cumulative state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from collections import defaultdict
+          from pathlib import PurePosixPath
+
+          root='cumulative-verify'
+          rows=[json.loads(x) for x in open(f'{root}/live-lessons.ndjson',encoding='utf-8') if x.strip()]
+          live={row['kvKey'].split(':',1)[-1]:row['record'] for row in rows}
+          r2=json.load(open(f'{root}/r2-objects.json',encoding='utf-8'))
+          r2keys=sorted({x.get('key','') for x in r2 if x.get('key')})
+
+          folders=defaultdict(list)
+          for key in r2keys:
+              if '/cumulative-homework/' not in key: continue
+              prefix=key.split('/cumulative-homework/',1)[0]
+              folders[prefix].append(key)
+
+          expected_groups={'level1':34,'level2':36,'level3':36,'year6-extra':5}
+          found_groups=defaultdict(int)
+          pairs={}
+          for prefix,keys in folders.items():
+              parts=prefix.split('/')
+              if len(parts)!=3 or parts[0]!='maths' or parts[1] not in expected_groups: continue
+              group,lid=parts[1],parts[2]
+              sheets=[k for k in keys if '/sheets/' in k]
+              answers=[k for k in keys if '/answers/' in k]
+              if len(sheets)!=1 or len(answers)!=1:
+                  raise SystemExit(f'{prefix}: expected 1 cumulative sheet + 1 answer; found {len(sheets)} + {len(answers)}')
+              found_groups[group]+=1
+              pairs[(group,lid)]={'sheet':sheets[0],'answer':answers[0]}
+
+          if dict(found_groups)!=expected_groups:
+              raise SystemExit(f'R2 cumulative group counts changed: {dict(found_groups)}')
+          if len(pairs)!=111: raise SystemExit(f'Expected 111 physical R2 cumulative pairs; found {len(pairs)}')
+
+          target={(g,lid):p for (g,lid),p in pairs.items() if g in ('level1','level2','level3')}
+          if len(target)!=106: raise SystemExit(f'Expected 106 Level 1/2/3 cumulative pairs; found {len(target)}')
+
+          errors=[]
+          verified_targets=[]
+          for (group,lid),material in sorted(target.items()):
+              rec=live.get(lid)
+              if not isinstance(rec,dict):
+                  errors.append({'lessonId':lid,'error':'missing-live-record'}); continue
+              ep=((rec.get('phase11Resources') or {}).get('elevenPlus') or {})
+              cp=ep.get('cumulativeHomeworks') or []
+              if len(cp)!=1:
+                  errors.append({'lessonId':lid,'error':'elevenPlus-pair-count','count':len(cp)}); continue
+              pair=cp[0]
+              hw=(pair.get('homework') or pair.get('sheet') or pair.get('primary') or {})
+              ans=(pair.get('answerPack') or pair.get('answerKey') or pair.get('answer') or {})
+              if hw.get('r2Key')!=material['sheet']:
+                  errors.append({'lessonId':lid,'error':'primary-r2-mismatch','actual':hw.get('r2Key'),'expected':material['sheet']})
+              if ans.get('r2Key')!=material['answer']:
+                  errors.append({'lessonId':lid,'error':'answer-r2-mismatch','actual':ans.get('r2Key'),'expected':material['answer']})
+              verified_targets.append(lid)
+
+          cumulative_supp=[]
+          core_pairs=[]
+          ep_pairs=[]
+          for lid,rec in live.items():
+              p11=rec.get('phase11Resources') or {}
+              core=p11.get('core') or {}
+              ep=p11.get('elevenPlus') or {}
+              for p in core.get('cumulativeHomeworks') or []: core_pairs.append(lid)
+              for p in ep.get('cumulativeHomeworks') or []: ep_pairs.append(lid)
+              for stream,container in (('core',core),('elevenPlus',ep)):
+                  for answer in container.get('supplementaryAnswers') or []:
+                      if not isinstance(answer,dict): continue
+                      text=(str(answer.get('displayName') or '')+' '+str(answer.get('r2Key') or '')).lower()
+                      if 'cumulative' in text:
+                          cumulative_supp.append({'lessonId':lid,'stream':stream,'displayName':answer.get('displayName'),'r2Key':answer.get('r2Key')})
+
+          if cumulative_supp:
+              errors.append({'error':'cumulative-answer-still-supplementary','items':cumulative_supp})
+
+          if len(ep_pairs)!=106:
+              errors.append({'error':'global-elevenPlus-pair-count','count':len(ep_pairs),'expected':106})
+          if len(core_pairs)!=6:
+              errors.append({'error':'global-core-pair-count','count':len(core_pairs),'expected':6,'lessonIds':sorted(core_pairs)})
+          if len(ep_pairs)+len(core_pairs)!=112:
+              errors.append({'error':'global-total-pair-count','count':len(ep_pairs)+len(core_pairs),'expected':112})
+
+          expected_core={'Y5M2','Y6M46','Y6M47','Y6M48','Y6M49','Y6M50'}
+          if set(core_pairs)!=expected_core:
+              errors.append({'error':'core-pair-identity-mismatch','actual':sorted(set(core_pairs)),'expected':sorted(expected_core)})
+
+          specific=live.get('Y6M2.2') or {}
+          specific_pairs=((((specific.get('phase11Resources') or {}).get('elevenPlus') or {}).get('cumulativeHomeworks')) or [])
+          if len(specific_pairs)!=1:
+              errors.append({'lessonId':'Y6M2.2','error':'specific-pair-count','count':len(specific_pairs)})
+          else:
+              pair=specific_pairs[0]
+              hw=pair.get('homework') or {}
+              ans=pair.get('answerPack') or {}
+              expected_hw='maths/level3/Y6M2.2/cumulative-homework/sheets/FAR300326Y6M2.2.pdf'
+              expected_ans='maths/level3/Y6M2.2/cumulative-homework/answers/L3T1M02 Answer Pack Cumulative Homework Number and Place Value II.pdf'
+              if hw.get('r2Key')!=expected_hw: errors.append({'lessonId':'Y6M2.2','error':'specific-primary','actual':hw.get('r2Key'),'expected':expected_hw})
+              if ans.get('r2Key')!=expected_ans: errors.append({'lessonId':'Y6M2.2','error':'specific-answer','actual':ans.get('r2Key'),'expected':expected_ans})
+
+          result={
+              'status':'PASS' if not errors else 'FAIL',
+              'liveLessonCount':len(rows),
+              'liveR2ObjectCount':len(r2keys),
+              'physicalR2CumulativePairCount':len(pairs),
+              'level1PairCount':found_groups['level1'],
+              'level2PairCount':found_groups['level2'],
+              'level3PairCount':found_groups['level3'],
+              'year6ExtraPairCount':found_groups['year6-extra'],
+              'verifiedLevelTargetCount':len(verified_targets),
+              'elevenPlusCumulativePairCount':len(ep_pairs),
+              'coreCumulativePairCount':len(core_pairs),
+              'totalStudentFacingCumulativePairCount':len(ep_pairs)+len(core_pairs),
+              'cumulativeSupplementaryAnswerCount':len(cumulative_supp),
+              'specificY6M2_2':{
+                  'primary':'maths/level3/Y6M2.2/cumulative-homework/sheets/FAR300326Y6M2.2.pdf',
+                  'answer':'maths/level3/Y6M2.2/cumulative-homework/answers/L3T1M02 Answer Pack Cumulative Homework Number and Place Value II.pdf'
+              },
+              'errors':errors
+          }
+          json.dump(result,open(f'{root}/postfix-verification.json','w',encoding='utf-8'),indent=2)
+          print(json.dumps(result,indent=2))
+          if errors: raise SystemExit(1)
+          PY
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cumulative-homework-postfix-verification
+          path: |
+            cumulative-verify/postfix-verification.json
+            cumulative-verify/live-lessons.ndjson
+            cumulative-verify/r2-objects.json
+          retention-days: 14
