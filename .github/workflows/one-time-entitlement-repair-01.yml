@@ -41,7 +41,7 @@ jobs:
           test -n "$STUDENTS"
           test "$STUDENTS" != null
           echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
-          echo "Production Students KV resolved; identifiers are not printed."
+          echo "Production Students KV resolved."
 
       - name: Locate exactly one target profile without exposing identity
         env:
@@ -69,7 +69,9 @@ jobs:
               except Exception:
                   continue
               name = str(user.get('name') or '').strip().lower()
-              digest = hashlib.sha256(name.encode('utf-8')).hexdigest()
+              parts = name.split()
+              first_token = parts[0] if parts else ''
+              digest = hashlib.sha256(first_token.encode('utf-8')).hexdigest()
               if digest == target:
                   matches.append((key, user))
           if len(matches) != 1:
@@ -121,7 +123,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          KEY="$(cat /tmp/target-key)"
           ENCODED_KEY="$(python3 - <<'PY'
           import urllib.parse
           print(urllib.parse.quote(open('/tmp/target-key', encoding='utf-8').read().strip(), safe=''))
