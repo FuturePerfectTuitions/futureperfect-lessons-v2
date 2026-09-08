@@ -2,7 +2,8 @@ import { handleAdminLessonReleaseImport as handleBaseImport } from './admin-less
 import {
   emailTypeForItem,
   validateParentEmailFields,
-  sendParentEmail
+  sendParentEmail,
+  completedStatus
 } from './parent-email.js';
 
 const PREVIEW_PATH = '/api/v1/admin/lesson-releases/preview';
@@ -53,7 +54,10 @@ function normaliseLessonLabelForYear(yearValue, lessonValue) {
 function normaliseCsvInputRow(row) {
   const year = rowValue(row, 'Year');
   const lesson = rowValue(row, 'Lesson');
-  return setRowValue(row, 'Lesson', normaliseLessonLabelForYear(year, lesson));
+  let result = setRowValue(row, 'Lesson', normaliseLessonLabelForYear(year, lesson));
+  const lessonStatus = rowValue(result, 'LessonStatus');
+  if (completedStatus(lessonStatus)) result = setRowValue(result, 'LessonStatus', 'Completed');
+  return result;
 }
 
 function emailItemFromRow(row, index = 0) {
