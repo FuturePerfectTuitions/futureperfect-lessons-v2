@@ -87,6 +87,17 @@ export default {
       return change15Worker.fetch(request, env, ctx);
     }
 
+    // The authenticated Admin superuser is entitled to every view, so the
+    // cross-subject preview-suppression home probe can never deny the requested
+    // view. Skipping that probe is important: with all Full Libraries present,
+    // rebuilding /home here causes the downstream Phase 12 merger to evaluate
+    // every year/level before a single requested lesson list/resource can open.
+    // This flag is supplied only by the outer authenticated Admin fast-path
+    // wrapper; ordinary student requests continue through the existing gate.
+    if (env?.ADMIN_SUPERUSER_FAST_PATH === true) {
+      return change15Worker.fetch(request, env, ctx);
+    }
+
     if (url.pathname === '/api/v1/student/home') {
       const response = await change15Worker.fetch(request, env, ctx);
       if (!response.ok) return response;
