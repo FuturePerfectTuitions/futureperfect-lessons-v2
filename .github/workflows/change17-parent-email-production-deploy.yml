@@ -12,7 +12,9 @@ on:
       - 'worker/src/parent-email-signature.js'
       - 'worker/src/index-phase20-change13.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'worker/src/live-student-catalogue-overlay.js'
       - 'worker/src/phase11-navigation-cache.js'
+      - 'tests/live-student-catalogue-overlay-verification.mjs'
       - 'tests/phase11-navigation-cache-static-verification.mjs'
       - 'tests/parent-email-import-verification.mjs'
       - 'tests/parent-email-completed-status-verification.mjs'
@@ -56,6 +58,7 @@ jobs:
           node --check worker/src/parent-email-signature.js
           node --check worker/src/index-phase20-change13.js
           node --check worker/src/index-phase20-change17-parent-email.js
+          node --check worker/src/live-student-catalogue-overlay.js
           node --check worker/src/phase11-navigation-cache.js
           node --check assets/admin-import.js
           node tests/admin-lesson-release-import-verification.mjs
@@ -65,11 +68,14 @@ jobs:
           node tests/subject-preview-enrolment-boundary-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
+          node tests/live-student-catalogue-overlay-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           grep -Fq 'LIVE_CURRICULUM_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           grep -Fq 'LIVE_LESSON_METADATA_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
+          grep -Fq 'LIVE_STUDENT_CATALOGUE_OVERLAY_V1' worker/src/live-student-catalogue-overlay.js
           test -f "worker/$WORKER_ENTRYPOINT"
           grep -Fq "import change16Worker from './index-phase20-change16.js';" "worker/$WORKER_ENTRYPOINT"
+          grep -Fq 'repairLiveStudentCatalogueResponse' "worker/$WORKER_ENTRYPOINT"
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_STATIC_PASS'
@@ -115,6 +121,10 @@ jobs:
           for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
             jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/change17-settings-after.json >/dev/null
           done
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/change17-worker-after.bin
+          grep -aFq 'live-kv-v1' /tmp/change17-worker-after.bin
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
           ORIGIN='https://lessons.futureperfect.education'
           code="$(curl --silent --show-error --output /tmp/change17-home.json --write-out '%{http_code}' \
