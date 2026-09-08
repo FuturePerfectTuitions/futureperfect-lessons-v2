@@ -237,7 +237,6 @@
   });
 
   $('confirmBtn').addEventListener('click', async () => {
-    if (!window.confirm('Apply the validated Portal lesson releases and send the listed parent emails now?')) return;
     $('confirmBtn').disabled=true; $('previewBtn').disabled=true; $('loadLatestBtn').disabled=true;
     setStatus($('status'),'Revalidating, applying Portal releases, then sending parent emails…','warn');
     try {
