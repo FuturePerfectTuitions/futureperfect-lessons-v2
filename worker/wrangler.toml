@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change17.js"
+main = "src/index-phase20-change17-parent-email.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,12 +9,16 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 17 adds a lightweight authenticated
-# /api/v1/student/navigation endpoint for the subject/year screen. It reads only
-# the student profile, D1 access/navigation rows and the small set of authoritative
-# live curriculum records; it does not build every lesson/detail resource before a
-# student can enter Maths or English. All lesson/resource access remains enforced
-# by the existing Change 16 and earlier gates.
+# Canonical Portal V2 production entrypoint. The parent-email wrapper is the
+# outermost Worker layer and delegates student traffic through Change 17 fast
+# navigation, which in turn delegates all non-navigation traffic to Change 16.
+# This ensures both transactional parent email and the lightweight authenticated
+# /api/v1/student/navigation endpoint survive every normal production deployment.
+#
+# Fast navigation reads only the student profile, D1 access/navigation rows and
+# the small set of authoritative live curriculum records. It does not build every
+# lesson/detail resource before a student can enter Maths or English. All lesson
+# and resource access remains enforced by the existing Change 16 and earlier gates.
 #
 # Change 16 restricts cross-subject upsell previews to subjects in which the
 # student has no actual entitlement. If a student already has any real English
@@ -98,5 +102,5 @@ STUDENT_LOGIN_ENABLED = "true"
 # Passwords, Answer Pack passwords, private student records, production student
 # allowlists and Cloudflare credential values are never committed in plaintext.
 # Production deployment must preserve the existing audited Students KV,
-# Lessons KV, D1 and R2 bindings; exact binding identifiers remain
+# Lessons KV, D1, R2 and parent-email bindings; exact binding identifiers remain
 # Cloudflare-managed rather than source data.
