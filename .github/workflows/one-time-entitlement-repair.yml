@@ -17,7 +17,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      TARGET_FIRST_NAME_SHA256: a9916765f2a4b978f30c19e9c5bd0d70cd015ce0542c4587b4e0c4fee98f5366
+      TARGET_PORTAL_ID_SHA256: fd104f90ad3cccdc967428bbd4c002122e91ec4f52607591795820b3b1969e53
 
     steps:
       - uses: actions/setup-node@v4
@@ -51,16 +51,14 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
           python3 - <<'PY'
-          import hashlib, json, os, re, subprocess, sys
-          target=os.environ['TARGET_FIRST_NAME_SHA256']
+          import hashlib, json, os, subprocess, sys
+          target=os.environ['TARGET_PORTAL_ID_SHA256']
           candidates=[]
           for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
               key=str(item.get('name') or '')
               if not key.startswith('user:'): continue
               suffix=key[5:].strip().lower()
-              if suffix.startswith(('admin','demo','trial')): continue
-              stem=re.sub(r'\d+$','',suffix)
-              if hashlib.sha256(stem.encode()).hexdigest()==target:
+              if hashlib.sha256(suffix.encode()).hexdigest()==target:
                   candidates.append(key)
           print('TARGET_MATCH_COUNT=' + str(len(candidates)))
           if len(candidates)!=1: sys.exit(2)
