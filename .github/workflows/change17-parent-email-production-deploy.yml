@@ -11,6 +11,8 @@ on:
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'worker/src/phase11-navigation-cache.js'
+      - 'tests/phase11-navigation-cache-static-verification.mjs'
       - 'tests/parent-email-import-verification.mjs'
       - 'tests/parent-email-completed-status-verification.mjs'
       - 'tests/parent-email-test-routing-verification.mjs'
@@ -52,6 +54,7 @@ jobs:
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
           node --check worker/src/index-phase20-change17-parent-email.js
+          node --check worker/src/phase11-navigation-cache.js
           node --check assets/admin-import.js
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
@@ -61,6 +64,7 @@ jobs:
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
+          grep -Fq 'LIVE_CURRICULUM_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           test -f "worker/$WORKER_ENTRYPOINT"
           grep -Fq "import change16Worker from './index-phase20-change16.js';" "worker/$WORKER_ENTRYPOINT"
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
