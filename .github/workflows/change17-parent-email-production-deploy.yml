@@ -11,7 +11,6 @@ on:
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
-      - 'worker/wrangler.toml'
       - 'tests/parent-email-import-verification.mjs'
       - 'tests/parent-email-completed-status-verification.mjs'
       - 'tests/parent-email-test-routing-verification.mjs'
@@ -29,6 +28,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
+      WORKER_ENTRYPOINT: src/index-phase20-change17-parent-email.js
       WRANGLER_VERSION: 4.125.0
       PARENT_EMAIL_TEST_TO: sej@futureperfect.education
       DEPLOY_MESSAGE: Portal V2 Change 17 parent transactional email - test recipient mode
@@ -61,9 +61,10 @@ jobs:
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
-          grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
-          grep -Fq '[[send_email]]' worker/wrangler.toml
+          test -f "$WORKER_ENTRYPOINT"
+          grep -Fq "import change16Worker from './index-phase20-change16.js';" "$WORKER_ENTRYPOINT"
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
+          grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_STATIC_PASS'
 
       - name: Require production bindings and secrets
@@ -73,6 +74,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test "$PARENT_EMAIL_TEST_TO" = 'sej@futureperfect.education'
+          test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change17-parent-email.js'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -103,6 +105,9 @@ jobs:
           jq -e '.success == true' /tmp/change17-settings-after.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/change17-settings-after.json >/dev/null
           jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/change17-settings-after.json >/dev/null
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
+            jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/change17-settings-after.json >/dev/null
+          done
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
           ORIGIN='https://lessons.futureperfect.education'
           code="$(curl --silent --show-error --output /tmp/change17-home.json --write-out '%{http_code}' \
