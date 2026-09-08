@@ -6,7 +6,10 @@ const DEFAULT_FROM_NAME = 'Sejal Dalal';
 const DEFAULT_CC = 'barkha@futureperfect.education';
 const SIGNATURE_CID = 'fpt-email-signature-clean';
 const SIGNATURE_FILENAME = 'fpt-email-signature.png';
-const SIGNATURE_SOURCE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline';
+const SIGNATURE_SOURCE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-clean-f5358c33';
+const SIGNATURE_EXPECTED_SHA256 = 'f5358c33613eb2c284e1f33b7eb3b5626cc6ec5e14bbe9e72891c2e0754632a3';
+const SIGNATURE_EXPECTED_WIDTH = 700;
+const SIGNATURE_EXPECTED_HEIGHT = 183;
 
 let signatureBytesPromise = null;
 
@@ -87,9 +90,31 @@ function bytesToBase64(bytes) {
 }
 
 function isPng(bytes) {
-  return bytes.length >= 8 &&
+  return bytes.length >= 24 &&
     bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 &&
     bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10;
+}
+
+function pngDimensions(bytes) {
+  if (!isPng(bytes)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { width:view.getUint32(16), height:view.getUint32(20) };
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function validateSignatureBytes(bytes) {
+  if (bytes.length < 1000 || !isPng(bytes)) throw new Error('Signature image response is not a valid PNG.');
+  const dims = pngDimensions(bytes);
+  if (!dims || dims.width !== SIGNATURE_EXPECTED_WIDTH || dims.height !== SIGNATURE_EXPECTED_HEIGHT) {
+    throw new Error(`Signature image dimensions are invalid: ${dims?.width || 0}x${dims?.height || 0}.`);
+  }
+  const hash = await sha256Hex(bytes);
+  if (hash !== SIGNATURE_EXPECTED_SHA256) throw new Error(`Signature image hash mismatch: ${hash}.`);
+  return bytes;
 }
 
 async function loadSignatureBytes(env = null) {
@@ -104,14 +129,12 @@ async function loadSignatureBytes(env = null) {
   if (!signatureBytesPromise) {
     signatureBytesPromise = (async () => {
       const response = await fetch(SIGNATURE_SOURCE_URL, {
-        headers: { Accept:'image/png' }
+        headers: { Accept:'image/png' },
+        cf:{ cacheTtl:0, cacheEverything:false }
       });
       if (!response.ok) throw new Error(`Signature image request failed with HTTP ${response.status}.`);
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length < 1000 || !isPng(bytes)) {
-        throw new Error('Signature image response is not a valid PNG.');
-      }
-      return bytes;
+      return validateSignatureBytes(bytes);
     })().catch(error => {
       signatureBytesPromise = null;
       throw error;
