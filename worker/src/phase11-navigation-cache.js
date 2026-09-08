@@ -15,9 +15,12 @@ const PHASE11_CURRICULUM_CODES = Object.freeze([
   'ENGLISH_Y6'
 ]);
 
-// Retained for fail-safe legacy fallback and as a deployed feature marker.
+// Retained for compatibility with existing verification/imports. Home navigation
+// now reads every live curriculum because curriculum membership in LESSONS_KV is
+// authoritative and must not be replaced by an older bundled membership list.
 const HOME_ORDER_SENSITIVE_CURRICULA = Object.freeze(['MATHS_L2', 'MATHS_L3']);
 const PREFETCH_CONCURRENCY = 64;
+const LIVE_CURRICULUM_AUTHORITY_MARKER = 'LIVE_CURRICULUM_AUTHORITY_V1';
 
 const VIEW_CURRICULA = Object.freeze({
   'maths-year2': ['MATHS_Y2'],
@@ -106,15 +109,12 @@ function cacheNamespace(namespace, overrides = new Map(), bundled = false) {
       if (prop === 'get') {
         return async (key, options) => {
           const wantsJson = options?.type === 'json';
-          // A real target lesson is request-local and infrequent, so retain the
-          // deep-clone isolation used by the protected/detail paths.
           if (wantsJson && overrides.has(key)) return structuredClone(overrides.get(key));
           if (wantsJson && bundled) {
             const value = bundledJsonValue(key);
-            // Bundled navigation records are immutable canonical metadata. The
-            // downstream navigation builder only reads nested metadata, so a
-            // shallow top-level clone preserves mutation isolation while avoiding
-            // hundreds of expensive deep structuredClone operations on /home.
+            // Bundled lesson metadata remains a fast immutable cache, but live
+            // curriculum records are inserted into overrides first and therefore
+            // always win for current curriculum membership/order.
             if (value !== undefined) return shallowBundledClone(value);
           }
           return target.get(key, options);
@@ -163,13 +163,30 @@ function lessonIdFromRequest(request) {
 function realCurriculaForRequest(request) {
   const url = new URL(request.url);
   if (url.pathname === '/api/v1/student/home') {
-    return [...HOME_ORDER_SENSITIVE_CURRICULA];
+    return [...PHASE11_CURRICULUM_CODES];
   }
 
   const viewId = viewIdFromRequest(request);
   if (!viewId) return [...PHASE11_CURRICULUM_CODES];
   const selected = VIEW_CURRICULA[viewId];
   return selected ? [...selected] : [...PHASE11_CURRICULUM_CODES];
+}
+
+async function liveCurriculumOverrides(env, request) {
+  const codes = realCurriculaForRequest(request);
+  const keys = codes.map(code => `curriculum:${code}`);
+  const live = await readJsonInBatches(env.LESSONS_KV, keys, codes.length || 1);
+  const overrides = new Map();
+
+  for (const key of keys) {
+    const value = live.get(key);
+    // A non-empty live curriculum is authoritative. Missing/malformed records
+    // fall back to the bundled manifest rather than blanking a student's view.
+    if (value != null && lessonIdsFromCurriculum(value).length > 0) {
+      overrides.set(key, value);
+    }
+  }
+  return overrides;
 }
 
 function seedSyntheticLessons(cache, curriculumKeys) {
@@ -215,12 +232,11 @@ async function legacyTargetedNavigationEnv(env, request) {
 async function phase11NavigationEnv(env, request) {
   if (!env?.LESSONS_KV || !request) return env;
 
-  // Normal Phase 11 path: identity/order/title/display metadata remains
-  // module-resident in the deterministic canonical manifest. The proxy clones
-  // only the records downstream code actually requests; it does not rebuild or
-  // clone the complete 380-record navigation catalogue per invocation.
+  // Current curriculum membership/order comes from live LESSONS_KV. The bundled
+  // manifest remains a fast cache for lesson navigation metadata only. This
+  // prevents stale manifest membership from creating phantom locked lessons.
   if (BUNDLED_MANIFEST_VALID) {
-    const overrides = new Map();
+    const overrides = await liveCurriculumOverrides(env, request);
     const targetLessonId = lessonIdFromRequest(request);
     if (targetLessonId) {
       const real = await env.LESSONS_KV.get(`lesson:${targetLessonId}`, { type: 'json' });
@@ -230,8 +246,7 @@ async function phase11NavigationEnv(env, request) {
   }
 
   // Fail-safe only: an accidental/manual build that did not generate the
-  // canonical manifest preserves the previously verified targeted KV behavior
-  // rather than trusting stale or incomplete metadata.
+  // canonical manifest preserves the targeted live-KV behavior.
   return legacyTargetedNavigationEnv(env, request);
 }
 
@@ -252,6 +267,7 @@ export {
   HOME_ORDER_SENSITIVE_CURRICULA,
   VIEW_CURRICULA,
   PREFETCH_CONCURRENCY,
+  LIVE_CURRICULUM_AUTHORITY_MARKER,
   validBundledManifest,
   phase11NavigationEnv,
   shouldPrefetchPhase11Navigation
