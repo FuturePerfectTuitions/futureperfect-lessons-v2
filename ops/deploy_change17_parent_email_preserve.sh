@@ -2,7 +2,7 @@
 set -euo pipefail
 : "${CLOUDFLARE_API_TOKEN:?}"
 : "${CLOUDFLARE_ACCOUNT_ID:?}"
-: "${PARENT_EMAIL_TEST_TO:?Change 17 initial deployment requires a safe test recipient}"
+: "${PARENT_EMAIL_TEST_TO:?Parent email deployment requires a safe test recipient}"
 : "${WORKER_NAME:=fpt-portal-v2-worker}"
 : "${WRANGLER_VERSION:=4.125.0}"
 : "${WORKER_CONFIG_FILE:=worker/wrangler.toml}"
@@ -12,8 +12,8 @@ CONFIG_ENTRYPOINT="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' 
 WORKER_ENTRYPOINT="${WORKER_ENTRYPOINT:-$CONFIG_ENTRYPOINT}"
 test -n "$WORKER_ENTRYPOINT"
 test -f "$CONFIG_DIR/$WORKER_ENTRYPOINT"
-test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change17-parent-email.js'
-echo "Change 17 Worker entrypoint: $WORKER_ENTRYPOINT"
+test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change19-admin-fast.js'
+echo "Current production Worker entrypoint: $WORKER_ENTRYPOINT"
 
 rm -rf /tmp/fpt-change17-navigation-package
 node --experimental-default-type=module scripts/phase11-apply-package.mjs \
@@ -56,7 +56,7 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
   printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
 } > worker/wrangler.change17.runtime.toml
 
-grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.change17.runtime.toml
+grep -Fq 'main = "src/index-phase20-change19-admin-fast.js"' worker/wrangler.change17.runtime.toml
 grep -Fq 'PARENT_EMAIL_TEST_TO = "'"$PARENT_EMAIL_TEST_TO"'"' worker/wrangler.change17.runtime.toml
 grep -Fq '[[send_email]]' worker/wrangler.change17.runtime.toml
 grep -Fq 'name = "EMAIL"' worker/wrangler.change17.runtime.toml
@@ -64,7 +64,7 @@ grep -Fq 'name = "EMAIL"' worker/wrangler.change17.runtime.toml
 npx --yes wrangler@"$WRANGLER_VERSION" deploy \
   --config worker/wrangler.change17.runtime.toml \
   --keep-vars \
-  --message "${DEPLOY_MESSAGE:-Portal V2 Change 17 parent email test mode}"
+  --message "${DEPLOY_MESSAGE:-Portal V2 parent email test mode on current production wrapper}"
 
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-change17-settings-after.json
 jq -e '.success == true' /tmp/fpt-change17-settings-after.json >/dev/null
@@ -72,4 +72,4 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 cmp -s /tmp/fpt-change17-secrets-before.json /tmp/fpt-change17-secrets-after.json
 jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-change17-settings-after.json >/dev/null
 jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/fpt-change17-settings-after.json >/dev/null
-echo 'CHANGE17_DEPLOYED_IN_TEST_MODE'
+echo 'PARENT_EMAIL_DEPLOYED_IN_TEST_MODE_ON_CURRENT_WRAPPER'
