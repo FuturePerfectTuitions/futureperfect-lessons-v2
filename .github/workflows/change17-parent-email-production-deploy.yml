@@ -10,6 +10,7 @@ on:
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
+      - 'worker/src/index-phase20-change13.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
       - 'worker/src/phase11-navigation-cache.js'
       - 'tests/phase11-navigation-cache-static-verification.mjs'
@@ -53,6 +54,7 @@ jobs:
           node --check worker/src/admin-lesson-release-import-email.js
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
+          node --check worker/src/index-phase20-change13.js
           node --check worker/src/index-phase20-change17-parent-email.js
           node --check worker/src/phase11-navigation-cache.js
           node --check assets/admin-import.js
@@ -65,6 +67,7 @@ jobs:
           node tests/y411-admin-import-baseline-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           grep -Fq 'LIVE_CURRICULUM_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
+          grep -Fq 'LIVE_LESSON_METADATA_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           test -f "worker/$WORKER_ENTRYPOINT"
           grep -Fq "import change16Worker from './index-phase20-change16.js';" "worker/$WORKER_ENTRYPOINT"
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
