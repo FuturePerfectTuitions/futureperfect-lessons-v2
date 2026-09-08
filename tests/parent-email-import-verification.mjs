@@ -4,7 +4,8 @@ import {
   prelessonSheetsFromRemarks,
   buildParentEmail,
   sendParentEmail,
-  slideText
+  slideText,
+  SIGNATURE_URL
 } from '../worker/src/parent-email.js';
 import {
   normalYearFromCsv,
@@ -103,6 +104,9 @@ assert.match(upcomingMail.html, /Hello Sheetal,/);
 assert.match(upcomingMail.html, /<strong>&quot;Y5T1E01 Descriptive Writing Settings and Atmosphere&quot;<\/strong>/);
 assert.match(upcomingMail.html, /For this session, there are PreLesson Sheets to be printed which have been shared on your portal\./);
 assert.doesNotMatch(upcomingMail.html, /attached the VR PreLesson/i);
+assert.match(SIGNATURE_URL, /^https:\/\//);
+assert.match(upcomingMail.html, new RegExp(SIGNATURE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+assert.doesNotMatch(upcomingMail.html, /cid:/i);
 
 const noSheetsMail = buildParentEmail({
   ...upcoming,
@@ -144,8 +148,9 @@ assert.equal(preview.results[0].parent, 'Sheetal');
 assert.equal(preview.results[0].parentEmail, 'sara_shinde@hotmail.co.uk');
 assert.equal(preview.summary.emailEligible, 1);
 
-// Cloudflare Email Sending payload must use Sej as sender, Barkha as CC, and
-// contain only the inline graphical signature — never a PreLesson PDF attachment.
+// Cloudflare Email Sending payload must use Sej as sender and Barkha as CC.
+// The graphical signature is loaded over HTTPS, so no lesson file or signature
+// attachment is present in the MIME payload.
 const sentPayloads = [];
 const env = {
   EMAIL:{
@@ -164,11 +169,8 @@ const payload = sentPayloads[0];
 assert.deepEqual(payload.from, { email:'sej@futureperfect.education', name:'Sejal Dalal' });
 assert.equal(payload.to, 'sara_shinde@hotmail.co.uk');
 assert.deepEqual(payload.cc, { email:'barkha@futureperfect.education', name:'Barkha' });
-assert.equal(payload.attachments.length, 1);
-assert.equal(payload.attachments[0].filename, 'fpt-email-signature.png');
-assert.equal(payload.attachments[0].disposition, 'inline');
-assert.equal(payload.attachments[0].contentId, 'fpt-email-signature');
-assert.ok(payload.attachments[0].content.length > 1000);
+assert.equal('attachments' in payload, false);
+assert.match(payload.html, /https:\/\/fpt-portal-v2-worker\.futureperfectlessons\.workers\.dev\/api\/v1\/public\/email-signature-v1\.png/);
 
 // A delivery failure is reported as an email failure; it does not throw and
 // therefore cannot roll back a Portal entitlement already committed before send.
