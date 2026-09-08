@@ -21,6 +21,7 @@ const PHASE11_CURRICULUM_CODES = Object.freeze([
 const HOME_ORDER_SENSITIVE_CURRICULA = Object.freeze(['MATHS_L2', 'MATHS_L3']);
 const PREFETCH_CONCURRENCY = 64;
 const LIVE_CURRICULUM_AUTHORITY_MARKER = 'LIVE_CURRICULUM_AUTHORITY_V1';
+const LIVE_LESSON_METADATA_AUTHORITY_MARKER = 'LIVE_LESSON_METADATA_AUTHORITY_V1';
 
 const VIEW_CURRICULA = Object.freeze({
   'maths-year2': ['MATHS_Y2'],
@@ -112,9 +113,8 @@ function cacheNamespace(namespace, overrides = new Map(), bundled = false) {
           if (wantsJson && overrides.has(key)) return structuredClone(overrides.get(key));
           if (wantsJson && bundled) {
             const value = bundledJsonValue(key);
-            // Bundled lesson metadata remains a fast immutable cache, but live
-            // curriculum records are inserted into overrides first and therefore
-            // always win for current curriculum membership/order.
+            // Bundled data remains a fail-safe/cache only. Live curriculum and
+            // known-view lesson records are inserted into overrides first and win.
             if (value !== undefined) return shallowBundledClone(value);
           }
           return target.get(key, options);
@@ -172,6 +172,13 @@ function realCurriculaForRequest(request) {
   return selected ? [...selected] : [...PHASE11_CURRICULUM_CODES];
 }
 
+function knownCatalogueViewCurricula(request) {
+  const url = new URL(request.url);
+  if (!/^\/api\/v1\/student\/views\/[^/]+\/lessons$/.test(url.pathname)) return [];
+  const selected = VIEW_CURRICULA[viewIdFromRequest(request)];
+  return selected ? [...selected] : [];
+}
+
 async function liveCurriculumOverrides(env, request) {
   const codes = realCurriculaForRequest(request);
   const keys = codes.map(code => `curriculum:${code}`);
@@ -187,6 +194,25 @@ async function liveCurriculumOverrides(env, request) {
     }
   }
   return overrides;
+}
+
+async function hydrateKnownViewLessonMetadata(env, request, overrides) {
+  const codes = knownCatalogueViewCurricula(request);
+  if (!codes.length) return;
+
+  const lessonIds = new Set();
+  for (const code of codes) {
+    const curriculum = overrides.get(`curriculum:${code}`);
+    if (!curriculum) continue;
+    for (const lessonId of lessonIdsFromCurriculum(curriculum)) lessonIds.add(lessonId);
+  }
+  if (!lessonIds.size) return;
+
+  const liveLessons = await readJsonInBatches(
+    env.LESSONS_KV,
+    [...lessonIds].map(lessonId => `lesson:${lessonId}`)
+  );
+  for (const [key, value] of liveLessons) overrides.set(key, value);
 }
 
 function seedSyntheticLessons(cache, curriculumKeys) {
@@ -232,11 +258,14 @@ async function legacyTargetedNavigationEnv(env, request) {
 async function phase11NavigationEnv(env, request) {
   if (!env?.LESSONS_KV || !request) return env;
 
-  // Current curriculum membership/order comes from live LESSONS_KV. The bundled
-  // manifest remains a fast cache for lesson navigation metadata only. This
-  // prevents stale manifest membership from creating phantom locked lessons.
+  // Current curriculum membership/order comes from live LESSONS_KV. For a known
+  // lesson-list view, the live lesson records also provide current title,
+  // displayIds, active state and canonical lesson identity. The bundled manifest
+  // is only a fast fail-safe for metadata not needed from live KV on that request.
   if (BUNDLED_MANIFEST_VALID) {
     const overrides = await liveCurriculumOverrides(env, request);
+    await hydrateKnownViewLessonMetadata(env, request, overrides);
+
     const targetLessonId = lessonIdFromRequest(request);
     if (targetLessonId) {
       const real = await env.LESSONS_KV.get(`lesson:${targetLessonId}`, { type: 'json' });
@@ -268,6 +297,7 @@ export {
   VIEW_CURRICULA,
   PREFETCH_CONCURRENCY,
   LIVE_CURRICULUM_AUTHORITY_MARKER,
+  LIVE_LESSON_METADATA_AUTHORITY_MARKER,
   validBundledManifest,
   phase11NavigationEnv,
   shouldPrefetchPhase11Navigation
