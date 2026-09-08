@@ -5,6 +5,9 @@ on:
     branches: [fix/live-l1-catalogue-authority-v2]
     paths:
       - '.github/workflows/live-catalogue-branch-verification.yml'
+      - 'worker/src/live-student-catalogue-overlay.js'
+      - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'tests/live-student-catalogue-overlay-verification.mjs'
 
 permissions:
   contents: read
