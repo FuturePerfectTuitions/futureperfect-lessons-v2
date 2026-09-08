@@ -12,7 +12,7 @@ CONFIG_ENTRYPOINT="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' 
 WORKER_ENTRYPOINT="${WORKER_ENTRYPOINT:-$CONFIG_ENTRYPOINT}"
 test -n "$WORKER_ENTRYPOINT"
 test -f "$CONFIG_DIR/$WORKER_ENTRYPOINT"
-test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change19-admin-fast.js'
+test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change20-configured-upsell.js'
 echo "Current production Worker entrypoint: $WORKER_ENTRYPOINT"
 
 rm -rf /tmp/fpt-change17-navigation-package
@@ -56,7 +56,7 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
   printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
 } > worker/wrangler.change17.runtime.toml
 
-grep -Fq 'main = "src/index-phase20-change19-admin-fast.js"' worker/wrangler.change17.runtime.toml
+grep -Fq 'main = "src/index-phase20-change20-configured-upsell.js"' worker/wrangler.change17.runtime.toml
 grep -Fq 'PARENT_EMAIL_TEST_TO = "'"$PARENT_EMAIL_TEST_TO"'"' worker/wrangler.change17.runtime.toml
 grep -Fq '[[send_email]]' worker/wrangler.change17.runtime.toml
 grep -Fq 'name = "EMAIL"' worker/wrangler.change17.runtime.toml
