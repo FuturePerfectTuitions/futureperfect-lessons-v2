@@ -1,11 +1,12 @@
 import change15Worker from './index-phase20-change15.js';
 
-// Performance note: the imported Change 12/13 home builders now keep the home
-// response lightweight. The other subject's full lesson descriptions are not
-// fetched until that subject is actually opened; home only prepares summaries
-// and live curriculum counts.
-// This file is intentionally touched so the production deployment workflow
-// bundles and publishes those imported performance changes.
+// Performance note: Portal home now avoids loading every entitled lesson record
+// individually. Change 8 resolves established access from the bundled catalogue
+// plus live curriculum membership, with live-KV fallback only for genuinely new
+// or unresolved lessons. Change 10 also checks ordinary PreLesson availability
+// directly from the canonical lesson record instead of recursively rendering each
+// recent-share lesson. This file is intentionally touched so production bundles
+// and deploys those imported performance changes.
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
