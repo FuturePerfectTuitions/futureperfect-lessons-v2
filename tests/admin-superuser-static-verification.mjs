@@ -1,8 +1,12 @@
 import fs from 'node:fs';
 
 const wrapperPath = 'worker/src/index-phase20-change18-admin-superuser.js';
+const fastPathPath = 'worker/src/index-phase20-change19-admin-fast.js';
+const change16Path = 'worker/src/index-phase20-change16.js';
 const wranglerPath = 'worker/wrangler.toml';
 const wrapper = fs.readFileSync(wrapperPath, 'utf8');
+const fastPath = fs.readFileSync(fastPathPath, 'utf8');
+const change16 = fs.readFileSync(change16Path, 'utf8');
 const wrangler = fs.readFileSync(wranglerPath, 'utf8');
 
 const requiredLibraries = [
@@ -34,8 +38,17 @@ for (const marker of requiredMarkers) {
   if (!wrapper.includes(marker)) throw new Error(`Missing admin-superuser marker: ${marker}`);
 }
 
-if (!wrangler.includes('main = "src/index-phase20-change18-admin-superuser.js"')) {
-  throw new Error('Production entrypoint is not the admin-superuser wrapper.');
+if (!fastPath.includes("body?.superuser === true") || !fastPath.includes("body?.role")) {
+  throw new Error('Admin fast path is not gated by authenticated superuser session state.');
+}
+if (!fastPath.includes("ADMIN_SUPERUSER_FAST_PATH")) {
+  throw new Error('Admin fast path marker is not supplied.');
+}
+if (!change16.includes("env?.ADMIN_SUPERUSER_FAST_PATH === true")) {
+  throw new Error('Change 16 does not bypass the redundant home probe for authenticated Admin.');
+}
+if (!wrangler.includes('main = "src/index-phase20-change19-admin-fast.js"')) {
+  throw new Error('Production entrypoint is not the Admin fast-path wrapper.');
 }
 
 console.log('ADMIN_SUPERUSER_STATIC_VERIFICATION_PASS');
