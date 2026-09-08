@@ -1,0 +1,147 @@
+name: Guarded Reina entitlement repair
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths:
+      - '.github/workflows/ops-reina-entitlement-repair.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      TARGET_PORTAL_ID_SHA256: acb8827e79d68860d090bb7219cc744a2d2edd4ae1ee1f95d63b89d0857bd0bc
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve production bindings
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          STUDENTS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DBID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id // empty)' /tmp/settings.json | head -n1)"
+          test -n "$STUDENTS" && test "$STUDENTS" != null
+          test -n "$DBID" && test "$DBID" != null
+          echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
+          echo "dbid=$DBID" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_GUARD=true'
+
+      - name: Resolve exact target and set no-upsell profile state
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, sys, urllib.parse, urllib.request
+          target=os.environ['TARGET_PORTAL_ID_SHA256']
+          candidates=[]
+          for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
+              key=str(item.get('name') or '')
+              if not key.startswith('user:'): continue
+              suffix=key[5:].strip().lower()
+              if hashlib.sha256(suffix.encode()).hexdigest()==target:
+                  candidates.append((key,suffix))
+          print('TARGET_MATCH_COUNT=' + str(len(candidates)))
+          if len(candidates)!=1: sys.exit(2)
+          key,suffix=candidates[0]
+          p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+          if p.returncode: sys.exit(3)
+          user=json.loads(p.stdout)
+          if str(user.get('role') or '').strip().lower()=='admin': sys.exit(4)
+          if (user.get('fullLibraries') or []) != []: sys.exit(5)
+          if (user.get('trialViews') or []) != []: sys.exit(6)
+          before=json.loads(json.dumps(user))
+          user['upsellViews']=[]
+          before_other=json.loads(json.dumps(before)); after_other=json.loads(json.dumps(user))
+          before_other.pop('upsellViews',None); after_other.pop('upsellViews',None)
+          if before_other != after_other: sys.exit(7)
+          if before.get('upsellViews') != []:
+              data=json.dumps(user,separators=(',',':')).encode()
+              url=f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/storage/kv/namespaces/{os.environ['STUDENTS_KV_ID']}/values/{urllib.parse.quote(key,safe='')}"
+              req=urllib.request.Request(url,data=data,headers={'Authorization':f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}",'Content-Type':'application/json'},method='PUT')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): sys.exit(8)
+          open('/tmp/target-key','w').write(key)
+          open('/tmp/target-norm','w').write(suffix)
+          print('PROFILE_RECONCILED=true')
+          PY
+
+      - name: Remove only the confirmed accidental bulk Maths grants
+        env:
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; target=open('/tmp/target-norm').read().strip()
+          def query(sql,params):
+              req=urllib.request.Request(
+                  f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',
+                  data=json.dumps({'sql':sql,'params':params}).encode(),
+                  headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},
+                  method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(10)
+              result=(body.get('result') or [{}])[0]
+              return result.get('results') or [], result.get('meta') or {}
+          rows,_=query("SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411OM' AND source_lesson_date='2026-09-07' AND core_access=1 ORDER BY lesson_id",[target])
+          ids=[str(r.get('lesson_id') or '') for r in rows]
+          print('BULK_GRANT_COUNT=' + str(len(ids)))
+          if len(ids)!=35 or any(not x.startswith('Y4M') for x in ids):
+              print('BULK_GRANT_GUARD=false'); sys.exit(11)
+          _,meta=query("DELETE FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411OM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id LIKE 'Y4M%'",[target])
+          print('BULK_GRANTS_REMOVED=true')
+          PY
+
+      - name: Verify exact corrected state and preserve weekly prelesson releases
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY="$(cat /tmp/target-key)"
+          npx --yes wrangler@latest kv key get "$KEY" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/verify.json 2>/dev/null
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          user=json.load(open('/tmp/verify.json'))
+          if (user.get('fullLibraries') or []) != []: sys.exit(2)
+          if user.get('upsellViews') != []: sys.exit(3)
+          if (user.get('trialViews') or []) != []: sys.exit(4)
+          target=open('/tmp/target-norm').read().strip(); account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          def query(sql):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':[target]}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(5)
+              return ((body.get('result') or [{}])[0].get('results') or [])
+          bulk=query("SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411OM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id LIKE 'Y4M%'")
+          pre=query("SELECT lesson_id,batch_key,lesson_date FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_date,lesson_id")
+          if bulk: sys.exit(6)
+          expected={('Y5M1','Y411OM','2026-09-07'),('Y4E1','Y411OE','2026-09-10')}
+          got={(str(r.get('lesson_id') or ''),str(r.get('batch_key') or ''),str(r.get('lesson_date') or '')) for r in pre}
+          if got != expected: sys.exit(7)
+          print('FULL_LIBRARY_VERIFY=true')
+          print('NO_UPSELL_VERIFY=true')
+          print('BULK_GRANTS_VERIFY_REMOVED=true')
+          print('PRELESSON_WEEKLY_RELEASES_PRESERVED=true')
+          PY
