@@ -4,6 +4,7 @@ import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
 import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
 
 const EMAIL_SIGNATURE_PATH = '/api/v1/public/email-signature-v1.png';
+const PERMANENT_PARENT_EMAIL_BCC = 'sej@futureperfect.education';
 let emailSignatureBytes = null;
 
 function decodeBase64(value) {
@@ -25,6 +26,29 @@ function emailSignatureResponse(request) {
   });
 }
 
+function envWithPermanentParentEmailBcc(env) {
+  const testRecipient = String(env?.PARENT_EMAIL_TEST_TO ?? '').trim();
+  if (testRecipient || !env?.EMAIL || typeof env.EMAIL.send !== 'function') return env;
+
+  const originalEmailBinding = env.EMAIL;
+  const wrappedEmailBinding = {
+    async send(payload) {
+      const outgoing = {
+        ...(payload || {}),
+        bcc: payload?.bcc || { email:PERMANENT_PARENT_EMAIL_BCC, name:'Sejal Dalal' }
+      };
+      return originalEmailBinding.send(outgoing);
+    }
+  };
+
+  return new Proxy(env, {
+    get(target, prop, receiver) {
+      if (prop === 'EMAIL') return wrappedEmailBinding;
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+}
+
 // Parent transactional email remains the outermost production layer. Student
 // requests now pass through the lightweight Change 17 navigation wrapper before
 // the existing Change 16 access-control chain. The fast navigation endpoint does
@@ -39,7 +63,7 @@ export default {
       return emailSignatureResponse(request);
     }
 
-    const adminResponse = await handleAdminLessonReleaseImport(request, env);
+    const adminResponse = await handleAdminLessonReleaseImport(request, envWithPermanentParentEmailBcc(env));
     if (adminResponse) return adminResponse;
 
     const response = await fastNavigationWorker.fetch(request, env, ctx);
@@ -53,4 +77,9 @@ export default {
   }
 };
 
-export { EMAIL_SIGNATURE_PATH, emailSignatureResponse };
+export {
+  EMAIL_SIGNATURE_PATH,
+  PERMANENT_PARENT_EMAIL_BCC,
+  emailSignatureResponse,
+  envWithPermanentParentEmailBcc
+};
