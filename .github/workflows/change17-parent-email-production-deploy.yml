@@ -68,6 +68,23 @@ jobs:
           node --check worker/src/live-student-catalogue-overlay.js
           node --check worker/src/phase11-navigation-cache.js
           node --check assets/admin-import.js
+          curl --fail --silent --show-error \
+            'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline' \
+            --output /tmp/fpt-parent-signature.png
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const b = fs.readFileSync('/tmp/fpt-parent-signature.png');
+          const magic = [137,80,78,71,13,10,26,10];
+          if (b.length < 10000 || !magic.every((value, index) => b[index] === value)) {
+            throw new Error(`Parent signature source is not a usable PNG (${b.length} bytes).`);
+          }
+          const width = b.readUInt32BE(16);
+          const height = b.readUInt32BE(20);
+          if (width !== 700 || height !== 183) {
+            throw new Error(`Unexpected parent signature dimensions ${width}x${height}.`);
+          }
+          console.log(`PARENT_SIGNATURE_SOURCE_PASS bytes=${b.length} dimensions=${width}x${height}`);
+          NODE
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-completed-status-verification.mjs
