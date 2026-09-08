@@ -46,7 +46,8 @@ jobs:
           const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
           const auth = { Authorization: `Bearer ${token}` };
 
-          const TARGET = 'cOQj6cnwzIc';
+          const TARGET = 'cOQj6cnwzlc';
+          const INCORRECT = 'cOQj6cnwzIc';
           const PLACEHOLDER = 'cO1Zionu8NC';
           const description = [
             'In this autumn-themed Year 6 English lesson, students develop spelling, punctuation, reading-inference and writing skills through a sequence of linked activities.',
@@ -110,7 +111,7 @@ jobs:
             const before = await getJson('lesson:Y6E1');
             guardLesson(before);
             const currentScreenPal = before?.core?.video?.screenpal ?? null;
-            if (![null, PLACEHOLDER, TARGET].includes(currentScreenPal)) {
+            if (![null, PLACEHOLDER, INCORRECT, TARGET].includes(currentScreenPal)) {
               throw new Error(`Y6E1 has an unexpected existing ScreenPal video: ${currentScreenPal}`);
             }
 
