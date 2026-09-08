@@ -1,0 +1,41 @@
+name: Riaan1808 production allowlist membership check
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - '.github/workflows/riaan1808-allowlist-readonly-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Check membership without printing allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          VALUE="$(jq -r '[.result.bindings[] | select(.name=="PROD_LOGIN_ALLOWLIST" and .type=="plain_text") | .text][0] // ""' /tmp/settings.json)"
+          COUNT="$(printf '%s' "$VALUE" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | wc -l | tr -d ' ')"
+          if printf '%s' "$VALUE" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' | grep -Fxq 'riaan1808'; then
+            FOUND=true
+          else
+            FOUND=false
+          fi
+          echo "prod_allowlist_entry_count=$COUNT"
+          echo "riaan1808_in_prod_allowlist=$FOUND"
+          rm -f /tmp/settings.json
+
+      - name: Confirm no writes
+        run: echo 'READ_ONLY_ALLOWLIST_CHECK_PASS'
