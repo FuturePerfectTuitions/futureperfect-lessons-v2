@@ -11,6 +11,7 @@ on:
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
+      - 'worker/src/parent-email-signature-clean*.js'
       - 'worker/src/index-phase20-change13.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
       - 'worker/src/live-student-catalogue-overlay.js'
@@ -57,6 +58,7 @@ jobs:
           node --check worker/src/admin-lesson-release-import-email.js
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
+          node --check worker/src/parent-email-signature-clean.js
           node --check worker/src/index-phase20-change13.js
           node --check worker/src/index-phase20-change17-parent-email.js
           node --check worker/src/live-student-catalogue-overlay.js
