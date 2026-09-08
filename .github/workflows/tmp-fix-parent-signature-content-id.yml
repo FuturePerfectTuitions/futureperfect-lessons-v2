@@ -1,0 +1,80 @@
+name: Temporary parent signature content_id fix
+
+on:
+  push:
+    branches: [fix/email-signature-content-id]
+    paths:
+      - '.github/workflows/tmp-fix-parent-signature-content-id.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/email-signature-content-id
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Replace raw MIME with documented structured inline image fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/src/parent-email.js')
+          s=p.read_text()
+          start=s.index('function utf8Base64(value) {')
+          end=s.index('function htmlShell(content) {')
+          s=s[:start]+s[end:]
+          old='''  const rawMime = buildRawMime({\n    fromEmail,\n    fromName,\n    toEmail:deliveredTo,\n    ccEmail:testMode ? \'\' : ccEmail,\n    subject:built.subject,\n    html:built.html,\n    text:built.text,\n    signatureBytes\n  });\n  const envelopeRecipients = testMode ? [deliveredTo] : [intendedTo, ccEmail];\n\n  try {\n    const messageIds = [];\n    for (const envelopeTo of envelopeRecipients) {\n      const message = await createRawEmailMessage(env, fromEmail, envelopeTo, rawMime);\n      const response = await env.EMAIL.send(message);\n      const id = clean(response?.messageId);\n      if (id) messageIds.push(id);\n    }\n    return {\n      ok:true,\n      status:\'SENT\',\n      messageId:messageIds[0] || \'\',\n      messageIds,\n      subject:built.subject,\n      testMode,\n      deliveredTo,\n      intendedTo,\n      intendedCc:ccEmail\n    };\n'''
+          new='''  const payload = {\n    from:{ email:fromEmail, name:fromName },\n    to:deliveredTo,\n    subject:built.subject,\n    html:built.html,\n    text:built.text,\n    attachments:[{\n      content:bytesToBase64(signatureBytes),\n      filename:SIGNATURE_FILENAME,\n      type:\'image/png\',\n      disposition:\'inline\',\n      content_id:SIGNATURE_CID\n    }]\n  };\n  if (!testMode) payload.cc = { email:ccEmail, name:\'Barkha\' };\n\n  try {\n    const response = await env.EMAIL.send(payload);\n    return {\n      ok:true,\n      status:\'SENT\',\n      messageId:clean(response?.messageId),\n      subject:built.subject,\n      testMode,\n      deliveredTo,\n      intendedTo,\n      intendedCc:ccEmail\n    };\n'''
+          if old not in s:
+              raise SystemExit('send block not found')
+          s=s.replace(old,new,1)
+          s=s.replace('  buildRawMime,\n','')
+          p.write_text(s)
+
+          p=Path('tests/parent-email-import-verification.mjs')
+          t=p.read_text()
+          a=t.index('// Cloudflare Email Sending now receives an explicit raw RFC 5322 MIME message.')
+          b=t.index('// A delivery failure is reported as an email failure;', a)
+          replacement='''// Cloudflare Email Sending structured payload must use the documented inline\n// attachment field `content_id` (snake case), with base64 content.\nconst TEST_SIGNATURE_BASE64 = 'dGVzdC1zaWduYXR1cmU=';\nconst sentPayloads = [];\nconst env = {\n  PARENT_EMAIL_SIGNATURE_BASE64: TEST_SIGNATURE_BASE64,\n  EMAIL:{\n    async send(payload) {\n      sentPayloads.push(payload);\n      return { messageId:'synthetic-message-id' };\n    }\n  }\n};\nconst sent = await sendParentEmail(env, upcoming);\nassert.equal(sent.ok, true);\nassert.equal(sent.status, 'SENT');\nassert.equal(sent.messageId, 'synthetic-message-id');\nassert.equal(sentPayloads.length, 1);\nconst payload = sentPayloads[0];\nassert.deepEqual(payload.from, { email:'sej@futureperfect.education', name:'Sejal Dalal' });\nassert.equal(payload.to, 'sara_shinde@hotmail.co.uk');\nassert.deepEqual(payload.cc, { email:'barkha@futureperfect.education', name:'Barkha' });\nassert.equal(payload.attachments.length, 1);\nassert.equal(payload.attachments[0].filename, 'fpt-email-signature.png');\nassert.equal(payload.attachments[0].type, 'image/png');\nassert.equal(payload.attachments[0].disposition, 'inline');\nassert.equal(payload.attachments[0].content_id, 'fpt-email-signature-clean');\nassert.equal('contentId' in payload.attachments[0], false);\nassert.equal(payload.attachments[0].content, TEST_SIGNATURE_BASE64);\n\n'''
+          t=t[:a]+replacement+t[b:]
+          t=t.replace("  __EMAIL_MESSAGE_FACTORY(from, to, raw) { return { from, to, raw }; },\n",'')
+          t=t.replace("console.log('Parent CSV email triggers, formatting, runtime signature loading, raw MIME CID linkage, L-prefix normalisation and Cloudflare delivery: PASS');","console.log('Parent CSV email triggers, formatting, runtime signature loading, documented content_id linkage, L-prefix normalisation and Cloudflare delivery: PASS');")
+          p.write_text(t)
+
+          p=Path('tests/parent-email-test-routing-verification.mjs')
+          t=p.read_text()
+          t=t.replace("  __EMAIL_MESSAGE_FACTORY(from, to, raw) { return { from, to, raw }; },\n",'')
+          old='''assert.equal(payloads.length, 1);\nassert.equal(payloads[0].to, 'sejal.mail@gmail.com');\nassert.match(payloads[0].raw, /To: sejal\\.mail@gmail\\.com/);\nassert.doesNotMatch(payloads[0].raw, /^Cc:/m, 'Test mode must not send a copy to Barkha');\nassert.match(payloads[0].raw, /Subject: Upcoming Lesson for Annisha and the worksheets to be printed before the next session on 7th September 2026\\./);\nassert.match(payloads[0].raw, /Content-ID: <fpt-email-signature-clean>/);\n'''
+          new='''assert.equal(payloads.length, 1);\nassert.equal(payloads[0].to, 'sejal.mail@gmail.com');\nassert.equal('cc' in payloads[0], false, 'Test mode must not send a copy to Barkha');\nassert.equal(payloads[0].subject, 'Upcoming Lesson for Annisha and the worksheets to be printed before the next session on 7th September 2026.');\nassert.equal(payloads[0].attachments[0].content_id, 'fpt-email-signature-clean');\nassert.equal(payloads[0].attachments[0].content, 'dGVzdC1zaWduYXR1cmU=');\n'''
+          if old not in t:
+              raise SystemExit('routing assertions not found')
+          p.write_text(t.replace(old,new,1))
+          PY
+      - name: Verify documented inline-image regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/parent-email.js
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          grep -Fq 'content_id:SIGNATURE_CID' worker/src/parent-email.js
+          ! grep -Fq 'contentId:SIGNATURE_CID' worker/src/parent-email.js
+          npx --yes wrangler@4.125.0 deploy --dry-run --config worker/wrangler.toml --outdir /tmp/fpt-content-id-build
+          echo CONTENT_ID_INLINE_IMAGE_REGRESSION_PASS
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/parent-email.js tests/parent-email-import-verification.mjs tests/parent-email-test-routing-verification.mjs
+          git commit -m 'Use documented content_id for inline signature image'
+          git push origin HEAD:fix/email-signature-content-id
