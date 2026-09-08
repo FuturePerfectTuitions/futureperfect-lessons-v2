@@ -7,22 +7,32 @@ on:
       - admin-import.html
       - assets/admin-import.js
       - worker/src/admin-lesson-release-import.js
+      - worker/src/admin-lesson-release-import-email.js
+      - worker/src/parent-email.js
+      - worker/src/parent-email-signature.js
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
+      - worker/src/index-phase20-change17-parent-email.js
       - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
+      - tests/parent-email-import-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
   push:
-    branches: [lesson-release-admin-import]
+    branches: [lesson-release-admin-import, feature/parent-email-csv-import]
     paths:
       - admin-import.html
       - assets/admin-import.js
       - worker/src/admin-lesson-release-import.js
+      - worker/src/admin-lesson-release-import-email.js
+      - worker/src/parent-email.js
+      - worker/src/parent-email-signature.js
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
+      - worker/src/index-phase20-change17-parent-email.js
       - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
+      - tests/parent-email-import-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
 
@@ -42,15 +52,20 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/admin-lesson-release-import-email.js
+          node --check worker/src/parent-email.js
+          node --check worker/src/parent-email-signature.js
           node --check worker/src/index-phase20-change7.js
           node --check worker/src/index-phase20-change8.js
+          node --check worker/src/index-phase20-change17-parent-email.js
           node --check assets/admin-import.js
       - name: Importer verification
         run: |
           set -euo pipefail
           node tests/admin-lesson-release-import-verification.mjs
+          node tests/parent-email-import-verification.mjs
       - name: Lesson release navigation verification
         run: |
           set -euo pipefail
           node tests/lesson-release-navigation-verification.mjs
-          grep -Fq 'main = "src/index-phase20-change8.js"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
