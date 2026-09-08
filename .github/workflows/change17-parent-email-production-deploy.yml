@@ -30,7 +30,7 @@ jobs:
       WORKER_NAME: fpt-portal-v2-worker
       WORKER_ENTRYPOINT: src/index-phase20-change17-parent-email.js
       WRANGLER_VERSION: 4.125.0
-      PARENT_EMAIL_TEST_TO: sej@futureperfect.education
+      PARENT_EMAIL_TEST_TO: sejal.mail@gmail.com
       DEPLOY_MESSAGE: Portal V2 Change 17 parent transactional email - test recipient mode
 
     steps:
@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test "$PARENT_EMAIL_TEST_TO" = 'sej@futureperfect.education'
+          test "$PARENT_EMAIL_TEST_TO" = 'sejal.mail@gmail.com'
           test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change17-parent-email.js'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
