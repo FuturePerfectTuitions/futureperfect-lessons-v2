@@ -130,6 +130,40 @@ async function kvCatalogueRowsForView(env, viewId) {
     .sort((a, b) => a.order - b.order || a.lessonId.localeCompare(b.lessonId));
 }
 
+// Home only needs whether a preview catalogue exists and how many lessons it
+// contains. Do not fetch every lesson record (titles/descriptions/resources) for
+// the other subject before the student has chosen that subject. Current live
+// curriculum membership remains authoritative, so the lightweight home summary
+// reads only the required curriculum records and derives counts from lesson IDs.
+async function kvCatalogueCountsForViews(env, viewIds) {
+  const normalizedViews = [...new Set(
+    (Array.isArray(viewIds) ? viewIds : [])
+      .map(cleanViewId)
+      .filter(viewId => VIEW_META[viewId] && Array.isArray(VIEW_CURRICULA[viewId]))
+  )];
+  const counts = new Map();
+  if (!env?.LESSONS_KV || !normalizedViews.length) return counts;
+
+  const curriculumCodes = [...new Set(
+    normalizedViews.flatMap(viewId => VIEW_CURRICULA[viewId] || [])
+  )];
+  const curriculumValues = await readJsonInBatches(
+    env.LESSONS_KV,
+    curriculumCodes.map(code => `curriculum:${code}`),
+    Math.max(1, curriculumCodes.length)
+  );
+
+  for (const viewId of normalizedViews) {
+    const lessonIds = new Set();
+    for (const code of VIEW_CURRICULA[viewId] || []) {
+      const raw = curriculumValues.get(`curriculum:${code}`);
+      for (const lessonId of lessonIdsFromCurriculum(raw)) lessonIds.add(lessonId);
+    }
+    counts.set(viewId, lessonIds.size);
+  }
+  return counts;
+}
+
 function jsonLike(response, body, status = null) {
   const headers = new Headers(response?.headers || {});
   headers.set('content-type', 'application/json; charset=utf-8');
@@ -154,16 +188,19 @@ function lockedRow(row) {
   };
 }
 
-function viewSummary(viewId, rows) {
+function viewSummary(viewId, rowsOrCount) {
   const meta = VIEW_META[viewId] || { subject: '', label: viewId };
+  const count = Array.isArray(rowsOrCount)
+    ? rowsOrCount.length
+    : Math.max(0, Number(rowsOrCount) || 0);
   return {
     viewId,
     subject: meta.subject,
     label: meta.label,
-    catalogueAvailable: rows.length > 0,
-    visibleLessonCount: rows.length,
+    catalogueAvailable: count > 0,
+    visibleLessonCount: count,
     openLessonCount: 0,
-    lockedLessonCount: rows.length,
+    lockedLessonCount: count,
     lockedPreview: true,
     current: true,
     group: 'current',
@@ -218,7 +255,7 @@ function buildLockedLesson(record, row) {
         ? lockedResource(resourceName(pair.answerPack, 'Answer Pack'), true)
         : null
     })),
-    otherResources: other.map(item => lockedResource(resourceName(item, 'Resource')))
+    otherResources: other.map(item => lockedResource(resourceName(item, 'Resource'))
   };
 }
 
@@ -228,14 +265,19 @@ async function homeWithKvPreviewCounts(request, env, ctx) {
   const body = await response.clone().json().catch(() => null);
   if (!body?.ok || !Array.isArray(body.subjects)) return response;
 
+  const previews = [];
   for (const subject of body.subjects) {
     for (const view of Array.isArray(subject?.views) ? subject.views : []) {
       if (view?.lockedPreview !== true && view?.source !== 'crossSubjectPreview') continue;
       const viewId = cleanViewId(view?.viewId);
       if (!VIEW_META[viewId]) continue;
-      const rows = await kvCatalogueRowsForView(env, viewId);
-      Object.assign(view, viewSummary(viewId, rows));
+      previews.push({ view, viewId });
     }
+  }
+
+  const counts = await kvCatalogueCountsForViews(env, previews.map(item => item.viewId));
+  for (const { view, viewId } of previews) {
+    Object.assign(view, viewSummary(viewId, counts.get(viewId) || 0));
   }
   return jsonLike(response, body);
 }
@@ -268,7 +310,8 @@ function detailLessonId(url) {
 export {
   rawCatalogueItems,
   lessonIdsFromCurriculum,
-  kvCatalogueRowsForView
+  kvCatalogueRowsForView,
+  kvCatalogueCountsForViews
 };
 
 export default {
