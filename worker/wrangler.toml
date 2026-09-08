@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change18-admin-superuser.js"
+main = "src/index-phase20-change19-admin-fast.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,33 +9,35 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Canonical Portal V2 production entrypoint. The admin-superuser wrapper is now
-# the outermost student-access layer. It delegates all normal/student traffic to
-# the parent-email/fast-navigation production chain unchanged, but elevates the
-# authenticated `admin` Portal User ID to server-side superuser access across all
-# current Maths, English, 11+, VR and special-resource libraries. Protected Answer
-# Packs are exposed to this authenticated superuser without the student Answer Pack
-# password gate. Normal student, trial and demo accounts remain on the existing
-# entitlement and protected-resource paths.
+# Canonical Portal V2 production entrypoint. Change 19 is a narrow authenticated
+# Admin performance wrapper. For view-scoped Admin GET requests it first proves
+# the session is the server-side Admin superuser, then supplies a request-local
+# performance marker so Change 16 can skip its redundant /home preview probe.
+# This prevents a single Year/Level lesson list or resource request from forcing
+# the entire Admin Full Library catalogue to be rebuilt first. Ordinary student,
+# trial and demo traffic is delegated unchanged to the existing Change 18 chain.
 #
-# The parent-email wrapper remains immediately underneath and delegates student
-# traffic through the lightweight Change 17 navigation wrapper before the existing
-# Change 16 access-control chain. The fast navigation endpoint does not weaken
-# lesson/resource gates for ordinary users; all non-navigation requests delegate
-# through the established Worker exactly as before.
-# Student catalogue-list responses are repaired last so stale bundled catalogue
-# overlays cannot re-introduce retired lessons or shift live Drive/KV display IDs.
+# Change 18 remains the Admin-superuser access layer. It delegates all normal
+# student traffic to the parent-email/fast-navigation production chain unchanged,
+# but elevates the authenticated `admin` Portal User ID to server-side superuser
+# access across all current Maths, English, 11+, VR and special-resource libraries.
+# Protected Answer Packs are exposed to this authenticated superuser without the
+# student Answer Pack password gate. Normal student, trial and demo accounts remain
+# on the existing entitlement and protected-resource paths.
+#
+# The parent-email wrapper remains underneath and delegates student traffic through
+# the lightweight Change 17 navigation wrapper before the existing Change 16
+# access-control chain. Student catalogue-list responses are repaired by the live
+# Drive/KV catalogue overlay so retired lessons cannot reappear and current display
+# IDs remain authoritative.
 #
 # Fast navigation reads only the student profile, D1 access/navigation rows and
 # the small set of authoritative live curriculum records. It does not build every
-# lesson/detail resource before a student can enter Maths or English. All lesson
-# and resource access remains enforced by the existing Change 16 and earlier gates
-# for non-superuser accounts.
+# lesson/detail resource before a student can enter Maths or English.
 #
 # Change 16 restricts cross-subject upsell previews to subjects in which the
-# student has no actual entitlement. If a student already has any real English
-# access, English year/level navigation comes only from explicit English
-# entitlements/imports; the same rule applies in reverse for Maths.
+# student has no actual entitlement. Its Admin-only fast-path bypass is safe because
+# Change 19 authenticates the superuser before setting the request-local marker.
 #
 # Change 15 fixes Maths 11+ navigation presentation: students with 11+ Maths access
 # see L1/L2/L3 rather than normal Year 4/5/6 aliases for the same curricula.
@@ -59,8 +61,8 @@ STUDENT_LOGIN_ENABLED = "true"
 #
 # Change 11 wraps Change 10 and makes an explicit Full Library enrolment
 # participate in the older cross-subject preview discovery path even when there
-# is no matching active D1 batch assignment. It remains in the chain for
-# backwards compatibility, but Change 12 no longer depends on that source.
+# is no matching active D1 batch assignment. It remains in the chain for backwards
+# compatibility, but Change 12 no longer depends on that source.
 #
 # Change 10 wraps Change 9 and verifies that an imported PRELESSON_ONLY release
 # actually has at least one usable PreLesson resource before it is presented as
