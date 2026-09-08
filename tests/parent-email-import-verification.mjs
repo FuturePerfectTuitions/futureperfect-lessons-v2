@@ -104,7 +104,7 @@ assert.match(upcomingMail.html, /Hello Sheetal,/);
 assert.match(upcomingMail.html, /<strong>&quot;Y5T1E01 Descriptive Writing Settings and Atmosphere&quot;<\/strong>/);
 assert.match(upcomingMail.html, /For this session, there are PreLesson Sheets to be printed which have been shared on your portal\./);
 assert.doesNotMatch(upcomingMail.html, /attached the VR PreLesson/i);
-assert.equal(SIGNATURE_URL, 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-v2.jpg');
+assert.equal(SIGNATURE_URL, 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png');
 assert.match(upcomingMail.html, new RegExp(SIGNATURE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 assert.doesNotMatch(upcomingMail.html, /cid:/i);
 
@@ -170,7 +170,7 @@ assert.deepEqual(payload.from, { email:'sej@futureperfect.education', name:'Seja
 assert.equal(payload.to, 'sara_shinde@hotmail.co.uk');
 assert.deepEqual(payload.cc, { email:'barkha@futureperfect.education', name:'Barkha' });
 assert.equal('attachments' in payload, false);
-assert.match(payload.html, /https:\/\/futureperfecttuitions\.github\.io\/futureperfect-lessons-v2\/assets\/sej-email-signature-v2\.jpg/);
+assert.match(payload.html, /https:\/\/futureperfecttuitions\.github\.io\/futureperfect-lessons-v2\/assets\/sej-email-signature-clean\.png/);
 
 // A delivery failure is reported as an email failure; it does not throw and
 // therefore cannot roll back a Portal entitlement already committed before send.
