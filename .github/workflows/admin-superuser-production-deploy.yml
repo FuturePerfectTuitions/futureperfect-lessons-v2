@@ -7,6 +7,7 @@ on:
       - 'worker/src/index-phase20-change16.js'
       - 'worker/src/index-phase20-change18-admin-superuser.js'
       - 'worker/src/index-phase20-change19-admin-fast.js'
+      - 'worker/src/index-phase20-change20-configured-upsell.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-superuser-static-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
@@ -23,18 +24,19 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Authenticated Admin superuser fast path
+      DEPLOY_MESSAGE: Authenticated Admin superuser fast path with configured upsells
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify admin superuser source syntax
+      - name: Verify production source syntax
         run: |
           node --check worker/src/index-phase20-change18-admin-superuser.js
           node --check worker/src/index-phase20-change19-admin-fast.js
+          node --check worker/src/index-phase20-change20-configured-upsell.js
           node --check worker/src/index-phase20-change16.js
-      - name: Verify admin superuser production wiring
+      - name: Verify production wiring
         run: node tests/admin-superuser-static-verification.mjs
       - name: Deploy Worker preserving bindings and secrets
         run: bash ops/deploy_current_worker_preserve.sh
