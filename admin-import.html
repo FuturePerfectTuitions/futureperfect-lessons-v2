@@ -46,6 +46,42 @@
   </div>
 </main>
 <script src="assets/admin-import-source.js"></script>
+<script>
+(() => {
+  const sourceApi = window.FPTAdminCsvSource;
+  const loginBtn = document.getElementById('loginBtn');
+  let savedHandlePromise = Promise.resolve(null);
+  window.FPTAdminSourcePermissionReady = Promise.resolve(false);
+
+  if (sourceApi?.supported?.()) {
+    savedHandlePromise = sourceApi.getSavedDirectory().catch(() => null);
+    loginBtn?.addEventListener('click', () => {
+      window.FPTAdminSourcePermissionReady = savedHandlePromise.then(handle => {
+        if (!handle) return false;
+        return sourceApi.permission(handle, true).catch(() => false);
+      });
+    }, true);
+  }
+})();
+</script>
 <script src="assets/admin-import.js"></script>
+<script>
+(() => {
+  const loadBtn = document.getElementById('loadLatestBtn');
+  const importCard = document.getElementById('importCard');
+  if (!loadBtn || !importCard) return;
+
+  let autoLoadStarted = false;
+  const tryAutoLoad = () => {
+    if (autoLoadStarted || importCard.classList.contains('hidden') || loadBtn.disabled) return;
+    autoLoadStarted = true;
+    Promise.resolve(window.FPTAdminSourcePermissionReady).finally(() => loadBtn.click());
+  };
+
+  new MutationObserver(tryAutoLoad).observe(loadBtn, { attributes:true, attributeFilter:['disabled'] });
+  new MutationObserver(tryAutoLoad).observe(importCard, { attributes:true, attributeFilter:['class'] });
+  tryAutoLoad();
+})();
+</script>
 </body>
 </html>
