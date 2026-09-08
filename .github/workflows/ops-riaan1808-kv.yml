@@ -1,0 +1,199 @@
+name: Ops Riaan1808 KV
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-riaan1808-kv.yml'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  verify-or-create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve live Students KV binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          NS_ID="$(jq -r '[.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id][0] // ""' /tmp/settings.json)"
+          test -n "$NS_ID"
+          echo "NS_ID=$NS_ID" >> "$GITHUB_ENV"
+
+      - name: Read existing live record or create exact new profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRIMARY_KEY='user:riaan1808'
+          LEGACY_KEY='student:riaan1808'
+
+          kv_get() {
+            local key="$1" out="$2" code key_enc
+            key_enc="$(python - "$key" <<'PY'
+import sys, urllib.parse
+print(urllib.parse.quote(sys.argv[1], safe=''))
+PY
+)"
+            code="$(curl --silent --show-error \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --output "$out" \
+              --write-out '%{http_code}' \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS_ID}/values/${key_enc}")"
+            printf '%s' "$code"
+          }
+
+          primary_code="$(kv_get "$PRIMARY_KEY" /tmp/user.json)"
+          created=false
+          source_key="$PRIMARY_KEY"
+
+          if [ "$primary_code" = '200' ]; then
+            :
+          else
+            legacy_code="$(kv_get "$LEGACY_KEY" /tmp/legacy.json)"
+            if [ "$legacy_code" = '200' ]; then
+              cp /tmp/legacy.json /tmp/user.json
+              source_key="$LEGACY_KEY"
+            else
+              stale_count="$(npx --yes wrangler@4.125.0 d1 execute fpt_portal_v2_db --remote --json --command "SELECT COUNT(*) AS n FROM lesson_entitlements WHERE portal_user_id_norm='riaan1808';" | jq -r '.[0].results[0].n // 0')"
+              test "$stale_count" = '0'
+
+              python <<'PY'
+import json, secrets, string
+rng = secrets.SystemRandom()
+def make_pw():
+    chars = [
+        rng.choice(string.ascii_uppercase),
+        rng.choice(string.ascii_lowercase),
+        rng.choice(string.digits),
+        rng.choice(string.ascii_letters + string.digits),
+    ]
+    rng.shuffle(chars)
+    return ''.join(chars)
+record = {
+    "portalUserId": "Riaan1808",
+    "name": "Riaan",
+    "firstName": "Riaan",
+    "p": make_pw(),
+    "answerPassword": make_pw(),
+    "status": "active",
+    "expires": None,
+    "accountStatus": "active",
+    "schoolYear": 5,
+    "vrEligible": False,
+    "batches": ["Y5E"],
+    "fullLibraries": [],
+    "manualAccess": {"coreLessons": [], "vrLessons": []},
+    "blockedLessons": [],
+    "historicalViews": [],
+    "specialAccess": [],
+    "upsellViews": ["maths-year5"]
+}
+with open('/tmp/user.json', 'w', encoding='utf-8') as f:
+    json.dump(record, f, separators=(',', ':'))
+PY
+              key_enc="$(python - "$PRIMARY_KEY" <<'PY'
+import sys, urllib.parse
+print(urllib.parse.quote(sys.argv[1], safe=''))
+PY
+)"
+              curl --fail --silent --show-error \
+                --request PUT \
+                --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                --header 'Content-Type: application/json' \
+                --data-binary @/tmp/user.json \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS_ID}/values/${key_enc}" \
+                >/tmp/put-result.json
+              created=true
+              source_key="$PRIMARY_KEY"
+              verify_code="$(kv_get "$PRIMARY_KEY" /tmp/user-verify.json)"
+              test "$verify_code" = '200'
+              mv /tmp/user-verify.json /tmp/user.json
+            fi
+          fi
+
+          jq -e 'type=="object"' /tmp/user.json >/dev/null
+          login_pw="$(jq -r '.p // .loginPassword // ""' /tmp/user.json)"
+          answer_pw="$(jq -r '.answerPassword // ""' /tmp/user.json)"
+          python - "$login_pw" "$answer_pw" <<'PY'
+import re, sys
+for value in sys.argv[1:]:
+    assert len(value) == 4
+    assert re.search(r'[A-Z]', value)
+    assert re.search(r'[a-z]', value)
+    assert re.search(r'\d', value)
+PY
+
+          if [ "$created" = 'true' ]; then
+            jq -e '
+              (.schoolYear == 5) and
+              (.vrEligible == false) and
+              (.batches == ["Y5E"]) and
+              (.fullLibraries == []) and
+              (.manualAccess.coreLessons == []) and
+              (.manualAccess.vrLessons == []) and
+              (.upsellViews == ["maths-year5"]) and
+              ((.specialAccess // []) == [])
+            ' /tmp/user.json >/dev/null
+          fi
+
+          jq -n \
+            --argjson created "$created" \
+            --arg sourceKey "$source_key" \
+            '{created:$created, existed:($created|not), sourceKey:$sourceKey}' \
+            >/tmp/summary.json
+
+          jq -c \
+            --argjson created "$created" \
+            --arg sourceKey "$source_key" \
+            '{created:$created, sourceKey:$sourceKey, loginPassword:(.p // .loginPassword // ""), answerPassword:(.answerPassword // "")}' \
+            /tmp/user.json >/tmp/credentials.json
+
+      - name: Encrypt credentials for requester
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/public.pem <<'PEM'
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArMkt5Wgt8asaQezct5ve
+          WFjcaU3Tf/R4/jREW5Iv7iOSLElYkUeEIox5EAlTKdAXWRnylUcLUgQt61G3FsT/
+          MCuvPYZAgfoDcK5zcYlIgx1CQxpd24/C8X7LLdvj6DDg3WtxbMu/hsFYGeQ21xnY
+          G8U92hEO68vvLJFoT6uHaFoc8WJk+RD/Dc+nzm2zVcas2cOL0xWdhypOMO8aWfrw
+          uZ6wRifoLbkubp67GGMjTMln6r5jWYl7TscgdL+nRKgubrb3KG8krWXHseLVpoqn
+          AxzuiY0FkCHh7VnGIKyPKuhTIlq0ykgcI5ec1wEUE3cQ8+mqSXJqSFmOMTYzueYX
+          WQIDAQAB
+          -----END PUBLIC KEY-----
+          PEM
+          openssl pkeyutl -encrypt \
+            -pubin -inkey /tmp/public.pem \
+            -in /tmp/credentials.json \
+            -out /tmp/credentials.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256
+          base64 -w0 /tmp/credentials.enc >/tmp/credentials.b64
+          rm -f /tmp/credentials.json /tmp/user.json /tmp/legacy.json /tmp/settings.json
+
+      - name: Upload encrypted result
+        uses: actions/upload-artifact@v4
+        with:
+          name: riaan1808-kv-result
+          path: |
+            /tmp/summary.json
+            /tmp/credentials.b64
+          retention-days: 1
+          if-no-files-found: error
