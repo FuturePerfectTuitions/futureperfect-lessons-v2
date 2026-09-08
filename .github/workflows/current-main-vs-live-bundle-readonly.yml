@@ -1,0 +1,74 @@
+name: Current main versus live Worker bundle read-only check
+
+on:
+  push:
+    branches: [ops/cloudflare-audit]
+    paths:
+      - '.github/workflows/current-main-vs-live-bundle-readonly.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Regenerate canonical navigation manifest in runner workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/fpt-navigation-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/fpt-navigation-package >/tmp/fpt-navigation-package.log
+      - name: Build current main without deploying
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/fpt-dry
+          mkdir -p /tmp/fpt-dry
+          npx --yes wrangler@4.130.0 deploy --config worker/wrangler.toml --dry-run --outdir /tmp/fpt-dry >/tmp/dry.log
+          FILE="$(find /tmp/fpt-dry -maxdepth 1 -type f -name '*.js' | head -n1)"
+          test -n "$FILE"
+          sha256sum "$FILE" | awk '{print "current_main_bundle_sha256=" $1}'
+          echo "current_main_sha=$(git rev-parse HEAD)"
+      - name: Hash currently deployed live Worker module
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error --dump-header /tmp/live.headers "$API/workers/scripts/${WORKER_NAME}" -H "$AUTH" -o /tmp/live.bin
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib,re
+          h=open('/tmp/live.headers','rb').read().decode('latin-1','replace')
+          b=open('/tmp/live.bin','rb').read()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',h)
+          ct=m.group(1).strip() if m else ''
+          if ct.lower().startswith('multipart/'):
+              msg=BytesParser(policy=default).parsebytes(('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+b)
+              parts=[]
+              for p in msg.iter_parts():
+                  payload=p.get_payload(decode=True) or b''
+                  name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or ''
+                  if name.endswith('.js'):
+                      parts.append((name,payload))
+              assert len(parts)==1, parts
+              print('live_bundle_sha256='+hashlib.sha256(parts[0][1]).hexdigest())
+              print('live_module_name='+parts[0][0])
+          else:
+              print('live_bundle_sha256='+hashlib.sha256(b).hexdigest())
+          PY
+      - name: Confirm no writes
+        run: echo 'READ_ONLY_BUNDLE_COMPARISON_PASS'
