@@ -1,0 +1,67 @@
+name: Cloudflare settings PATCH semantics disposable test
+
+on:
+  push:
+    branches: [ops/cloudflare-audit]
+    paths:
+      - '.github/workflows/cloudflare-settings-patch-semantics-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TEST_WORKER: fpt-settings-patch-test-20260908
+    steps:
+      - name: Create disposable Worker with two plain vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cfpatch
+          cat >/tmp/cfpatch/index.js <<'JS'
+          export default { fetch(){ return new Response('ok'); } };
+          JS
+          cat >/tmp/cfpatch/wrangler.toml <<TOML
+          name = "${TEST_WORKER}"
+          main = "index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+          [vars]
+          PATCH_TEST_A = "one"
+          PATCH_TEST_B = "two"
+          TOML
+          cd /tmp/cfpatch
+          npx --yes wrangler@4.130.0 deploy --config wrangler.toml >/tmp/test-deploy.log
+      - name: PATCH only one binding and inspect result
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${TEST_WORKER}/settings" -H "$AUTH" -o /tmp/before.json
+          BEFORE_A="$(jq -r '[.result.bindings[]|select(.name=="PATCH_TEST_A" and .type=="plain_text")|.text][0] // ""' /tmp/before.json)"
+          BEFORE_B="$(jq -r '[.result.bindings[]|select(.name=="PATCH_TEST_B" and .type=="plain_text")|.text][0] // ""' /tmp/before.json)"
+          test "$BEFORE_A" = one
+          test "$BEFORE_B" = two
+          printf '%s' '{"bindings":[{"type":"plain_text","name":"PATCH_TEST_B","text":"three"}]}' >/tmp/settings-part.json
+          curl --fail --silent --show-error -X PATCH "$API/workers/scripts/${TEST_WORKER}/settings" -H "$AUTH" -F 'settings=@/tmp/settings-part.json;type=application/json' -o /tmp/patch.json
+          jq -e '.success == true' /tmp/patch.json >/dev/null
+          curl --fail --silent --show-error "$API/workers/scripts/${TEST_WORKER}/settings" -H "$AUTH" -o /tmp/after.json
+          AFTER_A="$(jq -r '[.result.bindings[]|select(.name=="PATCH_TEST_A" and .type=="plain_text")|.text][0] // ""' /tmp/after.json)"
+          AFTER_B="$(jq -r '[.result.bindings[]|select(.name=="PATCH_TEST_B" and .type=="plain_text")|.text][0] // ""' /tmp/after.json)"
+          if [ "$AFTER_A" = one ] && [ "$AFTER_B" = three ]; then
+            echo 'single_binding_patch_preserves_other_bindings=true'
+          else
+            echo 'single_binding_patch_preserves_other_bindings=false'
+            echo "after_binding_count=$(jq '[.result.bindings[]]|length' /tmp/after.json)"
+          fi
+      - name: Delete disposable Worker
+        if: always()
+        shell: bash
+        run: |
+          npx --yes wrangler@4.130.0 delete --name "$TEST_WORKER" --force || true
