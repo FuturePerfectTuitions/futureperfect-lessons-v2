@@ -1,0 +1,160 @@
+name: One-time encrypted live entitlement audit
+
+on:
+  push:
+    branches:
+      - ops/one-time-entitlement-audit-20260908
+    paths:
+      - .github/workflows/one-time-encrypted-entitlement-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      D1_NAME: fpt_portal_v2_db
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Resolve production bindings without printing identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          ENVIRONMENT="$(jq -r '.result.bindings[] | select(.name == "ENVIRONMENT") | .text' /tmp/settings.json)"
+          test "$ENVIRONMENT" = "production"
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV") | .namespace_id' /tmp/settings.json)"
+          test -n "$STUDENTS_KV_ID"
+          echo "STUDENTS_KV_ID=$STUDENTS_KV_ID" >> "$GITHUB_ENV"
+          echo "Production binding resolved. No binding IDs printed."
+
+      - name: Read and sanitize student entitlement profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key list \
+            --namespace-id "$STUDENTS_KV_ID" \
+            --prefix "user:" \
+            --remote > /tmp/user-keys.json 2>/tmp/kv-list.err
+
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          keys = json.load(open('/tmp/user-keys.json', encoding='utf-8'))
+          profiles = []
+          for item in keys:
+              key = str(item.get('name') or '')
+              if not key.startswith('user:'):
+                  continue
+              proc = subprocess.run(
+                  ['npx','--yes','wrangler@latest','kv','key','get',key,
+                   '--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],
+                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                  text=True, check=True
+              )
+              try:
+                  user = json.loads(proc.stdout)
+              except Exception:
+                  continue
+              manual = user.get('manualAccess') if isinstance(user.get('manualAccess'), dict) else {}
+              profiles.append({
+                  'portalUserIdNorm': key[5:].strip().lower(),
+                  'name': str(user.get('name') or '').strip(),
+                  'fullLibraries': user.get('fullLibraries') if isinstance(user.get('fullLibraries'), list) else [],
+                  'trialViews': user.get('trialViews') if isinstance(user.get('trialViews'), list) else [],
+                  'batches': user.get('batches') if isinstance(user.get('batches'), list) else [],
+                  'manualCoreLessons': manual.get('coreLessons') if isinstance(manual.get('coreLessons'), list) else []
+              })
+          with open('/tmp/profiles.json','w',encoding='utf-8') as fh:
+              json.dump(profiles, fh, ensure_ascii=False, separators=(',',':'))
+          print(f"Sanitized {len(profiles)} profiles. Passwords, answer passwords, emails and parent data were not retained.")
+          PY
+
+      - name: Read D1 entitlement state
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest d1 execute "$D1_NAME" --remote --json --command \
+            "SELECT a.portal_user_id_norm, a.batch_key, a.effective_from, a.effective_to, b.subject, b.school_year, b.stream, b.maths_level, b.active_from, b.active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key;" \
+            > /tmp/assignments.json 2>/tmp/d1-assign.err
+
+          npx --yes wrangler@latest d1 execute "$D1_NAME" --remote --json --command \
+            "SELECT e.portal_user_id_norm, e.lesson_id, e.source_batch_code AS batch_key, e.source_lesson_date AS lesson_date, e.first_granted_at, b.subject, b.school_year, b.stream, b.maths_level FROM lesson_entitlements e LEFT JOIN batch_definitions b ON b.batch_key=e.source_batch_code WHERE e.core_access=1;" \
+            > /tmp/lesson-entitlements.json 2>/tmp/d1-full.err
+
+          npx --yes wrangler@latest d1 execute "$D1_NAME" --remote --json --command \
+            "SELECT e.portal_user_id_norm, e.lesson_id, e.batch_key, e.lesson_date, e.first_granted_at, b.subject, b.school_year, b.stream, b.maths_level FROM online_prelesson_entitlements e LEFT JOIN batch_definitions b ON b.batch_key=e.batch_key;" \
+            > /tmp/prelesson-entitlements.json 2>/tmp/d1-pre.err
+
+          echo "D1 entitlement tables read. Row data will not be printed."
+
+      - name: Encrypt audit package before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/audit-cert.pem <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIEGzCCAoOgAwIBAgIUQHTmeIwqDJ2uU1ZzvCoJi2SGeiAwDQYJKoZIhvcNAQEL
+          BQAwHTEbMBkGA1UEAwwSRlBUIE9uZS1UaW1lIEF1ZGl0MB4XDTI2MDkwODEwMTAy
+          OVoXDTI2MDkwOTEwMTAyOVowHTEbMBkGA1UEAwwSRlBUIE9uZS1UaW1lIEF1ZGl0
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAvb0xWLYvHY4IeWL3pclI
+          KS0qPUaHKjBBuv2NQhXng0SdP7ZChgIfZRSQRQaqhh4VoG4hgVl4dLhSqSutOFT1
+          ERBPh6Woy9wjcgTdKSztsoDIuixA8w0WVM/nG0zXFvFfwNv7Eu5NbtA0vajhu4ae
+          X9/m75iIoiHahLxPIWR4ajahFOxG1j8WgT/xOcOLkxEUn3y54F8VITxczT2N4Bly
+          KVaDIb6Nr+vQI3glgt0S1ozcQYm8Q0mpZ7DMKtHMS2l/8xvXU8MjYtRR2Iz1/lTt
+          Pj+XSOl5u/NIufjIoiofX7WvBXChCqDkhcXOmBFCoNDCMlXCduDQseAq1Cj8kZb3
+          uZWUj5GssVb7dmiMs0Q1EwPws0kmu0x15lBSCOx3zAPXKKZoEAzmJpqf1F6OL00O
+          6ZZ/La8LDngc8wCEAXew1mnafsbx01u3CGcLsyuWhRltrtXGJstdLHKOdewjGzr5
+          we+ljttcffAtx7cnpLAEiT5m9sH9rSUEQR9oUI0XYGMvAgMBAAGjUzBRMB0GA1Ud
+          DgQWBBS2ozF7g5JDntiLQnzfR4xtNtWBszAfBgNVHSMEGDAWgBS2ozF7g5JDntiL
+          QnzfR4xtNtWBszAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBgQBl
+          AehSqbMwhpxfbrESJ43Y84QeToCqxng2VrVo9KIUate/ESZdmR565Hx9w6DEX80r
+          Qtz2EPjRngjBXyn9Fx1KW12HiRJ8VgzEOLd+wFGrEUHdy31fqSJXOjH5iFVBP4Oi
+          LNRwWowY13b8wf8/LWNp4a5eTJWJDFwlysoNjdLvhUDWHkbC6UU2y0c4yh+Sgo/4
+          JlSq3ZZWNMToXzUXzaFo19pbBNibaTubyqNvaorHc9uwadbXu+lZlJ/cab1GDiu5
+          A6zM0yopO4lxwGjjqxHugtbnwsGlCT+qbr9yRxpQ4MK3nK9ac5nO5OACmnB2uoyN
+          1+oZRXk8y5E6mE7uZZGUXTZu7bymDsxbmkUbA5IzzbsIjQg1WbUuxQ8mKdrinccR
+          CC9kDmB2/SbtvaynK5/4nt+NXXwODSUnx0W+5OuSvB3vll4z9cBrtXGTHRUbQ4ak
+          hOgf9GgRHJb5YN0Ub44mWE0IkOPTqvOheEfhpupjaHlErIEtUdZjV42hPhUsmog=
+          -----END CERTIFICATE-----
+          CERT
+
+          python3 - <<'PY' | openssl cms -encrypt -binary -aes256 -outform DER -recip /tmp/audit-cert.pem -out /tmp/live-entitlement-audit.p7m
+          import json
+          def load(path):
+              with open(path, encoding='utf-8') as fh:
+                  return json.load(fh)
+          payload = {
+              'profiles': load('/tmp/profiles.json'),
+              'assignments': load('/tmp/assignments.json'),
+              'lessonEntitlements': load('/tmp/lesson-entitlements.json'),
+              'prelessonEntitlements': load('/tmp/prelesson-entitlements.json')
+          }
+          print(json.dumps(payload, ensure_ascii=False, separators=(',',':')))
+          PY
+
+          rm -f /tmp/profiles.json /tmp/assignments.json /tmp/lesson-entitlements.json /tmp/prelesson-entitlements.json /tmp/user-keys.json
+          echo "Encrypted audit package created. Plain student entitlement data was not uploaded or printed."
+
+      - name: Upload encrypted audit package
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-time-live-entitlement-audit-encrypted
+          path: /tmp/live-entitlement-audit.p7m
+          if-no-files-found: error
+          retention-days: 1
