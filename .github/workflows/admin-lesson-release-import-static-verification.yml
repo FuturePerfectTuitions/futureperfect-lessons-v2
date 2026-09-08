@@ -17,6 +17,7 @@ on:
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
+      - tests/parent-email-test-routing-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
   push:
@@ -35,6 +36,7 @@ on:
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
+      - tests/parent-email-test-routing-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
 
@@ -67,6 +69,7 @@ jobs:
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
       - name: Lesson release navigation verification
         run: |
           set -euo pipefail
