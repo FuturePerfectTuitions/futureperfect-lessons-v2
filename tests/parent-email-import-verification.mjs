@@ -37,7 +37,7 @@ assert.equal(signatureAsset.readUInt32BE(16), 600);
 assert.equal(signatureAsset.readUInt32BE(20), 157);
 assert.equal(
   FPT_EMAIL_SIGNATURE_SHA256,
-  '8444f6ba28a4ba94f7e815a2c5917c95999083454cec0407aa7aaf19f507470d'
+  'cc398aa099fb8aaaafdc7c3e7c08309e066ab33d8729907ee8606c3de5ebed4a'
 );
 assert.equal(
   createHash('sha256').update(signatureAsset).digest('hex'),
