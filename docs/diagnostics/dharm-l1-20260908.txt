@@ -1,0 +1,28 @@
+Dharm L1 read-only production diagnostic — 2026-09-08
+Portal user: dha2806
+
+Production STUDENTS_KV flags:
+- fullLibraries: []
+- blockedLessons: []
+
+Current live LESSONS_KV curriculum:MATHS_L1:
+- lesson count: 35
+
+Dharm D1 lesson_entitlements:
+- 36 FULL entitlements total across subjects/levels
+- all 35 lesson IDs in the current live MATHS_L1 curriculum have FULL entitlement
+- no current live MATHS_L1 lesson is missing FULL entitlement
+
+Bundled Phase 11 canonical MATHS_L1 navigation curriculum:
+- lesson count: 36
+
+Drift between bundled navigation and current live MATHS_L1:
+- bundled-only: Y4M36, Y4M24
+- live-KV-only: Y4M22
+
+Result against bundled navigation:
+- 34 of the bundled 36 L1 lesson IDs have Dharm FULL entitlement
+- Y4M36 and Y4M24 appear locked only because they exist in bundled navigation but are not in the current live MATHS_L1 used by the importer
+
+Conclusion:
+Dharm does have FULL access to every lesson in the current live MATHS_L1. The UI showing "34 open · 2 locked" is a navigation-catalogue drift defect, not a missing student entitlement. The current live L1 should be represented from live authoritative curriculum data, which would yield 35 open and 0 locked for Dharm.
