@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change16.js"
+main = "src/index-phase20-change17.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,12 +9,17 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Portal V2 production entrypoint. Change 16 restricts cross-subject upsell previews
-# to subjects in which the student has no actual entitlement. If a student already
-# has any real English access, English year/level navigation comes only from
-# explicit English entitlements/imports; Maths access cannot add extra English
-# year cards. The same rule applies in reverse for Maths. This preserves the
-# unenrolled-subject upsell catalogue while preventing over-broad navigation.
+# Portal V2 production entrypoint. Change 17 adds a lightweight authenticated
+# /api/v1/student/navigation endpoint for the subject/year screen. It reads only
+# the student profile, D1 access/navigation rows and the small set of authoritative
+# live curriculum records; it does not build every lesson/detail resource before a
+# student can enter Maths or English. All lesson/resource access remains enforced
+# by the existing Change 16 and earlier gates.
+#
+# Change 16 restricts cross-subject upsell previews to subjects in which the
+# student has no actual entitlement. If a student already has any real English
+# access, English year/level navigation comes only from explicit English
+# entitlements/imports; the same rule applies in reverse for Maths.
 #
 # Change 15 fixes Maths 11+ navigation presentation: students with 11+ Maths access
 # see L1/L2/L3 rather than normal Year 4/5/6 aliases for the same curricula.
