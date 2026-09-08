@@ -61,8 +61,8 @@ jobs:
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
-          test -f "$WORKER_ENTRYPOINT"
-          grep -Fq "import change16Worker from './index-phase20-change16.js';" "$WORKER_ENTRYPOINT"
+          test -f "worker/$WORKER_ENTRYPOINT"
+          grep -Fq "import change16Worker from './index-phase20-change16.js';" "worker/$WORKER_ENTRYPOINT"
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_STATIC_PASS'
