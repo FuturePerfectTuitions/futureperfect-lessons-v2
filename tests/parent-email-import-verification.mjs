@@ -23,16 +23,16 @@ import {
 // committed source image so a cropped/blank replacement cannot regress again.
 assert.equal(
   SIGNATURE_SOURCE_URL,
-  'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline'
+  'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-clean-f5358c33'
 );
 const signatureAsset = readFileSync(new URL('../assets/sej-email-signature-clean.png', import.meta.url));
-assert.equal(signatureAsset.length, 13164);
+assert.equal(signatureAsset.length, 29115);
 assert.deepEqual([...signatureAsset.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.equal(signatureAsset.readUInt32BE(16), 700);
 assert.equal(signatureAsset.readUInt32BE(20), 183);
 assert.equal(
   createHash('sha256').update(signatureAsset).digest('hex'),
-  '148a62e82fb99990cf1f51c46b50f290ca648f5295b41eb08a384094d5ffc099'
+  'f5358c33613eb2c284e1f33b7eb3b5626cc6ec5e14bbe9e72891c2e0754632a3'
 );
 
 // Normal Year 4/5/6 rows may arrive with L1/L2/L3 prefixes. The Year column,
