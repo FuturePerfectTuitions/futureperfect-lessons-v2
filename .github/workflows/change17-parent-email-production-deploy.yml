@@ -13,7 +13,8 @@ on:
       - 'worker/src/index-phase20-change17-parent-email.js'
       - 'worker/wrangler.toml'
       - 'tests/parent-email-import-verification.mjs'
-      - 'ops/deploy_current_worker_preserve.sh'
+      - 'tests/parent-email-completed-status-verification.mjs'
+      - 'ops/deploy_change17_parent_email_preserve.sh'
 
 permissions:
   contents: read
@@ -28,7 +29,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Portal V2 Change 17 parent transactional email
+      PARENT_EMAIL_TEST_TO: sej@futureperfect.education
+      DEPLOY_MESSAGE: Portal V2 Change 17 parent transactional email - test recipient mode
 
     steps:
       - uses: actions/checkout@v4
@@ -52,13 +54,14 @@ jobs:
           node --check assets/admin-import.js
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
           node tests/subject-preview-enrolment-boundary-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
           grep -Fq '[[send_email]]' worker/wrangler.toml
-          grep -Fq 'phase11-apply-package.mjs' ops/deploy_current_worker_preserve.sh
+          grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_STATIC_PASS'
 
       - name: Require production bindings and secrets
@@ -67,6 +70,7 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$PARENT_EMAIL_TEST_TO" = 'sej@futureperfect.education'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -80,13 +84,13 @@ jobs:
           done
           echo 'CHANGE17_BASE_BINDINGS_PASS'
 
-      - name: Deploy current production Worker preserving bindings and secrets
+      - name: Deploy Change 17 preserving bindings and forcing test recipient
         shell: bash
         run: |
           set -euo pipefail
-          bash ops/deploy_current_worker_preserve.sh
+          bash ops/deploy_change17_parent_email_preserve.sh
 
-      - name: Verify live Change 17 binding and security boundary
+      - name: Verify live Change 17 test mode and security boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -96,9 +100,10 @@ jobs:
             --output /tmp/change17-settings-after.json
           jq -e '.success == true' /tmp/change17-settings-after.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/change17-settings-after.json >/dev/null
+          jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/change17-settings-after.json >/dev/null
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
           ORIGIN='https://lessons.futureperfect.education'
           code="$(curl --silent --show-error --output /tmp/change17-home.json --write-out '%{http_code}' \
             --header "Origin: $ORIGIN" "$BASE/api/v1/student/home")"
           test "$code" = '401'
-          echo 'CHANGE17_LIVE_BINDING_AND_SECURITY_PASS'
+          echo 'CHANGE17_LIVE_TEST_MODE_AND_SECURITY_PASS'
