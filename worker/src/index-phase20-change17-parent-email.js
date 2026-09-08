@@ -1,6 +1,7 @@
 import change16Worker from './index-phase20-change16.js';
 import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-email.js';
 import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
+import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
 
 const EMAIL_SIGNATURE_PATH = '/api/v1/public/email-signature-v1.png';
 let emailSignatureBytes = null;
@@ -29,6 +30,9 @@ function emailSignatureResponse(request) {
 // Admin lesson-release requests are intercepted here so Portal entitlement writes
 // remain handled by the established importer; the email wrapper normalises normal
 // Y4/Y5/Y6 display prefixes and sends parent mail only after a successful confirm.
+// Student catalogue-list responses are repaired last, at the outermost Worker
+// layer, so stale bundled catalogue overlays cannot re-introduce retired lessons
+// or shift live Drive/KV display IDs after the navigation cache has done its work.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -38,7 +42,15 @@ export default {
 
     const adminResponse = await handleAdminLessonReleaseImport(request, env);
     if (adminResponse) return adminResponse;
-    return change16Worker.fetch(request, env, ctx);
+
+    const response = await change16Worker.fetch(request, env, ctx);
+    return repairLiveStudentCatalogueResponse(
+      request,
+      env,
+      ctx,
+      response,
+      (innerRequest, innerEnv, innerCtx) => change16Worker.fetch(innerRequest, innerEnv, innerCtx)
+    );
   }
 };
 
