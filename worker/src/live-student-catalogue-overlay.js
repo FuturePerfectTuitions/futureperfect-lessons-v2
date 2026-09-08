@@ -195,17 +195,26 @@ function modeForRow(live, existing, viewId, access) {
   const library = fullLibraryForView(viewId);
   if (library && access.fullLibraries.has(library)) return 'full';
 
-  if ((access.fullByLesson.get(live.lessonId) || []).some(row => entitlementMatchesView(row, live.record, viewId))) {
-    return 'full';
-  }
-  if ((access.preByLesson.get(live.lessonId) || []).some(row => entitlementMatchesView(row, live.record, viewId))) {
-    return 'prelesson';
-  }
+  const fullRows = access.fullByLesson.get(live.lessonId) || [];
+  if (fullRows.some(row => entitlementMatchesView(row, live.record, viewId))) return 'full';
 
-  // Preserve an existing open result for access sources that do not carry a
-  // batch key (for example a manual/guest grant) rather than accidentally
-  // re-locking a lesson while repairing stale catalogue metadata.
-  if (existing?.locked === false) return existing?.accessMode === 'prelesson' ? 'prelesson-existing' : 'full-existing';
+  // A manual/guest grant can legitimately have no batch key. Only preserve the
+  // downstream open result for that specific blank-batch entitlement; never use
+  // an open row to override a conflicting normal-vs-11+ batch classification.
+  if (
+    fullRows.some(row => !clean(row.batchKey)) &&
+    existing?.locked === false &&
+    existing?.accessMode !== 'prelesson'
+  ) return 'full-existing';
+
+  const preRows = access.preByLesson.get(live.lessonId) || [];
+  if (preRows.some(row => entitlementMatchesView(row, live.record, viewId))) return 'prelesson';
+  if (
+    preRows.some(row => !clean(row.batchKey)) &&
+    existing?.locked === false &&
+    existing?.accessMode === 'prelesson'
+  ) return 'prelesson-existing';
+
   return 'locked';
 }
 
