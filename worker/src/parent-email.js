@@ -213,34 +213,48 @@ async function sendParentEmail(env, item) {
   const fromEmail = clean(env?.PARENT_EMAIL_FROM) || DEFAULT_FROM;
   const fromName = clean(env?.PARENT_EMAIL_FROM_NAME) || DEFAULT_FROM_NAME;
   const ccEmail = clean(env?.PARENT_EMAIL_CC) || DEFAULT_CC;
+  const intendedTo = clean(item.parentEmail);
+  const testTo = clean(env?.PARENT_EMAIL_TEST_TO);
+  const deliveredTo = testTo || intendedTo;
+  const testMode = Boolean(testTo);
+
+  const payload = {
+    from: { email:fromEmail, name:fromName },
+    to: deliveredTo,
+    subject: built.subject,
+    html: built.html,
+    text: built.text,
+    attachments: [{
+      content:FPT_EMAIL_SIGNATURE_PNG_BASE64,
+      filename:SIGNATURE_FILENAME,
+      type:'image/png',
+      disposition:'inline',
+      contentId:SIGNATURE_CID
+    }]
+  };
+  if (!testMode) payload.cc = { email:ccEmail, name:'Barkha' };
 
   try {
-    const response = await env.EMAIL.send({
-      from: { email:fromEmail, name:fromName },
-      to: clean(item.parentEmail),
-      cc: { email:ccEmail, name:'Barkha' },
-      subject: built.subject,
-      html: built.html,
-      text: built.text,
-      attachments: [{
-        content:FPT_EMAIL_SIGNATURE_PNG_BASE64,
-        filename:SIGNATURE_FILENAME,
-        type:'image/png',
-        disposition:'inline',
-        contentId:SIGNATURE_CID
-      }]
-    });
+    const response = await env.EMAIL.send(payload);
     return {
       ok:true,
       status:'SENT',
       messageId:clean(response?.messageId),
-      subject:built.subject
+      subject:built.subject,
+      testMode,
+      deliveredTo,
+      intendedTo,
+      intendedCc:ccEmail
     };
   } catch (error) {
     return {
       ok:false,
       status:clean(error?.code) || 'EMAIL_SEND_FAILED',
-      message:clean(error?.message) || 'Cloudflare could not send the parent email.'
+      message:clean(error?.message) || 'Cloudflare could not send the parent email.',
+      testMode,
+      deliveredTo,
+      intendedTo,
+      intendedCc:ccEmail
     };
   }
 }
