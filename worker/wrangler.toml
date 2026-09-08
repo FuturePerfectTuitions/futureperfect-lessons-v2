@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change17-parent-email.js"
+main = "src/index-phase20-change18-admin-superuser.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,16 +9,28 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Canonical Portal V2 production entrypoint. The parent-email wrapper is the
-# outermost Worker layer and delegates student traffic through Change 17 fast
-# navigation, which in turn delegates all non-navigation traffic to Change 16.
-# This ensures both transactional parent email and the lightweight authenticated
-# /api/v1/student/navigation endpoint survive every normal production deployment.
+# Canonical Portal V2 production entrypoint. The admin-superuser wrapper is now
+# the outermost student-access layer. It delegates all normal/student traffic to
+# the parent-email/fast-navigation production chain unchanged, but elevates the
+# authenticated `admin` Portal User ID to server-side superuser access across all
+# current Maths, English, 11+, VR and special-resource libraries. Protected Answer
+# Packs are exposed to this authenticated superuser without the student Answer Pack
+# password gate. Normal student, trial and demo accounts remain on the existing
+# entitlement and protected-resource paths.
+#
+# The parent-email wrapper remains immediately underneath and delegates student
+# traffic through the lightweight Change 17 navigation wrapper before the existing
+# Change 16 access-control chain. The fast navigation endpoint does not weaken
+# lesson/resource gates for ordinary users; all non-navigation requests delegate
+# through the established Worker exactly as before.
+# Student catalogue-list responses are repaired last so stale bundled catalogue
+# overlays cannot re-introduce retired lessons or shift live Drive/KV display IDs.
 #
 # Fast navigation reads only the student profile, D1 access/navigation rows and
 # the small set of authoritative live curriculum records. It does not build every
 # lesson/detail resource before a student can enter Maths or English. All lesson
-# and resource access remains enforced by the existing Change 16 and earlier gates.
+# and resource access remains enforced by the existing Change 16 and earlier gates
+# for non-superuser accounts.
 #
 # Change 16 restricts cross-subject upsell previews to subjects in which the
 # student has no actual entitlement. If a student already has any real English
@@ -62,7 +74,7 @@ STUDENT_LOGIN_ENABLED = "true"
 # correct student year/11+ navigation view without depending on the D1 batch roster.
 # Existing Phase 18/19 resource gates remain authoritative: PreLesson-only access
 # exposes only allowed PreLesson downloads; video, homework and Answer Packs stay
-# locked until FULL access exists.
+# locked until FULL access exists for non-superuser accounts.
 #
 # Change 7 remains responsible for the Year 6 Maths SATS student/workbook alias
 # resolver: Y6MS1-Y6MS19 map to immutable canonical lesson keys Y6M51-Y6M69.
@@ -89,7 +101,8 @@ STUDENT_LOGIN_ENABLED = "true"
 #
 # Year 6 Maths SATS lessons appear at the end of the normal Year 6 Maths list as
 # Y6MS1-Y6MS19. Their ordinary resource model is unchanged: PreLesson Sheets,
-# Homework and password-protected Answer Packs use the existing lesson gates.
+# Homework and password-protected Answer Packs use the existing lesson gates for
+# non-superuser accounts.
 #
 # Production login remains governed by the inherited Phase 17 guard: login is
 # available only when STUDENT_LOGIN_ENABLED is true AND the normalised username
