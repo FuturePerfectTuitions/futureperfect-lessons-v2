@@ -30,6 +30,7 @@ const {
   PHASE11_CURRICULUM_CODES,
   PHASE11_CATALOGUE_SHA256,
   LIVE_CURRICULUM_AUTHORITY_MARKER,
+  LIVE_LESSON_METADATA_AUTHORITY_MARKER,
   validBundledManifest,
   phase11NavigationEnv,
   shouldPrefetchPhase11Navigation
@@ -38,6 +39,7 @@ const {
 assert.equal(PHASE11_CURRICULUM_CODES.length, 11);
 assert.equal(PHASE11_CATALOGUE_SHA256, manifest.catalogueSha256);
 assert.equal(LIVE_CURRICULUM_AUTHORITY_MARKER, 'LIVE_CURRICULUM_AUTHORITY_V1');
+assert.equal(LIVE_LESSON_METADATA_AUTHORITY_MARKER, 'LIVE_LESSON_METADATA_AUTHORITY_V1');
 assert.equal(validBundledManifest(manifest), true);
 assert.equal(validBundledManifest(null), false);
 assert.equal(validBundledManifest({ ...manifest, catalogueSha256: 'wrong' }), false);
@@ -67,9 +69,17 @@ function makeEnv() {
     lessonIds: ['Y5M1']
   });
 
+  // Deliberately make the live lesson metadata differ from the bundled record.
+  // Known catalogue lists must show/access the live record, not stale bundled
+  // title/display metadata for the same canonical key.
   store.set('lesson:Y5M1', {
     ...manifest.lessons.Y5M1,
+    lessonId: 'Y5M1',
     title: 'Real Y5M1',
+    displayIds: {
+      ...(manifest.lessons.Y5M1.displayIds || {}),
+      'maths-level2': 'LIVE-L2-M01'
+    },
     description: 'Real detail description',
     core: { homeworks: [] }
   });
@@ -94,31 +104,36 @@ async function accelerated(url) {
   return { cachedEnv, stats, liveL1Ids };
 }
 
-// Home reads only the 11 live curriculum records. Lesson metadata remains served
-// from the bundled manifest, but live curriculum membership/order is authoritative.
+// Home reads only the 11 live curriculum records. Lesson metadata can remain
+// bundled on home because this route needs current membership/counts, not a full
+// per-view list of current lesson titles/display IDs.
 const home = await accelerated('https://example.test/api/v1/student/home');
 assert.equal(home.stats.reads, 11, 'Home must read the 11 live curriculum records.');
 const homeL1 = await home.cachedEnv.LESSONS_KV.get('curriculum:MATHS_L1', { type: 'json' });
 const homeL2 = await home.cachedEnv.LESSONS_KV.get('curriculum:MATHS_L2', { type: 'json' });
 const homeLesson = await home.cachedEnv.LESSONS_KV.get('lesson:Y5M1', { type: 'json' });
-assert.equal(home.stats.reads, 11, 'Cached live curricula and bundled lessons must add no further reads.');
+assert.equal(home.stats.reads, 11, 'Cached live curricula and bundled home metadata must add no further reads.');
 assert.deepEqual(homeL1.lessonIds, home.liveL1Ids, 'Live L1 membership must override bundled L1 membership.');
 assert.deepEqual(homeL2.lessonIds, ['Y5M1'], 'Live L2 membership must override bundled L2 membership.');
 assert.equal(homeLesson.title, manifest.lessons.Y5M1.title);
 assert.equal(homeLesson.order, manifest.lessons.Y5M1.order);
 
-// A known view reads only its selected live curriculum.
+// A known catalogue view reads its selected live curriculum and the live lesson
+// records within that curriculum. This prevents stale bundled metadata from
+// showing a renamed/removed lesson or causing a false locked state.
 const y5 = await accelerated('https://example.test/api/v1/student/views/maths-year5/lessons');
-assert.equal(y5.stats.reads, 1);
-assert.deepEqual(y5.stats.keys, ['curriculum:MATHS_L2']);
+assert.equal(y5.stats.reads, 2);
+assert.deepEqual(y5.stats.keys, ['curriculum:MATHS_L2', 'lesson:Y5M1']);
 const y5Curriculum = await y5.cachedEnv.LESSONS_KV.get('curriculum:MATHS_L2', { type: 'json' });
 const y5Lesson = await y5.cachedEnv.LESSONS_KV.get('lesson:Y5M1', { type: 'json' });
 assert.deepEqual(y5Curriculum.lessonIds, ['Y5M1']);
-assert.equal(y5.stats.reads, 1);
-assert.deepEqual(y5Lesson.displayIds, manifest.lessons.Y5M1.displayIds);
+assert.equal(y5.stats.reads, 2);
+assert.equal(y5Lesson.title, 'Real Y5M1');
+assert.equal(y5Lesson.displayIds['maths-level2'], 'LIVE-L2-M01');
 
 // Unknown views safely read all live curriculum records while retaining bundled
-// lesson metadata; this prevents stale membership even for future navigation IDs.
+// lesson metadata; this prevents a broad, unbounded live-lesson fanout for an
+// unrecognised future view ID.
 const unknown = await accelerated('https://example.test/api/v1/student/views/future-view/lessons');
 assert.equal(unknown.stats.reads, 11);
 
@@ -145,10 +160,10 @@ assert.deepEqual(other.stats.keys, ['curriculum:MATHS_L2', 'lesson:Y5M1']);
 const mutable = await y5.cachedEnv.LESSONS_KV.get('lesson:Y5M1', { type: 'json' });
 mutable.title = 'Mutated';
 const again = await y5.cachedEnv.LESSONS_KV.get('lesson:Y5M1', { type: 'json' });
-assert.equal(again.title, manifest.lessons.Y5M1.title);
-assert.equal(y5.stats.reads, 1);
-await y5.cachedEnv.LESSONS_KV.get('lesson:Y5M1');
+assert.equal(again.title, 'Real Y5M1');
 assert.equal(y5.stats.reads, 2);
+await y5.cachedEnv.LESSONS_KV.get('lesson:Y5M1');
+assert.equal(y5.stats.reads, 3);
 
 assert.equal(shouldPrefetchPhase11Navigation(new Request('https://example.test/api/v1/student/home')), true);
 assert.equal(shouldPrefetchPhase11Navigation(new Request('https://example.test/api/v1/student/views/maths-year5/lessons')), true);
@@ -158,4 +173,4 @@ assert.equal(shouldPrefetchPhase11Navigation(new Request('https://example.test/a
 assert.equal(shouldPrefetchPhase11Navigation(new Request('https://example.test/api/v1/student/session')), false);
 assert.equal(shouldPrefetchPhase11Navigation(new Request('https://example.test/api/v1/student/home', { method: 'POST' })), false);
 
-console.log('Phase 11 live-curriculum navigation authority verification: PASS');
+console.log('Phase 11 live curriculum + lesson metadata authority verification: PASS');
