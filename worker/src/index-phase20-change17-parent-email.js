@@ -1,4 +1,4 @@
-import change16Worker from './index-phase20-change16.js';
+import fastNavigationWorker from './index-phase20-change17.js';
 import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-email.js';
 import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
 import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
@@ -25,14 +25,13 @@ function emailSignatureResponse(request) {
   });
 }
 
-// Change 17 adds parent transactional email delivery to the existing admin CSV
-// import without changing the underlying Change 16 student-portal behaviour.
-// Admin lesson-release requests are intercepted here so Portal entitlement writes
-// remain handled by the established importer; the email wrapper normalises normal
-// Y4/Y5/Y6 display prefixes and sends parent mail only after a successful confirm.
-// Student catalogue-list responses are repaired last, at the outermost Worker
-// layer, so stale bundled catalogue overlays cannot re-introduce retired lessons
-// or shift live Drive/KV display IDs after the navigation cache has done its work.
+// Parent transactional email remains the outermost production layer. Student
+// requests now pass through the lightweight Change 17 navigation wrapper before
+// the existing Change 16 access-control chain. The fast navigation endpoint does
+// not weaken lesson/resource gates; all non-navigation requests delegate through
+// the established Worker exactly as before.
+// Student catalogue-list responses are repaired last so stale bundled catalogue
+// overlays cannot re-introduce retired lessons or shift live Drive/KV display IDs.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -43,13 +42,13 @@ export default {
     const adminResponse = await handleAdminLessonReleaseImport(request, env);
     if (adminResponse) return adminResponse;
 
-    const response = await change16Worker.fetch(request, env, ctx);
+    const response = await fastNavigationWorker.fetch(request, env, ctx);
     return repairLiveStudentCatalogueResponse(
       request,
       env,
       ctx,
       response,
-      (innerRequest, innerEnv, innerCtx) => change16Worker.fetch(innerRequest, innerEnv, innerCtx)
+      (innerRequest, innerEnv, innerCtx) => fastNavigationWorker.fetch(innerRequest, innerEnv, innerCtx)
     );
   }
 };
