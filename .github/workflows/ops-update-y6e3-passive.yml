@@ -1,0 +1,157 @@
+name: Ops update Y6T1E03 Using the Passive
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y6e3-passive.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y6T1E03, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const TARGET = 'cOQj6Hnwzbk';
+          const PLACEHOLDER = 'cO1Zionu8NC';
+          const description = [
+            'In this Year 6 English lesson, students learn how to recognise and use the passive voice, beginning with a secure understanding of how active sentences are structured.',
+            '',
+            'This lesson includes:',
+            '✔ Identifying the subject, verb and object in active sentences',
+            '✔ Recognising how the object of an active sentence can become the subject in a passive sentence',
+            '✔ Identifying passive verb forms using past participles with verbs such as was, were, is and being',
+            '✔ Understanding how a by-phrase or other prepositional phrase can show who carried out the action',
+            '✔ Exploring why writers use the passive to shift emphasis onto the person or thing affected by an action',
+            '✔ Converting active sentences into passive sentences accurately',
+            '✔ Writing both active and passive versions of sentences from picture prompts',
+            '',
+            'Students first revise subject, verb and object through examples, then compare active and passive constructions to see how sentence focus changes. They learn that passive forms use a past participle together with an auxiliary verb and practise identifying the subject, passive verb form and accompanying prepositional phrase.',
+            '',
+            'The lesson then moves into sentence transformation. Students take active sentences, move the original object into subject position, change the verb into a passive form and, where appropriate, add the original subject in a by-phrase.',
+            '',
+            'By the end of the lesson, learners will be able to identify active and passive sentences, explain why the passive is used, and convert active constructions into accurate passive ones.'
+          ].join('\n');
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(base + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            const text = await r.text();
+            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(base + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          function guardLesson(r) {
+            if (r?.lessonId !== 'Y6E3') throw new Error(`Y6E3 identity mismatch: ${r?.lessonId}`);
+            if (r?.title !== 'Using the Passive') throw new Error(`Y6E3 title mismatch: ${r?.title}`);
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y6E3 state mismatch');
+            if (!Object.values(r?.displayIds || {}).includes('Y6T1E03')) throw new Error('Y6E3 display ID mismatch');
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y6E3 core.video missing');
+          }
+
+          (async () => {
+            const curriculum = await getJson('curriculum:ENGLISH_Y6');
+            if (curriculum?.curriculumCode !== 'ENGLISH_Y6') throw new Error('ENGLISH_Y6 curriculum identity mismatch');
+            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.includes('Y6E3')) {
+              throw new Error('ENGLISH_Y6 does not contain Y6E3');
+            }
+
+            const before = await getJson('lesson:Y6E3');
+            guardLesson(before);
+            const currentScreenPal = before?.core?.video?.screenpal ?? null;
+            if (![null, PLACEHOLDER, TARGET].includes(currentScreenPal)) {
+              throw new Error(`Y6E3 has an unexpected existing ScreenPal video: ${currentScreenPal}`);
+            }
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.description = description;
+            next.core.video = video(TARGET);
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson('lesson:Y6E3', next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson('lesson:Y6E3');
+              const ok = verified?.core?.video?.screenpal === TARGET &&
+                verified?.description === description &&
+                verified?.contentStatus?.description === 'available' &&
+                verified?.contentStatus?.mainVideo === 'available' &&
+                verified?.contentStatus?.ownerConfirmedPending === false;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guardLesson(verified);
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y6E3 ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Y6E3 description verification failed');
+            if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+              throw new Error('Y6E3 content status verification failed');
+            }
+
+            console.log('Y6E3_VERIFIED=' + JSON.stringify({
+              lessonId: verified.lessonId,
+              displayId: verified.displayIds['english-year6'],
+              title: verified.title,
+              screenpal: verified.core.video.screenpal,
+              contentStatus: verified.contentStatus
+            }));
+            console.log('OPS_UPDATE_Y6E3_PASSIVE_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
