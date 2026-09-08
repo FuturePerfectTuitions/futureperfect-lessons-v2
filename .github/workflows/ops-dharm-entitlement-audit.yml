@@ -1,0 +1,113 @@
+name: Guarded Dharm entitlement audit
+
+on:
+  push:
+    branches: [ops/dharm-entitlement]
+    paths:
+      - '.github/workflows/ops-dharm-entitlement-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      TARGET_HASH: 50040113026ed8443703c0379bc045b13499057d52b82369a742664aa567894d
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve production bindings
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          STUDENTS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DBID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id // empty)' /tmp/settings.json | head -n1)"
+          test -n "$STUDENTS" && test "$STUDENTS" != null
+          test -n "$DBID" && test "$DBID" != null
+          echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
+          echo "dbid=$DBID" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_GUARD=true'
+
+      - name: Locate exactly one target and print sanitized KV state
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess, sys
+          target=os.environ['TARGET_HASH']
+          matches={}
+          for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
+              key=str(item.get('name') or '')
+              if not key.startswith('user:'): continue
+              suffix=key[5:].strip().lower()
+              if suffix.startswith(('admin','demo','trial')): continue
+              stem=re.sub(r'\d+$','',suffix)
+              key_hit=(hashlib.sha256(stem.encode()).hexdigest()==target)
+              p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+              if p.returncode: continue
+              try: user=json.loads(p.stdout)
+              except Exception: continue
+              if str(user.get('role') or '').strip().lower()=='admin': continue
+              raw=str(user.get('name') or user.get('studentName') or '').strip().lower()
+              first=(raw.split() or [''])[0]
+              name_hit=(hashlib.sha256(first.encode()).hexdigest()==target)
+              if key_hit or name_hit:
+                  matches[key]=(suffix,user)
+          print('TARGET_MATCH_COUNT=' + str(len(matches)))
+          if len(matches)!=1: sys.exit(2)
+          key,(suffix,user)=next(iter(matches.items()))
+          manual=user.get('manualAccess') if isinstance(user.get('manualAccess'),dict) else {}
+          safe={
+            'fullLibraries': user.get('fullLibraries') if isinstance(user.get('fullLibraries'),list) else [],
+            'upsellViews': user.get('upsellViews') if isinstance(user.get('upsellViews'),list) else None,
+            'trialViews': user.get('trialViews') if isinstance(user.get('trialViews'),list) else [],
+            'batches': user.get('batches') if isinstance(user.get('batches'),list) else [],
+            'manualCoreLessons': manual.get('coreLessons') if isinstance(manual.get('coreLessons'),list) else [],
+            'blockedLessons': user.get('blockedLessons') if isinstance(user.get('blockedLessons'),list) else [],
+            'vrBuckets': user.get('vrBuckets') if isinstance(user.get('vrBuckets'),list) else [],
+            'vrEligible': bool(user.get('vrEligible') is True)
+          }
+          print('KV_STATE=' + json.dumps(safe,separators=(',',':'),sort_keys=True))
+          open('/tmp/target-norm','w').write(suffix)
+          PY
+
+      - name: Print sanitized D1 access
+        env:
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          target=open('/tmp/target-norm').read().strip()
+          def query(sql):
+              req=urllib.request.Request(
+                  f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/d1/database/{os.environ['DB_ID']}/query",
+                  data=json.dumps({'sql':sql,'params':[target]}).encode(),
+                  headers={'Authorization':f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}",'Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(5)
+              return ((body.get('result') or [{}])[0].get('results') or [])
+          full=query('SELECT lesson_id,core_access,vr_access,source_batch_code,source_lesson_date,first_granted_at FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY source_lesson_date,lesson_id')
+          pre=query('SELECT lesson_id,batch_key,lesson_date,vr_access,first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_date,lesson_id')
+          assignments=query('SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.batch_key')
+          print('D1_STATE=' + json.dumps({'lessonEntitlements':full,'prelessonEntitlements':pre,'assignments':assignments},separators=(',',':'),sort_keys=True))
+          PY
