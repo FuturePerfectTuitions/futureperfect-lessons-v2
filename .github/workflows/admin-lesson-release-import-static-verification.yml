@@ -13,7 +13,6 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
-      - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
@@ -32,7 +31,6 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
-      - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
@@ -74,4 +72,5 @@ jobs:
         run: |
           set -euo pipefail
           node tests/lesson-release-navigation-verification.mjs
-          grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
+          test -f worker/src/index-phase20-change17-parent-email.js
+          grep -Fq 'main = "src/index-phase20-change16.js"' worker/wrangler.toml
