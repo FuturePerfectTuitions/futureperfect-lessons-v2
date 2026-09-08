@@ -129,7 +129,12 @@ async function addPreviewViewsToHome(response, body, env) {
   for (const viewId of previews) {
     const meta = VIEW_META[viewId];
     if (!meta) continue;
-    const rows = await canonicalRows(env, viewId);
+
+    // Home navigation needs only a preview summary. Do not fetch every lesson
+    // description for the unselected subject here. The later Change 13 layer
+    // replaces this bundled count with the live-curriculum count, while the full
+    // lesson rows/descriptions are still loaded when that subject view is opened.
+    const rows = canonicalCatalogueRowsForView(viewId);
     const subject = ensureSubject(body, meta.subject);
     const existing = subject.views.find(view => cleanViewId(view?.viewId) === viewId);
     const summary = {
