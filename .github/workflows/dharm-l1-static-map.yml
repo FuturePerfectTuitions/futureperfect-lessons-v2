@@ -1,0 +1,32 @@
+name: Dharm L1 static map diagnostic
+
+on:
+  push:
+    branches: [diag/dharm-l1-live2]
+    paths:
+      - '.github/workflows/dharm-l1-static-map.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Print generated L1 mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/nav >/tmp/nav.log
+          node --experimental-default-type=module - <<'NODE'
+          import { PHASE11_NAVIGATION_MANIFEST as m } from './worker/src/phase11-navigation-manifest.generated.js';
+          for (const id of m.curricula.MATHS_L1.lessonIds) {
+            const r = m.lessons[id];
+            console.log(JSON.stringify({lessonId:id,title:r?.title,display:r?.displayIds?.['maths-level1'],order:r?.order}));
+          }
+          NODE
