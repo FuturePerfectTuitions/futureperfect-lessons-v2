@@ -46,10 +46,10 @@ jobs:
           kv_get() {
             local key="$1" out="$2" code key_enc
             key_enc="$(python - "$key" <<'PY'
-import sys, urllib.parse
-print(urllib.parse.quote(sys.argv[1], safe=''))
-PY
-)"
+          import sys, urllib.parse
+          print(urllib.parse.quote(sys.argv[1], safe=''))
+          PY
+          )"
             code="$(curl --silent --show-error \
               --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
               --output "$out" \
@@ -74,44 +74,44 @@ PY
               test "$stale_count" = '0'
 
               python <<'PY'
-import json, secrets, string
-rng = secrets.SystemRandom()
-def make_pw():
-    chars = [
-        rng.choice(string.ascii_uppercase),
-        rng.choice(string.ascii_lowercase),
-        rng.choice(string.digits),
-        rng.choice(string.ascii_letters + string.digits),
-    ]
-    rng.shuffle(chars)
-    return ''.join(chars)
-record = {
-    "portalUserId": "Riaan1808",
-    "name": "Riaan",
-    "firstName": "Riaan",
-    "p": make_pw(),
-    "answerPassword": make_pw(),
-    "status": "active",
-    "expires": None,
-    "accountStatus": "active",
-    "schoolYear": 5,
-    "vrEligible": False,
-    "batches": ["Y5E"],
-    "fullLibraries": [],
-    "manualAccess": {"coreLessons": [], "vrLessons": []},
-    "blockedLessons": [],
-    "historicalViews": [],
-    "specialAccess": [],
-    "upsellViews": ["maths-year5"]
-}
-with open('/tmp/user.json', 'w', encoding='utf-8') as f:
-    json.dump(record, f, separators=(',', ':'))
-PY
+          import json, secrets, string
+          rng = secrets.SystemRandom()
+          def make_pw():
+              chars = [
+                  rng.choice(string.ascii_uppercase),
+                  rng.choice(string.ascii_lowercase),
+                  rng.choice(string.digits),
+                  rng.choice(string.ascii_letters + string.digits),
+              ]
+              rng.shuffle(chars)
+              return ''.join(chars)
+          record = {
+              "portalUserId": "Riaan1808",
+              "name": "Riaan",
+              "firstName": "Riaan",
+              "p": make_pw(),
+              "answerPassword": make_pw(),
+              "status": "active",
+              "expires": None,
+              "accountStatus": "active",
+              "schoolYear": 5,
+              "vrEligible": False,
+              "batches": ["Y5E"],
+              "fullLibraries": [],
+              "manualAccess": {"coreLessons": [], "vrLessons": []},
+              "blockedLessons": [],
+              "historicalViews": [],
+              "specialAccess": [],
+              "upsellViews": ["maths-year5"]
+          }
+          with open('/tmp/user.json', 'w', encoding='utf-8') as f:
+              json.dump(record, f, separators=(',', ':'))
+          PY
               key_enc="$(python - "$PRIMARY_KEY" <<'PY'
-import sys, urllib.parse
-print(urllib.parse.quote(sys.argv[1], safe=''))
-PY
-)"
+          import sys, urllib.parse
+          print(urllib.parse.quote(sys.argv[1], safe=''))
+          PY
+          )"
               curl --fail --silent --show-error \
                 --request PUT \
                 --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -131,13 +131,13 @@ PY
           login_pw="$(jq -r '.p // .loginPassword // ""' /tmp/user.json)"
           answer_pw="$(jq -r '.answerPassword // ""' /tmp/user.json)"
           python - "$login_pw" "$answer_pw" <<'PY'
-import re, sys
-for value in sys.argv[1:]:
-    assert len(value) == 4
-    assert re.search(r'[A-Z]', value)
-    assert re.search(r'[a-z]', value)
-    assert re.search(r'\d', value)
-PY
+          import re, sys
+          for value in sys.argv[1:]:
+              assert len(value) == 4
+              assert re.search(r'[A-Z]', value)
+              assert re.search(r'[a-z]', value)
+              assert re.search(r'\d', value)
+          PY
 
           if [ "$created" = 'true' ]; then
             jq -e '
