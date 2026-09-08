@@ -4,7 +4,7 @@ const norm = value => clean(value).toLowerCase();
 const DEFAULT_FROM = 'sej@futureperfect.education';
 const DEFAULT_FROM_NAME = 'Sejal Dalal';
 const DEFAULT_CC = 'barkha@futureperfect.education';
-const SIGNATURE_URL = 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/public/email-signature-v1.png';
+const SIGNATURE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature.jpg';
 
 function onlineMode(value) {
   return clean(value).toUpperCase().includes('O');
