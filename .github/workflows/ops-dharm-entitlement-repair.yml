@@ -1,0 +1,170 @@
+name: Guarded Dharm entitlement repair
+
+on:
+  push:
+    branches: [ops/dharm-entitlement]
+    paths:
+      - '.github/workflows/ops-dharm-entitlement-repair.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      TARGET_PORTAL_ID_SHA256: 9c49cd887f91b8f2e84b7d02a6fc211c8f9d5d1c6f6eb684359b5a72e51adeb3
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve production bindings
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          STUDENTS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DBID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id // empty)' /tmp/settings.json | head -n1)"
+          test -n "$STUDENTS" && test "$STUDENTS" != null
+          test -n "$DBID" && test "$DBID" != null
+          echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
+          echo "dbid=$DBID" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_GUARD=true'
+
+      - name: Resolve exact target and prepare entitlement-only KV patch
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, sys
+          target=os.environ['TARGET_PORTAL_ID_SHA256']
+          matches=[]
+          for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
+              key=str(item.get('name') or '')
+              if not key.startswith('user:'): continue
+              suffix=key[5:].strip().lower()
+              if hashlib.sha256(suffix.encode()).hexdigest()==target:
+                  matches.append((key,suffix))
+          print('TARGET_MATCH_COUNT=' + str(len(matches)))
+          if len(matches)!=1: sys.exit(2)
+          key,suffix=matches[0]
+          p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+          if p.returncode: sys.exit(3)
+          user=json.loads(p.stdout)
+          if str(user.get('role') or '').strip().lower()=='admin': sys.exit(4)
+          before=json.loads(json.dumps(user))
+          user['fullLibraries']=['ENGLISH_Y3_FULL','MATHS_Y3_FULL']
+          user['upsellViews']=[]
+          user['trialViews']=[]
+          before_other=json.loads(json.dumps(before)); after_other=json.loads(json.dumps(user))
+          for field in ('fullLibraries','upsellViews','trialViews'):
+              before_other.pop(field,None); after_other.pop(field,None)
+          if before_other != after_other:
+              print('UNRELATED_FIELD_GUARD=false'); sys.exit(5)
+          open('/tmp/target-key','w').write(key)
+          open('/tmp/target-norm','w').write(suffix)
+          json.dump(before,open('/tmp/before.json','w'),separators=(',',':'))
+          json.dump(user,open('/tmp/after.json','w'),separators=(',',':'))
+          print('KV_PATCH_READY=true')
+          PY
+
+      - name: Guard and remove only accidental bulk Y4 Maths grants
+        env:
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; target=open('/tmp/target-norm').read().strip()
+          def query(sql,params):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':params}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(10)
+              result=(body.get('result') or [{}])[0]
+              return result.get('results') or []
+          bulk=query("SELECT lesson_id,first_granted_at FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411FM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id LIKE 'Y4M%' ORDER BY lesson_id",[target])
+          ids=[str(r.get('lesson_id') or '') for r in bulk]
+          current=query("SELECT lesson_id,first_granted_at FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411FM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id='Y5M1'",[target])
+          print('BULK_Y4M_COUNT=' + str(len(ids)))
+          print('CURRENT_WEEKLY_ROW_COUNT=' + str(len(current)))
+          if len(ids)!=35 or any(not x.startswith('Y4M') for x in ids):
+              print('BULK_GRANT_GUARD=false'); sys.exit(11)
+          if len(current)!=1:
+              print('CURRENT_WEEKLY_GUARD=false'); sys.exit(12)
+          query("DELETE FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411FM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id LIKE 'Y4M%'",[target])
+          print('BULK_Y4M_GRANTS_REMOVED=true')
+          print('Y5M1_WEEKLY_ROW_PRESERVED=true')
+          PY
+
+      - name: Persist only the target KV profile
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENCODED_KEY="$(python3 - <<'PY'
+          import urllib.parse
+          print(urllib.parse.quote(open('/tmp/target-key').read().strip(),safe=''))
+          PY
+          )"
+          curl --fail --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/after.json \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${ENCODED_KEY}" \
+            > /tmp/put.json
+          jq -e '.success == true' /tmp/put.json >/dev/null
+          echo 'KV_PATCH_APPLIED=true'
+
+      - name: Verify exact corrected state
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY="$(cat /tmp/target-key)"
+          npx --yes wrangler@latest kv key get "$KEY" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/verify.json 2>/dev/null
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          before=json.load(open('/tmp/before.json')); verify=json.load(open('/tmp/verify.json'))
+          if verify.get('fullLibraries') != ['ENGLISH_Y3_FULL','MATHS_Y3_FULL']: sys.exit(2)
+          if verify.get('upsellViews') != []: sys.exit(3)
+          if verify.get('trialViews') != []: sys.exit(4)
+          for f in ('fullLibraries','upsellViews','trialViews'):
+              before.pop(f,None); verify.pop(f,None)
+          if before != verify: sys.exit(5)
+          target=open('/tmp/target-norm').read().strip(); account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          def q(sql):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':[target]}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(6)
+              return ((body.get('result') or [{}])[0].get('results') or [])
+          bulk=q("SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411FM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id LIKE 'Y4M%'")
+          current=q("SELECT lesson_id FROM lesson_entitlements WHERE portal_user_id_norm=? AND source_batch_code='Y411FM' AND source_lesson_date='2026-09-07' AND core_access=1 AND lesson_id='Y5M1'")
+          if bulk: sys.exit(7)
+          if len(current)!=1: sys.exit(8)
+          print('FULL_LIBRARY_VERIFY=true')
+          print('NO_UPSELL_VERIFY=true')
+          print('TRIAL_VERIFY=true')
+          print('UNRELATED_FIELDS_UNCHANGED=true')
+          print('BULK_GRANTS_VERIFY_REMOVED=true')
+          print('WEEKLY_Y5M1_RELEASE_PRESERVED=true')
+          PY
