@@ -18,7 +18,6 @@ const payloads = [];
 const result = await sendParentEmail({
   PARENT_EMAIL_TEST_TO:'sejal.mail@gmail.com',
   PARENT_EMAIL_SIGNATURE_BASE64:'dGVzdC1zaWduYXR1cmU=',
-  __EMAIL_MESSAGE_FACTORY(from, to, raw) { return { from, to, raw }; },
   EMAIL:{
     async send(payload) {
       payloads.push(payload);
@@ -35,9 +34,9 @@ assert.equal(result.intendedTo, 'sara_shinde@hotmail.co.uk');
 assert.equal(result.intendedCc, 'barkha@futureperfect.education');
 assert.equal(payloads.length, 1);
 assert.equal(payloads[0].to, 'sejal.mail@gmail.com');
-assert.match(payloads[0].raw, /To: sejal\.mail@gmail\.com/);
-assert.doesNotMatch(payloads[0].raw, /^Cc:/m, 'Test mode must not send a copy to Barkha');
-assert.match(payloads[0].raw, /Subject: Upcoming Lesson for Annisha and the worksheets to be printed before the next session on 7th September 2026\./);
-assert.match(payloads[0].raw, /Content-ID: <fpt-email-signature-clean>/);
+assert.equal('cc' in payloads[0], false, 'Test mode must not send a copy to Barkha');
+assert.equal(payloads[0].subject, 'Upcoming Lesson for Annisha and the worksheets to be printed before the next session on 7th September 2026.');
+assert.equal(payloads[0].attachments[0].content_id, 'fpt-email-signature-clean');
+assert.equal(payloads[0].attachments[0].content, 'dGVzdC1zaWduYXR1cmU=');
 
 console.log('Parent email test routing sends only to Sejal personal Gmail and preserves intended recipients in result metadata: PASS');
