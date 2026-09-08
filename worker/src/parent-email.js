@@ -1,3 +1,9 @@
+import {
+  FPT_EMAIL_SIGNATURE_CLEAN_BASE64,
+  FPT_EMAIL_SIGNATURE_BYTES,
+  FPT_EMAIL_SIGNATURE_SHA256
+} from './parent-email-signature-clean.js';
+
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
@@ -6,10 +12,11 @@ const DEFAULT_FROM_NAME = 'Sejal Dalal';
 const DEFAULT_CC = 'barkha@futureperfect.education';
 const SIGNATURE_CID = 'fpt-email-signature-clean';
 const SIGNATURE_FILENAME = 'fpt-email-signature.png';
-const SIGNATURE_SOURCE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-clean-f5358c33';
-const SIGNATURE_EXPECTED_SHA256 = 'f5358c33613eb2c284e1f33b7eb3b5626cc6ec5e14bbe9e72891c2e0754632a3';
-const SIGNATURE_EXPECTED_WIDTH = 700;
-const SIGNATURE_EXPECTED_HEIGHT = 183;
+// Retained as a compatibility/export value only. Production email rendering no
+// longer fetches this URL; the signature bytes are embedded in the Worker.
+const SIGNATURE_SOURCE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline';
+const SIGNATURE_EXPECTED_WIDTH = 600;
+const SIGNATURE_EXPECTED_HEIGHT = 157;
 
 let signatureBytesPromise = null;
 
@@ -80,13 +87,11 @@ function slideText(value) {
   return rest[0].replace(/^slide\b/i, 'Slide');
 }
 
-function bytesToBase64(bytes) {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return btoa(binary);
+function decodeBase64Bytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 function isPng(bytes) {
@@ -106,36 +111,29 @@ async function sha256Hex(bytes) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function validateSignatureBytes(bytes) {
-  if (bytes.length < 1000 || !isPng(bytes)) throw new Error('Signature image response is not a valid PNG.');
+async function validateEmbeddedSignatureBytes(bytes) {
+  if (bytes.length !== FPT_EMAIL_SIGNATURE_BYTES || !isPng(bytes)) {
+    throw new Error(`Embedded signature image bytes are invalid: ${bytes.length}.`);
+  }
   const dims = pngDimensions(bytes);
   if (!dims || dims.width !== SIGNATURE_EXPECTED_WIDTH || dims.height !== SIGNATURE_EXPECTED_HEIGHT) {
-    throw new Error(`Signature image dimensions are invalid: ${dims?.width || 0}x${dims?.height || 0}.`);
+    throw new Error(`Embedded signature image dimensions are invalid: ${dims?.width || 0}x${dims?.height || 0}.`);
   }
   const hash = await sha256Hex(bytes);
-  if (hash !== SIGNATURE_EXPECTED_SHA256) throw new Error(`Signature image hash mismatch: ${hash}.`);
+  if (hash !== FPT_EMAIL_SIGNATURE_SHA256) {
+    throw new Error(`Embedded signature image hash mismatch: ${hash}.`);
+  }
   return bytes;
 }
 
 async function loadSignatureBytes(env = null) {
   const override = clean(env?.PARENT_EMAIL_SIGNATURE_BASE64);
-  if (override) {
-    const binary = atob(override);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  }
+  if (override) return decodeBase64Bytes(override);
 
   if (!signatureBytesPromise) {
-    signatureBytesPromise = (async () => {
-      const response = await fetch(SIGNATURE_SOURCE_URL, {
-        headers: { Accept:'image/png' },
-        cf:{ cacheTtl:0, cacheEverything:false }
-      });
-      if (!response.ok) throw new Error(`Signature image request failed with HTTP ${response.status}.`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return validateSignatureBytes(bytes);
-    })().catch(error => {
+    signatureBytesPromise = validateEmbeddedSignatureBytes(
+      decodeBase64Bytes(FPT_EMAIL_SIGNATURE_CLEAN_BASE64)
+    ).catch(error => {
       signatureBytesPromise = null;
       throw error;
     });
