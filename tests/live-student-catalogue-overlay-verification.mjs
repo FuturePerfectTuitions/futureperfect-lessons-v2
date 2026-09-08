@@ -146,4 +146,53 @@ const request = new Request('https://example.test/api/v1/student/views/maths-lev
   assert.ok(body.lessons.every(row => row.locked === false && row.accessMode === 'full'));
 }
 
+// Home-card counts must use current live curriculum membership too. This is the
+// exact stale-count failure seen after the obsolete Transition row disappeared:
+// the card still said 3 open + 1 locked even though only 3 live lessons remained.
+{
+  const homeRequest = new Request('https://example.test/api/v1/student/home', {
+    method:'GET',
+    headers:{ Cookie:'fpt_session=test' }
+  });
+  const homeResponse = new Response(JSON.stringify({
+    ok:true,
+    subjects:[{
+      subject:'maths',
+      views:[
+        {
+          viewId:'maths-level1', label:'L1',
+          visibleLessonCount:4, openLessonCount:3, lockedLessonCount:1,
+          current:true, group:'current'
+        },
+        {
+          viewId:'maths-level2', label:'L2',
+          visibleLessonCount:38, openLessonCount:1, lockedLessonCount:37,
+          current:true, group:'current'
+        }
+      ]
+    }]
+  }), {
+    status:200,
+    headers:{ 'content-type':'application/json' }
+  });
+
+  const response = await repairLiveStudentCatalogueResponse(
+    homeRequest,
+    makeEnv(),
+    {},
+    homeResponse,
+    baseFetch
+  );
+  const body = await response.json();
+  const l1 = body.subjects[0].views.find(view => view.viewId === 'maths-level1');
+  const l2 = body.subjects[0].views.find(view => view.viewId === 'maths-level2');
+  assert.equal(l1.visibleLessonCount, 3);
+  assert.equal(l1.openLessonCount, 3);
+  assert.equal(l1.lockedLessonCount, 0);
+  assert.equal(l2.visibleLessonCount, 38, 'Views without a resolvable live curriculum must remain unchanged');
+  assert.equal(l2.openLessonCount, 1);
+  assert.equal(l2.lockedLessonCount, 37);
+  assert.equal(response.headers.get('x-fpt-catalogue-authority'), 'live-kv-v1');
+}
+
 console.log('Live student catalogue overlay verification: PASS');
