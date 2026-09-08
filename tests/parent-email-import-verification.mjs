@@ -16,9 +16,9 @@ import {
   decoratePreview
 } from '../worker/src/admin-lesson-release-import-email.js';
 
-// Production fetches this clean PNG server-side and then embeds the resulting
-// bytes as a CID image. Unit tests inject deterministic base64 so they never
-// depend on network access or manually copied image bytes.
+// Production fetches this clean PNG server-side and passes the exact binary
+// bytes to Cloudflare Email Sending as an ArrayBufferView CID attachment. Unit
+// tests inject deterministic base64 which is decoded to the same binary shape.
 assert.equal(
   SIGNATURE_SOURCE_URL,
   'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline'
@@ -184,7 +184,8 @@ assert.equal(payload.attachments[0].filename, 'fpt-email-signature.png');
 assert.equal(payload.attachments[0].type, 'image/png');
 assert.equal(payload.attachments[0].disposition, 'inline');
 assert.equal(payload.attachments[0].contentId, 'fpt-email-signature-clean');
-assert.equal(payload.attachments[0].content, TEST_SIGNATURE_BASE64);
+assert.ok(payload.attachments[0].content instanceof Uint8Array);
+assert.equal(new TextDecoder().decode(payload.attachments[0].content), 'test-signature');
 
 // A delivery failure is reported as an email failure; it does not throw and
 // therefore cannot roll back a Portal entitlement already committed before send.

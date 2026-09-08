@@ -8,7 +8,7 @@ const SIGNATURE_CID = 'fpt-email-signature-clean';
 const SIGNATURE_FILENAME = 'fpt-email-signature.png';
 const SIGNATURE_SOURCE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline';
 
-let signatureBase64Promise = null;
+let signatureBytesPromise = null;
 
 function onlineMode(value) {
   return clean(value).toUpperCase().includes('O');
@@ -92,12 +92,17 @@ function isPng(bytes) {
     bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10;
 }
 
-async function loadSignatureBase64(env = null) {
+async function loadSignatureBytes(env = null) {
   const override = clean(env?.PARENT_EMAIL_SIGNATURE_BASE64);
-  if (override) return override;
+  if (override) {
+    const binary = atob(override);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
 
-  if (!signatureBase64Promise) {
-    signatureBase64Promise = (async () => {
+  if (!signatureBytesPromise) {
+    signatureBytesPromise = (async () => {
       const response = await fetch(SIGNATURE_SOURCE_URL, {
         headers: { Accept:'image/png' }
       });
@@ -106,13 +111,13 @@ async function loadSignatureBase64(env = null) {
       if (bytes.length < 1000 || !isPng(bytes)) {
         throw new Error('Signature image response is not a valid PNG.');
       }
-      return bytesToBase64(bytes);
+      return bytes;
     })().catch(error => {
-      signatureBase64Promise = null;
+      signatureBytesPromise = null;
       throw error;
     });
   }
-  return signatureBase64Promise;
+  return signatureBytesPromise;
 }
 
 function htmlShell(content) {
@@ -257,9 +262,9 @@ async function sendParentEmail(env, item) {
   const deliveredTo = testTo || intendedTo;
   const testMode = Boolean(testTo);
 
-  let signatureBase64 = '';
+  let signatureBytes = null;
   try {
-    signatureBase64 = await loadSignatureBase64(env);
+    signatureBytes = await loadSignatureBytes(env);
   } catch (error) {
     return {
       ok:false,
@@ -279,7 +284,7 @@ async function sendParentEmail(env, item) {
     html: built.html,
     text: built.text,
     attachments: [{
-      content:signatureBase64,
+      content:signatureBytes,
       filename:SIGNATURE_FILENAME,
       type:'image/png',
       disposition:'inline',
@@ -321,7 +326,7 @@ export {
   sendParentEmail,
   completedStatus,
   slideText,
-  loadSignatureBase64,
+  loadSignatureBytes,
   SIGNATURE_CID,
   SIGNATURE_SOURCE_URL
 };
