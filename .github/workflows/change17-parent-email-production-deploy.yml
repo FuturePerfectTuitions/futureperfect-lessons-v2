@@ -7,6 +7,7 @@ on:
       - '.github/workflows/change17-parent-email-production-deploy.yml'
       - 'admin-import.html'
       - 'assets/admin-import.js'
+      - 'assets/sej-email-signature-clean.png'
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
@@ -74,7 +75,8 @@ jobs:
           grep -Fq 'LIVE_LESSON_METADATA_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           grep -Fq 'LIVE_STUDENT_CATALOGUE_OVERLAY_V1' worker/src/live-student-catalogue-overlay.js
           test -f "worker/$WORKER_ENTRYPOINT"
-          grep -Fq "import change16Worker from './index-phase20-change16.js';" "worker/$WORKER_ENTRYPOINT"
+          grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" "worker/$WORKER_ENTRYPOINT"
+          grep -Fq 'handleAdminLessonReleaseImport' "worker/$WORKER_ENTRYPOINT"
           grep -Fq 'repairLiveStudentCatalogueResponse' "worker/$WORKER_ENTRYPOINT"
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
