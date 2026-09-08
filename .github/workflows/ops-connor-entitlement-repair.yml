@@ -1,0 +1,159 @@
+name: Guarded Connor entitlement repair
+
+on:
+  push:
+    branches: [ops/connor-entitlement]
+    paths:
+      - '.github/workflows/ops-connor-entitlement-repair.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      TARGET_PORTAL_ID_SHA256: e111c3c0caf613f133f2d1e31c9a2782d427e131cd68c6634e9bf9d1fcfefa35
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve production bindings
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          STUDENTS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DBID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id // empty)' /tmp/settings.json | head -n1)"
+          test -n "$STUDENTS" && test "$STUDENTS" != null
+          test -n "$DBID" && test "$DBID" != null
+          echo "students=$STUDENTS" >> "$GITHUB_OUTPUT"
+          echo "dbid=$DBID" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_GUARD=true'
+
+      - name: Resolve exact target and prepare entitlement-only patch
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, sys
+          target=os.environ['TARGET_PORTAL_ID_SHA256']
+          matches=[]
+          for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
+              key=str(item.get('name') or '')
+              if not key.startswith('user:'): continue
+              suffix=key[5:].strip().lower()
+              if hashlib.sha256(suffix.encode()).hexdigest()==target:
+                  matches.append((key,suffix))
+          print('TARGET_MATCH_COUNT=' + str(len(matches)))
+          if len(matches)!=1: sys.exit(2)
+          key,suffix=matches[0]
+          p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+          if p.returncode: sys.exit(3)
+          user=json.loads(p.stdout)
+          if str(user.get('role') or '').strip().lower()=='admin': sys.exit(4)
+          before=json.loads(json.dumps(user))
+          user['fullLibraries']=['MATHS_Y4_FULL','MATHS_Y5_FULL']
+          user['upsellViews']=['english-year6']
+          user['trialViews']=[]
+          before_other=json.loads(json.dumps(before)); after_other=json.loads(json.dumps(user))
+          for field in ('fullLibraries','upsellViews','trialViews'):
+              before_other.pop(field,None); after_other.pop(field,None)
+          if before_other != after_other:
+              print('UNRELATED_FIELD_GUARD=false'); sys.exit(5)
+          open('/tmp/target-key','w').write(key)
+          open('/tmp/target-norm','w').write(suffix)
+          json.dump(before,open('/tmp/before.json','w'),separators=(',',':'))
+          json.dump(user,open('/tmp/after.json','w'),separators=(',',':'))
+          print('CURRENT_FULL_LIBRARY_COUNT=' + str(len(before.get('fullLibraries') if isinstance(before.get('fullLibraries'),list) else [])))
+          print('CURRENT_MANUAL_CORE_COUNT=' + str(len((before.get('manualAccess') or {}).get('coreLessons',[]) if isinstance(before.get('manualAccess'),dict) else [])))
+          print('PATCH_READY=true')
+          PY
+
+      - name: Snapshot D1 counts before KV-only repair
+        env:
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          target=open('/tmp/target-norm').read().strip()
+          def q(sql):
+              req=urllib.request.Request(f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/d1/database/{os.environ['DB_ID']}/query",data=json.dumps({'sql':sql,'params':[target]}).encode(),headers={'Authorization':f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}",'Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(6)
+              return int((((body.get('result') or [{}])[0].get('results') or [{}])[0].get('c') or 0))
+          snap={'lesson':q('SELECT COUNT(*) c FROM lesson_entitlements WHERE portal_user_id_norm=?'),'pre':q('SELECT COUNT(*) c FROM online_prelesson_entitlements WHERE portal_user_id_norm=?'),'assign':q('SELECT COUNT(*) c FROM student_batch_assignments WHERE portal_user_id_norm=?')}
+          json.dump(snap,open('/tmp/d1-before.json','w'))
+          print('D1_SNAPSHOT_TAKEN=true')
+          PY
+
+      - name: Persist only the target profile
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENCODED_KEY="$(python3 - <<'PY'
+          import urllib.parse
+          print(urllib.parse.quote(open('/tmp/target-key').read().strip(),safe=''))
+          PY
+          )"
+          curl --fail --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/after.json \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${ENCODED_KEY}" \
+            > /tmp/put.json
+          jq -e '.success == true' /tmp/put.json >/dev/null
+          echo 'KV_PATCH_APPLIED=true'
+
+      - name: Verify exact entitlements and untouched ongoing state
+        env:
+          STUDENTS_KV_ID: ${{ steps.guard.outputs.students }}
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY="$(cat /tmp/target-key)"
+          npx --yes wrangler@latest kv key get "$KEY" --namespace-id "$STUDENTS_KV_ID" --remote > /tmp/verify.json 2>/dev/null
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          before=json.load(open('/tmp/before.json')); verify=json.load(open('/tmp/verify.json'))
+          if verify.get('fullLibraries') != ['MATHS_Y4_FULL','MATHS_Y5_FULL']: sys.exit(2)
+          if verify.get('upsellViews') != ['english-year6']: sys.exit(3)
+          if verify.get('trialViews') != []: sys.exit(4)
+          for f in ('fullLibraries','upsellViews','trialViews'):
+              before.pop(f,None); verify.pop(f,None)
+          if before != verify: sys.exit(5)
+          target=open('/tmp/target-norm').read().strip()
+          def q(sql):
+              req=urllib.request.Request(f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/d1/database/{os.environ['DB_ID']}/query",data=json.dumps({'sql':sql,'params':[target]}).encode(),headers={'Authorization':f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}",'Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(6)
+              return int((((body.get('result') or [{}])[0].get('results') or [{}])[0].get('c') or 0))
+          after={'lesson':q('SELECT COUNT(*) c FROM lesson_entitlements WHERE portal_user_id_norm=?'),'pre':q('SELECT COUNT(*) c FROM online_prelesson_entitlements WHERE portal_user_id_norm=?'),'assign':q('SELECT COUNT(*) c FROM student_batch_assignments WHERE portal_user_id_norm=?')}
+          if after != json.load(open('/tmp/d1-before.json')): sys.exit(7)
+          print('FULL_LIBRARY_VERIFY=true')
+          print('UPSELL_VERIFY=true')
+          print('TRIAL_VERIFY=true')
+          print('UNRELATED_FIELDS_UNCHANGED=true')
+          print('ONGOING_D1_STATE_UNCHANGED=true')
+          PY
