@@ -1,0 +1,80 @@
+name: Temporary guard parent email deploy on Change 20
+
+on:
+  push:
+    branches: [fix/email-signature-raw-mime]
+    paths:
+      - '.github/workflows/tmp-guard-parent-email-change20.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/email-signature-raw-mime
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Make parent email deployment preserve canonical Change 20 wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('ops/deploy_change17_parent_email_preserve.sh')
+          s=p.read_text()
+          assert "test \"$WORKER_ENTRYPOINT\" = 'src/index-phase20-change19-admin-fast.js'" in s
+          assert "main = \"src/index-phase20-change19-admin-fast.js\"" in s
+          s=s.replace("test \"$WORKER_ENTRYPOINT\" = 'src/index-phase20-change19-admin-fast.js'", "test \"$WORKER_ENTRYPOINT\" = 'src/index-phase20-change20-configured-upsell.js'", 1)
+          s=s.replace("main = \"src/index-phase20-change19-admin-fast.js\"", "main = \"src/index-phase20-change20-configured-upsell.js\"", 1)
+          p.write_text(s)
+
+          p=Path('.github/workflows/change17-parent-email-production-deploy.yml')
+          w=p.read_text()
+          assert "WORKER_ENTRYPOINT: src/index-phase20-change19-admin-fast.js" in w
+          assert "test \"$WORKER_ENTRYPOINT\" = 'src/index-phase20-change19-admin-fast.js'" in w
+          assert "grep -Fq \"import adminSuperuserWorker from './index-phase20-change18-admin-superuser.js';\" \"worker/$WORKER_ENTRYPOINT\"" in w
+          w=w.replace("      - 'worker/src/index-phase20-change19-admin-fast.js'\n", "      - 'worker/src/index-phase20-change19-admin-fast.js'\n      - 'worker/src/index-phase20-change20-configured-upsell.js'\n", 1)
+          w=w.replace("      WORKER_ENTRYPOINT: src/index-phase20-change19-admin-fast.js", "      WORKER_ENTRYPOINT: src/index-phase20-change20-configured-upsell.js", 1)
+          w=w.replace("DEPLOY_MESSAGE: Portal V2 parent transactional email signature fix - test recipient mode on Change 19", "DEPLOY_MESSAGE: Portal V2 parent transactional email signature fix - test recipient mode on Change 20", 1)
+          w=w.replace("          node --check worker/src/index-phase20-change19-admin-fast.js\n", "          node --check worker/src/index-phase20-change19-admin-fast.js\n          node --check worker/src/index-phase20-change20-configured-upsell.js\n", 1)
+          old="          grep -Fq \"import adminSuperuserWorker from './index-phase20-change18-admin-superuser.js';\" \"worker/$WORKER_ENTRYPOINT\"\n"
+          new="          grep -Fq \"import productionWorker from './index-phase20-change19-admin-fast.js';\" \"worker/$WORKER_ENTRYPOINT\"\n          grep -Fq \"import adminSuperuserWorker from './index-phase20-change18-admin-superuser.js';\" worker/src/index-phase20-change19-admin-fast.js\n"
+          w=w.replace(old,new,1)
+          w=w.replace("          test \"$WORKER_ENTRYPOINT\" = 'src/index-phase20-change19-admin-fast.js'", "          test \"$WORKER_ENTRYPOINT\" = 'src/index-phase20-change20-configured-upsell.js'", 1)
+          p.write_text(w)
+          PY
+
+      - name: Verify tests and Worker bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/parent-email.js
+          node --check worker/src/index-phase20-change20-configured-upsell.js
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          grep -Fq "test \"\$WORKER_ENTRYPOINT\" = 'src/index-phase20-change20-configured-upsell.js'" ops/deploy_change17_parent_email_preserve.sh
+          grep -Fq 'WORKER_ENTRYPOINT: src/index-phase20-change20-configured-upsell.js' .github/workflows/change17-parent-email-production-deploy.yml
+          npx --yes wrangler@4.125.0 deploy --dry-run --config worker/wrangler.toml --outdir /tmp/fpt-raw-mime-build
+          test -n "$(find /tmp/fpt-raw-mime-build -type f -print -quit)"
+          echo RAW_MIME_CHANGE20_BUNDLE_PASS
+
+      - name: Commit guard and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-guard-parent-email-change20.yml
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add ops/deploy_change17_parent_email_preserve.sh .github/workflows/change17-parent-email-production-deploy.yml .github/workflows/tmp-guard-parent-email-change20.yml
+          git commit -m 'Preserve Change 20 in parent email deployment'
+          git push origin HEAD:fix/email-signature-raw-mime
