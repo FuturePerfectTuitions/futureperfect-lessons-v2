@@ -1,0 +1,70 @@
+name: Dharm L1 read-only diagnostic
+
+on:
+  push:
+    branches: [diag/dharm-l1-locked]
+    paths:
+      - '.github/workflows/dharm-l1-readonly-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      PORTAL_USER_ID_NORM: dha2806
+    steps:
+      - name: Compare Dharm L1 entitlements with live curriculum
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
+            --header "$AUTH" --output /tmp/settings.json
+
+          DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB") | (.id // .database_id // .namespace_id // empty)' /tmp/settings.json | head -1)"
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | (.namespace_id // .id // empty)' /tmp/settings.json | head -1)"
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | (.namespace_id // .id // empty)' /tmp/settings.json | head -1)"
+          test -n "$DB_ID"
+          test -n "$LESSONS_KV_ID"
+          test -n "$STUDENTS_KV_ID"
+
+          curl --fail --silent --show-error \
+            "$API/storage/kv/namespaces/${LESSONS_KV_ID}/values/curriculum%3AMATHS_L1" \
+            --header "$AUTH" --output /tmp/l1.json
+          jq -e '.lessonIds | type=="array"' /tmp/l1.json >/dev/null
+
+          curl --fail --silent --show-error \
+            "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/user%3Adha2806" \
+            --header "$AUTH" --output /tmp/student.json
+
+          jq -n --arg sql "SELECT lesson_id, core_access, source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm = '${PORTAL_USER_ID_NORM}' ORDER BY lesson_id" \
+            '{sql:$sql}' >/tmp/query.json
+          curl --fail --silent --show-error \
+            "$API/d1/database/${DB_ID}/query" \
+            --header "$AUTH" --header 'Content-Type: application/json' \
+            --data @/tmp/query.json --output /tmp/d1.json
+          jq -e '.success == true' /tmp/d1.json >/dev/null
+
+          jq '[.lessonIds[] | tostring]' /tmp/l1.json >/tmp/l1ids.json
+          jq '[.result[].results[]? | select((.core_access|tonumber)==1) | .lesson_id | tostring]' /tmp/d1.json >/tmp/openids.json
+
+          echo '=== SAFE STUDENT FLAGS ==='
+          jq '{fullLibraries:(.fullLibraries // []), blockedLessons:(.blockedLessons // []), manualCoreLessons:(.manualAccess.coreLessons // [])}' /tmp/student.json
+          echo '=== COUNTS ==='
+          echo "l1_curriculum_count=$(jq length /tmp/l1ids.json)"
+          echo "total_full_entitlement_count=$(jq length /tmp/openids.json)"
+          echo '=== L1 CURRICULUM IDS ==='
+          jq -r '.[]' /tmp/l1ids.json
+          echo '=== L1 IDS WITHOUT FULL ENTITLEMENT ==='
+          jq -n --slurpfile curriculum /tmp/l1ids.json --slurpfile open /tmp/openids.json \
+            '$curriculum[0] - $open[0] | .[]'
+          echo '=== FULL ENTITLEMENTS WITH Y411 SOURCE ==='
+          jq -r '.result[].results[]? | select((.core_access|tonumber)==1 and ((.source_batch_code // "")|ascii_upcase|startswith("Y411"))) | [.lesson_id,.source_batch_code] | @tsv' /tmp/d1.json
