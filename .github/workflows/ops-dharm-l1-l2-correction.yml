@@ -18,6 +18,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       TARGET_PORTAL_ID_SHA256: 9c49cd887f91b8f2e84b7d02a6fc211c8f9d5d1c6f6eb684359b5a72e51adeb3
+      MANUAL_L2_SOURCE: Y5M11-MANUAL
 
     steps:
       - uses: actions/setup-node@v4
@@ -68,9 +69,7 @@ jobs:
           user=json.loads(p.stdout)
           if str(user.get('role') or '').strip().lower()=='admin': sys.exit(4)
           before=json.loads(json.dumps(user))
-          libs=[str(x).upper() for x in (user.get('fullLibraries') or []) if str(x).strip()]
-          required=['ENGLISH_Y3_FULL','MATHS_Y3_FULL','MATHS_L1_FULL']
-          user['fullLibraries']=required
+          user['fullLibraries']=['ENGLISH_Y3_FULL','MATHS_Y3_FULL','MATHS_L1_FULL']
           user['upsellViews']=[]
           user['trialViews']=[]
           before_other=json.loads(json.dumps(before)); after_other=json.loads(json.dumps(user))
@@ -92,21 +91,22 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, os, sys, urllib.request
-          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; target=open('/tmp/target-norm').read().strip()
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; target=open('/tmp/target-norm').read().strip(); manual=os.environ['MANUAL_L2_SOURCE']
           def q(sql,params):
               req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':params}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
               with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
               if not body.get('success'): raise SystemExit(10)
               return ((body.get('result') or [{}])[0].get('results') or [])
-          batch=q("SELECT batch_key,subject,school_year,stream,maths_level FROM batch_definitions WHERE batch_key='Y511FM'",[])
-          if len(batch)!=1 or str(batch[0].get('subject') or '').lower()!='maths' or str(batch[0].get('stream') or '').lower()!='11plus' or int(batch[0].get('maths_level') or 0)!=2:
-              print('L2_BATCH_GUARD=false'); sys.exit(11)
+          collision=q('SELECT batch_key FROM batch_definitions WHERE batch_key=?',[manual])
+          if collision:
+              print('MANUAL_SOURCE_COLLISION=true'); sys.exit(11)
           rows=q("SELECT lesson_id,source_batch_code,source_lesson_date,core_access FROM lesson_entitlements WHERE portal_user_id_norm=? AND lesson_id='Y5M1' AND core_access=1",[target])
           print('Y5M1_ROW_COUNT=' + str(len(rows)))
           if len(rows)!=1: sys.exit(12)
-          if str(rows[0].get('source_batch_code') or '') not in ('Y411FM','Y511FM'): sys.exit(13)
-          if str(rows[0].get('source_batch_code') or '')!='Y511FM':
-              q("UPDATE lesson_entitlements SET source_batch_code='Y511FM' WHERE portal_user_id_norm=? AND lesson_id='Y5M1' AND core_access=1",[target])
+          current=str(rows[0].get('source_batch_code') or '')
+          if current not in ('Y411FM',manual): sys.exit(13)
+          if current!=manual:
+              q('UPDATE lesson_entitlements SET source_batch_code=? WHERE portal_user_id_norm=? AND lesson_id=\'Y5M1\' AND core_access=1',[manual,target])
           print('L2_FIRST_LESSON_CLASSIFIED=true')
           PY
 
@@ -146,13 +146,13 @@ jobs:
           if verify.get('fullLibraries') != ['ENGLISH_Y3_FULL','MATHS_Y3_FULL','MATHS_L1_FULL']: sys.exit(2)
           if verify.get('upsellViews') != []: sys.exit(3)
           if verify.get('trialViews') != []: sys.exit(4)
-          target=open('/tmp/target-norm').read().strip(); account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
-          def q(sql):
-              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':[target]}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+          target=open('/tmp/target-norm').read().strip(); account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; manual=os.environ['MANUAL_L2_SOURCE']
+          def q(sql,params):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':params}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
               with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
               if not body.get('success'): raise SystemExit(5)
               return ((body.get('result') or [{}])[0].get('results') or [])
-          l2=q("SELECT lesson_id,source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm=? AND core_access=1 AND source_batch_code='Y511FM' ORDER BY lesson_id")
+          l2=q('SELECT lesson_id,source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm=? AND core_access=1 AND source_batch_code=? ORDER BY lesson_id',[target,manual])
           if len(l2)!=1 or str(l2[0].get('lesson_id') or '')!='Y5M1': sys.exit(6)
           print('L1_FULL_VERIFY=true')
           print('L2_FIRST_LESSON_ONLY_VERIFY=true')
