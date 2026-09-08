@@ -11,8 +11,11 @@ on:
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
+      - 'worker/src/parent-email-signature-clean*.js'
       - 'worker/src/index-phase20-change13.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'worker/src/index-phase20-change18-admin-superuser.js'
+      - 'worker/src/index-phase20-change19-admin-fast.js'
       - 'worker/src/live-student-catalogue-overlay.js'
       - 'worker/src/phase11-navigation-cache.js'
       - 'tests/live-student-catalogue-overlay-verification.mjs'
@@ -34,10 +37,10 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      WORKER_ENTRYPOINT: src/index-phase20-change17-parent-email.js
+      WORKER_ENTRYPOINT: src/index-phase20-change19-admin-fast.js
       WRANGLER_VERSION: 4.125.0
       PARENT_EMAIL_TEST_TO: sejal.mail@gmail.com
-      DEPLOY_MESSAGE: Portal V2 Change 17 parent transactional email - test recipient mode
+      DEPLOY_MESSAGE: Portal V2 parent transactional email signature fix - test recipient mode on Change 19
 
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +49,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify Change 17 regressions
+      - name: Verify Change 17 regressions on current production wrapper
         shell: bash
         run: |
           set -euo pipefail
@@ -57,8 +60,11 @@ jobs:
           node --check worker/src/admin-lesson-release-import-email.js
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
+          node --check worker/src/parent-email-signature-clean.js
           node --check worker/src/index-phase20-change13.js
           node --check worker/src/index-phase20-change17-parent-email.js
+          node --check worker/src/index-phase20-change18-admin-superuser.js
+          node --check worker/src/index-phase20-change19-admin-fast.js
           node --check worker/src/live-student-catalogue-overlay.js
           node --check worker/src/phase11-navigation-cache.js
           node --check assets/admin-import.js
@@ -75,9 +81,11 @@ jobs:
           grep -Fq 'LIVE_LESSON_METADATA_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           grep -Fq 'LIVE_STUDENT_CATALOGUE_OVERLAY_V1' worker/src/live-student-catalogue-overlay.js
           test -f "worker/$WORKER_ENTRYPOINT"
-          grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" "worker/$WORKER_ENTRYPOINT"
-          grep -Fq 'handleAdminLessonReleaseImport' "worker/$WORKER_ENTRYPOINT"
-          grep -Fq 'repairLiveStudentCatalogueResponse' "worker/$WORKER_ENTRYPOINT"
+          grep -Fq "import adminSuperuserWorker from './index-phase20-change18-admin-superuser.js';" "worker/$WORKER_ENTRYPOINT"
+          grep -Fq "import productionWorker from './index-phase20-change17-parent-email.js';" worker/src/index-phase20-change18-admin-superuser.js
+          grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
+          grep -Fq 'handleAdminLessonReleaseImport' worker/src/index-phase20-change17-parent-email.js
+          grep -Fq 'repairLiveStudentCatalogueResponse' worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_STATIC_PASS'
@@ -89,7 +97,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test "$PARENT_EMAIL_TEST_TO" = 'sejal.mail@gmail.com'
-          test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change17-parent-email.js'
+          test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change19-admin-fast.js'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -103,13 +111,13 @@ jobs:
           done
           echo 'CHANGE17_BASE_BINDINGS_PASS'
 
-      - name: Deploy Change 17 preserving bindings and forcing test recipient
+      - name: Deploy parent email fix preserving bindings and current production wrapper
         shell: bash
         run: |
           set -euo pipefail
           bash ops/deploy_change17_parent_email_preserve.sh
 
-      - name: Verify live Change 17 test mode and security boundary
+      - name: Verify live test mode and security boundary
         shell: bash
         run: |
           set -euo pipefail
