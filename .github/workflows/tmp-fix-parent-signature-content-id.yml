@@ -1,5 +1,6 @@
 name: Temporary parent signature content_id fix
 
+# Trigger documented Cloudflare inline-image field verification.
 on:
   push:
     branches: [fix/email-signature-content-id]
