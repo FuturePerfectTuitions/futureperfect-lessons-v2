@@ -17,11 +17,11 @@ import {
 } from '../worker/src/admin-lesson-release-import-email.js';
 
 // Production fetches this clean PNG server-side and passes the exact binary
-// bytes to Cloudflare Email Sending as an ArrayBufferView CID attachment. Unit
+// bytes to Cloudflare Email Sending as an ArrayBuffer CID attachment. Unit
 // tests inject deterministic base64 which is decoded to the same binary shape.
 assert.equal(
   SIGNATURE_SOURCE_URL,
-  'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline'
+  'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-clean-f5358c33'
 );
 
 // Normal Year 4/5/6 rows may arrive with L1/L2/L3 prefixes. The Year column,
@@ -156,8 +156,8 @@ assert.equal(preview.results[0].parent, 'Sheetal');
 assert.equal(preview.results[0].parentEmail, 'sara_shinde@hotmail.co.uk');
 assert.equal(preview.summary.emailEligible, 1);
 
-// Cloudflare Email Sending structured payload must use the documented inline
-// attachment field `content_id` (snake case), with base64 content.
+// Cloudflare Email Sending structured payload uses the Workers inline
+// attachment schema with camel-case `contentId` and exact binary content.
 const TEST_SIGNATURE_BASE64 = 'dGVzdC1zaWduYXR1cmU=';
 const sentPayloads = [];
 const env = {
