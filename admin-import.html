@@ -7,14 +7,14 @@
   <link rel="icon" href="favicon-32.png">
   <meta name="fpt-worker-base" content="https://fpt-portal-v2-worker.futureperfectlessons.workers.dev">
   <style>
-    :root{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#172033;background:#f5f7fb}body{margin:0}main{max-width:1180px;margin:40px auto;padding:0 20px}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px rgba(20,35,60,.06);margin-bottom:18px}h1{margin:0 0 8px;font-size:28px}p{line-height:1.5}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{font-weight:650;display:block;margin-bottom:6px}input[type=password],input[type=file]{padding:10px;border:1px solid #b9c4d4;border-radius:9px;background:#fff}button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1f4fd1;color:white}button.secondary{background:#e7ecf5;color:#26354d}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#667085}.status{padding:10px 12px;border-radius:9px;background:#eef3fb;margin-top:12px}.bad{background:#fff0f0;color:#9f1d1d}.good{background:#eefaf1;color:#176532}.warn{background:#fff8e7;color:#785500}.table-wrap{overflow:auto;max-height:560px;border:1px solid #e0e6ef;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#f7f9fc;z-index:1}.ok{color:#176532;font-weight:700}.err{color:#9f1d1d;font-weight:700}.summary{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.pill{background:#eef2f8;border-radius:999px;padding:6px 10px;font-weight:650}code{background:#f1f3f7;padding:2px 5px;border-radius:5px}.hidden{display:none}
+    :root{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#172033;background:#f5f7fb}body{margin:0}main{max-width:1280px;margin:40px auto;padding:0 20px}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px rgba(20,35,60,.06);margin-bottom:18px}h1{margin:0 0 8px;font-size:28px}p{line-height:1.5}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{font-weight:650;display:block;margin-bottom:6px}input[type=password],input[type=file]{padding:10px;border:1px solid #b9c4d4;border-radius:9px;background:#fff}button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1f4fd1;color:white}button.secondary{background:#e7ecf5;color:#26354d}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#667085}.status{padding:10px 12px;border-radius:9px;background:#eef3fb;margin-top:12px}.bad{background:#fff0f0;color:#9f1d1d}.good{background:#eefaf1;color:#176532}.warn{background:#fff8e7;color:#785500}.table-wrap{overflow:auto;max-height:560px;border:1px solid #e0e6ef;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#f7f9fc;z-index:1}.ok{color:#176532;font-weight:700}.err{color:#9f1d1d;font-weight:700}.summary{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.pill{background:#eef2f8;border-radius:999px;padding:6px 10px;font-weight:650}code{background:#f1f3f7;padding:2px 5px;border-radius:5px}.hidden{display:none}
   </style>
 </head>
 <body>
 <main>
   <div class="card">
     <h1>Lesson Release Import</h1>
-    <p class="muted">Upload the CSV produced by FuturePerfectLive. One file may contain any mixture of Full releases and Online PreLesson-only releases. The Portal validates every releasable row before anything is changed.</p>
+    <p class="muted">Upload the CSV produced by FuturePerfectLive. The Portal validates lesson access and the parent email triggered by each qualifying row before anything is changed or sent.</p>
   </div>
   <div class="card" id="loginCard">
     <div class="row">
@@ -27,11 +27,11 @@
     <div class="row">
       <div><label for="csvFile">FuturePerfectLive CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"></div>
       <button id="previewBtn" disabled>Validate &amp; Preview</button>
-      <button id="confirmBtn" class="secondary" disabled>Confirm Import</button>
+      <button id="confirmBtn" class="secondary" disabled>Confirm Import &amp; Send Emails</button>
     </div>
     <div id="status" class="status hidden"></div>
     <div id="summary" class="summary"></div>
-    <div id="tableWrap" class="table-wrap hidden"><table><thead><tr><th>Row</th><th>Student</th><th>Name</th><th>Batch</th><th>Lesson</th><th>Date</th><th>Status</th><th>Release</th><th>Portal action</th><th>Validation</th></tr></thead><tbody id="resultBody"></tbody></table></div>
+    <div id="tableWrap" class="table-wrap hidden"><table><thead><tr><th>Row</th><th>Student</th><th>Name</th><th>Parent</th><th>Email</th><th>Batch</th><th>Lesson</th><th>Date</th><th>Status</th><th>Release</th><th>Portal action</th><th>Email action</th><th>Validation</th></tr></thead><tbody id="resultBody"></tbody></table></div>
   </div>
 </main>
 <script src="assets/admin-import.js"></script>
