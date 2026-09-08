@@ -1,16 +1,26 @@
 (() => {
   const worker = document.querySelector('meta[name="fpt-worker-base"]').content.replace(/\/$/, '');
   const $ = id => document.getElementById(id);
+  const sourceApi = window.FPTAdminCsvSource || null;
   let token = sessionStorage.getItem('fptAdminImportToken') || '';
   let rows = [];
+  let savedDirectory = null;
 
   function setStatus(el, text, kind='') {
     el.textContent = text;
     el.className = `status ${kind}`.trim();
   }
+
+  function resetPreview() {
+    $('confirmBtn').disabled=true;
+    $('tableWrap').classList.add('hidden');
+    $('summary').innerHTML='';
+  }
+
   function showImport() {
     $('loginCard').classList.add('hidden');
     $('importCard').classList.remove('hidden');
+    initSavedSource();
   }
   if (token) showImport();
 
@@ -47,6 +57,18 @@
     if (!nonblank.length) return [];
     const headers=nonblank[0].map((h,i)=>String(h).replace(/^\uFEFF/,'').trim() || `Column${i+1}`);
     return nonblank.slice(1).map(r => Object.fromEntries(headers.map((h,i)=>[h,r[i] ?? ''])));
+  }
+
+  function loadRows(text, sourceLabel='CSV') {
+    resetPreview();
+    rows=parseCsv(text);
+    const required=['Student','Name','Year','Subject','Mode','Lesson','LessonDated','LessonStatus','Remarks','Email','Parent'];
+    const keys=new Set(Object.keys(rows[0] || {}).map(k=>k.toLowerCase()));
+    const missing=required.filter(k=>!keys.has(k.toLowerCase()));
+    if (!rows.length) throw new Error('CSV contains no data rows.');
+    if (missing.length) throw new Error(`Missing required column(s): ${missing.join(', ')}`);
+    $('previewBtn').disabled=false;
+    setStatus($('status'),`${rows.length} CSV row${rows.length===1?'':'s'} loaded from ${sourceLabel}. No Portal access has been changed and no emails have been sent.`,'good');
   }
 
   function renderSummary(summary) {
@@ -92,33 +114,9 @@
     $('tableWrap').classList.remove('hidden');
   }
 
-  $('loginBtn').addEventListener('click', async () => {
-    $('loginBtn').disabled=true;
-    try {
-      const data=await api('/api/v1/admin/lesson-releases/login',{ password:$('password').value },false);
-      token=data.token; sessionStorage.setItem('fptAdminImportToken',token); $('password').value=''; showImport();
-    } catch(e) { setStatus($('loginStatus'), e.data?.error==='ADMIN_IMPORT_NOT_CONFIGURED' ? 'Admin import has not yet been configured on the Worker.' : 'Sign-in failed.', 'bad'); }
-    finally { $('loginBtn').disabled=false; }
-  });
-
-  $('csvFile').addEventListener('change', async () => {
-    $('confirmBtn').disabled=true; $('tableWrap').classList.add('hidden'); $('summary').innerHTML='';
-    const file=$('csvFile').files[0];
-    if (!file) { $('previewBtn').disabled=true; return; }
-    try {
-      rows=parseCsv(await file.text());
-      const required=['Student','Name','Year','Subject','Mode','Lesson','LessonDated','LessonStatus','Remarks','Email','Parent'];
-      const keys=new Set(Object.keys(rows[0] || {}).map(k=>k.toLowerCase()));
-      const missing=required.filter(k=>!keys.has(k.toLowerCase()));
-      if (!rows.length) throw new Error('CSV contains no data rows.');
-      if (missing.length) throw new Error(`Missing required column(s): ${missing.join(', ')}`);
-      $('previewBtn').disabled=false;
-      setStatus($('status'),`${rows.length} CSV row${rows.length===1?'':'s'} loaded. No Portal access has been changed and no emails have been sent.`,'good');
-    } catch(e) { rows=[]; $('previewBtn').disabled=true; setStatus($('status'),e.message,'bad'); }
-  });
-
-  $('previewBtn').addEventListener('click', async () => {
-    $('previewBtn').disabled=true; $('confirmBtn').disabled=true;
+  async function previewCurrentRows() {
+    if (!rows.length) throw new Error('Load a CSV first.');
+    $('previewBtn').disabled=true; $('confirmBtn').disabled=true; $('loadLatestBtn').disabled=true;
     setStatus($('status'),'Validating Portal access and parent email actions…','warn');
     try {
       const data=await api('/api/v1/admin/lesson-releases/preview',{ rows });
@@ -134,13 +132,113 @@
         setStatus($('status'),`Validation passed. Review the table, then confirm ${releasable} Portal release action${releasable===1?'':'s'} and ${emailEligible} parent email${emailEligible===1?'':'s'}.`,'good');
         $('confirmBtn').disabled=false;
       }
-    } catch(e) { setStatus($('status'),`Preview failed: ${e.message}`,'bad'); }
-    finally { $('previewBtn').disabled=false; }
+    } catch(e) {
+      setStatus($('status'),`Preview failed: ${e.message}`,'bad');
+      throw e;
+    } finally {
+      $('previewBtn').disabled=false;
+      $('loadLatestBtn').disabled=!savedDirectory;
+    }
+  }
+
+  async function initSavedSource() {
+    if (!sourceApi?.supported?.()) {
+      $('savedSourceBox').classList.add('hidden');
+      return;
+    }
+    $('savedSourceBox').classList.remove('hidden');
+    try {
+      savedDirectory=await sourceApi.getSavedDirectory();
+      if (!savedDirectory) {
+        $('sourceMeta').textContent='No folder saved yet. Select the folder containing workFP.csv once; Chrome will remember it for future imports.';
+        $('loadLatestBtn').disabled=true;
+        $('clearSourceBtn').disabled=true;
+        return;
+      }
+      $('sourceMeta').textContent=`Saved folder: ${savedDirectory.name}. The Portal will read the current workFP.csv from this folder.`;
+      $('loadLatestBtn').disabled=false;
+      $('clearSourceBtn').disabled=false;
+    } catch(e) {
+      savedDirectory=null;
+      $('sourceMeta').textContent='The saved CSV source could not be restored. You can choose the folder again or use the manual CSV fallback.';
+      $('loadLatestBtn').disabled=true;
+      $('clearSourceBtn').disabled=true;
+    }
+  }
+
+  async function loadLatestAndPreview() {
+    if (!savedDirectory) throw new Error('Set the CSV source folder first.');
+    $('loadLatestBtn').disabled=true;
+    $('setSourceBtn').disabled=true;
+    setStatus($('sourceStatus'),'Reading the latest workFP.csv from the saved folder…','warn');
+    try {
+      const loaded=await sourceApi.readLatestCsv(savedDirectory,true);
+      const time=loaded.lastModified ? new Date(loaded.lastModified).toLocaleString() : '';
+      $('sourceMeta').textContent=`Saved folder: ${loaded.directoryName} • File: ${loaded.name}${time ? ` • Modified: ${time}` : ''}`;
+      loadRows(loaded.text,loaded.name);
+      setStatus($('sourceStatus'),`${loaded.name} loaded successfully. Validating and previewing now…`,'good');
+      await previewCurrentRows();
+      setStatus($('sourceStatus'),`${loaded.name} is the CSV currently shown in the preview.`,'good');
+    } catch(e) {
+      setStatus($('sourceStatus'),e.message || 'Could not read the saved CSV source.','bad');
+    } finally {
+      $('setSourceBtn').disabled=false;
+      $('loadLatestBtn').disabled=!savedDirectory;
+    }
+  }
+
+  $('loginBtn').addEventListener('click', async () => {
+    $('loginBtn').disabled=true;
+    try {
+      const data=await api('/api/v1/admin/lesson-releases/login',{ password:$('password').value },false);
+      token=data.token; sessionStorage.setItem('fptAdminImportToken',token); $('password').value=''; showImport();
+    } catch(e) { setStatus($('loginStatus'), e.data?.error==='ADMIN_IMPORT_NOT_CONFIGURED' ? 'Admin import has not yet been configured on the Worker.' : 'Sign-in failed.', 'bad'); }
+    finally { $('loginBtn').disabled=false; }
+  });
+
+  $('setSourceBtn').addEventListener('click', async () => {
+    if (!sourceApi?.supported?.()) return;
+    $('setSourceBtn').disabled=true;
+    try {
+      savedDirectory=await sourceApi.chooseDirectory();
+      $('sourceMeta').textContent=`Saved folder: ${savedDirectory.name}. Looking for workFP.csv…`;
+      $('clearSourceBtn').disabled=false;
+      await loadLatestAndPreview();
+    } catch(e) {
+      if (e?.name !== 'AbortError') setStatus($('sourceStatus'),e.message || 'Could not save the CSV source folder.','bad');
+    } finally {
+      $('setSourceBtn').disabled=false;
+      $('loadLatestBtn').disabled=!savedDirectory;
+    }
+  });
+
+  $('loadLatestBtn').addEventListener('click', loadLatestAndPreview);
+
+  $('clearSourceBtn').addEventListener('click', async () => {
+    try { await sourceApi.clearSavedDirectory(); } catch { /* UI still clears local handle */ }
+    savedDirectory=null;
+    $('loadLatestBtn').disabled=true;
+    $('clearSourceBtn').disabled=true;
+    $('sourceMeta').textContent='No folder saved. Use Set CSV Source Folder to choose the folder containing workFP.csv.';
+    setStatus($('sourceStatus'),'Saved CSV source forgotten. Manual upload remains available.','good');
+  });
+
+  $('csvFile').addEventListener('change', async () => {
+    resetPreview();
+    const file=$('csvFile').files[0];
+    if (!file) { $('previewBtn').disabled=true; return; }
+    try {
+      loadRows(await file.text(),file.name);
+    } catch(e) { rows=[]; $('previewBtn').disabled=true; setStatus($('status'),e.message,'bad'); }
+  });
+
+  $('previewBtn').addEventListener('click', async () => {
+    try { await previewCurrentRows(); } catch { /* status already shown */ }
   });
 
   $('confirmBtn').addEventListener('click', async () => {
     if (!window.confirm('Apply the validated Portal lesson releases and send the listed parent emails now?')) return;
-    $('confirmBtn').disabled=true; $('previewBtn').disabled=true;
+    $('confirmBtn').disabled=true; $('previewBtn').disabled=true; $('loadLatestBtn').disabled=true;
     setStatus($('status'),'Revalidating, applying Portal releases, then sending parent emails…','warn');
     try {
       const data=await api('/api/v1/admin/lesson-releases/confirm',{ rows });
@@ -149,16 +247,22 @@
       const portalSucceeded=Number(data.summary?.succeeded || 0);
       const emailsSent=Number(data.summary?.emailsSent || 0);
       const emailsFailed=Number(data.summary?.emailsFailed || 0);
-      const failedAddresses=(data.emailResults || []).filter(r=>!r.ok).map(r=>r.parentEmail).filter(Boolean);
+      const failedEmailResults=(data.emailResults || []).filter(r=>!r.ok);
+      const failedAddresses=failedEmailResults.map(r=>r.parentEmail).filter(Boolean);
+      const failureMessages=[...new Set(failedEmailResults.map(r=>r.message || r.status).filter(Boolean))];
       if (portalFailed || emailsFailed) {
         const detail=failedAddresses.length ? ` Failed email recipient${failedAddresses.length===1?'':'s'}: ${failedAddresses.join(', ')}.` : '';
-        setStatus($('status'),`Import finished with ${portalFailed} Portal failure${portalFailed===1?'':'s'} and ${emailsFailed} email failure${emailsFailed===1?'':'s'}. Successful Portal changes were kept.${detail}`,'bad');
+        const reason=failureMessages.length ? ` Email error: ${failureMessages.join(' | ')}` : '';
+        setStatus($('status'),`Import finished with ${portalFailed} Portal failure${portalFailed===1?'':'s'} and ${emailsFailed} email failure${emailsFailed===1?'':'s'}. Successful Portal changes were kept.${detail}${reason}`,'bad');
       } else {
         setStatus($('status'),`Import complete. ${portalSucceeded} Portal release action${portalSucceeded===1?'':'s'} confirmed and ${emailsSent} parent email${emailsSent===1?'':'s'} sent.`,'good');
       }
     } catch(e) {
       if (e.data?.results) render(e.data.results,{ errors:e.data.results.filter(r=>!r.ok).length });
       setStatus($('status'), e.data?.error==='VALIDATION_FAILED' ? 'Import stopped because revalidation failed. No release actions were applied and no emails were sent.' : `Import failed: ${e.message}`,'bad');
-    } finally { $('previewBtn').disabled=false; }
+    } finally {
+      $('previewBtn').disabled=false;
+      $('loadLatestBtn').disabled=!savedDirectory;
+    }
   });
 })();
