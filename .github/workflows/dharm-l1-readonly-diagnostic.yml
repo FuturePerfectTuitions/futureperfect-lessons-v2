@@ -19,6 +19,26 @@ jobs:
       WORKER_NAME: fpt-portal-v2-worker
       PORTAL_USER_ID_NORM: dha2806
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build canonical L1 list
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { loadPhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          import fs from 'node:fs';
+          const catalogue = loadPhase11Catalogue(process.cwd());
+          const ids = catalogue.curricula.MATHS_L1.lessonIds;
+          fs.writeFileSync('/tmp/canonical-l1.json', JSON.stringify(ids));
+          console.log(`canonical_l1_count=${ids.length}`);
+          console.log(ids.join('\n'));
+          NODE
+
       - name: Compare Dharm L1 entitlements with live curriculum
         shell: bash
         run: |
@@ -53,18 +73,24 @@ jobs:
             --data @/tmp/query.json --output /tmp/d1.json
           jq -e '.success == true' /tmp/d1.json >/dev/null
 
-          jq '[.lessonIds[] | tostring]' /tmp/l1.json >/tmp/l1ids.json
+          jq '[.lessonIds[] | tostring]' /tmp/l1.json >/tmp/live-l1.json
           jq '[.result[].results[]? | select((.core_access|tonumber)==1) | .lesson_id | tostring]' /tmp/d1.json >/tmp/openids.json
 
           echo '=== SAFE STUDENT FLAGS ==='
-          jq '{fullLibraries:(.fullLibraries // []), blockedLessons:(.blockedLessons // []), manualCoreLessons:(.manualAccess.coreLessons // [])}' /tmp/student.json
+          jq '{fullLibraries:(.fullLibraries // []), blockedLessons:(.blockedLessons // [])}' /tmp/student.json
           echo '=== COUNTS ==='
-          echo "l1_curriculum_count=$(jq length /tmp/l1ids.json)"
+          echo "canonical_l1_count=$(jq length /tmp/canonical-l1.json)"
+          echo "live_kv_l1_count=$(jq length /tmp/live-l1.json)"
           echo "total_full_entitlement_count=$(jq length /tmp/openids.json)"
-          echo '=== L1 CURRICULUM IDS ==='
-          jq -r '.[]' /tmp/l1ids.json
-          echo '=== L1 IDS WITHOUT FULL ENTITLEMENT ==='
-          jq -n --slurpfile curriculum /tmp/l1ids.json --slurpfile open /tmp/openids.json \
-            '$curriculum[0] - $open[0] | .[]'
-          echo '=== FULL ENTITLEMENTS WITH Y411 SOURCE ==='
-          jq -r '.result[].results[]? | select((.core_access|tonumber)==1 and ((.source_batch_code // "")|ascii_upcase|startswith("Y411"))) | [.lesson_id,.source_batch_code] | @tsv' /tmp/d1.json
+          echo '=== CANONICAL L1 IDS NOT IN LIVE KV ==='
+          jq -n --slurpfile canonical /tmp/canonical-l1.json --slurpfile live /tmp/live-l1.json \
+            '$canonical[0] - $live[0] | .[]'
+          echo '=== LIVE KV L1 IDS NOT IN CANONICAL ==='
+          jq -n --slurpfile canonical /tmp/canonical-l1.json --slurpfile live /tmp/live-l1.json \
+            '$live[0] - $canonical[0] | .[]'
+          echo '=== CANONICAL L1 IDS WITHOUT FULL ENTITLEMENT ==='
+          jq -n --slurpfile canonical /tmp/canonical-l1.json --slurpfile open /tmp/openids.json \
+            '$canonical[0] - $open[0] | .[]'
+          echo '=== CANONICAL L1 IDS WITH FULL ENTITLEMENT COUNT ==='
+          jq -n --slurpfile canonical /tmp/canonical-l1.json --slurpfile open /tmp/openids.json \
+            '$canonical[0] - ($canonical[0] - $open[0]) | length'
