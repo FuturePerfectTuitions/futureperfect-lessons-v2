@@ -14,6 +14,7 @@ on:
       - 'worker/wrangler.toml'
       - 'tests/parent-email-import-verification.mjs'
       - 'tests/parent-email-completed-status-verification.mjs'
+      - 'tests/parent-email-test-routing-verification.mjs'
       - 'ops/deploy_change17_parent_email_preserve.sh'
 
 permissions:
@@ -55,6 +56,7 @@ jobs:
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
           node tests/subject-preview-enrolment-boundary-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
