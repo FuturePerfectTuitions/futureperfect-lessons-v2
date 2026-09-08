@@ -1,0 +1,78 @@
+name: Dharm L1 transition diagnostic
+
+on:
+  push:
+    branches: [diag/dharm-l1-transition]
+    paths:
+      - '.github/workflows/dharm-l1-transition-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      USER_ID: dha2806
+    steps:
+      - name: Inspect live L1 curriculum, lesson identities and Dharm entitlements
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          DB_ID=$(jq -r '.result.bindings[] | select(.name=="DB") | (.id // .database_id)' /tmp/settings.json | head -1)
+          LESSONS_NS=$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | (.namespace_id // .id)' /tmp/settings.json | head -1)
+          test -n "$DB_ID" && test "$DB_ID" != null
+          test -n "$LESSONS_NS" && test "$LESSONS_NS" != null
+
+          query() {
+            local sql="$1"
+            curl --fail --silent --show-error "$API/d1/database/${DB_ID}/query" \
+              -H "$AUTH" -H 'Content-Type: application/json' \
+              --data "$(jq -nc --arg sql "$sql" '{sql:$sql}')"
+          }
+
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${LESSONS_NS}/values/curriculum:MATHS_L1" -H "$AUTH" -o /tmp/l1.json
+          jq -r '(.lessonIds // .lessons // .items // [])[] | if type=="string" then . else .lessonId end' /tmp/l1.json > /tmp/l1_ids.txt
+          echo '=== LIVE L1 IDS ==='
+          nl -ba /tmp/l1_ids.txt
+
+          query "SELECT lesson_id,core_access,source,source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm='${USER_ID}' AND core_access=1 ORDER BY lesson_id" \
+            | jq -r '.result[0].results[]?.lesson_id' > /tmp/ent_ids.txt
+          echo '=== DHARM FULL ENTITLEMENT IDS ==='
+          nl -ba /tmp/ent_ids.txt
+
+          echo '=== LIVE L1 IDS WITHOUT FULL ENTITLEMENT ==='
+          comm -23 <(sort -u /tmp/l1_ids.txt) <(sort -u /tmp/ent_ids.txt) || true
+          echo '=== FULL ENTITLEMENT IDS NOT IN LIVE L1 ==='
+          comm -13 <(sort -u /tmp/l1_ids.txt) <(sort -u /tmp/ent_ids.txt) || true
+
+          echo '=== LIVE L1 LESSON RECORDS ==='
+          while IFS= read -r lesson; do
+            [ -n "$lesson" ] || continue
+            code=$(curl --silent --show-error -o /tmp/lesson.json -w '%{http_code}' "$API/storage/kv/namespaces/${LESSONS_NS}/values/lesson:${lesson}" -H "$AUTH")
+            if [ "$code" = 200 ]; then
+              jq -c --arg requested "$lesson" '{requested:$requested,lessonId,title,displayIds,active,subject}' /tmp/lesson.json
+            else
+              echo "{\"requested\":\"$lesson\",\"http\":$code}"
+            fi
+          done < /tmp/l1_ids.txt
+
+          echo '=== TRANSITION MATCHES ==='
+          while IFS= read -r lesson; do
+            [ -n "$lesson" ] || continue
+            code=$(curl --silent --show-error -o /tmp/lesson.json -w '%{http_code}' "$API/storage/kv/namespaces/${LESSONS_NS}/values/lesson:${lesson}" -H "$AUTH")
+            [ "$code" = 200 ] || continue
+            title=$(jq -r '.title // ""' /tmp/lesson.json)
+            if printf '%s' "$title" | grep -qi 'Transition to Level 1'; then
+              jq -c --arg requested "$lesson" '{requested:$requested,lessonId,title,displayIds,active,subject}' /tmp/lesson.json
+              echo "entitlement_rows_for_requested=$lesson"
+              query "SELECT lesson_id,core_access,source,source_batch_code FROM lesson_entitlements WHERE portal_user_id_norm='${USER_ID}' AND lesson_id='${lesson}'" | jq -c '.result[0].results // []'
+            fi
+          done < /tmp/l1_ids.txt
