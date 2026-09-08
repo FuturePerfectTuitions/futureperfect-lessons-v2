@@ -16,6 +16,7 @@ on:
       - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
+      - tests/parent-email-completed-status-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
   push:
@@ -33,6 +34,7 @@ on:
       - worker/wrangler.toml
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
+      - tests/parent-email-completed-status-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
 
@@ -64,6 +66,7 @@ jobs:
           set -euo pipefail
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
       - name: Lesson release navigation verification
         run: |
           set -euo pipefail
