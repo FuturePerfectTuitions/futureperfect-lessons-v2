@@ -40,8 +40,9 @@ jobs:
       WORKER_NAME: fpt-portal-v2-worker
       WORKER_ENTRYPOINT: src/index-phase20-change20-configured-upsell.js
       WRANGLER_VERSION: 4.125.0
-      PARENT_EMAIL_TEST_TO: sejal.mail@gmail.com
-      DEPLOY_MESSAGE: Portal V2 parent transactional email signature fix - test recipient mode on Change 20
+      PARENT_EMAIL_LIVE: '1'
+      PARENT_EMAIL_TEST_TO: ''
+      DEPLOY_MESSAGE: Portal V2 parent transactional emails LIVE on Change 20
 
     steps:
       - uses: actions/checkout@v4
@@ -106,17 +107,19 @@ jobs:
           grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'handleAdminLessonReleaseImport' worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'repairLiveStudentCatalogueResponse' worker/src/index-phase20-change17-parent-email.js
+          grep -Fq 'PARENT_EMAIL_LIVE' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_STATIC_PASS'
 
-      - name: Require production bindings and secrets
+      - name: Require production bindings, secrets and live parent-email mode
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test "$PARENT_EMAIL_TEST_TO" = 'sejal.mail@gmail.com'
+          test "$PARENT_EMAIL_LIVE" = '1'
+          test -z "$PARENT_EMAIL_TEST_TO"
           test "$WORKER_ENTRYPOINT" = 'src/index-phase20-change20-configured-upsell.js'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
@@ -129,15 +132,15 @@ jobs:
           for required in ADMIN_IMPORT_PASSWORD ADMIN_IMPORT_SESSION_SECRET EXCEL_SYNC_TOKEN; do
             jq -e --arg n "$required" '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | index($n) != null' /tmp/change17-settings-before.json >/dev/null
           done
-          echo 'CHANGE17_BASE_BINDINGS_PASS'
+          echo 'CHANGE17_BASE_BINDINGS_AND_LIVE_MODE_PASS'
 
-      - name: Deploy parent email fix preserving bindings and current production wrapper
+      - name: Deploy live parent emails preserving bindings and current production wrapper
         shell: bash
         run: |
           set -euo pipefail
           bash ops/deploy_change17_parent_email_preserve.sh
 
-      - name: Verify live test mode and security boundary
+      - name: Verify live parent email mode and security boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -147,7 +150,7 @@ jobs:
             --output /tmp/change17-settings-after.json
           jq -e '.success == true' /tmp/change17-settings-after.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/change17-settings-after.json >/dev/null
-          jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/change17-settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/change17-settings-after.json >/dev/null
           for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
             jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/change17-settings-after.json >/dev/null
           done
@@ -160,4 +163,4 @@ jobs:
           code="$(curl --silent --show-error --output /tmp/change17-home.json --write-out '%{http_code}' \
             --header "Origin: $ORIGIN" "$BASE/api/v1/student/home")"
           test "$code" = '401'
-          echo 'CHANGE17_LIVE_TEST_MODE_AND_SECURITY_PASS'
+          echo 'CHANGE17_LIVE_PARENT_EMAIL_AND_SECURITY_PASS'

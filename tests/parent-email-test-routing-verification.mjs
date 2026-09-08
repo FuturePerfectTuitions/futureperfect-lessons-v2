@@ -40,4 +40,27 @@ assert.equal(payloads[0].attachments[0].contentId, 'fpt-email-signature-clean');
 assert.ok(payloads[0].attachments[0].content instanceof ArrayBuffer);
 assert.equal(new TextDecoder().decode(new Uint8Array(payloads[0].attachments[0].content)), 'test-signature');
 
-console.log('Parent email test routing sends only to Sejal personal Gmail and preserves intended recipients in result metadata: PASS');
+const livePayloads = [];
+const liveResult = await sendParentEmail({
+  PARENT_EMAIL_SIGNATURE_BASE64:'dGVzdC1zaWduYXR1cmU=',
+  EMAIL:{
+    async send(payload) {
+      livePayloads.push(payload);
+      return { messageId:'live-mode-message' };
+    }
+  }
+}, item);
+
+assert.equal(liveResult.ok, true);
+assert.equal(liveResult.status, 'SENT');
+assert.equal(liveResult.testMode, false);
+assert.equal(liveResult.deliveredTo, 'sara_shinde@hotmail.co.uk');
+assert.equal(liveResult.intendedTo, 'sara_shinde@hotmail.co.uk');
+assert.equal(liveResult.intendedCc, 'barkha@futureperfect.education');
+assert.equal(livePayloads.length, 1);
+assert.equal(livePayloads[0].to, 'sara_shinde@hotmail.co.uk');
+assert.deepEqual(livePayloads[0].cc, { email:'barkha@futureperfect.education', name:'Barkha' });
+assert.equal(livePayloads[0].attachments[0].contentId, 'fpt-email-signature-clean');
+assert.ok(livePayloads[0].attachments[0].content instanceof ArrayBuffer);
+
+console.log('Parent email routing verifies both safe test mode and live parent + Barkha CC delivery: PASS');
