@@ -1,0 +1,140 @@
+name: Ops update Y6T1E01 Autumn video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y6e1-autumn.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y6T1E01, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS"; test "$LESSONS" != null
+          export LESSONS_KV_ID="$LESSONS"
+
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const api = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const TARGET = 'cOQj6cnwzIc';
+          const PLACEHOLDER = 'cO1Zionu8NC';
+          const description = `In this autumn-themed Year 6 English lesson, students develop spelling, punctuation, reading-inference and writing skills through a sequence of linked activities.
+
+This lesson includes:
+✔ Revising Year 5/6 statutory spellings and using clues to identify words
+✔ Exploring autumn vocabulary, including the word deciduous
+✔ Sorting apostrophes into contracted forms, singular possession and plural possession
+✔ Making inferences from a text about Humphrey the hedgehog and selecting evidence to justify answers
+✔ Correcting commonly confused spellings and word endings, including words such as mansion, magician, illusion, technician, occasion and permission
+✔ Writing descriptive sentences using a prepositional phrase, dashes for parenthesis, a semi-colon, a fronted adverbial and a modal verb
+✔ Planning and writing a 300-word narrative using varied sentence starters, ambitious vocabulary, powerful verbs, conjunctions, accurate punctuation and complex sentences
+
+Students begin with an autumn spelling puzzle before revisiting the different uses of apostrophes in context. They then read a short passage and infer character, setting and season from textual clues, before correcting a set of spelling errors with similar-sounding endings.
+
+The writing section moves from controlled sentence-level grammar practice to an extended creative-writing task based on a magical scrap-metal yard, where students invent a moving metal creation to help people in a dangerous situation.
+
+By the end of the lesson, learners will have practised a broad range of Year 6 English skills and applied spelling, punctuation, inference, grammar and creative-writing techniques in context.`;
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            return await r.json();
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(`${api}/values/${encodeURIComponent(key)}`, {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          function guardLesson(r) {
+            if (r?.lessonId !== 'Y6E1') throw new Error(`Y6E1 identity mismatch: ${r?.lessonId}`);
+            if (r?.title !== 'Transition to Year 6') throw new Error(`Y6E1 title mismatch: ${r?.title}`);
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y6E1 state mismatch');
+            if (!Object.values(r?.displayIds || {}).includes('Y6T1E01')) throw new Error('Y6E1 display ID mismatch');
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y6E1 core.video missing');
+          }
+
+          const curriculum = await getJson('curriculum:ENGLISH_Y6');
+          if (curriculum?.curriculumCode !== 'ENGLISH_Y6') throw new Error('ENGLISH_Y6 curriculum identity mismatch');
+          if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.includes('Y6E1')) {
+            throw new Error('ENGLISH_Y6 does not contain Y6E1');
+          }
+
+          const y6e1 = await getJson('lesson:Y6E1');
+          guardLesson(y6e1);
+
+          const currentScreenPal = y6e1?.core?.video?.screenpal ?? null;
+          if (![null, PLACEHOLDER, TARGET].includes(currentScreenPal)) {
+            throw new Error(`Y6E1 has an unexpected existing ScreenPal video: ${currentScreenPal}`);
+          }
+
+          y6e1.description = description;
+          y6e1.core.video = video(TARGET);
+          y6e1.contentStatus = {
+            ...(y6e1.contentStatus || {}),
+            description: 'available',
+            mainVideo: 'available',
+            ownerConfirmedPending: false
+          };
+
+          await putJson('lesson:Y6E1', y6e1);
+
+          const verified = await getJson('lesson:Y6E1');
+          guardLesson(verified);
+          if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y6E1 ScreenPal verification failed');
+          if (verified?.description !== description) throw new Error('Y6E1 description verification failed');
+          if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+            throw new Error('Y6E1 content status verification failed');
+          }
+
+          console.log('Y6E1_VERIFIED=' + JSON.stringify({
+            lessonId: verified.lessonId,
+            displayId: verified.displayIds['english-year6'],
+            title: verified.title,
+            screenpal: verified.core.video.screenpal,
+            contentStatus: verified.contentStatus
+          }));
+          console.log('OPS_UPDATE_Y6E1_AUTUMN_PASS');
+          NODE
