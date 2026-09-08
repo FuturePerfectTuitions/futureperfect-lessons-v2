@@ -43,6 +43,40 @@ function hasUsablePreLesson(lesson) {
   return false;
 }
 
+function usableRawPreLessonResource(resource) {
+  if (!resource || resource.locked === true || resource.available === false) return false;
+  return Boolean(clean(
+    resource.resourceKey ||
+    resource.r2Key ||
+    resource.r2 ||
+    resource.key ||
+    resource.path
+  ));
+}
+
+function rawPreLessonState(record) {
+  if (!record || typeof record !== 'object') return null;
+
+  const standardArrays = [];
+  if (Array.isArray(record.preLessonSheets)) standardArrays.push(record.preLessonSheets);
+  if (Array.isArray(record?.core?.preLessonSheets)) standardArrays.push(record.core.preLessonSheets);
+
+  if (standardArrays.some(items => items.some(usableRawPreLessonResource))) return true;
+
+  const phase11 = record.phase11Resources;
+  const hasSpecialPreLesson =
+    (Array.isArray(phase11?.corePreLessonPairs) && phase11.corePreLessonPairs.length > 0) ||
+    (Array.isArray(phase11?.elevenPlus?.preLessonPairs) && phase11.elevenPlus.preLessonPairs.length > 0) ||
+    (Array.isArray(record?.vr?.preLesson) && record.vr.preLesson.length > 0);
+
+  // If the canonical record explicitly has ordinary PreLesson arrays and they
+  // contain no usable R2/resource key, that is a definitive empty package unless
+  // a special/VR package also exists. Special packages still go through the
+  // access-aware renderer below so VR eligibility cannot be bypassed.
+  if (standardArrays.length > 0 && !hasSpecialPreLesson) return false;
+  return null;
+}
+
 async function preLessonAvailability(request, env, ctx, lessonId, viewId) {
   if (!lessonId || !viewId) return false;
   const url = new URL(request.url);
@@ -57,6 +91,16 @@ async function preLessonAvailability(request, env, ctx, lessonId, viewId) {
   return Boolean(response.ok && body?.ok && hasUsablePreLesson(body.lesson));
 }
 
+async function fastPreLessonAvailability(request, env, ctx, lessonId, viewId) {
+  if (!lessonId || !viewId) return false;
+  if (env?.LESSONS_KV) {
+    const record = await env.LESSONS_KV.get(`lesson:${lessonId}`, { type:'json' }).catch(() => null);
+    const state = rawPreLessonState(record);
+    if (state !== null) return state;
+  }
+  return preLessonAvailability(request, env, ctx, lessonId, viewId);
+}
+
 async function annotateLessonList(request, env, ctx, body, viewId) {
   if (!Array.isArray(body?.lessons)) return body;
 
@@ -66,7 +110,7 @@ async function annotateLessonList(request, env, ctx, body, viewId) {
 
   const checks = await Promise.all(candidates.map(async item => ({
     lessonId: String(item.lessonId),
-    available: await preLessonAvailability(request, env, ctx, String(item.lessonId), viewId)
+    available: await fastPreLessonAvailability(request, env, ctx, String(item.lessonId), viewId)
   })));
   const availability = new Map(checks.map(item => [item.lessonId, item.available]));
 
@@ -99,7 +143,7 @@ async function annotateHome(request, env, ctx, body) {
   const checks = await Promise.all(candidates.map(async item => ({
     lessonId: String(item.lessonId),
     viewId: norm(item.viewId),
-    available: await preLessonAvailability(
+    available: await fastPreLessonAvailability(
       request,
       env,
       ctx,
@@ -120,7 +164,13 @@ async function annotateHome(request, env, ctx, body) {
   return body;
 }
 
-export { usablePreLessonResource, hasUsablePreLesson, annotateLessonList, annotateHome };
+export {
+  usablePreLessonResource,
+  hasUsablePreLesson,
+  rawPreLessonState,
+  annotateLessonList,
+  annotateHome
+};
 
 export default {
   async fetch(request, env, ctx) {
