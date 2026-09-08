@@ -51,26 +51,25 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@latest kv key list --namespace-id "$STUDENTS_KV_ID" --prefix 'user:' --remote > /tmp/keys.json 2>/dev/null
           python3 - <<'PY'
-          import hashlib, json, os, subprocess, sys
+          import hashlib, json, os, re, subprocess, sys
           target=os.environ['TARGET_FIRST_NAME_SHA256']
-          matches=[]
+          candidates=[]
           for item in json.load(open('/tmp/keys.json',encoding='utf-8')):
               key=str(item.get('name') or '')
               if not key.startswith('user:'): continue
               suffix=key[5:].strip().lower()
               if suffix.startswith(('admin','demo','trial')): continue
-              p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
-              if p.returncode: continue
-              try: user=json.loads(p.stdout)
-              except Exception: continue
-              raw_name=str(user.get('name') or user.get('studentName') or '').strip().lower()
-              first=(raw_name.split() or [''])[0]
-              if hashlib.sha256(first.encode()).hexdigest()!=target: continue
-              if str(user.get('role') or '').strip().lower()=='admin': continue
-              matches.append((key,user))
-          print('TARGET_MATCH_COUNT=' + str(len(matches)))
-          if len(matches)!=1: sys.exit(2)
-          key,user=matches[0]
+              stem=re.sub(r'\d+$','',suffix)
+              if hashlib.sha256(stem.encode()).hexdigest()==target:
+                  candidates.append(key)
+          print('TARGET_MATCH_COUNT=' + str(len(candidates)))
+          if len(candidates)!=1: sys.exit(2)
+          key=candidates[0]
+          p=subprocess.run(['npx','--yes','wrangler@latest','kv','key','get',key,'--namespace-id',os.environ['STUDENTS_KV_ID'],'--remote'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+          if p.returncode: sys.exit(3)
+          try: user=json.loads(p.stdout)
+          except Exception: sys.exit(4)
+          if str(user.get('role') or '').strip().lower()=='admin': sys.exit(5)
           before=json.loads(json.dumps(user))
           user['fullLibraries']=['MATHS_Y4_FULL','MATHS_Y5_FULL']
           user['upsellViews']=['english-year5','english-year6']
@@ -80,7 +79,7 @@ jobs:
           for field in ('fullLibraries','upsellViews','trialViews'):
               before_other.pop(field,None); after_other.pop(field,None)
           if before_other != after_other:
-              print('UNRELATED_FIELD_GUARD=false'); sys.exit(3)
+              print('UNRELATED_FIELD_GUARD=false'); sys.exit(6)
           open('/tmp/target-key','w').write(key)
           json.dump(before,open('/tmp/before.json','w'),separators=(',',':'))
           json.dump(user,open('/tmp/after.json','w'),separators=(',',':'))
