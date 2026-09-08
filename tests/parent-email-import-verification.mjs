@@ -1,18 +1,13 @@
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import {
   emailTypeForItem,
   prelessonSheetsFromRemarks,
   buildParentEmail,
   sendParentEmail,
   slideText,
-  SIGNATURE_CID
+  SIGNATURE_CID,
+  SIGNATURE_SOURCE_URL
 } from '../worker/src/parent-email.js';
-import {
-  FPT_EMAIL_SIGNATURE_CLEAN_BASE64,
-  FPT_EMAIL_SIGNATURE_BYTES,
-  FPT_EMAIL_SIGNATURE_SHA256
-} from '../worker/src/parent-email-signature-clean.js';
 import {
   normalYearFromCsv,
   normaliseLessonLabelForYear,
@@ -21,17 +16,13 @@ import {
   decoratePreview
 } from '../worker/src/admin-lesson-release-import-email.js';
 
-// Verify the signature bytes before any email can be shipped. This catches the
-// binary truncation/corruption that affected the earlier hosted image assets.
-const signatureBytes = Buffer.from(FPT_EMAIL_SIGNATURE_CLEAN_BASE64, 'base64');
-assert.equal(signatureBytes.length, FPT_EMAIL_SIGNATURE_BYTES);
-assert.equal(FPT_EMAIL_SIGNATURE_BYTES, 10606);
+// Production fetches this clean PNG server-side and then embeds the resulting
+// bytes as a CID image. Unit tests inject deterministic base64 so they never
+// depend on network access or manually copied image bytes.
 assert.equal(
-  crypto.createHash('sha256').update(signatureBytes).digest('hex'),
-  FPT_EMAIL_SIGNATURE_SHA256
+  SIGNATURE_SOURCE_URL,
+  'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline'
 );
-assert.equal(FPT_EMAIL_SIGNATURE_SHA256, '8444f6ba28a4ba94f7e815a2c5917c95999083454cec0407aa7aaf19f507470d');
-assert.deepEqual([...signatureBytes.subarray(0, 8)], [137,80,78,71,13,10,26,10]);
 
 // Normal Year 4/5/6 rows may arrive with L1/L2/L3 prefixes. The Year column,
 // not the supplied L-number, is authoritative for normal students.
@@ -168,8 +159,10 @@ assert.equal(preview.summary.emailEligible, 1);
 // Cloudflare Email Sending payload must use Sej as sender and Barkha as CC.
 // The only MIME attachment is the inline graphical signature; no lesson or
 // PreLesson worksheet file is attached.
+const TEST_SIGNATURE_BASE64 = 'dGVzdC1zaWduYXR1cmU=';
 const sentPayloads = [];
 const env = {
+  PARENT_EMAIL_SIGNATURE_BASE64: TEST_SIGNATURE_BASE64,
   EMAIL:{
     async send(payload) {
       sentPayloads.push(payload);
@@ -191,15 +184,16 @@ assert.equal(payload.attachments[0].filename, 'fpt-email-signature.png');
 assert.equal(payload.attachments[0].type, 'image/png');
 assert.equal(payload.attachments[0].disposition, 'inline');
 assert.equal(payload.attachments[0].contentId, 'fpt-email-signature-clean');
-assert.equal(payload.attachments[0].content, FPT_EMAIL_SIGNATURE_CLEAN_BASE64);
+assert.equal(payload.attachments[0].content, TEST_SIGNATURE_BASE64);
 
 // A delivery failure is reported as an email failure; it does not throw and
 // therefore cannot roll back a Portal entitlement already committed before send.
 const failed = await sendParentEmail({
+  PARENT_EMAIL_SIGNATURE_BASE64: TEST_SIGNATURE_BASE64,
   EMAIL:{ async send() { throw Object.assign(new Error('Synthetic delivery failure'), { code:'DELIVERY_FAILURE' }); } }
 }, completed);
 assert.equal(failed.ok, false);
 assert.equal(failed.status, 'DELIVERY_FAILURE');
 assert.match(failed.message, /Synthetic delivery failure/);
 
-console.log('Parent CSV email triggers, formatting, verified signature bytes, L-prefix normalisation and Cloudflare payload: PASS');
+console.log('Parent CSV email triggers, formatting, runtime signature loading, L-prefix normalisation and Cloudflare payload: PASS');
