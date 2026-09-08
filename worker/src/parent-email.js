@@ -4,7 +4,7 @@ const norm = value => clean(value).toLowerCase();
 const DEFAULT_FROM = 'sej@futureperfect.education';
 const DEFAULT_FROM_NAME = 'Sejal Dalal';
 const DEFAULT_CC = 'barkha@futureperfect.education';
-const SIGNATURE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png';
+const SIGNATURE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-v3.png';
 
 function onlineMode(value) {
   return clean(value).toUpperCase().includes('O');
@@ -78,7 +78,7 @@ function htmlShell(content) {
 ${content}
 <p style="margin:0 0 20px 0;">Warmly,</p>
 <p style="margin:0 0 24px 0;">Sej</p>
-<img src="${SIGNATURE_URL}" width="700" height="183" alt="Sejal Dalal — Future Perfect Tuitions" style="display:block;width:700px;max-width:100%;height:auto;border:0;">
+<img src="${SIGNATURE_URL}" width="600" alt="Sejal Dalal — Future Perfect Tuitions" style="display:block;width:600px;max-width:100%;height:auto;border:0;">
 </div>`;
 }
 
