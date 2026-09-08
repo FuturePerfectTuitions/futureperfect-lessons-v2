@@ -1,5 +1,3 @@
-import { FPT_EMAIL_SIGNATURE_CLEAN_BASE64 } from './parent-email-signature-clean.js';
-
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
@@ -8,6 +6,9 @@ const DEFAULT_FROM_NAME = 'Sejal Dalal';
 const DEFAULT_CC = 'barkha@futureperfect.education';
 const SIGNATURE_CID = 'fpt-email-signature-clean';
 const SIGNATURE_FILENAME = 'fpt-email-signature.png';
+const SIGNATURE_SOURCE_URL = 'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline';
+
+let signatureBase64Promise = null;
 
 function onlineMode(value) {
   return clean(value).toUpperCase().includes('O');
@@ -74,6 +75,44 @@ function slideText(value) {
   const rest = status.match(/\bslide\b.*$/i);
   if (!rest) return 'the marked slide';
   return rest[0].replace(/^slide\b/i, 'Slide');
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function isPng(bytes) {
+  return bytes.length >= 8 &&
+    bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 &&
+    bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10;
+}
+
+async function loadSignatureBase64(env = null) {
+  const override = clean(env?.PARENT_EMAIL_SIGNATURE_BASE64);
+  if (override) return override;
+
+  if (!signatureBase64Promise) {
+    signatureBase64Promise = (async () => {
+      const response = await fetch(SIGNATURE_SOURCE_URL, {
+        headers: { Accept:'image/png' }
+      });
+      if (!response.ok) throw new Error(`Signature image request failed with HTTP ${response.status}.`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length < 1000 || !isPng(bytes)) {
+        throw new Error('Signature image response is not a valid PNG.');
+      }
+      return bytesToBase64(bytes);
+    })().catch(error => {
+      signatureBase64Promise = null;
+      throw error;
+    });
+  }
+  return signatureBase64Promise;
 }
 
 function htmlShell(content) {
@@ -218,6 +257,21 @@ async function sendParentEmail(env, item) {
   const deliveredTo = testTo || intendedTo;
   const testMode = Boolean(testTo);
 
+  let signatureBase64 = '';
+  try {
+    signatureBase64 = await loadSignatureBase64(env);
+  } catch (error) {
+    return {
+      ok:false,
+      status:'EMAIL_SIGNATURE_LOAD_FAILED',
+      message:clean(error?.message) || 'Could not load the parent email signature image.',
+      testMode,
+      deliveredTo,
+      intendedTo,
+      intendedCc:ccEmail
+    };
+  }
+
   const payload = {
     from: { email:fromEmail, name:fromName },
     to: deliveredTo,
@@ -225,7 +279,7 @@ async function sendParentEmail(env, item) {
     html: built.html,
     text: built.text,
     attachments: [{
-      content:FPT_EMAIL_SIGNATURE_CLEAN_BASE64,
+      content:signatureBase64,
       filename:SIGNATURE_FILENAME,
       type:'image/png',
       disposition:'inline',
@@ -267,5 +321,7 @@ export {
   sendParentEmail,
   completedStatus,
   slideText,
-  SIGNATURE_CID
+  loadSignatureBase64,
+  SIGNATURE_CID,
+  SIGNATURE_SOURCE_URL
 };
