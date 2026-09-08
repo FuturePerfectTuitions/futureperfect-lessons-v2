@@ -46,8 +46,8 @@ jobs:
           const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
           const auth = { Authorization: `Bearer ${token}` };
 
+          const DISPLAY_ID = 'Y6T1E05';
           const TARGET = 'cOQj2znwz7j';
-          const PLACEHOLDER = 'cO1Zionu8NC';
           const description = [
             'In this Year 6 English lesson, students explore how layout devices organise information and help readers navigate non-fiction texts, with a particular focus on headings, subheadings, columns, bullet points and tables.',
             '',
@@ -95,27 +95,28 @@ jobs:
           }
 
           function guardLesson(r) {
-            if (r?.lessonId !== 'Y6E5') throw new Error(`Y6E5 identity mismatch: ${r?.lessonId}`);
-            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y6E5 state mismatch');
-            if (!Object.values(r?.displayIds || {}).includes('Y6T1E05')) throw new Error('Y6E5 display ID mismatch');
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y6T1E05 state mismatch');
+            if (!Object.values(r?.displayIds || {}).includes(DISPLAY_ID)) throw new Error(`Display ID mismatch for ${r?.lessonId}`);
             const title = String(r?.title || '').toLowerCase();
-            if (!title.includes('layout') || !title.includes('device')) throw new Error(`Y6E5 title guard failed: ${r?.title}`);
-            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y6E5 core.video missing');
+            if (!title.includes('layout') || !title.includes('device')) throw new Error(`Y6T1E05 title guard failed: ${r?.title}`);
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y6T1E05 core.video missing');
           }
 
           (async () => {
             const curriculum = await getJson('curriculum:ENGLISH_Y6');
             if (curriculum?.curriculumCode !== 'ENGLISH_Y6') throw new Error('ENGLISH_Y6 curriculum identity mismatch');
-            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.includes('Y6E5')) {
-              throw new Error('ENGLISH_Y6 does not contain Y6E5');
-            }
+            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.length) throw new Error('ENGLISH_Y6 lessonIds missing');
 
-            const before = await getJson('lesson:Y6E5');
-            guardLesson(before);
-            const currentScreenPal = before?.core?.video?.screenpal ?? null;
-            if (![null, PLACEHOLDER, TARGET].includes(currentScreenPal)) {
-              throw new Error(`Y6E5 has an unexpected existing ScreenPal video: ${currentScreenPal}`);
+            const matches = [];
+            for (const lessonId of curriculum.lessonIds) {
+              const rec = await getJson(`lesson:${lessonId}`);
+              if (Object.values(rec?.displayIds || {}).includes(DISPLAY_ID)) matches.push(rec);
             }
+            if (matches.length !== 1) throw new Error(`Expected exactly one ${DISPLAY_ID} lesson; found ${matches.length}`);
+
+            const before = matches[0];
+            guardLesson(before);
+            const lessonKey = `lesson:${before.lessonId}`;
 
             const next = JSON.parse(JSON.stringify(before));
             next.description = description;
@@ -127,11 +128,11 @@ jobs:
               ownerConfirmedPending: false
             };
 
-            await putJson('lesson:Y6E5', next);
+            await putJson(lessonKey, next);
 
             let verified;
             for (let attempt = 1; attempt <= 6; attempt++) {
-              verified = await getJson('lesson:Y6E5');
+              verified = await getJson(lessonKey);
               const ok = verified?.core?.video?.screenpal === TARGET &&
                 verified?.description === description &&
                 verified?.contentStatus?.description === 'available' &&
@@ -142,13 +143,13 @@ jobs:
             }
 
             guardLesson(verified);
-            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y6E5 ScreenPal verification failed');
-            if (verified?.description !== description) throw new Error('Y6E5 description verification failed');
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y6T1E05 ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Y6T1E05 description verification failed');
             if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
-              throw new Error('Y6E5 content status verification failed');
+              throw new Error('Y6T1E05 content status verification failed');
             }
 
-            console.log('Y6E5_VERIFIED=' + JSON.stringify({
+            console.log('Y6T1E05_VERIFIED=' + JSON.stringify({
               lessonId: verified.lessonId,
               displayId: verified.displayIds['english-year6'],
               title: verified.title,
