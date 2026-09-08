@@ -1,0 +1,1 @@
+2026-09-08 Riaan1808 login-gate diagnostic. Read-only Cloudflare audit only; verify live ENVIRONMENT, STUDENT_LOGIN_ENABLED, DEV_LOGIN_ALLOWLIST and bindings. No Cloudflare writes or deploys.
