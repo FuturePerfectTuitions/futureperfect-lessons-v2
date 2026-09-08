@@ -1,0 +1,60 @@
+name: Audit online Year 6 batch definition
+
+on:
+  push:
+    branches: [ops/zara-entitlement-20260908]
+    paths:
+      - '.github/workflows/ops-batch-definition-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Resolve production D1
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          DBID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id // empty)' /tmp/settings.json | head -n1)"
+          test -n "$DBID" && test "$DBID" != null
+          echo "dbid=$DBID" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_GUARD=true'
+
+      - name: Inspect non-student batch schema and Year 6 definitions
+        env:
+          DB_ID: ${{ steps.guard.outputs.dbid }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; db=os.environ['DB_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          def q(sql,params=[]):
+              req=urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db}/query',data=json.dumps({'sql':sql,'params':params}).encode(),headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'},method='POST')
+              with urllib.request.urlopen(req,timeout=30) as r: body=json.load(r)
+              if not body.get('success'): raise SystemExit(2)
+              return ((body.get('result') or [{}])[0].get('results') or [])
+          schema=q('PRAGMA table_info(batch_definitions)')
+          defs=q("SELECT * FROM batch_definitions WHERE school_year=6 OR batch_key IN ('Y6OE','Y6EO','Y6E') ORDER BY batch_key")
+          safe_schema=[{'name':r.get('name'),'type':r.get('type'),'notnull':r.get('notnull'),'dflt_value':r.get('dflt_value'),'pk':r.get('pk')} for r in schema]
+          safe_defs=[]
+          for r in defs:
+              safe_defs.append({k:v for k,v in r.items() if k in {'batch_key','subject','school_year','stream','maths_level','active_from','active_to'}})
+          print('BATCH_SCHEMA=' + json.dumps(safe_schema,separators=(',',':')))
+          print('Y6_DEFINITIONS=' + json.dumps(safe_defs,separators=(',',':')))
+          print('BATCH_DEFINITION_AUDIT=true')
+          PY
