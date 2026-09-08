@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change19-admin-fast.js"
+main = "src/index-phase20-change20-configured-upsell.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -9,113 +9,21 @@ ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futur
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
-# Canonical Portal V2 production entrypoint. Change 19 is a narrow authenticated
-# Admin performance wrapper. For view-scoped Admin GET requests it first proves
-# the session is the server-side Admin superuser, then supplies a request-local
-# performance marker so Change 16 can skip its redundant /home preview probe.
-# This prevents a single Year/Level lesson list or resource request from forcing
-# the entire Admin Full Library catalogue to be rebuilt first. Ordinary student,
-# trial and demo traffic is delegated unchanged to the existing Change 18 chain.
+# Canonical Portal V2 production entrypoint.
+# Change 20 adds explicit, profile-configured locked upsell views through
+# `upsellViews`. When that field is present, those views are the student's exact
+# upsell set: they are visible immediately, even before a counterpart lesson or
+# batch release exists, and their lesson catalogues/descriptions are browseable
+# while every resource remains locked. An explicit empty array means no upsells.
+# Profiles without `upsellViews` retain the existing automatic cross-subject
+# preview behaviour for backwards compatibility.
 #
-# Change 18 remains the Admin-superuser access layer. It delegates all normal
-# student traffic to the parent-email/fast-navigation production chain unchanged,
-# but elevates the authenticated `admin` Portal User ID to server-side superuser
-# access across all current Maths, English, 11+, VR and special-resource libraries.
-# Protected Answer Packs are exposed to this authenticated superuser without the
-# student Answer Pack password gate. Normal student, trial and demo accounts remain
-# on the existing entitlement and protected-resource paths.
+# Change 20 delegates all non-upsell behaviour to Change 19. Change 19 retains
+# the authenticated Admin fast path, Change 18 retains Admin superuser access,
+# and the underlying Change 17/16 chain retains student navigation, Full Library,
+# trial, batch, lesson-release, PreLesson-only, Answer Pack and resource controls.
 #
-# The parent-email wrapper remains underneath and delegates student traffic through
-# the lightweight Change 17 navigation wrapper before the existing Change 16
-# access-control chain. Student catalogue-list responses are repaired by the live
-# Drive/KV catalogue overlay so retired lessons cannot reappear and current display
-# IDs remain authoritative.
-#
-# Fast navigation reads only the student profile, D1 access/navigation rows and
-# the small set of authoritative live curriculum records. It does not build every
-# lesson/detail resource before a student can enter Maths or English.
-#
-# Change 16 restricts cross-subject upsell previews to subjects in which the
-# student has no actual entitlement. Its Admin-only fast-path bypass is safe because
-# Change 19 authenticates the superuser before setting the request-local marker.
-#
-# Change 15 fixes Maths 11+ navigation presentation: students with 11+ Maths access
-# see L1/L2/L3 rather than normal Year 4/5/6 aliases for the same curricula.
-# Normal Year 2/3 and normal non-11+ navigation remain unchanged.
-#
-# Change 14 adds the Year 4 11+ Maths import baseline: a Y411 Maths CSV row carries
-# full Level 1 access for that student, while the original row continues to control
-# the current Level 2 lesson release. The baseline is derived from the authoritative
-# MATHS_L1 curriculum in LESSONS_KV and is idempotent through existing entitlements.
-#
-# Change 13 fixes cross-subject preview catalogue population when the repository
-# contains the deliberate null Phase 11 manifest. Preview lesson identity/order/
-# title/description is read from the live LESSONS_KV curriculum + lesson records,
-# matching the existing Phase 11 fail-safe model. This is presentation-only: it
-# does not write KV/D1 and does not grant resources.
-#
-# Change 12 derives the unenrolled-subject preview from the student's actual
-# visible Year/Level views returned by the underlying Portal, rather than from one
-# particular entitlement source. Change 16 constrains those previews to a wholly
-# unenrolled target subject.
-#
-# Change 11 wraps Change 10 and makes an explicit Full Library enrolment
-# participate in the older cross-subject preview discovery path even when there
-# is no matching active D1 batch assignment. It remains in the chain for backwards
-# compatibility, but Change 12 no longer depends on that source.
-#
-# Change 10 wraps Change 9 and verifies that an imported PRELESSON_ONLY release
-# actually has at least one usable PreLesson resource before it is presented as
-# clickable/available. Empty PreLesson releases stay visible for information as
-# "No PreLesson Sheets" but are not openable.
-#
-# Change 9 normalises every student-facing 11+ Year/Level label to one convention.
-# Change 15 supersedes the Maths level wording specifically with L1/L2/L3.
-#
-# Change 8 surfaces imported FULL / Online PreLesson-only lesson access in the
-# correct student year/11+ navigation view without depending on the D1 batch roster.
-# Existing Phase 18/19 resource gates remain authoritative: PreLesson-only access
-# exposes only allowed PreLesson downloads; video, homework and Answer Packs stay
-# locked until FULL access exists for non-superuser accounts.
-#
-# Change 7 remains responsible for the Year 6 Maths SATS student/workbook alias
-# resolver: Y6MS1-Y6MS19 map to immutable canonical lesson keys Y6M51-Y6M69.
-# The canonical keys remain entitlement/content identities.
-#
-# Online PreLesson rule remains unchanged: selected rows for Batch IDs containing
-# O may grant PreLesson-only access before completion; full lesson access comes
-# only from a Completed import. There is no date/time automatic promotion.
-#
-# Trial Portal User IDs are recognised by the Trial prefix, except IDs beginning
-# admintrial, which are deliberately exempt from the Trial rule and use their
-# normal/admin-configured entitlements. Trial views are stored as trialViews.
-# A Trial ID can complete only its first successful login; later logins are
-# rejected. Trial access exposes full lesson descriptions and lesson videos only.
-#
-# Student sessions are bound to a per-window token supplied by the published
-# frontend. A fresh browser window without that token cannot reuse an existing
-# session cookie and must authenticate again.
-#
-# Students who are completely unenrolled in the counterpart subject may browse
-# the corresponding locked catalogue for their visible Year/Level programme.
-# Full lesson descriptions are visible, while all lesson resources remain
-# server-side locked unless an independent entitlement already grants access.
-#
-# Year 6 Maths SATS lessons appear at the end of the normal Year 6 Maths list as
-# Y6MS1-Y6MS19. Their ordinary resource model is unchanged: PreLesson Sheets,
-# Homework and password-protected Answer Packs use the existing lesson gates for
-# non-superuser accounts.
-#
-# Production login remains governed by the inherited Phase 17 guard: login is
-# available only when STUDENT_LOGIN_ENABLED is true AND the normalised username
-# is present in the Cloudflare-managed PROD_LOGIN_ALLOWLIST.
-# The production allowlist is deliberately not committed to this public repo.
-#
-# Excel sync still requires the dedicated EXCEL_SYNC_TOKEN Worker secret. The
-# secret is deliberately not present in this file or any repository source.
-#
-# Passwords, Answer Pack passwords, private student records, production student
-# allowlists and Cloudflare credential values are never committed in plaintext.
-# Production deployment must preserve the existing audited Students KV,
-# Lessons KV, D1, R2 and parent-email bindings; exact binding identifiers remain
-# Cloudflare-managed rather than source data.
+# Production bindings and secrets remain Cloudflare-managed. `keep_vars = true`
+# is required so deploys preserve existing KV, D1, R2 and secret bindings.
+# Passwords, Answer Pack passwords, private student records, production allowlists
+# and Cloudflare credential values must never be committed to this repository.
