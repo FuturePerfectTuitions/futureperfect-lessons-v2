@@ -1,6 +1,7 @@
 import { VIEW_CURRICULA } from './phase11-navigation-cache.js';
 
 const LIVE_STUDENT_CATALOGUE_OVERLAY_MARKER = 'LIVE_STUDENT_CATALOGUE_OVERLAY_V1';
+const LIVE_HOME_COUNTS_AUTHORITY_MARKER = 'LIVE_HOME_COUNTS_AUTHORITY_V1';
 const PRELESSON_MESSAGE = 'Only PreLesson Sheets are available before the lesson. Other resources will unlock once the lesson starts.';
 
 const clean = value => String(value ?? '').trim();
@@ -275,15 +276,72 @@ function pathViewId(url) {
   try { return norm(decodeURIComponent(match[1])); } catch { return ''; }
 }
 
+function safeCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+async function repairHomeCatalogueCounts(body, env) {
+  if (!Array.isArray(body?.subjects)) return false;
+  const views = [];
+  for (const subject of body.subjects) {
+    for (const view of Array.isArray(subject?.views) ? subject.views : []) {
+      if (clean(view?.viewId)) views.push(view);
+    }
+  }
+  if (!views.length) return false;
+
+  let changed = false;
+  await Promise.all(views.map(async view => {
+    const live = await liveCatalogueForView(env, view.viewId);
+    if (!live.length) return;
+
+    const visible = live.length;
+    const priorOpen = safeCount(view.openLessonCount);
+    const priorLocked = safeCount(view.lockedLessonCount);
+    let open = null;
+
+    // The underlying entitlement pipeline remains authoritative for how many
+    // lessons are open. This outer layer only reconciles that count against the
+    // current live curriculum membership so retired catalogue rows cannot remain
+    // as phantom locked lessons on the subject/year card.
+    if (priorOpen !== null) {
+      open = Math.min(visible, priorOpen);
+    } else if (priorLocked !== null) {
+      open = Math.max(0, visible - Math.min(visible, priorLocked));
+    }
+    if (open === null) return;
+
+    const locked = Math.max(0, visible - open);
+    if (
+      safeCount(view.visibleLessonCount) !== visible ||
+      safeCount(view.openLessonCount) !== open ||
+      safeCount(view.lockedLessonCount) !== locked
+    ) changed = true;
+
+    view.catalogueAvailable = true;
+    view.visibleLessonCount = visible;
+    view.openLessonCount = open;
+    view.lockedLessonCount = locked;
+  }));
+
+  return changed;
+}
+
 async function repairLiveStudentCatalogueResponse(request, env, ctx, response, baseFetch) {
   try {
     if (request.method !== 'GET' || !response?.ok) return response;
     const url = new URL(request.url);
-    const viewId = pathViewId(url);
-    if (!viewId) return response;
-
     const body = await response.clone().json().catch(() => null);
-    if (!body?.ok || !Array.isArray(body.lessons)) return response;
+    if (!body?.ok) return response;
+
+    if (url.pathname === '/api/v1/student/home') {
+      const changed = await repairHomeCatalogueCounts(body, env);
+      return changed ? responseLike(response, body) : response;
+    }
+
+    const viewId = pathViewId(url);
+    if (!viewId || !Array.isArray(body.lessons)) return response;
 
     const live = await liveCatalogueForView(env, viewId);
     if (!live.length) return response;
@@ -310,11 +368,13 @@ async function repairLiveStudentCatalogueResponse(request, env, ctx, response, b
 
 export {
   LIVE_STUDENT_CATALOGUE_OVERLAY_MARKER,
+  LIVE_HOME_COUNTS_AUTHORITY_MARKER,
   lessonIdsFromCurriculum,
   displayLessonId,
   studentTitle,
   fullLibraryForView,
   entitlementMatchesView,
   liveCatalogueForView,
+  repairHomeCatalogueCounts,
   repairLiveStudentCatalogueResponse
 };
