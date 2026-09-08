@@ -30,7 +30,7 @@ assert.equal(
   'https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/sej-email-signature-clean.png?v=20260908-inline'
 );
 const signatureAsset = Buffer.from(FPT_EMAIL_SIGNATURE_CLEAN_BASE64, 'base64');
-assert.equal(FPT_EMAIL_SIGNATURE_BYTES, 10606);
+assert.equal(FPT_EMAIL_SIGNATURE_BYTES, 10570);
 assert.equal(signatureAsset.length, FPT_EMAIL_SIGNATURE_BYTES);
 assert.deepEqual([...signatureAsset.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.equal(signatureAsset.readUInt32BE(16), 600);
