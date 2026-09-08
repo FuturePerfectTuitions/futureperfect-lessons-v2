@@ -56,19 +56,10 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
   printf '\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "%s"\n' "$LESSONS"
   printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$R2"
   printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
-  if grep -Fq '[[send_email]]' "$WORKER_CONFIG_FILE"; then
-    printf '\n[[send_email]]\nname = "EMAIL"\n'
-  fi
 } > worker/wrangler.runtime-preserve.toml
 
 grep -Fq "main = \"$WORKER_ENTRYPOINT\"" worker/wrangler.runtime-preserve.toml
-if grep -Fq '[[send_email]]' "$WORKER_CONFIG_FILE"; then
-  grep -Fq 'name = "EMAIL"' worker/wrangler.runtime-preserve.toml
-fi
 npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-preserve.toml --keep-vars --message "${DEPLOY_MESSAGE:-Portal V2 production update}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings-after.json
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-after.json >/tmp/fpt-secrets-after.json
 cmp -s /tmp/fpt-secrets-before.json /tmp/fpt-secrets-after.json
-if grep -Fq '[[send_email]]' "$WORKER_CONFIG_FILE"; then
-  jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-worker-settings-after.json >/dev/null
-fi
