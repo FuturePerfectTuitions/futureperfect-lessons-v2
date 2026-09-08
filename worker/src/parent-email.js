@@ -120,6 +120,81 @@ async function loadSignatureBytes(env = null) {
   return signatureBytesPromise;
 }
 
+function utf8Base64(value) {
+  return bytesToBase64(new TextEncoder().encode(String(value ?? '')));
+}
+
+function wrapBase64(value, width = 76) {
+  const text = String(value || '');
+  if (!text) return '';
+  const lines = [];
+  for (let i = 0; i < text.length; i += width) lines.push(text.slice(i, i + width));
+  return lines.join('\r\n');
+}
+
+function safeHeader(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+}
+
+function mimeBoundary(prefix) {
+  const id = crypto.randomUUID().replace(/-/g, '');
+  return `${prefix}_${id}`;
+}
+
+function buildRawMime({ fromEmail, fromName, toEmail, ccEmail = '', subject, html, text, signatureBytes }) {
+  const relatedBoundary = mimeBoundary('fpt_related');
+  const alternativeBoundary = mimeBoundary('fpt_alt');
+  const imageBase64 = wrapBase64(bytesToBase64(signatureBytes));
+  const textBase64 = wrapBase64(utf8Base64(text));
+  const htmlBase64 = wrapBase64(utf8Base64(html));
+  const lines = [
+    `From: ${safeHeader(fromName)} <${safeHeader(fromEmail)}>`,
+    `To: ${safeHeader(toEmail)}`,
+    ...(ccEmail ? [`Cc: Barkha <${safeHeader(ccEmail)}>`] : []),
+    `Subject: ${safeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+    '',
+    `--${relatedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    '',
+    `--${alternativeBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    textBase64,
+    '',
+    `--${alternativeBoundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    htmlBase64,
+    '',
+    `--${alternativeBoundary}--`,
+    '',
+    `--${relatedBoundary}`,
+    `Content-Type: image/png; name="${SIGNATURE_FILENAME}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-ID: <${SIGNATURE_CID}>`,
+    `X-Attachment-Id: ${SIGNATURE_CID}`,
+    `Content-Disposition: inline; filename="${SIGNATURE_FILENAME}"`,
+    '',
+    imageBase64,
+    '',
+    `--${relatedBoundary}--`,
+    ''
+  ];
+  return lines.join('\r\n');
+}
+
+async function createRawEmailMessage(env, fromEmail, envelopeTo, rawMime) {
+  if (typeof env?.__EMAIL_MESSAGE_FACTORY === 'function') {
+    return env.__EMAIL_MESSAGE_FACTORY(fromEmail, envelopeTo, rawMime);
+  }
+  const { EmailMessage } = await import('cloudflare:email');
+  return new EmailMessage(fromEmail, envelopeTo, rawMime);
+}
+
 function htmlShell(content) {
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.45;color:#111111;">
 ${content}
@@ -277,28 +352,31 @@ async function sendParentEmail(env, item) {
     };
   }
 
-  const payload = {
-    from: { email:fromEmail, name:fromName },
-    to: deliveredTo,
-    subject: built.subject,
-    html: built.html,
-    text: built.text,
-    attachments: [{
-      content:signatureBytes,
-      filename:SIGNATURE_FILENAME,
-      type:'image/png',
-      disposition:'inline',
-      contentId:SIGNATURE_CID
-    }]
-  };
-  if (!testMode) payload.cc = { email:ccEmail, name:'Barkha' };
+  const rawMime = buildRawMime({
+    fromEmail,
+    fromName,
+    toEmail:deliveredTo,
+    ccEmail:testMode ? '' : ccEmail,
+    subject:built.subject,
+    html:built.html,
+    text:built.text,
+    signatureBytes
+  });
+  const envelopeRecipients = testMode ? [deliveredTo] : [intendedTo, ccEmail];
 
   try {
-    const response = await env.EMAIL.send(payload);
+    const messageIds = [];
+    for (const envelopeTo of envelopeRecipients) {
+      const message = await createRawEmailMessage(env, fromEmail, envelopeTo, rawMime);
+      const response = await env.EMAIL.send(message);
+      const id = clean(response?.messageId);
+      if (id) messageIds.push(id);
+    }
     return {
       ok:true,
       status:'SENT',
-      messageId:clean(response?.messageId),
+      messageId:messageIds[0] || '',
+      messageIds,
       subject:built.subject,
       testMode,
       deliveredTo,
@@ -327,6 +405,7 @@ export {
   completedStatus,
   slideText,
   loadSignatureBytes,
+  buildRawMime,
   SIGNATURE_CID,
   SIGNATURE_SOURCE_URL
 };
