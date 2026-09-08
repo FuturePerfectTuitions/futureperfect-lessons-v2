@@ -36,7 +36,8 @@ assert.equal(payloads.length, 1);
 assert.equal(payloads[0].to, 'sejal.mail@gmail.com');
 assert.equal('cc' in payloads[0], false, 'Test mode must not send a copy to Barkha');
 assert.equal(payloads[0].subject, 'Upcoming Lesson for Annisha and the worksheets to be printed before the next session on 7th September 2026.');
-assert.equal(payloads[0].attachments[0].content_id, 'fpt-email-signature-clean');
-assert.equal(payloads[0].attachments[0].content, 'dGVzdC1zaWduYXR1cmU=');
+assert.equal(payloads[0].attachments[0].contentId, 'fpt-email-signature-clean');
+assert.ok(payloads[0].attachments[0].content instanceof ArrayBuffer);
+assert.equal(new TextDecoder().decode(new Uint8Array(payloads[0].attachments[0].content)), 'test-signature');
 
 console.log('Parent email test routing sends only to Sejal personal Gmail and preserves intended recipients in result metadata: PASS');
