@@ -182,9 +182,10 @@ assert.equal(payload.attachments.length, 1);
 assert.equal(payload.attachments[0].filename, 'fpt-email-signature.png');
 assert.equal(payload.attachments[0].type, 'image/png');
 assert.equal(payload.attachments[0].disposition, 'inline');
-assert.equal(payload.attachments[0].content_id, 'fpt-email-signature-clean');
-assert.equal('contentId' in payload.attachments[0], false);
-assert.equal(payload.attachments[0].content, TEST_SIGNATURE_BASE64);
+assert.equal(payload.attachments[0].contentId, 'fpt-email-signature-clean');
+assert.equal('content_id' in payload.attachments[0], false);
+assert.ok(payload.attachments[0].content instanceof ArrayBuffer);
+assert.equal(new TextDecoder().decode(new Uint8Array(payload.attachments[0].content)), 'test-signature');
 
 // A delivery failure is reported as an email failure; it does not throw and
 // therefore cannot roll back a Portal entitlement already committed before send.
@@ -196,4 +197,4 @@ assert.equal(failed.ok, false);
 assert.equal(failed.status, 'DELIVERY_FAILURE');
 assert.match(failed.message, /Synthetic delivery failure/);
 
-console.log('Parent CSV email triggers, formatting, runtime signature loading, documented content_id linkage, L-prefix normalisation and Cloudflare delivery: PASS');
+console.log('Parent CSV email triggers, formatting, runtime signature loading, Workers contentId linkage, L-prefix normalisation and Cloudflare delivery: PASS');

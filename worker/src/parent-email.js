@@ -284,11 +284,11 @@ async function sendParentEmail(env, item) {
     html:built.html,
     text:built.text,
     attachments:[{
-      content:bytesToBase64(signatureBytes),
+      content:signatureBytes.buffer.slice(signatureBytes.byteOffset, signatureBytes.byteOffset + signatureBytes.byteLength),
       filename:SIGNATURE_FILENAME,
       type:'image/png',
       disposition:'inline',
-      content_id:SIGNATURE_CID
+      contentId:SIGNATURE_CID
     }]
   };
   if (!testMode) payload.cc = { email:ccEmail, name:'Barkha' };
