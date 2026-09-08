@@ -1,0 +1,71 @@
+name: Temporary Workers contentId parent signature fix
+
+on:
+  push:
+    branches: [fix/email-signature-workers-contentid]
+    paths:
+      - '.github/workflows/tmp-fix-parent-signature-workers-contentid.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/email-signature-workers-contentid
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply Workers inline-image schema fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('worker/src/parent-email.js')
+          s=p.read_text()
+          old="""      content:bytesToBase64(signatureBytes),\n      filename:SIGNATURE_FILENAME,\n      type:'image/png',\n      disposition:'inline',\n      content_id:SIGNATURE_CID\n"""
+          new="""      content:signatureBytes.buffer.slice(signatureBytes.byteOffset, signatureBytes.byteOffset + signatureBytes.byteLength),\n      filename:SIGNATURE_FILENAME,\n      type:'image/png',\n      disposition:'inline',\n      contentId:SIGNATURE_CID\n"""
+          if old not in s:
+              raise SystemExit('parent-email attachment block not found')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('tests/parent-email-import-verification.mjs')
+          t=p.read_text()
+          t=t.replace("assert.equal(payload.attachments[0].content_id, 'fpt-email-signature-clean');\nassert.equal('contentId' in payload.attachments[0], false);\nassert.equal(payload.attachments[0].content, TEST_SIGNATURE_BASE64);",
+                      "assert.equal(payload.attachments[0].contentId, 'fpt-email-signature-clean');\nassert.equal('content_id' in payload.attachments[0], false);\nassert.ok(payload.attachments[0].content instanceof ArrayBuffer);\nassert.equal(new TextDecoder().decode(new Uint8Array(payload.attachments[0].content)), 'test-signature');")
+          t=t.replace("documented content_id linkage", "Workers contentId linkage")
+          p.write_text(t)
+
+          p=Path('tests/parent-email-test-routing-verification.mjs')
+          t=p.read_text()
+          t=t.replace("assert.equal(payloads[0].attachments[0].content_id, 'fpt-email-signature-clean');\nassert.equal(payloads[0].attachments[0].content, 'dGVzdC1zaWduYXR1cmU=');",
+                      "assert.equal(payloads[0].attachments[0].contentId, 'fpt-email-signature-clean');\nassert.ok(payloads[0].attachments[0].content instanceof ArrayBuffer);\nassert.equal(new TextDecoder().decode(new Uint8Array(payloads[0].attachments[0].content)), 'test-signature');")
+          p.write_text(t)
+          PY
+      - name: Verify Workers inline image regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/parent-email.js
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          grep -Fq 'contentId:SIGNATURE_CID' worker/src/parent-email.js
+          ! grep -Fq 'content_id:SIGNATURE_CID' worker/src/parent-email.js
+          grep -Fq 'signatureBytes.buffer.slice' worker/src/parent-email.js
+          npx --yes wrangler@4.125.0 deploy --dry-run --config worker/wrangler.toml --outdir /tmp/fpt-workers-contentid-build
+          echo WORKERS_CONTENTID_INLINE_IMAGE_REGRESSION_PASS
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/parent-email.js tests/parent-email-import-verification.mjs tests/parent-email-test-routing-verification.mjs
+          git commit -m 'Use Workers contentId for inline signature image'
+          git push origin HEAD:fix/email-signature-workers-contentid
