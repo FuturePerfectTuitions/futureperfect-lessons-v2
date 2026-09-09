@@ -40,6 +40,7 @@ STUDENTS="$(field STUDENTS_KV kv_namespace namespace_id)"
 LESSONS="$(field LESSONS_KV kv_namespace namespace_id)"
 DBID="$(field DB d1 id)"
 R2="$(field MATERIALS_R2 r2_bucket bucket_name)"
+PARENT_EMAIL_TEST_TO="$(plain PARENT_EMAIL_TEST_TO)"
 for value in "$STUDENTS" "$LESSONS" "$DBID" "$R2"; do test -n "$value"; done
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-secrets-before.json >/dev/null 2>&1 || true
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings.json >/tmp/fpt-secrets-before.json
@@ -52,6 +53,12 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
   printf 'DEV_LOGIN_ALLOWLIST = "%s"\n' "$(plain DEV_LOGIN_ALLOWLIST)"
   printf 'PROD_LOGIN_ALLOWLIST = "%s"\n' "$(plain PROD_LOGIN_ALLOWLIST)"
   printf 'STUDENT_LOGIN_ENABLED = "%s"\n' "$(plain STUDENT_LOGIN_ENABLED)"
+  printf 'PARENT_EMAIL_TEST_TO = "%s"\n' "$PARENT_EMAIL_TEST_TO"
+  # Email Sending is a Worker binding, not a plain var. Wrangler deploys replace
+  # non-secret bindings from the generated config, so every production deploy
+  # must explicitly carry EMAIL forward. Omitting this binding causes the admin
+  # importer to report EMAIL_SENDING_NOT_CONFIGURED even though email code exists.
+  printf '\n[[send_email]]\nname = "EMAIL"\n'
   printf '\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "%s"\n' "$STUDENTS"
   printf '\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "%s"\n' "$LESSONS"
   printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$R2"
@@ -59,7 +66,12 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 } > worker/wrangler.runtime-preserve.toml
 
 grep -Fq "main = \"$WORKER_ENTRYPOINT\"" worker/wrangler.runtime-preserve.toml
+grep -Fq '[[send_email]]' worker/wrangler.runtime-preserve.toml
+grep -Fq 'name = "EMAIL"' worker/wrangler.runtime-preserve.toml
 npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-preserve.toml --keep-vars --message "${DEPLOY_MESSAGE:-Portal V2 production update}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings-after.json
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-after.json >/tmp/fpt-secrets-after.json
 cmp -s /tmp/fpt-secrets-before.json /tmp/fpt-secrets-after.json
+jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-worker-settings-after.json >/dev/null
+jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/fpt-worker-settings-after.json >/dev/null
+echo 'PRODUCTION_BINDINGS_PRESERVED_WITH_EMAIL'
