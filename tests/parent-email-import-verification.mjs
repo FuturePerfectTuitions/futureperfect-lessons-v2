@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import {
   emailTypeForItem,
+  continuingLessonFromRemarks,
   prelessonSheetsFromRemarks,
   buildParentEmail,
   sendParentEmail,
@@ -108,6 +109,37 @@ assert.equal(emailTypeForItem({ lessonStatus:'Not Completed', batchKey:'Y5FM' })
 assert.equal(emailTypeForItem({ lessonStatus:'Slide 9', batchKey:'Y5FM' }), 'ONGOING');
 assert.equal(emailTypeForItem({ lessonStatus:'something COMPLETED today', batchKey:'Y5FM' }), 'COMPLETED');
 
+// A Ready online row with "Start from ..." is a continuation of the previous
+// session. It must not require a new PreLesson-Sheets remark or trigger another
+// upcoming parent email; the Portal release itself must remain valid.
+assert.equal(continuingLessonFromRemarks('Start from 10'), true);
+assert.equal(continuingLessonFromRemarks('Start from slide 16'), true);
+assert.equal(continuingLessonFromRemarks('Continue from page 4'), true);
+assert.equal(continuingLessonFromRemarks('PreLesson Sheets to be printed'), false);
+const continuingRow = {
+  ...upcomingRow,
+  LessonDated:'14th September 2026',
+  Remarks:'Start from 10'
+};
+const continuing = emailItemFromRow(continuingRow, 3);
+assert.equal(continuing.emailType, '');
+const continuingPreview = decoratePreview({
+  ok:true,
+  results:[{
+    index:0,
+    ok:true,
+    action:'ALREADY_PRELESSON',
+    portalUserId:'Ann3009',
+    lessonLabel:'Y5T1E01 Descriptive Writing Settings and Atmosphere'
+  }],
+  summary:{ total:1, releasable:1, skipped:0, errors:0 }
+}, [normaliseCsvInputRow(continuingRow)], null);
+assert.equal(continuingPreview.results[0].ok, true);
+assert.equal(continuingPreview.results[0].action, 'ALREADY_PRELESSON');
+assert.equal(continuingPreview.results[0].emailAction, 'NO_EMAIL');
+assert.equal(continuingPreview.summary.errors, 0);
+assert.equal(continuingPreview.summary.emailEligible, 0);
+
 assert.equal(prelessonSheetsFromRemarks('VR Sheets to be printed'), true);
 assert.equal(prelessonSheetsFromRemarks('PreLesson Sheets to be printed'), true);
 assert.equal(prelessonSheetsFromRemarks('For this session, there are no PreLesson Sheets to be printed'), false);
@@ -208,4 +240,4 @@ assert.equal(failed.ok, false);
 assert.equal(failed.status, 'DELIVERY_FAILURE');
 assert.match(failed.message, /Synthetic delivery failure/);
 
-console.log('Parent CSV email triggers, formatting, locked clean signature bytes, Workers contentId linkage, L-prefix normalisation and Cloudflare delivery: PASS');
+console.log('Parent CSV email triggers, continuation handling, formatting, locked clean signature bytes, Workers contentId linkage, L-prefix normalisation and Cloudflare delivery: PASS');
