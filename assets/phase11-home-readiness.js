@@ -3,10 +3,14 @@
 
   const downstreamFetch = window.fetch.bind(window);
   const HOME_TTL_MS = 5000;
+  const PREFETCH_REUSE_WAIT_MS = 1200;
+  const HOME_REQUEST_TIMEOUT_MS = 7000;
+  const HOME_RETRY_DELAY_MS = 250;
   const holder = document.getElementById('phase7-message');
   const LOADING_MESSAGE = 'Loading your curriculum… Please wait.';
   let homePromise = null;
   let homeExpiresAt = 0;
+  let homeAbortController = null;
   let homeReady = false;
   let bootstrapSessionPromise = null;
 
@@ -33,9 +37,13 @@
     holder.hidden = true;
   }
 
-  function clearHomeCache({ resetReady = false } = {}) {
+  function clearHomeCache({ resetReady = false, abort = false } = {}) {
+    if (abort && homeAbortController) {
+      try { homeAbortController.abort(); } catch (_) {}
+    }
     homePromise = null;
     homeExpiresAt = 0;
+    homeAbortController = null;
     if (resetReady) homeReady = false;
   }
 
@@ -43,17 +51,11 @@
     bootstrapSessionPromise = null;
   }
 
-  function rememberHomeRequest(promise) {
+  function rememberHomeRequest(promise, controller = null) {
     homePromise = promise;
+    homeAbortController = controller;
     homeExpiresAt = Date.now() + HOME_TTL_MS;
-    promise.then(response => {
-      if (response?.ok) {
-        homeReady = true;
-        clearLoadingNotice();
-      } else if (homePromise === promise) {
-        clearHomeCache();
-      }
-    }).catch(() => {
+    promise.catch(() => {
       if (homePromise === promise) clearHomeCache();
     });
     return promise;
@@ -62,7 +64,7 @@
   function freshHomePromise() {
     if (!homePromise) return null;
     if (Date.now() >= homeExpiresAt) {
-      clearHomeCache();
+      clearHomeCache({ abort: true });
       return null;
     }
     return homePromise;
@@ -76,15 +78,87 @@
     return homeUrl.toString();
   }
 
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function settleWithin(promise, ms) {
+    let timer = 0;
+    const timeout = new Promise(resolve => {
+      timer = window.setTimeout(() => resolve({ timedOut: true }), ms);
+    });
+    const settled = promise.then(
+      value => ({ timedOut: false, value }),
+      error => ({ timedOut: false, error })
+    );
+    const result = await Promise.race([settled, timeout]);
+    if (timer) window.clearTimeout(timer);
+    return result;
+  }
+
+  async function fetchWithTimeout(input, init, timeoutMs) {
+    const controller = new AbortController();
+    const sourceSignal = init?.signal || (input instanceof Request ? input.signal : null);
+    let sourceAbort = null;
+
+    if (sourceSignal) {
+      if (sourceSignal.aborted) controller.abort();
+      else {
+        sourceAbort = () => controller.abort();
+        sourceSignal.addEventListener('abort', sourceAbort, { once: true });
+      }
+    }
+
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await downstreamFetch(input, { ...(init || {}), signal: controller.signal });
+    } finally {
+      window.clearTimeout(timer);
+      if (sourceSignal && sourceAbort) sourceSignal.removeEventListener('abort', sourceAbort);
+    }
+  }
+
+  function shouldRetryHomeResponse(response) {
+    return response?.status === 408 || response?.status === 429 || response?.status >= 500;
+  }
+
+  async function fetchHomeWithRetry(input, init) {
+    let lastError = null;
+    let lastResponse = null;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetchWithTimeout(input, init, HOME_REQUEST_TIMEOUT_MS);
+        lastResponse = response;
+        if (response?.ok) {
+          homeReady = true;
+          clearLoadingNotice();
+          return response;
+        }
+        if (!shouldRetryHomeResponse(response) || attempt === 1) return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 1) throw error;
+      }
+      await delay(HOME_RETRY_DELAY_MS);
+    }
+
+    if (lastResponse) return lastResponse;
+    throw lastError || new Error('Curriculum request failed');
+  }
+
   function primeHome(loginUrl) {
     if (freshHomePromise()) return;
-    const promise = Promise.resolve().then(() => downstreamFetch(homeUrlFrom(loginUrl), {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), HOME_TTL_MS);
+    const promise = downstreamFetch(homeUrlFrom(loginUrl), {
       method: 'GET',
       headers: { Accept: 'application/json' },
       credentials: 'include',
-      cache: 'no-store'
-    }));
-    rememberHomeRequest(promise);
+      cache: 'no-store',
+      signal: controller.signal
+    }).finally(() => window.clearTimeout(timer));
+    rememberHomeRequest(promise, controller);
   }
 
   function rememberBootstrapSession(loginResponse) {
@@ -131,7 +205,7 @@
 
     if (isLogout) {
       clearBootstrapSession();
-      clearHomeCache({ resetReady: true });
+      clearHomeCache({ resetReady: true, abort: true });
       clearLoadingNotice();
     }
 
@@ -147,27 +221,28 @@
     if (isHome) {
       const cached = freshHomePromise();
       if (cached) {
-        const response = await cached;
-        if (response.ok) {
+        const settled = await settleWithin(cached, PREFETCH_REUSE_WAIT_MS);
+        if (!settled.timedOut && !settled.error && settled.value?.ok) {
+          const response = settled.value;
+          clearHomeCache();
           homeReady = true;
           clearLoadingNotice();
+          return response.clone();
         }
-        return response.clone();
+
+        // The speculative request is only an optimisation. Never let a slow,
+        // failed or rejected prefetch block the real foreground home request.
+        clearHomeCache({ abort: true });
       }
 
-      const promise = rememberHomeRequest(downstreamFetch(input, init));
-      const response = await promise;
-      if (response.ok) {
-        homeReady = true;
-        clearLoadingNotice();
-      }
+      const response = await fetchHomeWithRetry(input, init);
       return response.clone();
     }
 
     const response = await downstreamFetch(input, init);
     if (isLogin) {
       clearBootstrapSession();
-      clearHomeCache({ resetReady: true });
+      clearHomeCache({ resetReady: true, abort: true });
       if (response.ok) {
         rememberBootstrapSession(response);
         primeHome(info.url);
