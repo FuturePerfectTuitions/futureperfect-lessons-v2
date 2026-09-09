@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase20-change20-configured-upsell.js"
+main = "src/index-phase23-protected-view-stability.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -10,6 +10,13 @@ DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
 
 # Canonical Portal V2 production entrypoint.
+# Phase 23 wraps the current Change 20 production Worker only for protected
+# Answer Pack/Answer Key fetch stability. If an initial protected PDF request
+# races the existing short content-open window or repeats a single-use request,
+# Phase 23 retries it only while the original session-bound lease is still valid.
+# All password, session, entitlement, view, account and password-fingerprint
+# checks remain owned by the existing protected-answer Worker chain.
+#
 # Change 20 adds explicit, profile-configured locked upsell views through
 # `upsellViews`. When that field is present, those views are the student's exact
 # upsell set: they are visible immediately, even before a counterpart lesson or
