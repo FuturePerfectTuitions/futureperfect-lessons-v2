@@ -1,5 +1,5 @@
 import fastNavigationWorker from './index-phase20-change17.js';
-import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-email.js';
+import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-manual-email.js';
 import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
 import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
 
