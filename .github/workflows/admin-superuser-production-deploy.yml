@@ -8,8 +8,10 @@ on:
       - 'worker/src/index-phase20-change18-admin-superuser.js'
       - 'worker/src/index-phase20-change19-admin-fast.js'
       - 'worker/src/index-phase20-change20-configured-upsell.js'
+      - 'worker/src/index-phase23-protected-view-stability.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-superuser-static-verification.mjs'
+      - 'tests/protected-view-stability-static-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
 
 permissions:
@@ -18,13 +20,14 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Authenticated Admin superuser fast path with configured upsells
+      REQUIRE_PHASE23_ENTRYPOINT: '1'
+      DEPLOY_MESSAGE: Authenticated Admin chain with protected Answer viewer stability
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,10 +38,28 @@ jobs:
           node --check worker/src/index-phase20-change18-admin-superuser.js
           node --check worker/src/index-phase20-change19-admin-fast.js
           node --check worker/src/index-phase20-change20-configured-upsell.js
+          node --check worker/src/index-phase23-protected-view-stability.js
           node --check worker/src/index-phase20-change16.js
+          node --check assets/phase23-protected-view-stability.js
       - name: Verify production wiring
-        run: node tests/admin-superuser-static-verification.mjs
+        run: |
+          node tests/admin-superuser-static-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
       - name: Deploy Worker preserving bindings and secrets
         run: bash ops/deploy_current_worker_preserve.sh
+      - name: Verify live protected viewer wrapper
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error \
+            --header "Origin: $ORIGIN" \
+            --dump-header /tmp/protected-view-headers.txt \
+            --output /tmp/protected-view-body.json \
+            --write-out '%{http_code}' \
+            "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+          test "$code" = '410'
+          grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v1' /tmp/protected-view-headers.txt
+          grep -Fq 'ANSWER_VIEW_INVALID' /tmp/protected-view-body.json
       - name: Complete
-        run: echo ADMIN_SUPERUSER_PRODUCTION_DEPLOY_PASS
+        run: echo ADMIN_SUPERUSER_PHASE23_PRODUCTION_DEPLOY_PASS
