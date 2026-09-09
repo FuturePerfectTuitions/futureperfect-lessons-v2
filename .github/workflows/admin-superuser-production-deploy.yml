@@ -59,7 +59,7 @@ jobs:
             --write-out '%{http_code}' \
             "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
           test "$code" = '410'
-          grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v1' /tmp/protected-view-headers.txt
+          grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/protected-view-headers.txt
           grep -Fq 'ANSWER_VIEW_INVALID' /tmp/protected-view-body.json
       - name: Complete
         run: echo ADMIN_SUPERUSER_PHASE23_PRODUCTION_DEPLOY_PASS
