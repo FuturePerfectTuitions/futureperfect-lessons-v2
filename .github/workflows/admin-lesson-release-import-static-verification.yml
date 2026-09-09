@@ -13,6 +13,7 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
+      - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
@@ -32,6 +33,7 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
+      - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
@@ -66,6 +68,7 @@ jobs:
       - name: Importer verification
         run: |
           set -euo pipefail
+          node tests/admin-import-auto-process-static-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-idempotency-verification.mjs
