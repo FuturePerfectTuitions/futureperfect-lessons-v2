@@ -19,11 +19,23 @@ function completedStatus(value) {
   return status.includes('completed') && !/\bnot\s+completed\b/.test(status);
 }
 
+function continuingLessonFromRemarks(value) {
+  const remarks = norm(value).replace(/\s+/g, ' ');
+  if (!remarks) return false;
+  return /\b(?:start|starting|continue|continuing|resume|resuming)\s+from\b/.test(remarks);
+}
+
 function emailTypeForItem(item) {
   const status = clean(item?.lessonStatus);
   if (completedStatus(status)) return 'COMPLETED';
   if (/\bslide\b/i.test(status)) return 'ONGOING';
-  if (norm(status) === 'ready' && onlineMode(item?.batchKey)) return 'UPCOMING';
+  if (norm(status) === 'ready' && onlineMode(item?.batchKey)) {
+    // A Ready row such as "Start from 10" is the next session of a lesson that
+    // is already in progress. It is not a new upcoming lesson, so it does not
+    // need a fresh PreLesson-Sheets declaration or another upcoming email.
+    if (continuingLessonFromRemarks(item?.remarks)) return '';
+    return 'UPCOMING';
+  }
   return '';
 }
 
@@ -64,7 +76,7 @@ function escapeHtml(value) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
 
@@ -320,6 +332,7 @@ async function sendParentEmail(env, item) {
 
 export {
   emailTypeForItem,
+  continuingLessonFromRemarks,
   prelessonSheetsFromRemarks,
   validateParentEmailFields,
   buildParentEmail,
