@@ -3,11 +3,13 @@ import fs from 'node:fs';
 const wrapperPath = 'worker/src/index-phase20-change18-admin-superuser.js';
 const fastPathPath = 'worker/src/index-phase20-change19-admin-fast.js';
 const configuredUpsellPath = 'worker/src/index-phase20-change20-configured-upsell.js';
+const protectedStabilityPath = 'worker/src/index-phase23-protected-view-stability.js';
 const change16Path = 'worker/src/index-phase20-change16.js';
 const wranglerPath = 'worker/wrangler.toml';
 const wrapper = fs.readFileSync(wrapperPath, 'utf8');
 const fastPath = fs.readFileSync(fastPathPath, 'utf8');
 const configuredUpsell = fs.readFileSync(configuredUpsellPath, 'utf8');
+const protectedStability = fs.readFileSync(protectedStabilityPath, 'utf8');
 const change16 = fs.readFileSync(change16Path, 'utf8');
 const wrangler = fs.readFileSync(wranglerPath, 'utf8');
 
@@ -55,8 +57,14 @@ if (!configuredUpsell.includes("user?.upsellViews") || !configuredUpsell.include
 if (!configuredUpsell.includes("import productionWorker from './index-phase20-change19-admin-fast.js'")) {
   throw new Error('Configured upsell wrapper does not preserve the Admin fast-path chain.');
 }
-if (!wrangler.includes('main = "src/index-phase20-change20-configured-upsell.js"')) {
-  throw new Error('Production entrypoint is not the configured-upsell wrapper.');
+if (!protectedStability.includes("import currentWorker from './index-phase20-change20-configured-upsell.js'")) {
+  throw new Error('Protected-view stability wrapper does not preserve the configured-upsell production chain.');
+}
+if (!protectedStability.includes('ANSWER_VIEW_EXPIRED') || !protectedStability.includes('ANSWER_VIEW_ALREADY_OPENED')) {
+  throw new Error('Protected-view stability wrapper is missing the narrow retry gates.');
+}
+if (!wrangler.includes('main = "src/index-phase23-protected-view-stability.js"')) {
+  throw new Error('Production entrypoint is not the protected-view stability wrapper.');
 }
 
 console.log('ADMIN_SUPERUSER_STATIC_VERIFICATION_PASS');
