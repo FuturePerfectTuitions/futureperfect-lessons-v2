@@ -8,6 +8,10 @@ ENVIRONMENT = "production"
 ALLOWED_ORIGINS = "https://futureperfecttuitions.github.io,https://lessons.futureperfect.education"
 DEV_LOGIN_ALLOWLIST = ""
 STUDENT_LOGIN_ENABLED = "true"
+PARENT_EMAIL_TEST_TO = ""
+
+[[send_email]]
+name = "EMAIL"
 
 # Canonical Portal V2 production entrypoint.
 # Phase 23 wraps the current Change 20 production Worker only for protected
@@ -30,7 +34,10 @@ STUDENT_LOGIN_ENABLED = "true"
 # and the underlying Change 17/16 chain retains student navigation, Full Library,
 # trial, batch, lesson-release, PreLesson-only, Answer Pack and resource controls.
 #
-# Production bindings and secrets remain Cloudflare-managed. `keep_vars = true`
-# is required so deploys preserve existing KV, D1, R2 and secret bindings.
+# Production KV, D1, R2 bindings and secrets remain Cloudflare-managed. The
+# outbound EMAIL binding is declared here because Wrangler treats it as a Worker
+# binding and production deploys must carry it explicitly. `keep_vars = true`
+# preserves existing dashboard vars/secrets; deployment scripts separately
+# preserve the production KV, D1, R2 and EMAIL bindings.
 # Passwords, Answer Pack passwords, private student records, production allowlists
 # and Cloudflare credential values must never be committed to this repository.
