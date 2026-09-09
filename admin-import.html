@@ -7,14 +7,14 @@
   <link rel="icon" href="favicon-32.png">
   <meta name="fpt-worker-base" content="https://fpt-portal-v2-worker.futureperfectlessons.workers.dev">
   <style>
-    :root{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#172033;background:#f5f7fb}body{margin:0}main{max-width:1280px;margin:40px auto;padding:0 20px}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px rgba(20,35,60,.06);margin-bottom:18px}h1{margin:0 0 8px;font-size:28px}p{line-height:1.5}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{font-weight:650;display:block;margin-bottom:6px}input[type=password],input[type=file]{padding:10px;border:1px solid #b9c4d4;border-radius:9px;background:#fff}button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1f4fd1;color:white}button.secondary{background:#e7ecf5;color:#26354d}button.ghost{background:#fff;color:#26354d;border:1px solid #cbd5e1}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#667085}.status{padding:12px 14px;border-radius:9px;background:#eef3fb;margin-top:12px}.bad{background:#fff0f0;color:#9f1d1d}.good{background:#eefaf1;color:#176532}.warn{background:#fff8e7;color:#785500}.state-title{font-weight:800;font-size:18px;margin-bottom:3px}.table-wrap{overflow:auto;max-height:560px;border:1px solid #e0e6ef;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#f7f9fc;z-index:1}.ok{color:#176532;font-weight:700}.err{color:#9f1d1d;font-weight:700}.summary{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.pill{background:#eef2f8;border-radius:999px;padding:6px 10px;font-weight:650}code{background:#f1f3f7;padding:2px 5px;border-radius:5px}.hidden{display:none}.source-box{border:1px solid #dfe5ef;border-radius:12px;padding:16px;margin-bottom:16px;background:#fbfcfe}.source-title{font-weight:750;margin-bottom:4px}.source-meta{font-size:14px;margin-bottom:12px}.fallback{margin-top:18px;padding-top:18px;border-top:1px solid #edf0f5}
+    :root{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#172033;background:#f5f7fb}body{margin:0}main{max-width:1280px;margin:40px auto;padding:0 20px}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px rgba(20,35,60,.06);margin-bottom:18px}h1{margin:0 0 8px;font-size:28px}p{line-height:1.5}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{font-weight:650;display:block;margin-bottom:6px}input[type=password],input[type=file]{padding:10px;border:1px solid #b9c4d4;border-radius:9px;background:#fff}button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1f4fd1;color:white}button.secondary{background:#e7ecf5;color:#26354d}button.ghost{background:#fff;color:#26354d;border:1px solid #cbd5e1}button.send{background:#b42318;color:white}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#667085}.status{padding:12px 14px;border-radius:9px;background:#eef3fb;margin-top:12px}.bad{background:#fff0f0;color:#9f1d1d}.good{background:#eefaf1;color:#176532}.warn{background:#fff8e7;color:#785500}.state-title{font-weight:800;font-size:18px;margin-bottom:3px}.table-wrap{overflow:auto;max-height:560px;border:1px solid #e0e6ef;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#f7f9fc;z-index:1}.ok{color:#176532;font-weight:700}.err{color:#9f1d1d;font-weight:700}.summary{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.pill{background:#eef2f8;border-radius:999px;padding:6px 10px;font-weight:650}code{background:#f1f3f7;padding:2px 5px;border-radius:5px}.hidden{display:none}.source-box{border:1px solid #dfe5ef;border-radius:12px;padding:16px;margin-bottom:16px;background:#fbfcfe}.source-title{font-weight:750;margin-bottom:4px}.source-meta{font-size:14px;margin-bottom:12px}.send-box{border:1px solid #f0c6c2;background:#fff8f7;border-radius:12px;padding:16px;margin:16px 0}.fallback{margin-top:18px;padding-top:18px;border-top:1px solid #edf0f5}
   </style>
 </head>
 <body data-import-state="idle">
 <main>
   <div class="card">
     <h1>Lesson Release Import</h1>
-    <p class="muted">FuturePerfectLive creates <code>workFP.csv</code>. Once signed in and the CSV folder has been authorised, this page automatically loads the current CSV, validates every row, applies the Portal actions and sends the qualifying parent emails. There is no second confirmation step.</p>
+    <p class="muted">FuturePerfectLive creates <code>workFP.csv</code>. Once signed in and the CSV folder has been authorised, this page automatically loads the current CSV, validates every row and imports the Portal access changes. <strong>Parent emails are not sent automatically.</strong> Email sending remains a separate manual action below.</p>
   </div>
 
   <div class="card" id="loginCard">
@@ -39,6 +39,13 @@
 
     <div id="status" class="status hidden"></div>
     <div id="summary" class="summary"></div>
+
+    <div class="send-box">
+      <div class="source-title">Manual parent email send</div>
+      <p class="muted">The CSV can be imported without sending any parent email. When you are satisfied with the imported rows, use this button to send the qualifying emails deliberately.</p>
+      <button id="sendEmailsBtn" type="button" class="send" disabled>Send Parent Emails</button>
+    </div>
+
     <div id="tableWrap" class="table-wrap hidden"><table><thead><tr><th>Row</th><th>Student</th><th>Name</th><th>Parent</th><th>Email</th><th>Batch</th><th>Lesson</th><th>Date</th><th>Status</th><th>Release</th><th>Portal action</th><th>Email action</th><th>Validation</th></tr></thead><tbody id="resultBody"></tbody></table></div>
 
     <div class="fallback">
@@ -70,6 +77,7 @@
   }
 })();
 </script>
+<script src="assets/admin-import-manual-email.js"></script>
 <script src="assets/admin-import.js"></script>
 </body>
 </html>
