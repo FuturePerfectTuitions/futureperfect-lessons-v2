@@ -14,6 +14,17 @@ assert.match(worker, /lease_expires_at > \?/);
 assert.match(worker, /searchParams\.get\('status'\) === '1'/);
 assert.match(worker, /x-fpt-protected-view-stability/);
 
+// Protected-view token requests must recover the original view context. This is
+// essential for Phase 12 batch-aware L1/L2/L3 students because the browser's
+// /answer-view/<token> URL does not otherwise carry the viewId used at password
+// authorisation time.
+assert.match(worker, /SELECT token_hash, view_id, lease_expires_at/);
+assert.match(worker, /requestWithProtectedViewContext/);
+assert.match(worker, /row\?\.view_id/);
+assert.match(worker, /url\.searchParams\.set\('viewId', viewId\)/);
+assert.match(worker, /currentWorker\.fetch\(contextualRequest, env, ctx\)/);
+assert.match(worker, /phase23-protected-view-stability-v2/);
+
 assert.match(frontend, /Number\(delay\) === 30000/);
 assert.match(frontend, /status=1/);
 assert.match(frontend, /protectedAnswerHeartbeat/);

@@ -1,6 +1,6 @@
 import currentWorker from './index-phase20-change20-configured-upsell.js';
 
-const PROTECTED_VIEW_STABILITY_VERSION = 'phase23-protected-view-stability-v1';
+const PROTECTED_VIEW_STABILITY_VERSION = 'phase23-protected-view-stability-v2';
 const RETRYABLE_PROTECTED_VIEW_ERRORS = new Set([
   'ANSWER_VIEW_EXPIRED',
   'ANSWER_VIEW_ALREADY_OPENED'
@@ -11,6 +11,35 @@ async function sha256Hex(value) {
     await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)))
   );
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function protectedViewRow(env, token) {
+  if (!env?.DB || !token) return null;
+  const tokenHash = await sha256Hex(token);
+  return env.DB.prepare(
+    `SELECT token_hash, view_id, lease_expires_at
+     FROM answer_view_tokens
+     WHERE token_hash = ?`
+  )
+    .bind(tokenHash)
+    .first();
+}
+
+async function requestWithProtectedViewContext(request, env, token) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('viewId')) return request;
+
+  const row = await protectedViewRow(env, token).catch(() => null);
+  const viewId = String(row?.view_id || '').trim();
+  if (!viewId) return request;
+
+  // The password-authorize request carries viewId, but the follow-up token URL
+  // historically did not. Phase 12 uses viewId to recreate batch-aware Maths
+  // L1/L2/L3 access. Restore the token's authoritative view_id on this internal
+  // request so the protected-answer visibility re-check runs in the same view
+  // context in which the password was accepted.
+  url.searchParams.set('viewId', viewId);
+  return new Request(url.toString(), request);
 }
 
 async function reviveProtectedOpen(env, token) {
@@ -59,14 +88,20 @@ export default {
       ? url.pathname.match(/^\/api\/v1\/student\/answer-view\/([^/]+)$/)
       : null;
 
-    if (!match || url.searchParams.get('status') === '1') {
+    if (!match) {
       return currentWorker.fetch(request, env, ctx);
     }
 
     const token = decodeURIComponent(match[1]);
-    const firstResponse = await currentWorker.fetch(request, env, ctx);
+    const contextualRequest = await requestWithProtectedViewContext(request, env, token);
+
+    if (url.searchParams.get('status') === '1') {
+      return withStabilityMarker(await currentWorker.fetch(contextualRequest, env, ctx));
+    }
+
+    const firstResponse = await currentWorker.fetch(contextualRequest, env, ctx);
     const response = await retryProtectedOpenIfNeeded(
-      request,
+      contextualRequest,
       env,
       ctx,
       token,
