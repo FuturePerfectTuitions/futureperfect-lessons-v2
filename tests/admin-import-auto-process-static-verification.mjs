@@ -5,7 +5,7 @@ const html = readFileSync(new URL('../admin-import.html', import.meta.url), 'utf
 const js = readFileSync(new URL('../assets/admin-import.js', import.meta.url), 'utf8');
 
 assert.match(html, /<form id="loginForm"/);
-assert.match(html, /There is no second confirmation step/);
+assert.match(html, /Parent emails are not sent automatically/);
 assert.doesNotMatch(html, /id="confirmBtn"/);
 assert.doesNotMatch(html, /Confirm Import &amp; Send Emails/);
 assert.match(html, /id="loadLatestBtn"[^>]*>Process Latest CSV</);
