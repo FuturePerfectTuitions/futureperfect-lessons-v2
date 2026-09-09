@@ -8,6 +8,7 @@ import {
 
 const PREVIEW_PATH = '/api/v1/admin/lesson-releases/preview';
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';
+const EMAIL_DELIVERY_PREFIX = 'admin-email-delivery:v1:';
 const PORTAL_ACTIONS = new Set([
   'GRANT_FULL', 'GRANT_PRELESSON', 'UPGRADE_TO_FULL', 'ALREADY_FULL', 'ALREADY_PRELESSON'
 ]);
@@ -152,6 +153,45 @@ function emailInputKey(item) {
   return `${item.portalUserIdNorm}|${inputLessonToken(item.lessonLabel)}`;
 }
 
+async function sha256Hex(text) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+  return [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+}
+
+function emailDeliveryIdentity(item) {
+  return JSON.stringify([
+    item.portalUserIdNorm,
+    inputLessonToken(item.lessonLabel),
+    norm(item.emailType),
+    norm(item.lessonDateDisplay),
+    norm(item.lessonStatus),
+    norm(item.parentEmail)
+  ]);
+}
+
+async function emailDeliveryKey(item) {
+  return `${EMAIL_DELIVERY_PREFIX}${await sha256Hex(emailDeliveryIdentity(item))}`;
+}
+
+async function previousEmailDelivery(env, item) {
+  if (!env?.STUDENTS_KV?.get) throw new Error('EMAIL_IDEMPOTENCY_NOT_CONFIGURED');
+  return env.STUDENTS_KV.get(await emailDeliveryKey(item), { type:'json' });
+}
+
+async function rememberEmailDelivery(env, item, sent) {
+  if (!env?.STUDENTS_KV?.put) throw new Error('EMAIL_IDEMPOTENCY_NOT_CONFIGURED');
+  const key = await emailDeliveryKey(item);
+  await env.STUDENTS_KV.put(key, JSON.stringify({
+    status:'SENT',
+    sentAt:new Date().toISOString(),
+    portalUserId:item.portalUserId,
+    lesson:inputLessonToken(item.lessonLabel),
+    emailType:item.emailType,
+    parentEmail:item.parentEmail,
+    messageId:clean(sent?.messageId)
+  }));
+}
+
 async function sendEmailsAfterConfirm(env, rows, portalBody) {
   const items = rows.map(emailItemFromRow);
   const portalFailures = new Set(
@@ -188,7 +228,58 @@ async function sendEmailsAfterConfirm(env, rows, portalBody) {
       continue;
     }
 
+    let previous;
+    try {
+      previous = await previousEmailDelivery(env, item);
+    } catch (error) {
+      emailResults.push({
+        index:item.index,
+        portalUserId:item.portalUserId,
+        parent:item.parent,
+        parentEmail:item.parentEmail,
+        emailType:item.emailType,
+        ok:false,
+        status:'IDEMPOTENCY_CHECK_FAILED',
+        message:`Duplicate-email safety check failed: ${error.message}`
+      });
+      continue;
+    }
+
+    if (previous?.status === 'SENT') {
+      emailResults.push({
+        index:item.index,
+        portalUserId:item.portalUserId,
+        parent:item.parent,
+        parentEmail:item.parentEmail,
+        emailType:item.emailType,
+        ok:true,
+        status:'ALREADY_SENT',
+        messageId:clean(previous.messageId),
+        message:'This parent email was already sent for the same student, lesson, session and email type. Duplicate send skipped.'
+      });
+      continue;
+    }
+
     const sent = await sendParentEmail(env, item);
+    if (sent.status === 'SENT') {
+      try {
+        await rememberEmailDelivery(env, item, sent);
+      } catch (error) {
+        emailResults.push({
+          index:item.index,
+          portalUserId:item.portalUserId,
+          parent:item.parent,
+          parentEmail:item.parentEmail,
+          emailType:item.emailType,
+          ...sent,
+          ok:false,
+          status:'SENT_UNTRACKED',
+          message:`Email was sent, but duplicate-send tracking could not be saved: ${error.message}`
+        });
+        continue;
+      }
+    }
+
     emailResults.push({
       index:item.index,
       portalUserId:item.portalUserId,
@@ -200,7 +291,8 @@ async function sendEmailsAfterConfirm(env, rows, portalBody) {
   }
 
   const emailsSent = emailResults.filter(result => result.status === 'SENT').length;
-  const emailsFailed = emailResults.length - emailsSent;
+  const emailsAlreadySent = emailResults.filter(result => result.status === 'ALREADY_SENT').length;
+  const emailsFailed = emailResults.length - emailsSent - emailsAlreadySent;
   return {
     ...portalBody,
     emailResults,
@@ -208,6 +300,7 @@ async function sendEmailsAfterConfirm(env, rows, portalBody) {
       ...(portalBody?.summary || {}),
       emailsEligible:emailResults.length,
       emailsSent,
+      emailsAlreadySent,
       emailsFailed
     }
   };
@@ -242,5 +335,7 @@ export {
   normaliseCsvInputRow,
   emailItemFromRow,
   decoratePreview,
+  emailDeliveryIdentity,
+  emailDeliveryKey,
   sendEmailsAfterConfirm
 };

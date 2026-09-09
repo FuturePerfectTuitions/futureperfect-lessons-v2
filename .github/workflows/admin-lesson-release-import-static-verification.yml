@@ -13,14 +13,16 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
+      - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
+      - tests/parent-email-idempotency-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
       - tests/parent-email-test-routing-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
   push:
-    branches: [lesson-release-admin-import, feature/parent-email-csv-import]
+    branches: [lesson-release-admin-import, feature/parent-email-csv-import, feature/admin-import-auto-process]
     paths:
       - admin-import.html
       - assets/admin-import.js
@@ -31,8 +33,10 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
+      - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/parent-email-import-verification.mjs
+      - tests/parent-email-idempotency-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
       - tests/parent-email-test-routing-verification.mjs
       - tests/lesson-release-navigation-verification.mjs
@@ -64,8 +68,10 @@ jobs:
       - name: Importer verification
         run: |
           set -euo pipefail
+          node tests/admin-import-auto-process-static-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
           node tests/parent-email-completed-status-verification.mjs
           node tests/parent-email-test-routing-verification.mjs
       - name: Lesson release navigation verification
@@ -73,4 +79,4 @@ jobs:
           set -euo pipefail
           node tests/lesson-release-navigation-verification.mjs
           test -f worker/src/index-phase20-change17-parent-email.js
-          grep -Fq 'main = "src/index-phase20-change16.js"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-phase20-change20-configured-upsell.js"' worker/wrangler.toml
