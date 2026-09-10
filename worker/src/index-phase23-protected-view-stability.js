@@ -2,7 +2,9 @@ import currentWorker from './index-phase20-change20-configured-upsell.js';
 import { classifyPhase11AnswerIndex, phase11AnswerResource } from './phase11-resources.js';
 
 const PROTECTED_VIEW_STABILITY_VERSION = 'phase23-protected-view-stability-v3';
+const ADMIN_HOME_FAST_PATH_VERSION = 'admin-home-fast-path-v1';
 const SESSION_COOKIE = 'fpt_v2_session';
+const DEFAULT_ADMIN_SUPERUSER_IDS = Object.freeze(['admin']);
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -68,6 +70,50 @@ async function sha256Bytes(value) {
 async function sha256Hex(value) {
   const bytes = await sha256Bytes(value);
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function adminSuperuserIds(env) {
+  const configured = String(env?.ADMIN_SUPERUSER_IDS || '')
+    .split(',')
+    .map(normalisePortalUserId)
+    .filter(Boolean);
+  return new Set(configured.length ? configured : DEFAULT_ADMIN_SUPERUSER_IDS);
+}
+
+async function authenticatedAdminHome(request, env) {
+  if (request.method !== 'GET' || !env?.DB) return false;
+  const url = new URL(request.url);
+  if (url.pathname !== '/api/v1/student/home') return false;
+
+  const token = parseCookies(request)[SESSION_COOKIE] || '';
+  if (!token) return false;
+
+  try {
+    const tokenHash = await sha256Hex(token);
+    const row = await env.DB.prepare(
+      `SELECT portal_user_id_norm
+       FROM student_sessions
+       WHERE token_hash = ?
+         AND revoked_at IS NULL
+         AND idle_expires_at > ?`
+    )
+      .bind(tokenHash, new Date().toISOString())
+      .first();
+    return adminSuperuserIds(env).has(normalisePortalUserId(row?.portal_user_id_norm));
+  } catch {
+    return false;
+  }
+}
+
+function adminHomeFastEnv(env) {
+  return new Proxy(env, {
+    get(target, prop) {
+      if (prop === 'ADMIN_SUPERUSER_FAST_PATH') return true;
+      if (prop === 'ADMIN_HOME_FAST_PATH_VERSION') return ADMIN_HOME_FAST_PATH_VERSION;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
 }
 
 async function timingSafeStringEqual(left, right) {
@@ -282,6 +328,10 @@ async function protectedAnswerPdf(request, env, tokenRow) {
 
 export default {
   async fetch(request, env, ctx) {
+    if (await authenticatedAdminHome(request, env)) {
+      return currentWorker.fetch(request, adminHomeFastEnv(env), ctx);
+    }
+
     const url = new URL(request.url);
     const match = request.method === 'GET'
       ? url.pathname.match(/^\/api\/v1\/student\/answer-view\/([^/]+)$/)
