@@ -48,9 +48,6 @@ if (!fastPath.includes("body?.superuser === true") || !fastPath.includes("body?.
 if (!fastPath.includes("ADMIN_SUPERUSER_FAST_PATH")) {
   throw new Error('Admin fast path marker is not supplied.');
 }
-if (!fastPath.includes("url.pathname === '/api/v1/student/home'")) {
-  throw new Error('Authenticated Admin /student/home is not covered by the fast path.');
-}
 if (!change16.includes("env?.ADMIN_SUPERUSER_FAST_PATH === true")) {
   throw new Error('Change 16 does not bypass the redundant home probe for authenticated Admin.');
 }
@@ -65,6 +62,18 @@ if (!protectedStability.includes("import currentWorker from './index-phase20-cha
 }
 if (!protectedStability.includes('ANSWER_VIEW_EXPIRED') || !protectedStability.includes('ANSWER_VIEW_ALREADY_OPENED')) {
   throw new Error('Protected-view stability wrapper is missing the narrow retry gates.');
+}
+const requiredAdminHomeMarkers = [
+  "ADMIN_HOME_FAST_PATH_VERSION = 'admin-home-fast-path-v1'",
+  "url.pathname !== '/api/v1/student/home'",
+  'authenticatedAdminHome(request, env)',
+  "prop === 'ADMIN_SUPERUSER_FAST_PATH'",
+  'currentWorker.fetch(request, adminHomeFastEnv(env), ctx)'
+];
+for (const marker of requiredAdminHomeMarkers) {
+  if (!protectedStability.includes(marker)) {
+    throw new Error(`Authenticated Admin home fast path is missing: ${marker}`);
+  }
 }
 if (!wrangler.includes('main = "src/index-phase23-protected-view-stability.js"')) {
   throw new Error('Production entrypoint is not the protected-view stability wrapper.');
