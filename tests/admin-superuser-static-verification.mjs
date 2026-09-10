@@ -48,6 +48,9 @@ if (!fastPath.includes("body?.superuser === true") || !fastPath.includes("body?.
 if (!fastPath.includes("ADMIN_SUPERUSER_FAST_PATH")) {
   throw new Error('Admin fast path marker is not supplied.');
 }
+if (!fastPath.includes("url.pathname === '/api/v1/student/home'")) {
+  throw new Error('Authenticated Admin /student/home is not covered by the fast path.');
+}
 if (!change16.includes("env?.ADMIN_SUPERUSER_FAST_PATH === true")) {
   throw new Error('Change 16 does not bypass the redundant home probe for authenticated Admin.');
 }
