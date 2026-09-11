@@ -1,0 +1,169 @@
+name: Ops update Y2T1E03 English video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y2t1e03-english.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y2T1E03, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const DISPLAY_ID = 'Y2T1E03';
+          const TARGET = 'cOQX1cnwEqi';
+          const description = [
+            'In this Year 2 English lesson, pupils practise tenses, adjectives, grammar and punctuation, spelling and word classes through a story-based adventure in Adjective Land.',
+            '',
+            'This lesson includes:',
+            '✔ Correcting sentences using capital letters, full stops, accurate spelling and the correct tense',
+            '✔ Recognising and using adjectives to describe nouns',
+            '✔ Choosing suitable adjectives to complete sentences',
+            '✔ Changing verbs into the past tense, including irregular forms such as ran, wrote, rode and took',
+            '✔ Distinguishing between past and present tense',
+            '✔ Using question marks, commas in lists and full stops correctly',
+            '✔ Matching contractions such as I’ll, you’re, it’s and doesn’t and understanding the role of the apostrophe',
+            '✔ Identifying adjectives, adverbs, nouns and verbs in sentences',
+            '✔ Recognising commands, statements, questions and exclamations',
+            '✔ Forming plurals using s and es',
+            '✔ Using capital letters for proper nouns',
+            '✔ Choosing the correct homophone, including sun/son and deer/dear',
+            '✔ Extending sentences with conjunctions such as but and or',
+            '✔ Creating new words with suffixes including -ful, -less and -er',
+            '✔ Using apostrophes for possession and commas to separate names in a list',
+            '',
+            'Pupils begin by correcting deliberately incorrect sentences before moving into adjective work, where they identify describing words and choose adjectives that fit the meaning of a sentence. The lesson then revisits past and present tense through both regular and irregular verb forms.',
+            '',
+            'The later activities provide a broad Year 2 grammar and punctuation review, covering sentence types, contractions, word classes, plurals, proper nouns, homophones, conjunctions, suffixes, possessive apostrophes and commas in lists.',
+            '',
+            'By the end of the lesson, learners will have practised a wide range of Year 2 English skills and applied them in short sentence-level challenges.'
+          ].join('\n');
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(base + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            const text = await r.text();
+            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(base + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          function guardLesson(r) {
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y2T1E03 state mismatch');
+            if (!Object.values(r?.displayIds || {}).includes(DISPLAY_ID)) throw new Error(`Display ID mismatch for ${r?.lessonId}`);
+            const title = String(r?.title || '').toLowerCase();
+            for (const required of ['tense', 'adjective', 'punctuation', 'spelling']) {
+              if (!title.includes(required)) throw new Error(`Y2T1E03 title guard failed: ${r?.title}`);
+            }
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y2T1E03 core.video missing');
+          }
+
+          (async () => {
+            const curriculum = await getJson('curriculum:ENGLISH_Y2');
+            if (curriculum?.curriculumCode !== 'ENGLISH_Y2') throw new Error('ENGLISH_Y2 curriculum identity mismatch');
+            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.length) throw new Error('ENGLISH_Y2 lessonIds missing');
+
+            const matches = [];
+            for (const lessonId of curriculum.lessonIds) {
+              const rec = await getJson(`lesson:${lessonId}`);
+              if (Object.values(rec?.displayIds || {}).includes(DISPLAY_ID)) matches.push(rec);
+            }
+            if (matches.length !== 1) throw new Error(`Expected exactly one ${DISPLAY_ID} lesson; found ${matches.length}`);
+
+            const before = matches[0];
+            guardLesson(before);
+            const lessonKey = `lesson:${before.lessonId}`;
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.description = description;
+            next.core.video = video(TARGET);
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson(lessonKey, next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson(lessonKey);
+              const ok = verified?.core?.video?.screenpal === TARGET &&
+                verified?.description === description &&
+                verified?.contentStatus?.description === 'available' &&
+                verified?.contentStatus?.mainVideo === 'available' &&
+                verified?.contentStatus?.ownerConfirmedPending === false;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guardLesson(verified);
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y2T1E03 ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Y2T1E03 description verification failed');
+            if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+              throw new Error('Y2T1E03 content status verification failed');
+            }
+
+            console.log('Y2T1E03_VERIFIED=' + JSON.stringify({
+              lessonId: verified.lessonId,
+              displayId: DISPLAY_ID,
+              title: verified.title,
+              screenpal: verified.core.video.screenpal,
+              contentStatus: verified.contentStatus
+            }));
+            console.log('OPS_UPDATE_Y2T1E03_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
