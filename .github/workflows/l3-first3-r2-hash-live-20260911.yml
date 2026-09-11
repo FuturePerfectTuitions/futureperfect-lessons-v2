@@ -1,0 +1,62 @@
+name: L3 first three R2 hash audit 2026-09-11
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/l3-first3-r2-hash-live-20260911.yml'
+
+permissions:
+  contents: read
+
+env:
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  hash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hash existing target R2 objects
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$bucket"; test "$bucket" != null
+          keys=(
+            'maths/level3/Y6M2.1/homework/sheets/L3T1M01 Homework Number and Place Value I.pdf'
+            'maths/level3/Y6M2.1/homework/answers/L3T1M01 Answer Pack Homework Number and Place Value I.pdf'
+            'maths/level3/Y6M2.2/homework/sheets/L3T1M02 Homework Number and Place Value II.pdf'
+            'maths/level3/Y6M2.2/homework/answers/L3T1M02 Answer Pack Homework Number and Place Value II.pdf'
+            'maths/level3/Y6M2.3/homework/sheets/L3T1M03 Homework Number and Place Value III.pdf'
+            'maths/level3/Y6M2.3/homework/answers/L3T1M03 Answer Pack Homework Number and Place Value III.pdf'
+            'maths/year6/L3T1M01/homework/sheets/L3T1M01 Homework Number and Place Value I.pdf'
+            'maths/year6/L3T1M02/homework/sheets/L3T1M02 Homework Number and Place Value II.pdf'
+            'maths/year6/L3T1M03/homework/sheets/L3T1M03 Homework Number and Place Value III.pdf'
+          )
+          mkdir -p hash
+          : > hash/results.txt
+          n=0
+          for key in "${keys[@]}"; do
+            n=$((n+1)); out="hash/$n.pdf"
+            echo "KEY=$key" | tee -a hash/results.txt
+            if npx --yes wrangler@4.125.0 r2 object get "${bucket}/${key}" --file "$out" --remote >/dev/null 2>&1; then
+              sha256sum "$out" | awk '{print "SHA256="$1}' | tee -a hash/results.txt
+              stat -c 'SIZE=%s' "$out" | tee -a hash/results.txt
+            else
+              echo 'MISSING=1' | tee -a hash/results.txt
+            fi
+          done
+          cat hash/results.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: l3-first3-r2-hash-20260911
+          path: hash/results.txt
+          retention-days: 7
