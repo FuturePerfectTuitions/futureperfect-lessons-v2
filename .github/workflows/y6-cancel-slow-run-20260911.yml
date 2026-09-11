@@ -1,0 +1,28 @@
+name: Cancel slow Year 6 cumulative purge 2026-09-11
+
+on:
+  push:
+    branches:
+      - ops/y6-remove-all-cumulative-20260911
+    paths:
+      - .github/workflows/y6-cancel-slow-run-20260911.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel prior slow purge run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/34641011922/cancel
+          echo 'Cancel requested for slow purge run 34641011922.'
