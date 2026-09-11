@@ -181,6 +181,25 @@ assert.equal(normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Not Complet
 assert.equal(normaliseCsvRow({ ...onlineReady, LessonStatus:'Not Completed' }, 4).releaseType, 'PRELESSON_ONLY');
 assert.equal(normaliseCsvRow({ ...faceToFaceCompleted, Mode:'' }, 5).releaseType, 'FULL');
 
+// Continuing means the previous lesson is still being taught, but all Portal
+// resources for that lesson must now be treated exactly like a Completed row.
+assert.equal(
+  normaliseCsvRow({ ...onlineReady, LessonStatus:'Continuing' }, 6).releaseType,
+  'FULL'
+);
+assert.equal(
+  normaliseCsvRow({ ...onlineReady, Remarks:'Start from slide 16' }, 7).releaseType,
+  'FULL'
+);
+assert.equal(
+  normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Ready', Remarks:'Continue from page 4' }, 8).releaseType,
+  'FULL'
+);
+assert.equal(
+  normaliseCsvRow({ ...onlineReady, Remarks:'PreLesson Sheets to be printed' }, 9).releaseType,
+  'PRELESSON_ONLY'
+);
+
 const origin = 'https://futureperfecttuitions.github.io';
 
 async function call(path, body, token='') {
@@ -258,6 +277,26 @@ const repeatPre = await call('/api/v1/admin/lesson-releases/confirm', { rows:[on
 assert.equal(repeatPre.response.status, 200);
 assert.equal([...db.prelessons.values()][0]?.first_granted_at, firstPreGrantedAt, 'Idempotent PreLesson confirmation must preserve the original shared timestamp');
 
+// A continuing row upgrades the same PreLesson-only entitlement to FULL. That
+// is the entitlement used for the video, Homework and Answer Pack resources.
+const continuingUpgradeRow = { ...onlineReady, Remarks:'Start from slide 16' };
+const continuingUpgrade = await call(
+  '/api/v1/admin/lesson-releases/confirm',
+  { rows:[continuingUpgradeRow] },
+  token
+);
+assert.equal(continuingUpgrade.response.status, 200);
+assert.equal(continuingUpgrade.body.results[0].releaseType, 'FULL');
+assert.equal(continuingUpgrade.body.results[0].accessMode, 'full');
+assert.equal(db.entitlements.get('pre0101|Y5E2')?.core_access, 1);
+assert.equal(
+  [...db.prelessons.values()].some(
+    r => r.portal_user_id_norm === 'pre0101' && r.lesson_id === 'Y5E2'
+  ),
+  false,
+  'Continuing FULL release must clear stale PreLesson-only access'
+);
+
 const upgradeRow = { ...onlineReady, LessonStatus:'Completed' };
 const upgrade = await call(
   '/api/v1/admin/lesson-releases/confirm',
@@ -302,4 +341,4 @@ assert.equal(aliasPreview.response.status, 200);
 assert.equal(aliasPreview.body.results[0].lessonId, 'Y5E2');
 assert.equal(aliasPreview.body.results[0].action, 'ALREADY_FULL');
 
-console.log('Lesson release importer ignores D1 batch roster and verifies display IDs + mixed FULL/PRELESSON_ONLY: PASS');
+console.log('Lesson release importer ignores D1 batch roster and verifies display IDs + FULL/PRELESSON_ONLY + continuing FULL release: PASS');
