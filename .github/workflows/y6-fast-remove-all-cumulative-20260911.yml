@@ -1,0 +1,195 @@
+name: Fast remove all Year 6 cumulative homework 2026-09-11
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/y6-fast-remove-all-cumulative-20260911.yml
+
+permissions:
+  actions: write
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  OLD_RUN_ID: 34641011922
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Cancel prior slow purge and wait for it to stop
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/${OLD_RUN_ID}/cancel" >/dev/null || true
+          for i in $(seq 1 30); do
+            status="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/${OLD_RUN_ID}" | jq -r '.status')"
+            if [ "$status" = completed ]; then
+              echo "Prior run stopped."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Prior run did not stop in time.' >&2
+          exit 1
+
+      - name: Remove all Year 6 cumulative mappings and R2 objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p /tmp/y6fast/kv-before
+
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+          test -n "$bucket"; test "$bucket" != null
+          echo "Production guard PASS: ${WORKER_NAME} / ${bucket}"
+
+          # Only Year 6 lesson keys.
+          : > /tmp/y6fast/y6keys.txt
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${ns}/keys?limit=1000&prefix=lesson%3AY6"
+            if [ -n "$cursor" ]; then
+              c="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$cursor")"
+              url="${url}&cursor=${c}"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq -r '.result[].name' <<<"$page" >> /tmp/y6fast/y6keys.txt
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          sort -u -o /tmp/y6fast/y6keys.txt /tmp/y6fast/y6keys.txt
+
+          : > /tmp/y6fast/target-keys.txt
+          : > /tmp/y6fast/r2refs.txt
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+            curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/y6fast/v.json
+            jq -e . /tmp/y6fast/v.json >/dev/null 2>&1 || continue
+            n="$(jq '((.phase11Resources.core.cumulativeHomeworks // [])|length)+((.phase11Resources.elevenPlus.cumulativeHomeworks // [])|length)' /tmp/y6fast/v.json)"
+            if [ "$n" -gt 0 ]; then
+              echo "$key" >> /tmp/y6fast/target-keys.txt
+              safe="$(printf '%s' "$key" | sha256sum | cut -c1-20)"
+              cp /tmp/y6fast/v.json "/tmp/y6fast/kv-before/${safe}.json"
+              jq -r '[
+                (.phase11Resources.core.cumulativeHomeworks // [])[],
+                (.phase11Resources.elevenPlus.cumulativeHomeworks // [])[]
+              ] | .[] | (.homework.r2Key? // empty), (.answerPack.r2Key? // empty)' /tmp/y6fast/v.json >> /tmp/y6fast/r2refs.txt
+              jq '
+                if .phase11Resources.core? then .phase11Resources.core.cumulativeHomeworks=[] else . end |
+                if .phase11Resources.elevenPlus? then .phase11Resources.elevenPlus.cumulativeHomeworks=[] else . end
+              ' /tmp/y6fast/v.json > /tmp/y6fast/after.json
+              resp="$(curl -fsS -X PUT -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' \
+                --data-binary @/tmp/y6fast/after.json \
+                "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${ns}/values/${enc}")"
+              jq -e '.success == true' <<<"$resp" >/dev/null
+              echo "KV cleared: ${key} (${n} cumulative pair(s))"
+            fi
+          done < /tmp/y6fast/y6keys.txt
+
+          # Gather every Year 6 R2 object identifiable as cumulative, including stale/orphaned copies.
+          printf '[]' > /tmp/y6fast/objs.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucket}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              c="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$cursor")"
+              url="${url}&cursor=${c}"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key,size}]' <<<"$page" > /tmp/y6fast/page.json
+            jq -s '.[0]+.[1]' /tmp/y6fast/objs.json /tmp/y6fast/page.json > /tmp/y6fast/next.json
+            mv /tmp/y6fast/next.json /tmp/y6fast/objs.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          jq -r '.[] | .key as $k | ($k|ascii_downcase) as $l |
+            select(($l|contains("cumulative")) and (($l|contains("/year6/")) or ($k|test("(^|/)Y6[^/]*(/|$)")))) | .key' /tmp/y6fast/objs.json >> /tmp/y6fast/r2refs.txt
+          sed '/^$/d' /tmp/y6fast/r2refs.txt | sort -u > /tmp/y6fast/r2targets.txt
+
+          # Delete scoped Year 6 cumulative objects. Ordinary homework is untouched.
+          deleted=0
+          while IFS= read -r r2key; do
+            [ -n "$r2key" ] || continue
+            if npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${bucket}/${r2key}" --file=/tmp/y6fast/check.bin --remote >/dev/null 2>&1; then
+              npx --yes wrangler@${WRANGLER_VERSION} r2 object delete "${bucket}/${r2key}" --remote >/dev/null
+              deleted=$((deleted+1))
+              echo "R2 deleted: ${r2key}"
+            fi
+            rm -f /tmp/y6fast/check.bin
+          done < /tmp/y6fast/r2targets.txt
+
+          echo "Year 6 KV records cleared: $(wc -l < /tmp/y6fast/target-keys.txt | tr -d ' ')"
+          echo "Year 6 cumulative R2 objects deleted: ${deleted}"
+
+          # Final KV verification.
+          remaining=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+            curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/y6fast/final.json
+            jq -e . /tmp/y6fast/final.json >/dev/null 2>&1 || continue
+            n="$(jq '((.phase11Resources.core.cumulativeHomeworks // [])|length)+((.phase11Resources.elevenPlus.cumulativeHomeworks // [])|length)' /tmp/y6fast/final.json)"
+            if [ "$n" -ne 0 ]; then echo "REMAINING KV ${key}: ${n}" >&2; remaining=$((remaining+n)); fi
+          done < /tmp/y6fast/y6keys.txt
+          test "$remaining" -eq 0
+
+          # Final R2 verification.
+          printf '[]' > /tmp/y6fast/final-objs.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucket}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              c="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$cursor")"
+              url="${url}&cursor=${c}"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key,size}]' <<<"$page" > /tmp/y6fast/final-page.json
+            jq -s '.[0]+.[1]' /tmp/y6fast/final-objs.json /tmp/y6fast/final-page.json > /tmp/y6fast/final-next.json
+            mv /tmp/y6fast/final-next.json /tmp/y6fast/final-objs.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          jq -r '.[] | .key as $k | ($k|ascii_downcase) as $l |
+            select(($l|contains("cumulative")) and (($l|contains("/year6/")) or ($k|test("(^|/)Y6[^/]*(/|$)")))) | .key' /tmp/y6fast/final-objs.json > /tmp/y6fast/remaining-r2.txt
+          if [ -s /tmp/y6fast/remaining-r2.txt ]; then
+            cat /tmp/y6fast/remaining-r2.txt >&2
+            exit 1
+          fi
+          echo 'FINAL PASS: all Year 6 cumulative homework mappings and Year 6 cumulative R2 objects are gone.'
+
+      - name: Upload audit snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: year6-cumulative-removal-audit-20260911
+          path: /tmp/y6fast/
+          retention-days: 30
+          if-no-files-found: ignore
