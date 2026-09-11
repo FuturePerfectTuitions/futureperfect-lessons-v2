@@ -1,10 +1,29 @@
 import currentWorker from './index-phase20-change20-configured-upsell.js';
+import { kvCatalogueCountsForViews } from './index-phase20-change13.js';
 import { classifyPhase11AnswerIndex, phase11AnswerResource } from './phase11-resources.js';
 
 const PROTECTED_VIEW_STABILITY_VERSION = 'phase23-protected-view-stability-v3';
-const ADMIN_HOME_FAST_PATH_VERSION = 'admin-home-fast-path-v1';
+const ADMIN_HOME_FAST_PATH_VERSION = 'admin-home-direct-v2';
 const SESSION_COOKIE = 'fpt_v2_session';
 const DEFAULT_ADMIN_SUPERUSER_IDS = Object.freeze(['admin']);
+const ADMIN_VIEW_META = Object.freeze({
+  'maths-year2': { subject: 'maths', label: 'Year 2' },
+  'maths-year3': { subject: 'maths', label: 'Year 3' },
+  'maths-year4': { subject: 'maths', label: 'Year 4' },
+  'maths-year5': { subject: 'maths', label: 'Year 5' },
+  'maths-year6': { subject: 'maths', label: 'Year 6' },
+  'maths-level1': { subject: 'maths', label: 'L1' },
+  'maths-level2': { subject: 'maths', label: 'L2' },
+  'maths-level3': { subject: 'maths', label: 'L3' },
+  'english-year2': { subject: 'english', label: 'Year 2' },
+  'english-year3': { subject: 'english', label: 'Year 3' },
+  'english-year4': { subject: 'english', label: 'Year 4' },
+  'english-year5': { subject: 'english', label: 'Year 5' },
+  'english-year6': { subject: 'english', label: 'Year 6' },
+  'english-year4-11plus': { subject: 'english', label: 'Year 4 11+' },
+  'english-year5-11plus': { subject: 'english', label: 'Year 5 11+' }
+});
+const ADMIN_VIEW_IDS = Object.freeze(Object.keys(ADMIN_VIEW_META));
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -48,7 +67,7 @@ function corsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Expose-Headers': 'Content-Type, X-FPT-Protected-View-Stability, X-FPT-Protected-View-Stage',
+    'Access-Control-Expose-Headers': 'Content-Type, X-FPT-Protected-View-Stability, X-FPT-Protected-View-Stage, X-FPT-Admin-Home-Fast-Path',
     Vary: 'Origin'
   };
 }
@@ -114,6 +133,50 @@ function adminHomeFastEnv(env) {
       return typeof value === 'function' ? value.bind(target) : value;
     }
   });
+}
+
+function adminHomeView(viewId, count) {
+  const meta = ADMIN_VIEW_META[viewId];
+  const visible = Math.max(0, Number(count) || 0);
+  return {
+    viewId,
+    subject: meta.subject,
+    label: meta.label,
+    catalogueAvailable: visible > 0,
+    visibleLessonCount: visible,
+    openLessonCount: visible,
+    lockedLessonCount: 0,
+    lockedPreview: false,
+    current: true,
+    group: 'current',
+    source: 'adminSuperuserDirectHome'
+  };
+}
+
+async function directAdminHome(request, env) {
+  const counts = await kvCatalogueCountsForViews(env, ADMIN_VIEW_IDS);
+  const subjects = [
+    { subject: 'maths', label: 'Maths' },
+    { subject: 'english', label: 'English' }
+  ].map(subject => ({
+    ...subject,
+    views: ADMIN_VIEW_IDS
+      .filter(viewId => ADMIN_VIEW_META[viewId].subject === subject.subject)
+      .map(viewId => adminHomeView(viewId, counts.get(viewId)))
+  }));
+
+  const response = json(request, env, {
+    ok: true,
+    superuser: true,
+    role: 'admin',
+    subjects,
+    recentShares: [],
+    source: 'adminSuperuserDirectHome',
+    timestamp: new Date().toISOString()
+  }, 200);
+  const headers = new Headers(response.headers);
+  headers.set('x-fpt-admin-home-fast-path', ADMIN_HOME_FAST_PATH_VERSION);
+  return new Response(response.body, { status: response.status, headers });
 }
 
 async function timingSafeStringEqual(left, right) {
@@ -329,7 +392,11 @@ async function protectedAnswerPdf(request, env, tokenRow) {
 export default {
   async fetch(request, env, ctx) {
     if (await authenticatedAdminHome(request, env)) {
-      return currentWorker.fetch(request, adminHomeFastEnv(env), ctx);
+      try {
+        return await directAdminHome(request, env);
+      } catch {
+        return currentWorker.fetch(request, adminHomeFastEnv(env), ctx);
+      }
     }
 
     const url = new URL(request.url);
