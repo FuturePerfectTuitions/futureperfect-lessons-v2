@@ -149,14 +149,27 @@ function sourceRowId(row, index) {
   return `csv-${index + 2}-${norm(rowValue(row, 'Student'))}-${extractLessonId(rowValue(row, 'Lesson')).toLowerCase()}`.slice(0, 160);
 }
 
+function continuingLessonFromCsv(row, lessonStatus = rowValue(row, 'LessonStatus')) {
+  const status = norm(lessonStatus).replace(/\s+/g, ' ');
+  if (status === 'continue' || status === 'continuing') return true;
+
+  const remarks = norm(rowValue(row, 'Remarks')).replace(/\s+/g, ' ');
+  if (!remarks) return false;
+  return /\b(?:start|starting|continue|continuing|resume|resuming)\s+from\b/.test(remarks);
+}
+
 function normaliseCsvRow(row, index) {
   const portalUserId = rowValue(row, 'Student');
   const batchKey = rowValue(row, 'Mode');
   const lessonId = extractLessonId(rowValue(row, 'Lesson'));
   const lessonDate = parseLessonDate(rowValue(row, 'LessonDated'));
   const lessonStatus = rowValue(row, 'LessonStatus');
+  const remarks = rowValue(row, 'Remarks');
   const completed = norm(lessonStatus) === 'completed';
-  const releaseType = completed ? 'FULL' : (onlineBatch(batchKey) ? 'PRELESSON_ONLY' : 'SKIP');
+  const continuing = continuingLessonFromCsv(row, lessonStatus);
+  const releaseType = (completed || continuing)
+    ? 'FULL'
+    : (onlineBatch(batchKey) ? 'PRELESSON_ONLY' : 'SKIP');
 
   return {
     index,
@@ -169,6 +182,7 @@ function normaliseCsvRow(row, index) {
     lessonDate,
     releaseType,
     lessonStatus,
+    remarks,
     name: rowValue(row, 'Name'),
     subjectFromCsv: rowValue(row, 'Subject'),
     lessonLabel: rowValue(row, 'Lesson')
@@ -242,7 +256,7 @@ async function previewRows(env, rows) {
         results.push({ ...sourceItem, ok:true, action:'SKIP_DUPLICATE', message:'Duplicate CSV row; no second action will be applied.' });
       } else {
         seen.add(key);
-        results.push({ ...sourceItem, ok:true, action:'NO_RELEASE', message:'Face-to-face lesson is not Completed, so nothing will be released.' });
+        results.push({ ...sourceItem, ok:true, action:'NO_RELEASE', message:'Face-to-face lesson is neither Completed nor Continuing, so nothing will be released.' });
       }
       continue;
     }
@@ -572,5 +586,6 @@ export {
   extractLessonId,
   previewRows,
   curriculumCandidatesForDisplayId,
-  createLessonResolver
+  createLessonResolver,
+  continuingLessonFromCsv
 };
