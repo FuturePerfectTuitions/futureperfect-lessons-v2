@@ -1,0 +1,91 @@
+name: L3T1M02 R2 exact-source SHA scan 2026-09-11
+
+on:
+  push:
+    branches:
+      - ops/l3t1m02-cumulative-replace-20260911
+    paths:
+      - .github/workflows/l3t1m02-r2-sha-source-scan-20260911.yml
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  QUESTION_SHA256: a1ac33df9284342c1b636d68d5aa205dcf138dfe6efc21383300e235d768ddd7
+  ANSWER_SHA256: dcacb5ba2ecd09406fcc4c6e619445164772ddcd52ddf75df1c673234925833e
+  QUESTION_SIZE: '155934'
+  ANSWER_SIZE: '110602'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard production binding and scan exact-size R2 candidates by SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$bucket"; test "$bucket" != null
+          echo "Production MATERIALS_R2 bucket guarded: ${bucket}"
+
+          mkdir -p /tmp/r2scan
+          printf '[]' > /tmp/r2scan/objects.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucket}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              url="${url}&cursor=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key,size}]' <<<"$page" > /tmp/r2scan/page.json
+            jq -s '.[0] + .[1]' /tmp/r2scan/objects.json /tmp/r2scan/page.json > /tmp/r2scan/next.json
+            mv /tmp/r2scan/next.json /tmp/r2scan/objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+
+          jq -r --argjson qs "$QUESTION_SIZE" --argjson as "$ANSWER_SIZE" \
+            '.[] | select(.size==$qs or .size==$as) | [.size,.key] | @tsv' /tmp/r2scan/objects.json \
+            > /tmp/r2scan/candidates.tsv
+          echo "Candidate count by exact byte size: $(wc -l < /tmp/r2scan/candidates.tsv | tr -d ' ')"
+          cat /tmp/r2scan/candidates.tsv
+
+          question_found=''
+          answer_found=''
+          n=0
+          while IFS=$'\t' read -r size key; do
+            [ -n "$key" ] || continue
+            n=$((n+1))
+            f="/tmp/r2scan/candidate-${n}.pdf"
+            npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${bucket}/${key}" --file="$f" --remote >/tmp/r2scan/get.log 2>&1
+            sha="$(sha256sum "$f" | awk '{print $1}')"
+            echo "SHA ${sha} | ${size} | ${key}"
+            if [ "$sha" = "$QUESTION_SHA256" ]; then
+              question_found="$key"
+              echo "EXACT_QUESTION_SOURCE=${key}"
+            fi
+            if [ "$sha" = "$ANSWER_SHA256" ]; then
+              answer_found="$key"
+              echo "EXACT_ANSWER_SOURCE=${key}"
+            fi
+          done < /tmp/r2scan/candidates.tsv
+
+          [ -n "$question_found" ] && echo 'Exact question already exists in R2: YES' || echo 'Exact question already exists in R2: NO'
+          [ -n "$answer_found" ] && echo 'Exact answer already exists in R2: YES' || echo 'Exact answer already exists in R2: NO'
+          echo 'Read-only scan complete; no R2 or KV writes performed.'
