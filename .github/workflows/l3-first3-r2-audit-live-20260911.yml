@@ -1,0 +1,97 @@
+name: L3 first three R2/KV live read-only audit 2026-09-11
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/l3-first3-r2-audit-live-20260911.yml'
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  audit:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard production bindings and inspect only target lessons
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          lessons_ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$lessons_ns"; test "$lessons_ns" != null
+          test -n "$bucket"; test "$bucket" != null
+          echo "Production MATERIALS_R2 bucket: $bucket"
+
+          mkdir -p audit
+          keys_json="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${lessons_ns}/keys?limit=1000")"
+          jq -e '.success == true' <<<"$keys_json" >/dev/null
+          jq -r '.result[].name' <<<"$keys_json" > audit/lesson-keys.txt
+          echo "LESSONS_KV key count: $(wc -l < audit/lesson-keys.txt | tr -d ' ')"
+
+          : > audit/targets.ndjson
+          while IFS= read -r key; do
+            enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            value="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${lessons_ns}/values/${enc}")"
+            if grep -Eq 'L3T1M0[123]|Number and Place Value (I|II|III)' <<<"$value"; then
+              jq -c --arg kvKey "$key" 'if type=="object" then . + {__kvKey:$kvKey} else {__kvKey:$kvKey,value:.} end' <<<"$value" >> audit/targets.ndjson
+            fi
+          done < audit/lesson-keys.txt
+
+          echo '--- TARGET LESSON RECORDS ---'
+          cat audit/targets.ndjson | jq .
+          target_count="$(wc -l < audit/targets.ndjson | tr -d ' ')"
+          echo "Target lesson record count: $target_count"
+          test "$target_count" -ge 3
+
+          printf '[]' > audit/r2-objects.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucket}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              url="${url}&cursor=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key,size,etag,last_modified}]' <<<"$page" > audit/page.json
+            jq -s '.[0] + .[1]' audit/r2-objects.json audit/page.json > audit/next.json
+            mv audit/next.json audit/r2-objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          echo "R2 object count: $(jq length audit/r2-objects.json)"
+
+          echo '--- R2 KEYS FOR TARGET LESSON IDS ---'
+          jq -r '.__kvKey' audit/targets.ndjson | sort -u > audit/target-ids.txt
+          while IFS= read -r lesson_id; do
+            echo "### ${lesson_id}"
+            jq -r --arg id "$lesson_id" '.[] | select(.key | contains("/"+$id+"/")) | .key' audit/r2-objects.json | sort
+          done < audit/target-ids.txt
+
+          echo '--- R2 KEYS WITH L3 FIRST-THREE DISPLAY TOKENS ---'
+          jq -r '.[].key' audit/r2-objects.json | grep -E 'L3T1M0[123]|Number and Place Value (I|II|III)' | sort || true
+
+      - name: Upload read-only audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: l3-first3-r2-kv-audit-live-20260911
+          path: audit/
+          retention-days: 14
