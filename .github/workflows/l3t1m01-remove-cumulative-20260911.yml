@@ -1,0 +1,135 @@
+name: L3T1M01 remove obsolete cumulative homework 2026-09-11
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/l3t1m01-remove-cumulative-20260911.yml'
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  TARGET_KV_KEY: lesson:Y6M2.1
+  EXPECTED_DISPLAY_ID: L3T1M01
+  EXPECTED_SHEET_KEY: maths/level3/Y6M2.1/cumulative-homework/sheets/FAR300326Y6M2.1.pdf
+  EXPECTED_ANSWER_KEY: maths/level3/Y6M2.1/cumulative-homework/answers/FAR300326Y6M2.1 Homework Answer Pack.pdf
+  TARGET_PREFIX: maths/level3/Y6M2.1/cumulative-homework/
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard exact production target and snapshot current state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          lessons_ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$lessons_ns"; test "$lessons_ns" != null
+          test -n "$bucket"; test "$bucket" != null
+          echo "lessons_ns=$lessons_ns" >> "$GITHUB_OUTPUT"
+          echo "bucket=$bucket" >> "$GITHUB_OUTPUT"
+
+          mkdir -p /tmp/l3t1m01-backup/r2
+          enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TARGET_KV_KEY")"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${lessons_ns}/values/${enc}" \
+            -o /tmp/l3t1m01-backup/lesson-before.json
+
+          jq -e --arg id "$EXPECTED_DISPLAY_ID" '.lessonId=="Y6M2.1" and .displayIds["maths-level3"]==$id and .title=="Number and Place Value I"' /tmp/l3t1m01-backup/lesson-before.json >/dev/null
+          jq -e '.phase11Resources.core.cumulativeHomeworks | length == 0' /tmp/l3t1m01-backup/lesson-before.json >/dev/null
+          jq -e '.phase11Resources.elevenPlus.cumulativeHomeworks | length == 1' /tmp/l3t1m01-backup/lesson-before.json >/dev/null
+          jq -e --arg s "$EXPECTED_SHEET_KEY" --arg a "$EXPECTED_ANSWER_KEY" '
+            .phase11Resources.elevenPlus.cumulativeHomeworks[0] as $p |
+            $p.homework.r2Key==$s and $p.answerPack.r2Key==$a
+          ' /tmp/l3t1m01-backup/lesson-before.json >/dev/null
+
+          prefix_enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TARGET_PREFIX")"
+          page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucket}/objects?per_page=1000&prefix=${prefix_enc}")"
+          jq -e '.success == true' <<<"$page" >/dev/null
+          jq -r '.result[]?.key' <<<"$page" | sort > /tmp/l3t1m01-backup/prefix-keys-before.txt
+          printf '%s\n%s\n' "$EXPECTED_ANSWER_KEY" "$EXPECTED_SHEET_KEY" | sort > /tmp/l3t1m01-backup/expected-keys.txt
+          diff -u /tmp/l3t1m01-backup/expected-keys.txt /tmp/l3t1m01-backup/prefix-keys-before.txt
+
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${bucket}/${EXPECTED_SHEET_KEY}" --file=/tmp/l3t1m01-backup/r2/cumulative-sheet.pdf --remote >/tmp/get-sheet.log
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${bucket}/${EXPECTED_ANSWER_KEY}" --file=/tmp/l3t1m01-backup/r2/cumulative-answer.pdf --remote >/tmp/get-answer.log
+          sha256sum /tmp/l3t1m01-backup/r2/*.pdf > /tmp/l3t1m01-backup/r2-sha256.txt
+          echo 'Pre-write guards and snapshots: PASS'
+
+      - name: Upload rollback snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: l3t1m01-cumulative-predelete-backup-20260911
+          path: /tmp/l3t1m01-backup/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove cumulative mapping and exact two obsolete R2 objects
+        shell: bash
+        env:
+          LESSONS_NS: ${{ steps.guard.outputs.lessons_ns }}
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          jq '.phase11Resources.elevenPlus.cumulativeHomeworks = []' /tmp/l3t1m01-backup/lesson-before.json > /tmp/lesson-after.json
+          enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TARGET_KV_KEY")"
+          curl -fsS -X PUT "${auth[@]}" \
+            --data-binary @/tmp/lesson-after.json \
+            "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}/values/${enc}" >/tmp/kv-put.json
+          jq -e '.success == true' /tmp/kv-put.json >/dev/null
+
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object delete "${BUCKET}/${EXPECTED_SHEET_KEY}" --remote >/tmp/delete-sheet.log
+          npx --yes wrangler@${WRANGLER_VERSION} r2 object delete "${BUCKET}/${EXPECTED_ANSWER_KEY}" --remote >/tmp/delete-answer.log
+          echo 'Exact KV and R2 deletions completed.'
+
+      - name: Verify L3T1M01 has no cumulative homework anywhere
+        shell: bash
+        env:
+          LESSONS_NS: ${{ steps.guard.outputs.lessons_ns }}
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TARGET_KV_KEY")"
+          current=''
+          for i in 1 2 3 4 5 6; do
+            current="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_NS}/values/${enc}")"
+            if jq -e '.phase11Resources.core.cumulativeHomeworks|length==0' <<<"$current" >/dev/null && \
+               jq -e '.phase11Resources.elevenPlus.cumulativeHomeworks|length==0' <<<"$current" >/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+          jq -e '.phase11Resources.core.cumulativeHomeworks|length==0' <<<"$current" >/dev/null
+          jq -e '.phase11Resources.elevenPlus.cumulativeHomeworks|length==0' <<<"$current" >/dev/null
+
+          if npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${BUCKET}/${EXPECTED_SHEET_KEY}" --file=/tmp/should-not-exist-sheet.pdf --remote >/tmp/check-sheet.log 2>&1; then
+            echo 'Obsolete cumulative sheet still exists.' >&2; exit 1
+          fi
+          if npx --yes wrangler@${WRANGLER_VERSION} r2 object get "${BUCKET}/${EXPECTED_ANSWER_KEY}" --file=/tmp/should-not-exist-answer.pdf --remote >/tmp/check-answer.log 2>&1; then
+            echo 'Obsolete cumulative answer still exists.' >&2; exit 1
+          fi
+
+          prefix_enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TARGET_PREFIX")"
+          page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${BUCKET}/objects?per_page=1000&prefix=${prefix_enc}")"
+          jq -e '.success == true' <<<"$page" >/dev/null
+          test "$(jq '.result|length' <<<"$page")" -eq 0
+          echo 'VERIFIED: L3T1M01 has no cumulative homework mapping or R2 objects.'
