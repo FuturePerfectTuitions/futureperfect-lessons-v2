@@ -4,12 +4,14 @@ on:
   push:
     branches: [main]
     paths:
+      - 'worker/src/admin-lesson-release-import.js'
       - 'worker/src/index-phase20-change16.js'
       - 'worker/src/index-phase20-change18-admin-superuser.js'
       - 'worker/src/index-phase20-change19-admin-fast.js'
       - 'worker/src/index-phase20-change20-configured-upsell.js'
       - 'worker/src/index-phase23-protected-view-stability.js'
       - 'worker/wrangler.toml'
+      - 'tests/admin-lesson-release-import-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
       - 'tests/protected-view-stability-static-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
@@ -35,6 +37,7 @@ jobs:
           node-version: '22'
       - name: Verify production source syntax
         run: |
+          node --check worker/src/admin-lesson-release-import.js
           node --check worker/src/index-phase20-change18-admin-superuser.js
           node --check worker/src/index-phase20-change19-admin-fast.js
           node --check worker/src/index-phase20-change20-configured-upsell.js
@@ -43,6 +46,7 @@ jobs:
           node --check assets/phase23-protected-view-stability.js
       - name: Verify production wiring
         run: |
+          node tests/admin-lesson-release-import-verification.mjs
           node tests/admin-superuser-static-verification.mjs
           node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
       - name: Deploy Worker preserving bindings and secrets
