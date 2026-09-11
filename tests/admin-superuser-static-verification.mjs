@@ -63,18 +63,35 @@ if (!protectedStability.includes("import currentWorker from './index-phase20-cha
 if (!protectedStability.includes('ANSWER_VIEW_EXPIRED') || !protectedStability.includes('ANSWER_VIEW_ALREADY_OPENED')) {
   throw new Error('Protected-view stability wrapper is missing the narrow retry gates.');
 }
+
 const requiredAdminHomeMarkers = [
-  "ADMIN_HOME_FAST_PATH_VERSION = 'admin-home-fast-path-v1'",
+  "import { kvCatalogueCountsForViews } from './index-phase20-change13.js';",
+  "ADMIN_HOME_FAST_PATH_VERSION = 'admin-home-direct-v2'",
   "url.pathname !== '/api/v1/student/home'",
   'authenticatedAdminHome(request, env)',
-  "prop === 'ADMIN_SUPERUSER_FAST_PATH'",
+  'directAdminHome(request, env)',
+  "source: 'adminSuperuserDirectHome'",
+  "headers.set('x-fpt-admin-home-fast-path', ADMIN_HOME_FAST_PATH_VERSION)",
   'currentWorker.fetch(request, adminHomeFastEnv(env), ctx)'
 ];
 for (const marker of requiredAdminHomeMarkers) {
   if (!protectedStability.includes(marker)) {
-    throw new Error(`Authenticated Admin home fast path is missing: ${marker}`);
+    throw new Error(`Authenticated Admin direct-home path is missing: ${marker}`);
   }
 }
+
+const requiredDirectAdminViews = [
+  'maths-year2','maths-year3','maths-year4','maths-year5','maths-year6',
+  'maths-level1','maths-level2','maths-level3',
+  'english-year2','english-year3','english-year4','english-year5','english-year6',
+  'english-year4-11plus','english-year5-11plus'
+];
+for (const viewId of requiredDirectAdminViews) {
+  if (!protectedStability.includes(`'${viewId}'`)) {
+    throw new Error(`Direct Admin home is missing view: ${viewId}`);
+  }
+}
+
 if (!wrangler.includes('main = "src/index-phase23-protected-view-stability.js"')) {
   throw new Error('Production entrypoint is not the protected-view stability wrapper.');
 }
