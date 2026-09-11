@@ -1,0 +1,38 @@
+name: L3T1M02 payload validate
+
+on:
+  push:
+    branches:
+      - ops/l3t1m02-cumulative-replace-20260911
+    paths:
+      - .github/workflows/l3t1m02-payload-validate.yml
+      - .github/l3t1m02-payload/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct exact PDFs and verify SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/l3t1m02
+          cat .github/l3t1m02-payload/q-[0-9][0-9].b64 | tr -d '\r\n' | base64 -d > /tmp/l3t1m02/question.pdf
+          cat .github/l3t1m02-payload/a-*.b64 | tr -d '\r\n' | base64 -d > /tmp/l3t1m02/answer.pdf
+          qsha="$(sha256sum /tmp/l3t1m02/question.pdf | awk '{print $1}')"
+          asha="$(sha256sum /tmp/l3t1m02/answer.pdf | awk '{print $1}')"
+          qsize="$(stat -c%s /tmp/l3t1m02/question.pdf)"
+          asize="$(stat -c%s /tmp/l3t1m02/answer.pdf)"
+          echo "QUESTION size=$qsize sha256=$qsha"
+          echo "ANSWER size=$asize sha256=$asha"
+          test "$qsha" = "a1ac33df9284342c1b636d68d5aa205dcf138dfe6efc21383300e235d768ddd7"
+          test "$asha" = "dcacb5ba2ecd09406fcc4c6e619445164772ddcd52ddf75df1c673234925833e"
+          test "$qsize" = "155934"
+          test "$asize" = "110602"
+          head -c 4 /tmp/l3t1m02/question.pdf | grep -q '%PDF'
+          head -c 4 /tmp/l3t1m02/answer.pdf | grep -q '%PDF'
+          echo 'PAYLOAD VALIDATION PASS'
