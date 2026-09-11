@@ -16,23 +16,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct exact PDFs and verify SHA256
+      - name: Inspect staged chunks and verify exact PDFs
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          echo '--- QUESTION CHUNKS ---'
+          for f in .github/l3t1m02-payload/q-[0-9][0-9].b64; do
+            printf '%s size=%s sha256=' "$f" "$(stat -c%s "$f")"
+            sha256sum "$f" | awk '{print $1}'
+          done
+          echo '--- ANSWER STAGED FILES ---'
+          for f in .github/l3t1m02-payload/a-*.b64; do
+            printf '%s size=%s sha256=' "$f" "$(stat -c%s "$f")"
+            sha256sum "$f" | awk '{print $1}'
+          done
           mkdir -p /tmp/l3t1m02
+          set +e
           cat .github/l3t1m02-payload/q-[0-9][0-9].b64 | tr -d '\r\n' | base64 -d > /tmp/l3t1m02/question.pdf
+          qdecode=$?
           cat .github/l3t1m02-payload/a-*.b64 | tr -d '\r\n' | base64 -d > /tmp/l3t1m02/answer.pdf
+          adecode=$?
+          set -e
+          echo "Q_DECODE=$qdecode A_DECODE=$adecode"
           qsha="$(sha256sum /tmp/l3t1m02/question.pdf | awk '{print $1}')"
           asha="$(sha256sum /tmp/l3t1m02/answer.pdf | awk '{print $1}')"
           qsize="$(stat -c%s /tmp/l3t1m02/question.pdf)"
           asize="$(stat -c%s /tmp/l3t1m02/answer.pdf)"
           echo "QUESTION size=$qsize sha256=$qsha"
           echo "ANSWER size=$asize sha256=$asha"
+          test "$qdecode" = 0
+          test "$adecode" = 0
           test "$qsha" = "a1ac33df9284342c1b636d68d5aa205dcf138dfe6efc21383300e235d768ddd7"
           test "$asha" = "dcacb5ba2ecd09406fcc4c6e619445164772ddcd52ddf75df1c673234925833e"
           test "$qsize" = "155934"
           test "$asize" = "110602"
-          head -c 4 /tmp/l3t1m02/question.pdf | grep -q '%PDF'
-          head -c 4 /tmp/l3t1m02/answer.pdf | grep -q '%PDF'
           echo 'PAYLOAD VALIDATION PASS'
