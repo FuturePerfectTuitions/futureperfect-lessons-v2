@@ -88,4 +88,4 @@ jobs:
           set -euo pipefail
           node tests/lesson-release-navigation-verification.mjs
           test -f worker/src/index-phase20-change17-parent-email.js
-          grep -Fq 'main = "src/index-phase20-change20-configured-upsell.js"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.toml
