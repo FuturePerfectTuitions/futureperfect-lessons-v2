@@ -188,6 +188,14 @@ assert.equal(
   'FULL'
 );
 assert.equal(
+  normaliseCsvRow({ ...onlineReady, LessonStatus:'Slide 16' }, 10).releaseType,
+  'FULL'
+);
+assert.equal(
+  normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Slide 53' }, 11).releaseType,
+  'FULL'
+);
+assert.equal(
   normaliseCsvRow({ ...onlineReady, Remarks:'Start from slide 16' }, 7).releaseType,
   'FULL'
 );

@@ -151,7 +151,7 @@ function sourceRowId(row, index) {
 
 function continuingLessonFromCsv(row, lessonStatus = rowValue(row, 'LessonStatus')) {
   const status = norm(lessonStatus).replace(/\s+/g, ' ');
-  if (status === 'continue' || status === 'continuing') return true;
+  if (status === 'continue' || status === 'continuing' || /\bslide\b/.test(status)) return true;
 
   const remarks = norm(rowValue(row, 'Remarks')).replace(/\s+/g, ' ');
   if (!remarks) return false;
