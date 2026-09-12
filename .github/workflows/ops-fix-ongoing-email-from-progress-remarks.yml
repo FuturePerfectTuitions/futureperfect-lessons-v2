@@ -1,0 +1,258 @@
+name: Ops fix ongoing email from progress remarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-fix-ongoing-email-from-progress-remarks.yml'
+
+permissions:
+  contents: write
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  patch-test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Patch parent email classification and regression coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          parent = Path('worker/src/parent-email.js')
+          s = parent.read_text()
+
+          old = """function continuingLessonFromRemarks(value) {
+            const remarks = norm(value).replace(/\\s+/g, ' ');
+            if (!remarks) return false;
+            return /\\b(?:start|starting|continue|continuing|resume|resuming)\\s+from\\b/.test(remarks);
+          }
+
+          function emailTypeForItem(item) {
+            const status = clean(item?.lessonStatus);
+            if (completedStatus(status)) return 'COMPLETED';
+            if (/\\bslide\\b/i.test(status)) return 'ONGOING';
+            if (norm(status) === 'ready' && onlineMode(item?.batchKey)) {
+          """
+          new = """function continuingLessonFromRemarks(value) {
+            const remarks = norm(value).replace(/\\s+/g, ' ');
+            if (!remarks) return false;
+            return /\\b(?:start|starting|continue|continuing|resume|resuming)\\s+from\\b/.test(remarks);
+          }
+
+          function partialProgressFromRemarks(value) {
+            const remarks = norm(value).replace(/\\s+/g, ' ');
+            if (!remarks) return false;
+            return /\\b(?:completed?|covered|worked|finished)\\s+(?:up\\s+to|till|through)\\s+(?:the\\s+)?slide\\b/.test(remarks)
+              || /\\b(?:start|starting|continue|continuing|resume|resuming)\\s+from\\s+(?:the\\s+)?slide\\b/.test(remarks);
+          }
+
+          function emailTypeForItem(item) {
+            const status = clean(item?.lessonStatus);
+            if (/\\bslide\\b/i.test(status)) return 'ONGOING';
+            if (completedStatus(status)) {
+              // The workbook may mark J as Completed after generating an ongoing
+              // session CSV. Remarks such as "Completed till slide 10" are the
+              // authoritative indication that the lesson is not actually finished.
+              if (partialProgressFromRemarks(item?.remarks)) return 'ONGOING';
+              return 'COMPLETED';
+            }
+            if (norm(status) === 'ready' && onlineMode(item?.batchKey)) {
+          """
+          if old not in s:
+              raise SystemExit('parent-email classification anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = """function slideText(value) {
+            const status = clean(value);
+            const match = status.match(/\\bslide\\b\\s*([0-9]+(?:\\.[0-9]+)?[A-Za-z]?)/i);
+            if (match) return `Slide ${match[1]}`;
+            const rest = status.match(/\\bslide\\b.*$/i);
+            if (!rest) return 'the marked slide';
+            return rest[0].replace(/^slide\\b/i, 'Slide');
+          }
+          """
+          new = """function slideText(value) {
+            const status = clean(value);
+            const match = status.match(/\\bslide\\b\\s*([0-9]+(?:\\.[0-9]+)?[A-Za-z]?)/i);
+            if (match) return `Slide ${match[1]}`;
+            const rest = status.match(/\\bslide\\b.*$/i);
+            if (!rest) return 'the marked slide';
+            return rest[0].replace(/^slide\\b/i, 'Slide');
+          }
+
+          function ongoingSlideText(item) {
+            const status = clean(item?.lessonStatus);
+            if (/\\bslide\\b/i.test(status)) return slideText(status);
+            const remarks = clean(item?.remarks);
+            if (/\\bslide\\b/i.test(remarks)) return slideText(remarks);
+            return 'the marked slide';
+          }
+          """
+          if old not in s:
+              raise SystemExit('slideText anchor not found')
+          s = s.replace(old, new, 1)
+          s = s.replace("const slide = escapeHtml(slideText(item.lessonStatus));", "const slide = escapeHtml(ongoingSlideText(item));", 1)
+          s = s.replace("we will start from ${slideText(item.lessonStatus)} next session.", "we will start from ${ongoingSlideText(item)} next session.", 1)
+          s = s.replace("  continuingLessonFromRemarks,\n", "  continuingLessonFromRemarks,\n  partialProgressFromRemarks,\n", 1)
+          s = s.replace("  slideText,\n", "  slideText,\n  ongoingSlideText,\n", 1)
+          parent.write_text(s)
+
+          test = Path('tests/parent-email-import-verification.mjs')
+          t = test.read_text()
+          t = t.replace("  continuingLessonFromRemarks,\n", "  continuingLessonFromRemarks,\n  partialProgressFromRemarks,\n", 1)
+          t = t.replace("  slideText,\n", "  slideText,\n  ongoingSlideText,\n", 1)
+
+          anchor = """assert.equal(emailTypeForItem({ lessonStatus:'Slide 9', batchKey:'Y5FM' }), 'ONGOING');
+          assert.equal(emailTypeForItem({ lessonStatus:'something COMPLETED today', batchKey:'Y5FM' }), 'COMPLETED');
+          """
+          insert = """assert.equal(emailTypeForItem({ lessonStatus:'Slide 9', batchKey:'Y5FM' }), 'ONGOING');
+          assert.equal(emailTypeForItem({ lessonStatus:'something COMPLETED today', batchKey:'Y5FM' }), 'COMPLETED');
+          assert.equal(partialProgressFromRemarks('Completed till slide 10'), true);
+          assert.equal(partialProgressFromRemarks('Completed up to slide 18'), true);
+          assert.equal(partialProgressFromRemarks('Completed the lesson'), false);
+          assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Completed till slide 10', batchKey:'Y6FM' }), 'ONGOING');
+          assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Homework uploaded', batchKey:'Y6FM' }), 'COMPLETED');
+          """
+          if anchor not in t:
+              raise SystemExit('emailType test anchor not found')
+          t = t.replace(anchor, insert, 1)
+
+          anchor = """assert.match(ongoingMail.html, /Ava must have them handy for next lesson as well/);
+
+          // The preview exposes the intended parent email action but performs no send.
+          """
+          insert = """assert.match(ongoingMail.html, /Ava must have them handy for next lesson as well/);
+
+          // Real workbook shape: the ongoing-email macro has already changed the
+          // row status to Completed, while Remarks preserve the unfinished slide.
+          const aaravOngoingRow = {
+            Name:'Aarav',
+            Year:'Year 6',
+            Subject:'Maths',
+            Lesson:'Y6MS1 SATs Preparation Measurement',
+            LessonDated:'12 September 2026',
+            LessonStatus:'Completed',
+            Remarks:'Completed till slide 10',
+            Mode:'Y611FM',
+            Parent:'Shyna',
+            Email:'aa.aroraschools@gmail.com',
+            Student:'Aar1811'
+          };
+          const aaravOngoing = emailItemFromRow(aaravOngoingRow, 4);
+          assert.equal(aaravOngoing.emailType, 'ONGOING');
+          assert.equal(ongoingSlideText(aaravOngoing), 'Slide 10');
+          const aaravMail = buildParentEmail(aaravOngoing);
+          assert.equal(
+            aaravMail.subject,
+            "Ongoing Lesson: Update on Aarav's Lesson and its homework, for the session on 12 September 2026."
+          );
+          assert.match(aaravMail.html, /we will start from Slide 10 next session/);
+          assert.doesNotMatch(aaravMail.html, /We have completed the lesson/);
+
+          // The preview exposes the intended parent email action but performs no send.
+          """
+          if anchor not in t:
+              raise SystemExit('ongoing mail test anchor not found')
+          t = t.replace(anchor, insert, 1)
+          test.write_text(t)
+
+          completed_test = Path('tests/parent-email-completed-status-verification.mjs')
+          c = completed_test.read_text()
+          anchor = """assert.equal(emailItemFromRow(row).emailType, 'COMPLETED');
+
+          const negative = normaliseCsvInputRow({ ...row, LessonStatus:'Not Completed - Slide 18' });
+          """
+          insert = """assert.equal(emailItemFromRow(row).emailType, 'COMPLETED');
+
+          const workbookOngoing = {
+            ...row,
+            LessonStatus:'Completed',
+            Remarks:'Completed till slide 10'
+          };
+          assert.equal(normaliseCsvInputRow(workbookOngoing).LessonStatus, 'Completed');
+          assert.equal(emailItemFromRow(workbookOngoing).emailType, 'ONGOING');
+
+          const negative = normaliseCsvInputRow({ ...row, LessonStatus:'Not Completed - Slide 18' });
+          """
+          if anchor not in c:
+              raise SystemExit('completed-status test anchor not found')
+          c = c.replace(anchor, insert, 1)
+          completed_test.write_text(c)
+
+          workflow = Path('.github/workflows/admin-superuser-production-deploy.yml')
+          w = workflow.read_text()
+          if "worker/src/parent-email.js" not in w:
+              w = w.replace("      - 'worker/src/admin-lesson-release-import.js'\n", "      - 'worker/src/admin-lesson-release-import.js'\n      - 'worker/src/admin-lesson-release-import-email.js'\n      - 'worker/src/parent-email.js'\n", 1)
+          if "tests/parent-email-import-verification.mjs" not in w:
+              w = w.replace("      - 'tests/admin-lesson-release-import-verification.mjs'\n", "      - 'tests/admin-lesson-release-import-verification.mjs'\n      - 'tests/parent-email-import-verification.mjs'\n      - 'tests/parent-email-completed-status-verification.mjs'\n", 1)
+          if "node --check worker/src/parent-email.js" not in w:
+              w = w.replace("          node --check worker/src/admin-lesson-release-import.js\n", "          node --check worker/src/admin-lesson-release-import.js\n          node --check worker/src/admin-lesson-release-import-email.js\n          node --check worker/src/parent-email.js\n", 1)
+          if "node tests/parent-email-import-verification.mjs" not in w:
+              w = w.replace("          node tests/admin-lesson-release-import-verification.mjs\n", "          node tests/admin-lesson-release-import-verification.mjs\n          node tests/parent-email-import-verification.mjs\n          node tests/parent-email-completed-status-verification.mjs\n", 1)
+          workflow.write_text(w)
+          PY
+
+      - name: Verify email and Portal regression behaviour
+        run: |
+          set -euo pipefail
+          node --check worker/src/parent-email.js
+          node --check worker/src/admin-lesson-release-import-email.js
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+
+      - name: Commit fix and production workflow coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add worker/src/parent-email.js tests/parent-email-import-verification.mjs tests/parent-email-completed-status-verification.mjs .github/workflows/admin-superuser-production-deploy.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'Treat partial slide progress as ongoing parent email'
+            git push origin HEAD:main
+          fi
+
+      - name: Deploy current Worker preserving bindings and secrets
+        run: bash ops/deploy_current_worker_preserve.sh
+
+      - name: Verify live Worker remains healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error \
+              --header "Origin: $ORIGIN" \
+              --dump-header /tmp/live-headers.txt \
+              --output /tmp/live-body.json \
+              --write-out '%{http_code}' \
+              "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+            if test "$code" = '410' && grep -Fq 'ANSWER_VIEW_INVALID' /tmp/live-body.json; then
+              echo 'ONGOING_EMAIL_FIX_WORKER_LIVE_PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Live Worker verification failed.' >&2
+          exit 1
+
+      - name: Complete
+        run: echo ONGOING_EMAIL_PROGRESS_REMARKS_FIX_PASS
