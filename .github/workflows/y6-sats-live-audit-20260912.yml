@@ -17,11 +17,11 @@ jobs:
   audit:
     if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read production Year 6 curriculum and reserved SATs IDs
+      - name: Read production Year 6 SATs catalogue and verify R2 references
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -36,7 +36,10 @@ jobs:
           jq -e '.success == true' <<<"$settings" >/dev/null
           jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
           lessons_ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
           test -n "$lessons_ns"; test "$lessons_ns" != null
+          test -n "$bucket"; test "$bucket" != null
+          echo "Production MATERIALS_R2 bucket: $bucket"
 
           mkdir -p audit
           get_kv() {
@@ -61,7 +64,7 @@ jobs:
           jq . audit/curriculum_MATHS_L3.json
           echo '--- MATHS_Y6_EXTRA ---'
           jq . audit/curriculum_MATHS_Y6_EXTRA.json
-          echo '--- Y6M51-Y6M69 collision audit ---'
+          echo '--- Y6M51-Y6M69 lesson records ---'
           for n in $(seq 51 69); do
             f="audit/lesson_Y6M${n}.json"
             if jq -e '.missing == true' "$f" >/dev/null 2>&1; then
@@ -71,6 +74,51 @@ jobs:
               jq '{lessonId,title,order,subject,active,displayIds,core,video,contentStatus}' "$f"
             fi
           done
+
+          : > audit/expected-r2-keys.txt
+          for n in $(seq 51 69); do
+            jq -r '[
+              (.core.preLessonSheets[]?.r2Key),
+              (.core.homeworks[]?.homework?.r2Key),
+              (.core.homeworks[]?.answerPack?.r2Key),
+              (.core.otherResources[]?.r2Key)
+            ] | .[] | select(type=="string" and length>0)' "audit/lesson_Y6M${n}.json" >> audit/expected-r2-keys.txt
+          done
+          sort -u -o audit/expected-r2-keys.txt audit/expected-r2-keys.txt
+
+          printf '[]' > audit/r2-objects.json
+          cursor=''
+          while :; do
+            url="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucket}/objects?per_page=1000"
+            if [ -n "$cursor" ]; then
+              url="${url}&cursor=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+            fi
+            page="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            jq '[.result[]? | {key,size,etag,last_modified}]' <<<"$page" > audit/page.json
+            jq -s '.[0] + .[1]' audit/r2-objects.json audit/page.json > audit/next.json
+            mv audit/next.json audit/r2-objects.json
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+          jq -r '.[].key' audit/r2-objects.json | sort -u > audit/live-r2-keys.txt
+
+          : > audit/r2-status.tsv
+          printf 'status\tr2Key\n' >> audit/r2-status.tsv
+          while IFS= read -r key; do
+            if grep -Fqx -- "$key" audit/live-r2-keys.txt; then
+              printf 'PRESENT\t%s\n' "$key" >> audit/r2-status.tsv
+            else
+              printf 'MISSING\t%s\n' "$key" >> audit/r2-status.tsv
+            fi
+          done < audit/expected-r2-keys.txt
+
+          echo '--- SATs R2 STATUS ---'
+          cat audit/r2-status.tsv
+          expected="$(wc -l < audit/expected-r2-keys.txt | tr -d ' ')"
+          present="$(grep -c '^PRESENT' audit/r2-status.tsv || true)"
+          missing="$(grep -c '^MISSING' audit/r2-status.tsv || true)"
+          printf 'expected=%s\npresent=%s\nmissing=%s\n' "$expected" "$present" "$missing" | tee audit/r2-summary.txt
 
       - name: Upload read-only audit evidence
         uses: actions/upload-artifact@v4
