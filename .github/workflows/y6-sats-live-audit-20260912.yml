@@ -1,0 +1,80 @@
+name: Y6 SATs live catalogue read-only audit 2026-09-12
+
+on:
+  push:
+    branches: [feature/y6-sats-curriculum-20260912]
+    paths:
+      - '.github/workflows/y6-sats-live-audit-20260912.yml'
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  audit:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read production Year 6 curriculum and reserved SATs IDs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          lessons_ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          test -n "$lessons_ns"; test "$lessons_ns" != null
+
+          mkdir -p audit
+          get_kv() {
+            local key="$1"
+            local enc
+            enc="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            local out="audit/$(tr ':/' '__' <<<"$key").json"
+            local code
+            code="$(curl -sS -o "$out" -w '%{http_code}' -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${lessons_ns}/values/${enc}")"
+            if [ "$code" = 404 ]; then
+              printf '{"missing":true,"key":%s}\n' "$(jq -Rn --arg x "$key" '$x')" > "$out"
+            else
+              test "$code" = 200
+            fi
+          }
+
+          get_kv 'curriculum:MATHS_L3'
+          get_kv 'curriculum:MATHS_Y6_EXTRA'
+          for n in $(seq 51 69); do get_kv "lesson:Y6M${n}"; done
+
+          echo '--- MATHS_L3 ---'
+          jq . audit/curriculum_MATHS_L3.json
+          echo '--- MATHS_Y6_EXTRA ---'
+          jq . audit/curriculum_MATHS_Y6_EXTRA.json
+          echo '--- Y6M51-Y6M69 collision audit ---'
+          for n in $(seq 51 69); do
+            f="audit/lesson_Y6M${n}.json"
+            if jq -e '.missing == true' "$f" >/dev/null 2>&1; then
+              echo "Y6M${n}: MISSING"
+            else
+              echo "Y6M${n}: PRESENT"
+              jq '{lessonId,title,order,subject,active,displayIds,core,video,contentStatus}' "$f"
+            fi
+          done
+
+      - name: Upload read-only audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: y6-sats-live-audit-20260912
+          path: audit/
+          retention-days: 7
