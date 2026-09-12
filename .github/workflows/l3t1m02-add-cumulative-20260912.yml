@@ -1,4 +1,4 @@
-name: L3T1M02 secure transfer bootstrap
+name: Deploy uploaded L3T1M02 cumulative homework
 
 on:
   push:
@@ -8,31 +8,217 @@ on:
       - .github/workflows/l3t1m02-add-cumulative-20260912.yml
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  TARGET_KV_KEY: lesson:Y6M2.2
+  EXPECTED_DISPLAY_ID: L3T1M02
+  EXPECTED_TITLE: Number and Place Value II
+  QUESTION_SHA256: a1ac33df9284342c1b636d68d5aa205dcf138dfe6efc21383300e235d768ddd7
+  ANSWER_SHA256: dcacb5ba2ecd09406fcc4c6e619445164772ddcd52ddf75df1c673234925833e
+  NEW_SHEET_KEY: maths/level3/Y6M2.2/cumulative-homework/sheets/Cumulative Homework L3T1M02.pdf
+  NEW_ANSWER_KEY: maths/level3/Y6M2.2/cumulative-homework/answers/Answer Pack Cumulative Homework L3T1M02.pdf
 
 jobs:
-  bootstrap:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Generate one-off encrypted transfer keypair
+      - name: Check out transfer payload
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify the exact uploaded PDFs
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
-          mkdir -p .github/secure-transfer/l3t1m02
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /tmp/l3t1m02-private.pem >/dev/null 2>&1
-          openssl pkey -in /tmp/l3t1m02-private.pem -pubout -out .github/secure-transfer/l3t1m02/public.pem >/dev/null 2>&1
-          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
-            -in /tmp/l3t1m02-private.pem \
-            -out .github/secure-transfer/l3t1m02/private.pem.enc \
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p /tmp/l3t1m02
+
+          openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in .github/secure-transfer/l3t1m02/private.pem.enc \
+            -out /tmp/l3t1m02/private.pem \
             -pass env:CLOUDFLARE_API_TOKEN
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/secure-transfer/l3t1m02/public.pem .github/secure-transfer/l3t1m02/private.pem.enc
-          git commit -m "Stage encrypted L3T1M02 transfer keypair"
-          git push
-          echo "BOOTSTRAP PASS"
+
+          decrypt_key() {
+            local encrypted="$1" output="$2"
+            if openssl pkeyutl -decrypt \
+              -inkey /tmp/l3t1m02/private.pem \
+              -in "$encrypted" -out "$output" 2>/dev/null; then
+              return 0
+            fi
+            if openssl pkeyutl -decrypt \
+              -inkey /tmp/l3t1m02/private.pem \
+              -pkeyopt rsa_padding_mode:oaep \
+              -pkeyopt rsa_oaep_md:sha256 \
+              -in "$encrypted" -out "$output" 2>/dev/null; then
+              return 0
+            fi
+            openssl pkeyutl -decrypt \
+              -inkey /tmp/l3t1m02/private.pem \
+              -pkeyopt rsa_padding_mode:oaep \
+              -in "$encrypted" -out "$output"
+          }
+
+          for kind in question answer; do
+            cat .github/secure-transfer/l3t1m02/payload/${kind}/part*.b64 \
+              | tr -d '\r\n' \
+              | base64 -d > /tmp/l3t1m02/${kind}.pdf.enc
+            base64 -d .github/secure-transfer/l3t1m02/payload/${kind}.key.rsa.b64 \
+              > /tmp/l3t1m02/${kind}.key.rsa
+            decrypt_key /tmp/l3t1m02/${kind}.key.rsa /tmp/l3t1m02/${kind}.key.txt
+            openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+              -in /tmp/l3t1m02/${kind}.pdf.enc \
+              -out /tmp/l3t1m02/${kind}.pdf \
+              -pass file:/tmp/l3t1m02/${kind}.key.txt
+            head -c 4 /tmp/l3t1m02/${kind}.pdf | grep -q '%PDF'
+          done
+
+          test "$(sha256sum /tmp/l3t1m02/question.pdf | awk '{print $1}')" = "$QUESTION_SHA256"
+          test "$(sha256sum /tmp/l3t1m02/answer.pdf | awk '{print $1}')" = "$ANSWER_SHA256"
+          echo 'Uploaded PDF reconstruction/hash verification: PASS'
+
+      - name: Guard production and read current lesson
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          settings="$(curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+
+          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+          test -n "$bucket"; test "$bucket" != null
+          echo "ns=$ns" >> "$GITHUB_OUTPUT"
+          echo "bucket=$bucket" >> "$GITHUB_OUTPUT"
+
+          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$TARGET_KV_KEY")"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${ns}/values/${enc}" \
+            -o /tmp/l3t1m02/lesson-before.json
+
+          jq -e --arg id "$EXPECTED_DISPLAY_ID" --arg title "$EXPECTED_TITLE" \
+            --arg sk "$NEW_SHEET_KEY" --arg ak "$NEW_ANSWER_KEY" '
+            .lessonId=="Y6M2.2" and
+            .displayIds["maths-level3"]==$id and
+            .title==$title and
+            ((.phase11Resources.core.cumulativeHomeworks // [])|length)==0 and
+            (
+              ((.phase11Resources.elevenPlus.cumulativeHomeworks // [])|length)==0 or
+              (
+                ((.phase11Resources.elevenPlus.cumulativeHomeworks // [])|length)==1 and
+                .phase11Resources.elevenPlus.cumulativeHomeworks[0].pairId=="Y6M2.2-cum-01" and
+                .phase11Resources.elevenPlus.cumulativeHomeworks[0].homework.r2Key==$sk and
+                .phase11Resources.elevenPlus.cumulativeHomeworks[0].answerPack.r2Key==$ak
+              )
+            )
+          ' /tmp/l3t1m02/lesson-before.json >/dev/null
+          echo "Production guard PASS: ${WORKER_NAME} / ${bucket}"
+
+      - name: Put uploaded PDFs directly into R2 and verify them
+        shell: bash
+        env:
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          npm install -g wrangler@${WRANGLER_VERSION} >/dev/null
+          wrangler r2 object put "${BUCKET}/${NEW_SHEET_KEY}" \
+            --file=/tmp/l3t1m02/question.pdf --content-type='application/pdf' --remote >/dev/null
+          wrangler r2 object put "${BUCKET}/${NEW_ANSWER_KEY}" \
+            --file=/tmp/l3t1m02/answer.pdf --content-type='application/pdf' --remote >/dev/null
+          wrangler r2 object get "${BUCKET}/${NEW_SHEET_KEY}" \
+            --file=/tmp/l3t1m02/question-readback.pdf --remote >/dev/null
+          wrangler r2 object get "${BUCKET}/${NEW_ANSWER_KEY}" \
+            --file=/tmp/l3t1m02/answer-readback.pdf --remote >/dev/null
+          test "$(sha256sum /tmp/l3t1m02/question-readback.pdf | awk '{print $1}')" = "$QUESTION_SHA256"
+          test "$(sha256sum /tmp/l3t1m02/answer-readback.pdf | awk '{print $1}')" = "$ANSWER_SHA256"
+          echo 'R2 upload/hash verification: PASS'
+
+      - name: Add cumulative homework pair to LESSONS_KV
+        shell: bash
+        env:
+          NS: ${{ steps.guard.outputs.ns }}
+        run: |
+          set -euo pipefail
+          jq --arg sk "$NEW_SHEET_KEY" --arg ak "$NEW_ANSWER_KEY" '
+            .phase11Resources.elevenPlus.cumulativeHomeworks = [{
+              answerPack: {
+                displayName: "Answer Pack Cumulative Homework L3T1M02.pdf",
+                r2Key: $ak,
+                resourceId: "Y6M2.2-cum-01-answer"
+              },
+              homework: {
+                displayName: "Cumulative Homework L3T1M02.pdf",
+                r2Key: $sk,
+                resourceId: "Y6M2.2-cum-01-file"
+              },
+              pairId: "Y6M2.2-cum-01"
+            }]
+          ' /tmp/l3t1m02/lesson-before.json > /tmp/l3t1m02/lesson-after.json
+
+          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$TARGET_KV_KEY")"
+          resp="$(curl -fsS -X PUT \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/l3t1m02/lesson-after.json \
+            "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS}/values/${enc}")"
+          jq -e '.success == true' <<<"$resp" >/dev/null
+          echo 'KV write: PASS'
+
+      - name: Final production read-back verification
+        shell: bash
+        env:
+          NS: ${{ steps.guard.outputs.ns }}
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$TARGET_KV_KEY")"
+
+          for i in $(seq 1 20); do
+            curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS}/values/${enc}" \
+              -o /tmp/l3t1m02/final.json
+            if jq -e --arg sk "$NEW_SHEET_KEY" --arg ak "$NEW_ANSWER_KEY" '
+              ((.phase11Resources.core.cumulativeHomeworks // [])|length)==0 and
+              ((.phase11Resources.elevenPlus.cumulativeHomeworks // [])|length)==1 and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].pairId=="Y6M2.2-cum-01" and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].homework.displayName=="Cumulative Homework L3T1M02.pdf" and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].homework.resourceId=="Y6M2.2-cum-01-file" and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].homework.r2Key==$sk and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].answerPack.displayName=="Answer Pack Cumulative Homework L3T1M02.pdf" and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].answerPack.resourceId=="Y6M2.2-cum-01-answer" and
+              .phase11Resources.elevenPlus.cumulativeHomeworks[0].answerPack.r2Key==$ak
+            ' /tmp/l3t1m02/final.json >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          jq -e --arg sk "$NEW_SHEET_KEY" --arg ak "$NEW_ANSWER_KEY" '
+            ((.phase11Resources.core.cumulativeHomeworks // [])|length)==0 and
+            ((.phase11Resources.elevenPlus.cumulativeHomeworks // [])|length)==1 and
+            .phase11Resources.elevenPlus.cumulativeHomeworks[0].pairId=="Y6M2.2-cum-01" and
+            .phase11Resources.elevenPlus.cumulativeHomeworks[0].homework.resourceId=="Y6M2.2-cum-01-file" and
+            .phase11Resources.elevenPlus.cumulativeHomeworks[0].homework.r2Key==$sk and
+            .phase11Resources.elevenPlus.cumulativeHomeworks[0].answerPack.resourceId=="Y6M2.2-cum-01-answer" and
+            .phase11Resources.elevenPlus.cumulativeHomeworks[0].answerPack.r2Key==$ak
+          ' /tmp/l3t1m02/final.json >/dev/null
+
+          wrangler r2 object get "${BUCKET}/${NEW_SHEET_KEY}" \
+            --file=/tmp/l3t1m02/final-question.pdf --remote >/dev/null
+          wrangler r2 object get "${BUCKET}/${NEW_ANSWER_KEY}" \
+            --file=/tmp/l3t1m02/final-answer.pdf --remote >/dev/null
+          test "$(sha256sum /tmp/l3t1m02/final-question.pdf | awk '{print $1}')" = "$QUESTION_SHA256"
+          test "$(sha256sum /tmp/l3t1m02/final-answer.pdf | awk '{print $1}')" = "$ANSWER_SHA256"
+
+          echo 'FINAL PASS: L3T1M02 cumulative homework pair added and verified in production.'
