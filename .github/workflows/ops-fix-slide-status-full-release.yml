@@ -1,0 +1,102 @@
+name: Ops fix Slide status full release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-fix-slide-status-full-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Patch importer and regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('worker/src/admin-lesson-release-import.js')
+          source = source_path.read_text()
+          old = """function continuingLessonFromCsv(row, lessonStatus = rowValue(row, 'LessonStatus')) {
+            const status = norm(lessonStatus).replace(/\\s+/g, ' ');
+            if (status === 'continue' || status === 'continuing') return true;
+
+            const remarks = norm(rowValue(row, 'Remarks')).replace(/\\s+/g, ' ');
+            if (!remarks) return false;
+            return /\\b(?:start|starting|continue|continuing|resume|resuming)\\s+from\\b/.test(remarks);
+          }
+          """
+          new = """function continuingLessonFromCsv(row, lessonStatus = rowValue(row, 'LessonStatus')) {
+            const status = norm(lessonStatus).replace(/\\s+/g, ' ');
+            if (status === 'continue' || status === 'continuing' || /\\bslide\\b/.test(status)) return true;
+
+            const remarks = norm(rowValue(row, 'Remarks')).replace(/\\s+/g, ' ');
+            if (!remarks) return false;
+            return /\\b(?:start|starting|continue|continuing|resume|resuming)\\s+from\\b/.test(remarks);
+          }
+          """
+          if source.count(old) != 1:
+              raise SystemExit(f'Expected importer snippet exactly once; found {source.count(old)}')
+          source_path.write_text(source.replace(old, new))
+
+          test_path = Path('tests/admin-lesson-release-import-verification.mjs')
+          tests = test_path.read_text()
+          anchor = """assert.equal(
+            normaliseCsvRow({ ...onlineReady, LessonStatus:'Continuing' }, 6).releaseType,
+            'FULL'
+          );
+          """
+          insertion = anchor + """assert.equal(
+            normaliseCsvRow({ ...onlineReady, LessonStatus:'Slide 16' }, 10).releaseType,
+            'FULL'
+          );
+          assert.equal(
+            normaliseCsvRow({ ...faceToFaceCompleted, LessonStatus:'Slide 53' }, 11).releaseType,
+            'FULL'
+          );
+          """
+          if tests.count(anchor) != 1:
+              raise SystemExit(f'Expected test anchor exactly once; found {tests.count(anchor)}')
+          test_path.write_text(tests.replace(anchor, insertion))
+          PY
+
+      - name: Verify syntax and importer behaviour
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          grep -Fq "/\\bslide\\b/.test(status)" worker/src/admin-lesson-release-import.js
+          grep -Fq "LessonStatus:'Slide 16'" tests/admin-lesson-release-import-verification.mjs
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add worker/src/admin-lesson-release-import.js tests/admin-lesson-release-import-verification.mjs
+          if git diff --cached --quiet; then
+            echo 'No source change required.'
+            exit 0
+          fi
+          git commit -m 'Treat Slide lesson status as full release'
+          git push origin HEAD:main
+
+      - name: Complete
+        run: echo SLIDE_STATUS_FULL_RELEASE_PATCH_PASS
