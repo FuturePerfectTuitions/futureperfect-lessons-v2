@@ -68,11 +68,12 @@ jobs:
           }
 
           for kind in question answer; do
-            cat .github/secure-transfer/l3t1m02/payload/${kind}/part*.b64 \
-              | tr -d '\r\n' \
-              | base64 -d > /tmp/l3t1m02/${kind}.pdf.enc
-            base64 -d .github/secure-transfer/l3t1m02/payload/${kind}.key.rsa.b64 \
-              > /tmp/l3t1m02/${kind}.key.rsa
+            : > /tmp/l3t1m02/${kind}.pdf.enc
+            for part in .github/secure-transfer/l3t1m02/payload/${kind}/part*.b64; do
+              tr -d '\r\n ' < "$part" | base64 -d >> /tmp/l3t1m02/${kind}.pdf.enc
+            done
+            tr -d '\r\n ' < .github/secure-transfer/l3t1m02/payload/${kind}.key.rsa.b64 \
+              | base64 -d > /tmp/l3t1m02/${kind}.key.rsa
             decrypt_key /tmp/l3t1m02/${kind}.key.rsa /tmp/l3t1m02/${kind}.key.txt
             openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
               -in /tmp/l3t1m02/${kind}.pdf.enc \
