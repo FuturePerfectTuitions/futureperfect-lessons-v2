@@ -1,0 +1,105 @@
+name: Ops V2 English KV read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-v2-english-kv-audit.yml'
+      - 'ops/v2-english-kv-audit.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.head_ref == 'ops/v2-english-kv-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CF_API: https://api.cloudflare.com/client/v4
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard development environment and resolve LESSONS_KV
+        id: env
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' <<<"$settings" >/dev/null
+          test "$(jq -r '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket")|.bucket_name' <<<"$settings")" = 'fpt-materials-dev'
+          lessons="$(jq -r '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace")|.namespace_id' <<<"$settings")"
+          test -n "$lessons"; test "$lessons" != null
+          echo "lessons=$lessons" >> "$GITHUB_OUTPUT"
+          echo 'Development environment verified. Read-only LESSONS_KV export permitted.'
+
+      - name: Export English curricula and lesson records read-only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LESSONS_KV_ID: ${{ steps.env.outputs.lessons }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p v2-english-kv/values
+          api="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${LESSONS_KV_ID}"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          : > v2-english-kv/manifest.tsv
+
+          fetch_key() {
+            key="$1"
+            token="$(printf '%s' "$key" | sha256sum | awk '{print $1}')"
+            encoded="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            status="$(curl -sS -o "v2-english-kv/values/${token}.value" -w '%{http_code}' "${auth[@]}" "${api}/values/${encoded}")"
+            if [ "$status" = 200 ]; then
+              printf '%s\t%s\n' "$token" "$key" >> v2-english-kv/manifest.tsv
+            else
+              rm -f "v2-english-kv/values/${token}.value"
+              echo "Missing optional key: $key (HTTP $status)"
+            fi
+          }
+
+          for y in 2 3 4 5 6; do
+            fetch_key "curriculum:ENGLISH_Y${y}"
+          done
+
+          cursor=''
+          while :; do
+            url="${api}/keys?prefix=lesson%3A&limit=1000"
+            if [ -n "$cursor" ]; then
+              encoded_cursor="$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+              url="${url}&cursor=${encoded_cursor}"
+            fi
+            page="$(curl -fsS "${auth[@]}" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            while IFS= read -r key; do fetch_key "$key"; done < <(jq -r '.result[]?.name' <<<"$page")
+            cursor="$(jq -r '.result_info.cursor // empty' <<<"$page")"
+            [ -z "$cursor" ] && break
+          done
+
+          echo "Exported records: $(wc -l < v2-english-kv/manifest.tsv | tr -d ' ')"
+
+      - name: Safety check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -ERqi '"(password|expires|portalUserId|username|answerPassword)"[[:space:]]*:' v2-english-kv/values; then
+            echo 'Unexpected user-shaped field in LESSONS_KV export; refusing artifact.' >&2
+            exit 1
+          fi
+          echo 'V2 English KV read-only audit safety check: PASS'
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-english-kv-audit
+          path: v2-english-kv/
+          retention-days: 7
