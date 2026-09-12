@@ -18,6 +18,7 @@ on:
       - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
+      - tests/admin-lesson-release-y6-sats-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
@@ -41,6 +42,7 @@ on:
       - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
+      - tests/admin-lesson-release-y6-sats-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
@@ -79,6 +81,7 @@ jobs:
           node tests/admin-import-auto-process-static-verification.mjs
           node tests/admin-import-manual-email-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-idempotency-verification.mjs
           node tests/parent-email-completed-status-verification.mjs
