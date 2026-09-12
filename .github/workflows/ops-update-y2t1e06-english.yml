@@ -1,0 +1,167 @@
+name: Ops update Y2T1E06 English video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y2t1e06-english.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y2T1E06, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const DISPLAY_ID = 'Y2T1E06';
+          const TARGET = 'cOQlrPnwHgU';
+          const description = [
+            'In this Year 2 English lesson, pupils learn how noun phrases and expanded noun phrases add detail and make writing clearer and more interesting.',
+            '',
+            'This lesson includes:',
+            '✔ Revising what nouns are and identifying nouns in sentences',
+            '✔ Understanding that a noun phrase is a group of words built around a noun',
+            '✔ Identifying noun phrases in sentences, including sentences with more than one noun phrase',
+            '✔ Learning how adjectives can be added before a noun to expand a noun phrase',
+            '✔ Using two adjectives to add more precise description',
+            '✔ Using commas between two adjectives when both separately describe the same noun',
+            '✔ Expanding noun phrases with groups of words beginning with prepositions, such as on the ground and in the tree',
+            '✔ Comparing simple and expanded noun phrases and seeing how added detail improves meaning',
+            '✔ Writing expanded noun phrases to describe pictures',
+            '✔ Choosing suitable adjectives from a word bank to complete expanded noun phrases',
+            '✔ Sorting simple noun phrases and expanded noun phrases',
+            '✔ Improving a short Gingerbread Man story by expanding its noun phrases',
+            '✔ Applying expanded noun phrases in sentence-completion challenges',
+            '',
+            'Pupils begin by revising nouns and learning how noun phrases are built around a key noun. They identify noun phrases in a range of sentences before exploring how adjectives and other modifiers can add useful information.',
+            '',
+            'The lesson then shows how to build expanded noun phrases with one or two adjectives and with prepositional phrases that add details such as location. Pupils compare vague descriptions with more precise ones and create their own expanded noun phrases from pictures.',
+            '',
+            'Later activities ask pupils to complete, sort and improve noun phrases before applying the skill to a short Gingerbread Man story, where descriptive words are added without changing the events.',
+            '',
+            'By the end of the lesson, learners will be able to identify noun phrases and expand them with carefully chosen adjectives and other details to make their writing more vivid and specific.'
+          ].join('\n');
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(base + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            const text = await r.text();
+            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(base + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          function guardLesson(r) {
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y2T1E06 state mismatch');
+            if (!Object.values(r?.displayIds || {}).includes(DISPLAY_ID)) throw new Error(`Display ID mismatch for ${r?.lessonId}`);
+            const title = String(r?.title || '').toLowerCase();
+            if (!title.includes('expanded') || !title.includes('noun')) throw new Error(`Y2T1E06 title guard failed: ${r?.title}`);
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y2T1E06 core.video missing');
+          }
+
+          (async () => {
+            const curriculum = await getJson('curriculum:ENGLISH_Y2');
+            if (curriculum?.curriculumCode !== 'ENGLISH_Y2') throw new Error('ENGLISH_Y2 curriculum identity mismatch');
+            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.length) throw new Error('ENGLISH_Y2 lessonIds missing');
+
+            const matches = [];
+            for (const lessonId of curriculum.lessonIds) {
+              const rec = await getJson(`lesson:${lessonId}`);
+              if (Object.values(rec?.displayIds || {}).includes(DISPLAY_ID)) matches.push(rec);
+            }
+            if (matches.length !== 1) throw new Error(`Expected exactly one ${DISPLAY_ID} lesson; found ${matches.length}`);
+
+            const before = matches[0];
+            guardLesson(before);
+            const lessonKey = `lesson:${before.lessonId}`;
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.description = description;
+            next.core.video = video(TARGET);
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson(lessonKey, next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson(lessonKey);
+              const ok = verified?.core?.video?.screenpal === TARGET &&
+                verified?.description === description &&
+                verified?.contentStatus?.description === 'available' &&
+                verified?.contentStatus?.mainVideo === 'available' &&
+                verified?.contentStatus?.ownerConfirmedPending === false;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guardLesson(verified);
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y2T1E06 ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Y2T1E06 description verification failed');
+            if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+              throw new Error('Y2T1E06 content status verification failed');
+            }
+
+            console.log('Y2T1E06_VERIFIED=' + JSON.stringify({
+              lessonId: verified.lessonId,
+              displayId: DISPLAY_ID,
+              title: verified.title,
+              screenpal: verified.core.video.screenpal,
+              contentStatus: verified.contentStatus
+            }));
+            console.log('OPS_UPDATE_Y2T1E06_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
