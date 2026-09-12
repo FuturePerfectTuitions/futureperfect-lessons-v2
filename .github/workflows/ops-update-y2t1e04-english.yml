@@ -1,0 +1,166 @@
+name: Ops update Y2T1E04 English video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y2t1e04-english.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y2T1E04, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const DISPLAY_ID = 'Y2T1E04';
+          const TARGET = 'cOQlIznwHcH';
+          const description = [
+            'In this Year 2 English lesson, pupils learn how conjunctions connect words, phrases and clauses, and how coordinating and subordinating conjunctions are used to build compound and complex sentences.',
+            '',
+            'This lesson includes:',
+            '✔ Understanding that a clause contains a subject and a verb',
+            '✔ Joining clauses to create longer sentences',
+            '✔ Learning how coordinating conjunctions link equally important ideas',
+            '✔ Using coordinating conjunctions such as and, but, or and so',
+            '✔ Understanding how and adds information, but shows contrast, or presents choices and so links an idea with its result',
+            '✔ Checking whether joined clauses can stand independently',
+            '✔ Understanding that subordinating conjunctions introduce subordinate clauses',
+            '✔ Identifying main clauses and subordinate clauses in complex sentences',
+            '✔ Using subordinating conjunctions such as when, that, if and because',
+            '✔ Recognising further subordinating conjunctions including although, even though, so that and even if',
+            '✔ Choosing conjunctions that best match meaning in a sentence',
+            '✔ Distinguishing between coordinating and subordinating conjunctions',
+            '',
+            'Pupils begin by learning what clauses are and how conjunctions link ideas together. They then explore coordinating conjunctions in detail, using and, but, or and so to add information, show contrast, present alternatives and connect causes with results.',
+            '',
+            'The lesson then moves on to subordinating conjunctions and subordinate clauses, showing how dependent clauses work with main clauses to form complex sentences. Pupils identify conjunctions, clauses and sentence relationships in a range of examples.',
+            '',
+            'The final activities ask pupils to choose suitable conjunctions and classify them as coordinating or subordinating, applying their understanding across different sentence structures.',
+            '',
+            'By the end of the lesson, learners will be able to explain how conjunctions connect ideas and use coordinating and subordinating conjunctions accurately in sentences.'
+          ].join('\n');
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(base + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            const text = await r.text();
+            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(base + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          function guardLesson(r) {
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y2T1E04 state mismatch');
+            if (!Object.values(r?.displayIds || {}).includes(DISPLAY_ID)) throw new Error(`Display ID mismatch for ${r?.lessonId}`);
+            const title = String(r?.title || '').toLowerCase();
+            if (!title.includes('conjunction')) throw new Error(`Y2T1E04 title guard failed: ${r?.title}`);
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y2T1E04 core.video missing');
+          }
+
+          (async () => {
+            const curriculum = await getJson('curriculum:ENGLISH_Y2');
+            if (curriculum?.curriculumCode !== 'ENGLISH_Y2') throw new Error('ENGLISH_Y2 curriculum identity mismatch');
+            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.length) throw new Error('ENGLISH_Y2 lessonIds missing');
+
+            const matches = [];
+            for (const lessonId of curriculum.lessonIds) {
+              const rec = await getJson(`lesson:${lessonId}`);
+              if (Object.values(rec?.displayIds || {}).includes(DISPLAY_ID)) matches.push(rec);
+            }
+            if (matches.length !== 1) throw new Error(`Expected exactly one ${DISPLAY_ID} lesson; found ${matches.length}`);
+
+            const before = matches[0];
+            guardLesson(before);
+            const lessonKey = `lesson:${before.lessonId}`;
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.description = description;
+            next.core.video = video(TARGET);
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson(lessonKey, next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson(lessonKey);
+              const ok = verified?.core?.video?.screenpal === TARGET &&
+                verified?.description === description &&
+                verified?.contentStatus?.description === 'available' &&
+                verified?.contentStatus?.mainVideo === 'available' &&
+                verified?.contentStatus?.ownerConfirmedPending === false;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guardLesson(verified);
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y2T1E04 ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Y2T1E04 description verification failed');
+            if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+              throw new Error('Y2T1E04 content status verification failed');
+            }
+
+            console.log('Y2T1E04_VERIFIED=' + JSON.stringify({
+              lessonId: verified.lessonId,
+              displayId: DISPLAY_ID,
+              title: verified.title,
+              screenpal: verified.core.video.screenpal,
+              contentStatus: verified.contentStatus
+            }));
+            console.log('OPS_UPDATE_Y2T1E04_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
