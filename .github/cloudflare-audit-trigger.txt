@@ -1,0 +1,4 @@
+Cloudflare read-only audit trigger
+Run: 2026-08-26 Phase 13 preflight
+Attempt: 6
+Purpose: verify exact Phase 12 D1 and locked catalogue invariants before Phase 13 implementation
