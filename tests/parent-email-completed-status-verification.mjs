@@ -19,6 +19,10 @@ assert.equal(normalised.Lesson, 'Y5T1M01 Number and Place Value I');
 assert.equal(normalised.LessonStatus, 'Completed');
 assert.equal(emailItemFromRow(row).emailType, 'COMPLETED');
 
+const workbookOngoing = { ...row, LessonStatus:'Completed', Remarks:'Completed till slide 10' };
+assert.equal(normaliseCsvInputRow(workbookOngoing).LessonStatus, 'Completed');
+assert.equal(emailItemFromRow(workbookOngoing).emailType, 'ONGOING');
+
 const negative = normaliseCsvInputRow({ ...row, LessonStatus:'Not Completed - Slide 18' });
 assert.equal(negative.LessonStatus, 'Not Completed - Slide 18');
 assert.equal(emailItemFromRow({ ...row, LessonStatus:'Not Completed - Slide 18' }).emailType, 'ONGOING');

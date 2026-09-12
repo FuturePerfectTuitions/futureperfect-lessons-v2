@@ -4,10 +4,12 @@ import { createHash } from 'node:crypto';
 import {
   emailTypeForItem,
   continuingLessonFromRemarks,
+  partialProgressFromRemarks,
   prelessonSheetsFromRemarks,
   buildParentEmail,
   sendParentEmail,
   slideText,
+  ongoingSlideText,
   SIGNATURE_CID,
   SIGNATURE_SOURCE_URL
 } from '../worker/src/parent-email.js';
@@ -108,6 +110,11 @@ assert.equal(emailTypeForItem({ lessonStatus:'Ready', batchKey:'Y5FE' }), '');
 assert.equal(emailTypeForItem({ lessonStatus:'Not Completed', batchKey:'Y5FM' }), '');
 assert.equal(emailTypeForItem({ lessonStatus:'Slide 9', batchKey:'Y5FM' }), 'ONGOING');
 assert.equal(emailTypeForItem({ lessonStatus:'something COMPLETED today', batchKey:'Y5FM' }), 'COMPLETED');
+assert.equal(partialProgressFromRemarks('Completed till slide 10'), true);
+assert.equal(partialProgressFromRemarks('Completed up to slide 18'), true);
+assert.equal(partialProgressFromRemarks('Completed the lesson'), false);
+assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Completed till slide 10', batchKey:'Y6FM' }), 'ONGOING');
+assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Homework uploaded', batchKey:'Y6FM' }), 'COMPLETED');
 
 // A Ready online row with "Start from ..." is a continuation of the previous
 // session. It must not require a new PreLesson-Sheets remark or trigger another
@@ -181,6 +188,21 @@ assert.equal(
 assert.match(ongoingMail.html, /we will start from Slide 25 next session/);
 assert.match(ongoingMail.html, /color:#ff0000/);
 assert.match(ongoingMail.html, /Ava must have them handy for next lesson as well/);
+
+const aaravOngoingRow = {
+  Name:'Aarav', Year:'Year 6', Subject:'Maths',
+  Lesson:'Y6MS1 SATs Preparation Measurement',
+  LessonDated:'12 September 2026', LessonStatus:'Completed',
+  Remarks:'Completed till slide 10', Mode:'Y611FM', Parent:'Shyna',
+  Email:'aa.aroraschools@gmail.com', Student:'Aar1811'
+};
+const aaravOngoing = emailItemFromRow(aaravOngoingRow, 4);
+assert.equal(aaravOngoing.emailType, 'ONGOING');
+assert.equal(ongoingSlideText(aaravOngoing), 'Slide 10');
+const aaravMail = buildParentEmail(aaravOngoing);
+assert.equal(aaravMail.subject, "Ongoing Lesson: Update on Aarav's Lesson and its homework, for the session on 12 September 2026.");
+assert.match(aaravMail.html, /we will start from Slide 10 next session/);
+assert.doesNotMatch(aaravMail.html, /We have completed the lesson/);
 
 // The preview exposes the intended parent email action but performs no send.
 const preview = decoratePreview({

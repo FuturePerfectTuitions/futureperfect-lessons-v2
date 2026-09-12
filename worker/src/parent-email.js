@@ -25,10 +25,20 @@ function continuingLessonFromRemarks(value) {
   return /\b(?:start|starting|continue|continuing|resume|resuming)\s+from\b/.test(remarks);
 }
 
+function partialProgressFromRemarks(value) {
+  const remarks = norm(value).replace(/\s+/g, ' ');
+  if (!remarks) return false;
+  return /\b(?:completed?|covered|worked|finished)\s+(?:up\s+to|till|through)\s+(?:the\s+)?slide\b/.test(remarks)
+    || /\b(?:start|starting|continue|continuing|resume|resuming)\s+from\s+(?:the\s+)?slide\b/.test(remarks);
+}
+
 function emailTypeForItem(item) {
   const status = clean(item?.lessonStatus);
-  if (completedStatus(status)) return 'COMPLETED';
   if (/\bslide\b/i.test(status)) return 'ONGOING';
+  if (completedStatus(status)) {
+    if (partialProgressFromRemarks(item?.remarks)) return 'ONGOING';
+    return 'COMPLETED';
+  }
   if (norm(status) === 'ready' && onlineMode(item?.batchKey)) {
     // A Ready row such as "Start from 10" is the next session of a lesson that
     // is already in progress. It is not a new upcoming lesson, so it does not
@@ -87,6 +97,14 @@ function slideText(value) {
   const rest = status.match(/\bslide\b.*$/i);
   if (!rest) return 'the marked slide';
   return rest[0].replace(/^slide\b/i, 'Slide');
+}
+
+function ongoingSlideText(item) {
+  const status = clean(item?.lessonStatus);
+  if (/\bslide\b/i.test(status)) return slideText(status);
+  const remarks = clean(item?.remarks);
+  if (/\bslide\b/i.test(remarks)) return slideText(remarks);
+  return 'the marked slide';
 }
 
 function bytesToBase64(bytes) {
@@ -217,7 +235,7 @@ function buildOngoing(item) {
   const subject = escapeHtml(item.subjectFromCsv);
   const lesson = escapeHtml(item.lessonLabel);
   const date = escapeHtml(item.lessonDateDisplay);
-  const slide = escapeHtml(slideText(item.lessonStatus));
+  const slide = escapeHtml(ongoingSlideText(item));
 
   const subjectLine = `Ongoing Lesson: Update on ${clean(item.name)}'s Lesson and its homework, for the session on ${clean(item.lessonDateDisplay)}.`;
   const html = htmlShell(
@@ -232,7 +250,7 @@ function buildOngoing(item) {
 
 This is to let you know that ${clean(item.name)}'s class has studied "${clean(item.lessonLabel)}" during the ${clean(item.subjectFromCsv)} session on ${clean(item.lessonDateDisplay)}.
 
-We have not yet finished the lesson and we will start from ${slideText(item.lessonStatus)} next session. If there were any PreLesson Sheets given for this lesson, ${clean(item.name)} must have them handy for next lesson as well.
+We have not yet finished the lesson and we will start from ${ongoingSlideText(item)} next session. If there were any PreLesson Sheets given for this lesson, ${clean(item.name)} must have them handy for next lesson as well.
 
 We suggest that ${clean(item.name)} completes as much homework as possible. ${clean(item.name)} may not be able to finish the homework as the lesson is not completed yet.
 
@@ -333,12 +351,14 @@ async function sendParentEmail(env, item) {
 export {
   emailTypeForItem,
   continuingLessonFromRemarks,
+  partialProgressFromRemarks,
   prelessonSheetsFromRemarks,
   validateParentEmailFields,
   buildParentEmail,
   sendParentEmail,
   completedStatus,
   slideText,
+  ongoingSlideText,
   loadSignatureBytes,
   SIGNATURE_CID,
   SIGNATURE_SOURCE_URL
