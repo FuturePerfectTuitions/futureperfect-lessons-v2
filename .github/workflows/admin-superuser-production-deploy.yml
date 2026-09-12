@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - 'worker/src/admin-lesson-release-import.js'
+      - 'worker/src/admin-lesson-release-import-email.js'
+      - 'worker/src/parent-email.js'
       - 'worker/src/index-phase20-change16.js'
       - 'worker/src/index-phase20-change18-admin-superuser.js'
       - 'worker/src/index-phase20-change19-admin-fast.js'
@@ -13,6 +15,8 @@ on:
       - 'worker/src/index-phase23-protected-view-stability.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-lesson-release-import-verification.mjs'
+      - 'tests/parent-email-import-verification.mjs'
+      - 'tests/parent-email-completed-status-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
       - 'tests/protected-view-stability-static-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
@@ -39,6 +43,8 @@ jobs:
       - name: Verify production source syntax
         run: |
           node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/admin-lesson-release-import-email.js
+          node --check worker/src/parent-email.js
           node --check worker/src/index-phase20-change18-admin-superuser.js
           node --check worker/src/index-phase20-change19-admin-fast.js
           node --check worker/src/index-phase20-change20-configured-upsell.js
@@ -48,6 +54,8 @@ jobs:
       - name: Verify production wiring
         run: |
           node tests/admin-lesson-release-import-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
           node tests/admin-superuser-static-verification.mjs
           node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
       - name: Deploy Worker preserving bindings and secrets
