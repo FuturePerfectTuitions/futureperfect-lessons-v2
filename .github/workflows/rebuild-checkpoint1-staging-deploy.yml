@@ -1,14 +1,8 @@
 name: Rebuild Checkpoint 1 isolated staging deploy
 
+# Checkpoint 1 is closed/PASS. Keep this workflow as a reproducible manual
+# acceptance test, but do not redeploy it on later rebuild checkpoint commits.
 on:
-  push:
-    branches:
-      - rebuild/portal-v2-performance-2026-09-13
-    paths:
-      - 'rebuild/**'
-      - 'tests/rebuild-checkpoint1-static-verification.mjs'
-      - '.github/workflows/rebuild-checkpoint1-staging-deploy.yml'
-      - 'docs/rebuild/CHECKPOINT_1_PARALLEL_NAMESPACE.md'
   workflow_dispatch:
 
 permissions:
