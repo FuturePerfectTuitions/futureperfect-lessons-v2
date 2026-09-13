@@ -1,0 +1,196 @@
+name: Ops update Y5/L2 T2M23 Proportional Reasoning video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y5-l2-t2m23-proportional-reasoning-video.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y5/L2 T2M23, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const valuesBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const keysBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const LEVEL_DISPLAY_ID = 'L2T2M23';
+          const YEAR_DISPLAY_ID = 'Y5T2M23';
+          const TARGET = 'cOQIlQnwJ3P';
+          const description = [
+            'In this Year 5 Maths lesson, pupils develop proportional reasoning by comparing linked quantities, finding missing values and simplifying multiplication-and-division calculations efficiently.',
+            '',
+            'This lesson includes:',
+            '✔ Understanding that a fraction bar can represent division',
+            '✔ Simplifying calculations such as multiplication followed by division before multiplying',
+            '✔ Recognising that equivalent simplification routes can give the same answer',
+            '✔ Identifying the two quantities being compared in a proportional problem',
+            '✔ Using known corresponding values to find a missing value',
+            '✔ Applying a structured five-step proportional reasoning method',
+            '✔ Cross multiplying the diagonal values and dividing by the remaining value',
+            '✔ Solving proportion problems involving monkeys and bananas, pencils and pencil cases, sweets and children, and cost and quantity',
+            '✔ Applying proportional reasoning to measurement conversions',
+            '✔ Converting centimetres to millimetres using 1 cm = 10 mm',
+            '✔ Converting metres to centimetres using 1 m = 100 cm',
+            '',
+            'Pupils begin by revisiting division notation and the connection between division and fractions. They then explore how multiplication-and-division calculations can often be simplified before multiplying, making the arithmetic easier while preserving the same result.',
+            '',
+            'The lesson then introduces proportional reasoning as a way to compare two linked quantities. Pupils follow a consistent method: identify the two units, state what is known, identify the missing value, cross multiply, and divide by the remaining number.',
+            '',
+            'A sequence of contextual problems develops fluency before pupils apply the same reasoning to measurement conversions between centimetres and millimetres, and metres and centimetres.',
+            '',
+            'By the end of the lesson, learners will be able to use proportional reasoning to find missing values accurately and apply the method across everyday and measurement contexts.'
+          ].join('\n');
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(valuesBase + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            const text = await r.text();
+            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(valuesBase + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          async function listLessonKeys() {
+            const names = [];
+            let cursor = '';
+            do {
+              const u = new URL(keysBase);
+              u.searchParams.set('prefix', 'lesson:');
+              u.searchParams.set('limit', '1000');
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const r = await fetch(u, { headers: auth });
+              if (!r.ok) throw new Error(`LIST lesson keys failed HTTP ${r.status}`);
+              const body = await r.json();
+              if (!body?.success || !Array.isArray(body?.result)) throw new Error('LIST lesson keys returned unexpected payload');
+              for (const item of body.result) if (item?.name) names.push(item.name);
+              cursor = String(body?.result_info?.cursor || '');
+            } while (cursor);
+            return names;
+          }
+
+          function hasExpectedDisplayId(r) {
+            const vals = Object.values(r?.displayIds || {});
+            return vals.includes(LEVEL_DISPLAY_ID) || vals.includes(YEAR_DISPLAY_ID);
+          }
+
+          function guardLesson(r) {
+            if (r?.subject !== 'maths' || r?.active !== true) throw new Error('Y5/L2 T2M23 state mismatch');
+            if (!hasExpectedDisplayId(r)) throw new Error(`Display ID mismatch for ${r?.lessonId}`);
+            const title = String(r?.title || '').toLowerCase();
+            if (!title.includes('proportional')) throw new Error(`Proportional Reasoning title guard failed: ${r?.title}`);
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Proportional Reasoning core.video missing');
+          }
+
+          (async () => {
+            const lessonKeys = await listLessonKeys();
+            if (!lessonKeys.length) throw new Error('No lesson keys found in production LESSONS_KV');
+
+            const matches = [];
+            const batchSize = 25;
+            for (let i = 0; i < lessonKeys.length; i += batchSize) {
+              const batch = lessonKeys.slice(i, i + batchSize);
+              const records = await Promise.all(batch.map(async key => ({ key, rec: await getJson(key) })));
+              for (const item of records) if (hasExpectedDisplayId(item.rec)) matches.push(item);
+            }
+            if (matches.length !== 1) {
+              console.log('MATCH_DEBUG=' + JSON.stringify(matches.map(x => ({ key: x.key, lessonId: x.rec?.lessonId, title: x.rec?.title, displayIds: x.rec?.displayIds }))));
+              throw new Error(`Expected exactly one Y5/L2 T2M23 lesson; found ${matches.length}`);
+            }
+
+            const lessonKey = matches[0].key;
+            const before = matches[0].rec;
+            guardLesson(before);
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.description = description;
+            next.core.video = video(TARGET);
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson(lessonKey, next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson(lessonKey);
+              const ok = verified?.core?.video?.screenpal === TARGET &&
+                verified?.description === description &&
+                verified?.contentStatus?.description === 'available' &&
+                verified?.contentStatus?.mainVideo === 'available' &&
+                verified?.contentStatus?.ownerConfirmedPending === false;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guardLesson(verified);
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Proportional Reasoning ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Proportional Reasoning description verification failed');
+            if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+              throw new Error('Proportional Reasoning content status verification failed');
+            }
+
+            console.log('Y5_L2_T2M23_VERIFIED=' + JSON.stringify({
+              lessonKey,
+              lessonId: verified.lessonId,
+              levelDisplayId: verified?.displayIds?.['maths-level2'] || null,
+              yearDisplayId: verified?.displayIds?.['maths-year5'] || null,
+              title: verified.title,
+              screenpal: verified.core.video.screenpal,
+              contentStatus: verified.contentStatus
+            }));
+            console.log('OPS_UPDATE_Y5_L2_T2M23_PROPORTIONAL_REASONING_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
