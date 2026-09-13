@@ -1,22 +1,17 @@
 const API_PREFIX = '/api/v2/';
 
-function upstreamUrl(request, env) {
+function internalApiUrl(request) {
   const incoming = new URL(request.url);
-  const upstream = new URL(String(env.UPSTREAM_ORIGIN || ''));
-  if (upstream.protocol !== 'https:' || !/\.workers\.dev$/i.test(upstream.hostname)) {
-    throw new Error('INVALID_STAGING_UPSTREAM');
-  }
-  upstream.pathname = incoming.pathname;
-  upstream.search = incoming.search;
-  upstream.hash = '';
-  return upstream;
+  return new URL(`${incoming.pathname}${incoming.search}`, 'https://cp9-staging-api.internal');
 }
 
 async function proxyApi(request, env) {
-  const target = upstreamUrl(request, env);
+  if (!env.STAGING_API || typeof env.STAGING_API.fetch !== 'function') {
+    throw new Error('MISSING_STAGING_API_SERVICE_BINDING');
+  }
+
   const headers = new Headers(request.headers);
   headers.delete('host');
-
   const init = {
     method: request.method,
     headers,
@@ -24,9 +19,9 @@ async function proxyApi(request, env) {
   };
   if (!['GET', 'HEAD'].includes(request.method)) init.body = request.body;
 
-  const upstream = await fetch(target, init);
+  const upstream = await env.STAGING_API.fetch(internalApiUrl(request), init);
   const responseHeaders = new Headers(upstream.headers);
-  responseHeaders.set('x-fpt-cp9-browser-facade', 'same-origin');
+  responseHeaders.set('x-fpt-cp9-browser-facade', 'service-binding');
   responseHeaders.set('cache-control', responseHeaders.get('cache-control') || 'private, no-store');
   return new Response(upstream.body, {
     status: upstream.status,
