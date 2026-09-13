@@ -1,0 +1,357 @@
+name: Build CP10 clean restart handover
+
+on:
+  push:
+    branches:
+      - handover/cp10-clean-restart-2026-09-13-2254
+    paths:
+      - '.github/workflows/build-cp10-clean-restart-handover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-handover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact backend CP10 candidate
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-v2
+          ref: b730326d8224bae9f6f4e6e21c575bf2ba01dd8e
+          path: pack/backend-source
+          persist-credentials: false
+
+      - name: Checkout exact accepted CP7 frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: a4513da67ee66f51212114620c8e401bd5e31a8c
+          path: pack/frontend-cp7-source
+          persist-credentials: false
+
+      - name: Build authoritative handover notes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf pack/backend-source/.git pack/frontend-cp7-source/.git
+          mkdir -p pack/evidence pack/evidence/unpacked pack/run-metadata
+
+          cat > pack/START_HERE.txt <<'EOF'
+          FPT PORTAL V2 PERFORMANCE REBUILD — CP10 CLEAN RESTART
+          Generated: 2026-09-13 22:54 Europe/London
+
+          READ FIRST:
+          1. 00_MASTER_HANDOVER_CURRENT.md
+          2. 01_CHECKPOINT_STATUS.md
+          3. 02_EXACT_NEXT_ACTIONS.md
+          4. backend-source/docs/rebuild/CHECKPOINT_10_ACCEPTANCE_THRESHOLDS.md
+          5. evidence/cp10-optimized-pass.zip and its unpacked contents
+
+          CRITICAL STATUS:
+          - Official CP0–CP9 are PASS.
+          - Official rebuild branch is STILL CP9 at b96dca74f425a575057406736996f0d39c7aa0c4.
+          - CP10 feature branch is at b730326d8224bae9f6f4e6e21c575bf2ba01dd8e.
+          - CP10 optimized exact-SHA run 34784925141 is PASS.
+          - CP10 is NOT officially closed yet.
+          - DO NOT start CP11.
+
+          Resume by updating the CP10 documentation for the optimized candidate, re-running CP10 on that final documentation SHA, then fast-forwarding the official rebuild branch with force=false and requiring the official-branch exact-SHA CP10 run to pass.
+          EOF
+
+          cat > pack/00_MASTER_HANDOVER_CURRENT.md <<'EOF'
+          # FPT Portal V2 Performance Rebuild — Current Master Handover
+
+          Generated: **13 September 2026, 22:54 Europe/London**
+
+          ## Authority for this restart
+
+          Treat this document plus `01_CHECKPOINT_STATUS.md` and `02_EXACT_NEXT_ACTIONS.md` as the current handover authority for the restart point captured in this ZIP.
+
+          The source snapshots included in this pack are exact GitHub snapshots, not reconstructed excerpts:
+
+          - Backend CP10 candidate: `FuturePerfectTuitions/futureperfect-lessons-v2` at `b730326d8224bae9f6f4e6e21c575bf2ba01dd8e`.
+          - Accepted CP7 frontend source: `FuturePerfectTuitions/futureperfect-lessons-test` at `a4513da67ee66f51212114620c8e401bd5e31a8c`.
+          - Live frontend `main` remains frozen at `96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7`.
+          - Official backend rebuild branch `rebuild/portal-v2-performance-2026-09-13` remains at CP9 `b96dca74f425a575057406736996f0d39c7aa0c4`.
+
+          ## Current official checkpoint state
+
+          - CP0–CP9: **PASS**.
+          - CP10: **feature candidate passes, but official closure is incomplete**.
+          - CP11–CP13: **NOT STARTED**.
+
+          The next session must not interpret a green CP10 feature run as permission to start CP11. CP10 must first be closed on the final documentation SHA and then independently pass from the official rebuild branch.
+
+          ## What happened during CP10
+
+          CP10 implements the published acceptance thresholds from the approved rebuild plan:
+
+          - Subject click immediate/local where feasible.
+          - Warm Year/Level catalogue normally below 300 ms.
+          - Cold Year/Level catalogue below 800 ms under normal conditions.
+          - Lesson detail below 800 ms under normal conditions.
+          - Login/bootstrap below 1.5 s under normal UK conditions.
+          - Metadata/API failure bounded, typically 5–10 s.
+          - Zero ScreenPal/video requests before View.
+          - Locked preview exposes zero resource capabilities.
+          - Ordinary PDF uses direct browser capability navigation, not JavaScript Blob reconstruction.
+          - Answer Pack requires password every open and has no recurring heartbeat.
+          - Zero permitted infinite-spinner paths.
+
+          ### CP10 run history
+
+          1. Run `34784196065` on `74a683867dae67ed6582a942b5ba5a211c8d7ee5` failed because the harness rounded a raw cold timing before performing the strict `<800 ms` comparison. This was a harness precision defect, not accepted as a portal PASS.
+          2. Run `34784441339` on `1c7d84d97a75d2b24618c5babbe3deaa35f4a0f2` passed after comparing raw timings rather than rounded display values.
+          3. Documentation commit `f2f1751cf29439d55ba0c706353190ea419cbd7f` then ran as `34784675382` and failed genuinely: cold Year/Level measured **812.54 ms**. Production-anchor verification still passed.
+          4. Instead of weakening the threshold, the rebuilt Student Worker was improved so authenticated Home warms the stable global prepared read model. The warm-up occurs during Home bootstrap and does not send a catalogue to the browser or change local subject selection.
+          5. The optimized candidate `b730326d8224bae9f6f4e6e21c575bf2ba01dd8e` ran as `34784925141` and **passed the full CP10 workflow**, including acceptance thresholds, CP9 functional regression, production-anchor proof and evidence upload.
+
+          ## Runtime optimization in the current candidate
+
+          The change is in:
+
+          `backend-source/rebuild/student/src/lib/runtime.mjs`
+
+          Home now resolves the access model and primes the global prepared read model concurrently. The global warm-up is deliberately best-effort for Home so a global read failure is still surfaced by the subsequent Year/Level catalogue request rather than converting Home into a false hard dependency.
+
+          This was chosen instead of averaging away the 812.54 ms miss. The published `<800 ms` cold target remains unchanged.
+
+          ## CP10 evidence
+
+          This pack contains retained raw GitHub Actions evidence ZIPs and unpacked copies for:
+
+          - CP9 official PASS.
+          - CP10 first harness failure.
+          - CP10 pre-documentation PASS.
+          - CP10 documentation-SHA genuine cold failure.
+          - CP10 optimized PASS on `b730326d...`.
+
+          The optimized evidence is the current evidence authority for the candidate code. Exact measured values should be read from that evidence when updating the CP10 document; do not copy older pre-optimization timings into the final closure document.
+
+          ## Production safety status
+
+          No public cutover occurred during CP10. The official rebuild branch remains CP9. The live frontend `main` remains unchanged. Each CP10 workflow froze the production deployment anchor before staging work and proved it unchanged afterward.
+
+          CP10 staging uses isolated staging resources and a same-origin staging facade. Real parent-email sends and destructive production operations remain outside the staging path.
+
+          ## Frontend architecture still in force
+
+          The accepted frontend remains the exact CP7 build at `a4513da67ee66f51212114620c8e401bd5e31a8c`:
+
+          - local subject choice from Home data;
+          - one compact Year/Level catalogue request;
+          - bounded/cancellable networking;
+          - lazy video, zero ScreenPal before View;
+          - ordinary resources by direct capability navigation;
+          - password every Answer Pack open;
+          - protected viewer lazy-loaded with no recurring heartbeat;
+          - no JavaScript Blob reconstruction for ordinary PDFs.
+
+          ## Cumulative Homework clarification
+
+          Current content state: Year 5 / L2 has cumulative Homework; Year 6 / L3 currently does not.
+
+          **This L3 absence is temporary, not a permanent product rule.** The user intends to add cumulative Homework to L3 later. Therefore:
+
+          - never encode a prohibition on L3 cumulative Homework;
+          - audits must derive presence from authoritative lesson content;
+          - when cumulative Homework is tested, use an existing applicable lesson such as L2 until L3 content is added;
+          - future L3 cumulative Homework must be allowed to appear naturally without architecture changes.
+
+          ## Do not do on restart
+
+          - Do not start CP11 before CP10 official closure.
+          - Do not move or force-update the official rebuild branch until final CP10 feature verification passes on the documentation SHA.
+          - Do not change live frontend `main`.
+          - Do not repoint `lessons.futureperfect.education`.
+          - Do not deploy the new Student Worker to the public production route.
+          - Do not mutate production pupil data, entitlements, Cloudflare configuration or parent communications as part of CP10 closure.
+          - Do not weaken the acceptance thresholds to obtain a green result.
+          EOF
+
+          cat > pack/01_CHECKPOINT_STATUS.md <<'EOF'
+          # Checkpoint Status — Clean Restart Snapshot
+
+          | Checkpoint | Status | Authority / note |
+          |---|---|---|
+          | CP0 | PASS | Completed before rebuild implementation |
+          | CP1 | PASS | Completed |
+          | CP2 | PASS | Prepared read-model foundation |
+          | CP3 | PASS | Atomic publishing |
+          | CP4 | PASS | Dual-write compatibility / production shadow |
+          | CP5 | PASS | Authentication and capability core |
+          | CP6 | PASS | New Student Worker |
+          | CP7 | PASS | New frontend; exact source `a4513da...` |
+          | CP8 | PASS | Backfill/access parity; zero unexplained differences |
+          | CP9 | PASS | Production-shaped staging/UAT; official branch `b96dca74...` |
+          | CP10 | OPEN — optimized feature candidate PASS | `b730326d...`, run `34784925141` PASS; documentation/final official-branch closure still required |
+          | CP11 | NOT STARTED | Reversible Cutover — forbidden until CP10 closes |
+          | CP12 | NOT STARTED | Stabilisation |
+          | CP13 | NOT STARTED | Legacy retirement |
+
+          ## Exact branches / SHAs
+
+          - Official backend rebuild branch: `rebuild/portal-v2-performance-2026-09-13` → `b96dca74f425a575057406736996f0d39c7aa0c4`.
+          - CP10 feature branch: `rebuild/checkpoint10-acceptance-thresholds-2026-09-13` → `b730326d8224bae9f6f4e6e21c575bf2ba01dd8e`.
+          - Accepted CP7 frontend branch: `rebuild/checkpoint7-new-frontend-2026-09-13` → `a4513da67ee66f51212114620c8e401bd5e31a8c`.
+          - Live frontend `main`: `96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7`.
+
+          ## Latest decisive run
+
+          - Workflow run: `34784925141`.
+          - Candidate: `b730326d8224bae9f6f4e6e21c575bf2ba01dd8e`.
+          - Result: **SUCCESS**.
+          - Acceptance threshold step: PASS.
+          - CP9 backend functional regression: PASS.
+          - Production deployment remained unchanged: PASS.
+          - Evidence assembly/upload: PASS.
+          - Retained optimized artifact ID: `10326148158`.
+          - Artifact digest: `sha256:4e524e31a1991fc748f2c307983285f332aba7cb19bf9e8f9e223fd21ff0eedf`.
+          EOF
+
+          cat > pack/02_EXACT_NEXT_ACTIONS.md <<'EOF'
+          # Exact Next Actions — Finish Official Checkpoint 10 Only
+
+          Do these in order. Do not start CP11.
+
+          1. Read `evidence/unpacked/cp10-optimized-pass/` and extract the exact optimized acceptance measurements.
+          2. Update `backend-source/docs/rebuild/CHECKPOINT_10_ACCEPTANCE_THRESHOLDS.md` in the real CP10 feature branch so it reflects:
+             - the initial harness rounding defect;
+             - the genuine 812.54 ms documentation-SHA cold miss;
+             - the decision not to weaken the threshold;
+             - the Home/global-read-model warm-up optimization;
+             - the exact optimized PASS measurements from run `34784925141`;
+             - production unchanged;
+             - CP11 not started.
+          3. Commit only the CP10 documentation/evidence closure changes to `rebuild/checkpoint10-acceptance-thresholds-2026-09-13`.
+          4. Require a fresh CP10 workflow run to PASS on that exact final documentation SHA.
+          5. Verify the official branch is still `b96dca74f425a575057406736996f0d39c7aa0c4` before promotion.
+          6. Fast-forward `rebuild/portal-v2-performance-2026-09-13` to the final CP10 SHA with **force=false** only.
+          7. Require a second CP10 workflow run on the official branch and exact promoted SHA to PASS completely.
+          8. Verify again that production backend deployment/version and live frontend `main` are unchanged.
+          9. Only then record **Official Checkpoint 10 — PASS**.
+          10. Stop. CP11 starts only in a later explicit user instruction.
+
+          If any exact-SHA run fails, CP10 remains OPEN. Investigate the failure; do not promote and do not relax thresholds silently.
+          EOF
+
+          cat > pack/03_ANCHORS_AND_RUNS.md <<'EOF'
+          # Anchors and Run Ledger
+
+          ## Backend branches
+          - Official rebuild / CP9 closed: `b96dca74f425a575057406736996f0d39c7aa0c4`.
+          - CP10 feature candidate: `b730326d8224bae9f6f4e6e21c575bf2ba01dd8e`.
+
+          ## Frontend anchors
+          - Accepted CP7 rebuild: `a4513da67ee66f51212114620c8e401bd5e31a8c`.
+          - Live production frontend main: `96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7`.
+
+          ## CP9
+          - Official CP9 workflow run: `34783214323` — PASS.
+          - CP9 artifact ID: `10326285160`.
+
+          ## CP10
+          - `34784196065` — first CP10 run; failed on harness rounding precision bug; artifact `10325822832`.
+          - `34784441339` — corrected raw-timing comparison; PASS; artifact `10325504738`.
+          - `34784675382` — documentation SHA `f2f1751c...`; genuine cold catalogue failure 812.54 ms; artifact `10325958219`.
+          - `34784925141` — optimized candidate `b730326d...`; full PASS; artifact `10326148158`.
+
+          ## Important interpretation
+          A prior PASS is not enough to close CP10 because the final documentation commit itself must be tested, then the official rebuild branch must be fast-forwarded and tested independently. The optimized code candidate is accepted for continuation, but official checkpoint closure has not yet happened.
+          EOF
+
+          cat > pack/04_L3_CUMULATIVE_HOMEWORK_NOTE.md <<'EOF'
+          # L3 Cumulative Homework — Current Content Note
+
+          The current lack of cumulative Homework in Year 6 / L3 is temporary.
+
+          The user intends to add cumulative Homework to L3 later. Do not encode a product rule that L3 cannot or should not contain cumulative Homework.
+
+          Current test guidance:
+          - L2 / Year 5 currently contains cumulative Homework and is the correct existing test target.
+          - L3 / Year 6 currently has none, so absence today is not a defect.
+          - Once L3 cumulative Homework is added, the existing generic Phase 11 resource architecture and parity logic should accept it without a special-case prohibition.
+          EOF
+
+      - name: Download retained CP9/CP10 evidence and run metadata
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+
+          download_artifact() {
+            local id="$1" name="$2"
+            curl -L --fail --silent --show-error "${auth[@]}" \
+              "https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-v2/actions/artifacts/${id}/zip" \
+              -o "pack/evidence/${name}.zip"
+            mkdir -p "pack/evidence/unpacked/${name}"
+            unzip -q "pack/evidence/${name}.zip" -d "pack/evidence/unpacked/${name}"
+          }
+
+          run_json() {
+            local id="$1"
+            curl --fail --silent --show-error "${auth[@]}" \
+              "https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/${id}" \
+              -o "pack/run-metadata/${id}.json"
+          }
+
+          download_artifact 10326285160 cp9-official-pass
+          download_artifact 10325822832 cp10-first-harness-failure
+          download_artifact 10325504738 cp10-pre-documentation-pass
+          download_artifact 10325958219 cp10-documentation-cold-failure
+          download_artifact 10326148158 cp10-optimized-pass
+
+          for run in 34783214323 34784196065 34784441339 34784675382 34784925141; do
+            run_json "$run"
+          done
+
+      - name: Add pack manifest and checksums
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > pack/PACK_MANIFEST.md <<'EOF'
+          # Pack Manifest
+
+          This clean restart pack contains:
+
+          - `START_HERE.txt` — first instruction file.
+          - `00_MASTER_HANDOVER_CURRENT.md` — current authoritative handover.
+          - `01_CHECKPOINT_STATUS.md` — checkpoint/branch/SHA status.
+          - `02_EXACT_NEXT_ACTIONS.md` — exact CP10 closure sequence.
+          - `03_ANCHORS_AND_RUNS.md` — run and anchor ledger.
+          - `04_L3_CUMULATIVE_HOMEWORK_NOTE.md` — temporary L3 content-state clarification.
+          - `backend-source/` — exact backend CP10 candidate snapshot at `b730326d...`.
+          - `frontend-cp7-source/` — exact accepted CP7 frontend snapshot at `a4513da...`.
+          - `evidence/` — retained raw CP9/CP10 evidence ZIPs plus unpacked copies.
+          - `run-metadata/` — GitHub Actions run metadata for the decisive CP9/CP10 runs.
+          - `SHA256SUMS.txt` — integrity hashes for all files in the pack.
+
+          The handover helper branch used to build this ZIP is not an implementation branch and must not be promoted into the rebuild line.
+          EOF
+
+          (
+            cd pack
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+      - name: Create clean restart ZIP
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          zip -qr FPT_Portal_V2_Performance_Rebuild_CP10_CLEAN_RESTART_2026-09-13_2254.zip pack
+          sha256sum FPT_Portal_V2_Performance_Rebuild_CP10_CLEAN_RESTART_2026-09-13_2254.zip > FPT_Portal_V2_Performance_Rebuild_CP10_CLEAN_RESTART_2026-09-13_2254.zip.sha256
+
+      - name: Upload handover ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpt-portal-v2-cp10-clean-restart
+          path: |
+            FPT_Portal_V2_Performance_Rebuild_CP10_CLEAN_RESTART_2026-09-13_2254.zip
+            FPT_Portal_V2_Performance_Rebuild_CP10_CLEAN_RESTART_2026-09-13_2254.zip.sha256
+          retention-days: 30
+          if-no-files-found: error
