@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Confirm safety boundary and generate synthetic UAT secrets
+      - name: Confirm safety boundary and generate masked synthetic UAT secrets
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -49,7 +49,7 @@ jobs:
           [[ "$STAGING_WORKER" == *rebuild*staging* ]]
           [[ "$STAGING_R2" == *rebuild*staging* ]]
           [[ "$STAGING_STUDENTS_KV_TITLE" == *REBUILD*STAGING* ]]
-          python - <<'PY' >> "$GITHUB_ENV"
+          python - <<'PY' > /tmp/cp9-secrets.env
           import secrets,string
           def four():
               chars=[secrets.choice(string.ascii_uppercase),secrets.choice(string.ascii_lowercase),secrets.choice(string.digits),secrets.choice(string.ascii_letters+string.digits)]
@@ -60,13 +60,12 @@ jobs:
           print('AUTH_SIGNING_SECRET='+secrets.token_hex(32))
           print('ACCESS_SCOPE_SECRET='+secrets.token_hex(32))
           PY
-      - name: Mask generated secrets
-        shell: bash
-        run: |
-          echo "::add-mask::$UAT_LOGIN_PASSWORD"
-          echo "::add-mask::$UAT_ANSWER_PASSWORD"
-          echo "::add-mask::$AUTH_SIGNING_SECRET"
-          echo "::add-mask::$ACCESS_SCOPE_SECRET"
+          while IFS='=' read -r key value; do
+            test -n "$key"; test -n "$value"
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done < /tmp/cp9-secrets.env
+          rm -f /tmp/cp9-secrets.env
       - name: Pin Wrangler
         run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
       - name: Syntax and prior-checkpoint regressions
@@ -140,9 +139,12 @@ jobs:
       - name: Run production-shaped API UAT
         run: node scripts/rebuild-checkpoint9-staging-uat.mjs
       - name: Prove production deployment remained unchanged
+        if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
+          test -n "${PROD_DEPLOYMENT:-}"
+          test -n "${PROD_VERSION:-}"
           AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-after.json
