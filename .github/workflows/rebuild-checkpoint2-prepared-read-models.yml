@@ -8,6 +8,7 @@ on:
       - 'rebuild/shared/read-models/**'
       - 'rebuild/student/src/index.js'
       - 'rebuild/student/src/prepared-catalogue.generated.js'
+      - 'rebuild/student/wrangler.toml'
       - 'scripts/rebuild-checkpoint2-prepare-catalogue.mjs'
       - 'tests/rebuild-checkpoint2-read-models.mjs'
       - 'docs/rebuild/CHECKPOINT_2_PREPARED_READ_MODELS.md'
@@ -59,6 +60,7 @@ jobs:
           node --check rebuild/student/src/index.js
           node tests/rebuild-checkpoint2-read-models.mjs | tee /tmp/checkpoint2-tests.json
           grep -Fq 'REBUILD_CHECKPOINT2_READ_MODELS_PASS' /tmp/checkpoint2-tests.json
+          test "$(grep -c '^CHECKPOINT = "2"$' rebuild/student/wrangler.toml)" = '2'
           ! grep -R --line-number --fixed-strings 'name = "fpt-portal-v2-worker"' rebuild/student/wrangler.toml rebuild/adminops/wrangler.toml
           ! grep -R --line-number -E '\[\[kv_namespaces\]\]|\[\[d1_databases\]\]|\[\[r2_buckets\]\]|\[\[send_email\]\]|(^|[[:space:]])routes?[[:space:]]*=' rebuild/student/wrangler.toml rebuild/adminops/wrangler.toml
 
