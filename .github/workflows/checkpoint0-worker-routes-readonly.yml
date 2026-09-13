@@ -1,0 +1,52 @@
+name: Checkpoint 0 Worker routes read-only inventory
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/checkpoint0-worker-routes-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  routes:
+    name: Inventory Worker routes and domains without mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Read Worker domain and zone-route state
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          ACCOUNT_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          echo '=== workers.dev subdomain ==='
+          curl --fail --silent --show-error "$ACCOUNT_API/workers/subdomain" -H "$AUTH" | jq '{success,result}'
+          echo '=== Worker custom domains for account ==='
+          code="$(curl --silent --show-error --output /tmp/domains.json --write-out '%{http_code}' "$ACCOUNT_API/workers/domains" -H "$AUTH")"
+          echo "workers_domains_http=$code"
+          if test "$code" = '200'; then
+            jq --arg w "$WORKER_NAME" '{success, result:[(.result // [])[] | select(.service==$w or .script==$w or .worker==$w)]}' /tmp/domains.json
+          else
+            cat /tmp/domains.json
+          fi
+          echo '=== Zone Worker routes referencing this Worker ==='
+          zones_code="$(curl --silent --show-error --output /tmp/zones.json --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/zones?account.id=${CLOUDFLARE_ACCOUNT_ID}&per_page=50" -H "$AUTH")"
+          echo "zones_http=$zones_code"
+          if test "$zones_code" = '200'; then
+            jq -r '.result[] | [.id,.name] | @tsv' /tmp/zones.json | while IFS=$'\t' read -r zid zname; do
+              rcode="$(curl --silent --show-error --output /tmp/routes.json --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/zones/${zid}/workers/routes" -H "$AUTH")"
+              echo "zone=$zname routes_http=$rcode"
+              if test "$rcode" = '200'; then
+                jq --arg w "$WORKER_NAME" --arg z "$zname" '{zone:$z, routes:[(.result // [])[] | select(.script==$w)]}' /tmp/routes.json
+              fi
+            done
+          fi
+          rm -f /tmp/domains.json /tmp/zones.json /tmp/routes.json
+          echo 'CHECKPOINT0_WORKER_ROUTES_READONLY_COMPLETE'
