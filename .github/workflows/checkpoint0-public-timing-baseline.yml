@@ -1,0 +1,64 @@
+name: Checkpoint 0 public timing baseline
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/checkpoint0-public-timing-baseline.yml
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Read-only production edge timing baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Measure GET-only production paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/timings.tsv
+          measure() {
+            label="$1"
+            url="$2"
+            for i in $(seq 1 10); do
+              curl --silent --show-error --location \
+                --header 'Origin: https://lessons.futureperfect.education' \
+                --output /dev/null \
+                --write-out "${label}\t${i}\t%{http_code}\t%{time_connect}\t%{time_starttransfer}\t%{time_total}\t%{size_download}\n" \
+                "$url" >> /tmp/timings.tsv
+            done
+          }
+          measure frontend_root 'https://lessons.futureperfect.education/'
+          measure worker_home_unauth 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/student/home'
+          measure protected_view_invalid 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/student/answer-view/invalid-protected-view-token'
+          echo '=== raw timings: label iteration http connect ttfb total bytes ==='
+          cat /tmp/timings.tsv
+          echo '=== summary seconds ==='
+          python3 - <<'PY'
+          import statistics
+          from collections import defaultdict
+          rows=defaultdict(list)
+          statuses=defaultdict(set)
+          with open('/tmp/timings.tsv', encoding='utf-8') as f:
+              for line in f:
+                  label,i,status,connect,ttfb,total,size=line.rstrip('\n').split('\t')
+                  rows[label].append((float(connect),float(ttfb),float(total),int(size)))
+                  statuses[label].add(status)
+          for label, vals in rows.items():
+              def pct(xs,p):
+                  xs=sorted(xs)
+                  k=max(0,min(len(xs)-1, round((len(xs)-1)*p)))
+                  return xs[k]
+              connect=[x[0] for x in vals]
+              ttfb=[x[1] for x in vals]
+              total=[x[2] for x in vals]
+              print(f'{label}: http={sorted(statuses[label])} n={len(vals)} '
+                    f'ttfb_median={statistics.median(ttfb):.6f} ttfb_p95={pct(ttfb,.95):.6f} '
+                    f'total_median={statistics.median(total):.6f} total_p95={pct(total,.95):.6f} '
+                    f'connect_median={statistics.median(connect):.6f}')
+          PY
+          echo 'CHECKPOINT0_PUBLIC_TIMING_BASELINE_COMPLETE'
