@@ -12,7 +12,7 @@ Implemented:
 - independent simultaneous sessions for the same user (approved multi-device semantics);
 - stateless local HMAC verification with no per-request D1 session lookup;
 - short-lived, independently issued capabilities for `video`, ordinary `download`, and `answer-view`;
-- maximum capability lifetime of five minutes;
+- maximum capability lifetime of five minutes, additionally capped to the remaining parent-session lifetime;
 - exact capability binding to user, session, view, lesson, resource, capability type, and optional access-snapshot version;
 - logout helper that clears only the current device cookie;
 - Answer Pack authorization coordinator that performs a live current-password validation on every open, respects a live rate-limit adapter, and only then issues an `answer-view` capability.
@@ -34,7 +34,7 @@ The signing key is runtime configuration/secret material and is not stored in th
 - modified/expired sessions are rejected;
 - two sessions for the same user can coexist;
 - video/download/answer-view capabilities are independently issued;
-- capability lifetime cannot exceed five minutes;
+- capability lifetime cannot exceed five minutes or outlive the parent session;
 - modified and expired capabilities are rejected;
 - wrong-user, wrong-resource and wrong-view capabilities are rejected;
 - wrong-session, wrong-lesson, wrong-type and wrong-access-version bindings are also rejected;
