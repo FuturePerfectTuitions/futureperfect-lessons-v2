@@ -1,1 +1,1 @@
-2026-09-08 Riaan1808 login-gate diagnostic. Read-only Cloudflare audit only; verify live ENVIRONMENT, STUDENT_LOGIN_ENABLED, DEV_LOGIN_ALLOWLIST and bindings. No Cloudflare writes or deploys.
+2026-09-13 Checkpoint 0 production-baseline audit. Read-only Cloudflare audit only; verify live deployment identity/history, runtime settings/bindings, deployed Worker package hash, KV/D1/R2 inventory and repository deployment config. No Cloudflare writes or deploys.
