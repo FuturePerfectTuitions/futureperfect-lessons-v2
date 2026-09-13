@@ -6,8 +6,10 @@ workers_dev = true
 [vars]
 ENVIRONMENT = "development"
 DEPLOYMENT_IDENTITY = "adminops-development"
-CHECKPOINT = "3"
+CHECKPOINT = "4"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
+COMPAT_TEST_ENABLED = "false"
+COMPAT_SCOPE_SECRET = "development-synthetic-only"
 
 [env.staging]
 name = "fpt-portal-v2-rebuild-adminops-staging"
@@ -16,5 +18,7 @@ workers_dev = true
 [env.staging.vars]
 ENVIRONMENT = "staging"
 DEPLOYMENT_IDENTITY = "adminops-staging"
-CHECKPOINT = "3"
+CHECKPOINT = "4"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
+COMPAT_TEST_ENABLED = "true"
+COMPAT_SCOPE_SECRET = "checkpoint4-staging-synthetic-only"
