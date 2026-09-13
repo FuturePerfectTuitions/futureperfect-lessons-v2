@@ -15,6 +15,7 @@ const selected = seed.selected || {};
 const timings = {};
 const browserRequests = [];
 const assertions = {};
+let activePage = null;
 fs.mkdirSync(evidenceDir, { recursive: true });
 
 function validFour(value) {
@@ -32,6 +33,7 @@ const stagingBackendHost = 'fpt-portal-v2-rebuild-student-staging.futureperfectl
 function timed(name, started) { timings[name] = Date.now() - started; }
 function hostOf(value) { try { return new URL(value).hostname; } catch { return ''; } }
 function track(page, label) {
+  activePage = page;
   page.on('request', request => browserRequests.push({ label, method: request.method(), url: request.url() }));
 }
 async function screenshot(page, name) {
@@ -63,19 +65,29 @@ async function clickSubject(page, subject) {
   await page.getByRole('heading', { name: new RegExp(`^${subject}$`, 'i') }).waitFor({ timeout: 10_000 });
 }
 async function openView(page, label) {
-  await page.getByRole('button', { name: new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }).first().click();
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  await page.getByRole('button', { name: new RegExp(escaped, 'i') }).first().click();
   await page.getByLabel('Search lessons').waitFor({ state: 'visible', timeout: 15_000 });
 }
 async function openLessonById(page, lessonId, action = /Open|Preview/) {
+  assert(/^[A-Za-z0-9._-]+$/.test(lessonId), `Unsafe lesson ID in UAT selector: ${lessonId}`);
   const search = page.getByLabel('Search lessons');
-  await search.fill(lessonId);
-  const escaped = String(lessonId).replace(/(["\\])/g, '\\$1');
-  const button = page.locator(`[data-lesson="${escaped}"]`).first();
+  if (await search.inputValue()) await search.fill('');
+  const button = page.locator(`[data-lesson="${lessonId}"]`).first();
   await button.waitFor({ state: 'visible', timeout: 10_000 });
-  assert(action.test((await button.textContent()) || ''), `Unexpected action for lesson ${lessonId}`);
+  assert.equal(await button.getAttribute('data-lesson'), lessonId, `Canonical lesson binding mismatch for ${lessonId}`);
+  const label = String(await button.textContent());
+  assert(action.test(label), `Expected ${lessonId} action ${action}, got ${label}`);
+  const responsePromise = page.waitForResponse(response => {
+    try { return new URL(response.url()).pathname === `/api/v2/student/lessons/${encodeURIComponent(lessonId)}`; }
+    catch { return false; }
+  }, { timeout: 15_000 });
   await button.click();
+  const response = await responsePromise;
+  assert.equal(response.status(), 200, `Lesson detail request failed for ${lessonId}`);
+  const payload = await response.json();
+  assert.equal(payload?.lesson?.lessonId, lessonId, `Lesson detail canonical ID mismatch for ${lessonId}`);
   await page.locator('.lesson-heading').waitFor({ state: 'visible', timeout: 15_000 });
-  assert((await page.locator('.lesson-code').first().textContent())?.includes(lessonId), `Expected lesson ${lessonId}`);
 }
 async function browserFetchResource(page, rowText) {
   const row = page.locator('.resource-row').filter({ hasText: rowText }).first();
@@ -162,7 +174,8 @@ async function chromiumGate(browser) {
   await page.getByText('Incorrect Answer Pack password.').waitFor({ timeout: 10_000 });
   await page.getByLabel('Answer Pack password').fill(answerPassword);
   const protectedResponse = page.waitForResponse(response => {
-    try { return new URL(response.url()).pathname === '/api/v2/student/resource' && response.status() === 200; } catch { return false; }
+    try { return new URL(response.url()).pathname === '/api/v2/student/resource' && response.status() === 200; }
+    catch { return false; }
   }, { timeout: 20_000 });
   await page.getByRole('button', { name: 'Open Answer Pack' }).click();
   await page.getByText('Protected viewer').waitFor({ timeout: 15_000 });
@@ -296,8 +309,10 @@ async function preLessonGate(browser) {
 async function multiDeviceGate(browser) {
   const a = await browser.newContext();
   const b = await browser.newContext();
-  const pa = await a.newPage(); const pb = await b.newPage();
-  track(pa, 'chromium-device-a'); track(pb, 'chromium-device-b');
+  const pa = await a.newPage();
+  const pb = await b.newPage();
+  track(pa, 'chromium-device-a');
+  track(pb, 'chromium-device-b');
   await login(pa, 'cp9normal');
   await login(pb, 'cp9normal');
   await pa.getByRole('button', { name: 'Log out' }).click();
@@ -305,7 +320,8 @@ async function multiDeviceGate(browser) {
   await pb.reload({ waitUntil: 'domcontentloaded' });
   await pb.getByRole('heading', { name: /Welcome/ }).waitFor({ timeout: 10_000 });
   assertions.multiDeviceLogout = true;
-  await a.close(); await b.close();
+  await a.close();
+  await b.close();
 }
 
 async function navigationResilienceGate(browser) {
@@ -401,7 +417,7 @@ try {
   assert.equal(productionRequests.length, 0, 'Browser contacted production Worker');
   assert.equal(directBackendRequests.length, 0, 'Browser directly contacted staging backend; topology is not same-origin');
   const apiRequests = browserRequests.filter(row => {
-    try { const url = new URL(row.url); return url.pathname.startsWith('/api/v2/'); } catch { return false; }
+    try { return new URL(row.url).pathname.startsWith('/api/v2/'); } catch { return false; }
   });
   assert(apiRequests.length > 0, 'No browser API requests captured');
   assert(apiRequests.every(row => hostOf(row.url) === base.hostname), 'Browser API request escaped facade origin');
@@ -409,14 +425,11 @@ try {
   const summary = {
     marker: 'REBUILD_CHECKPOINT9_BROWSER_UAT_PASS',
     candidateSha,
-    frontend: {
-      repository: 'FuturePerfectTuitions/futureperfect-lessons-test',
-      sha: frontendSha
-    },
+    frontend: { repository: 'FuturePerfectTuitions/futureperfect-lessons-test', sha: frontendSha },
     browserOrigin: base.origin,
     backendOrigin: `https://${stagingBackendHost}`,
     cookieTopology: {
-      architecture: 'same-origin-browser-facade-to-isolated-staging-backend',
+      architecture: 'same-origin-browser-facade-to-isolated-staging-backend-via-service-binding',
       approvedCookieArchitectureUnchanged: true,
       cookieName: 'fpt_session',
       secure: true,
@@ -437,6 +450,10 @@ try {
   fs.writeFileSync(path.join(evidenceDir, 'browser-requests.json'), JSON.stringify(browserRequests.map(row => ({ ...row, url: row.url.replace(/([?&]cap=)[^&]+/g, '$1<redacted>') })), null, 2));
   console.log(JSON.stringify(summary, null, 2));
 } catch (error) {
+  if (activePage) {
+    try { await screenshot(activePage, 'failure-state'); } catch {}
+    try { fs.writeFileSync(path.join(evidenceDir, 'failure-page-text.txt'), await activePage.locator('body').innerText()); } catch {}
+  }
   const failure = { marker: 'REBUILD_CHECKPOINT9_BROWSER_UAT_FAIL', candidateSha, frontendSha, error: String(error?.stack || error) };
   fs.writeFileSync('/tmp/checkpoint9-browser-uat-failure.json', JSON.stringify(failure, null, 2));
   console.error(JSON.stringify(failure, null, 2));
