@@ -26,6 +26,7 @@ jobs:
           node --check tests/rebuild-checkpoint8-backfill-access-parity.mjs
           node --check scripts/rebuild-checkpoint8-live-audit.mjs
           node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
       - name: Checkpoint 8 synthetic access parity gate
         run: node tests/rebuild-checkpoint8-backfill-access-parity.mjs
       - name: Checkpoint 6 new Student Worker regression
@@ -62,6 +63,8 @@ jobs:
           echo "Cloudflare credentials are present; values are not printed."
       - name: Inventory current production profile access modes read-only
         run: node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+      - name: Audit special-area access for every current profile read-only
+        run: node scripts/rebuild-checkpoint8-special-area-audit.mjs
       - name: Audit every current student and presentation catalogue read-only
         run: node scripts/rebuild-checkpoint8-live-audit.mjs
       - name: Upload redacted Checkpoint 8 summary
