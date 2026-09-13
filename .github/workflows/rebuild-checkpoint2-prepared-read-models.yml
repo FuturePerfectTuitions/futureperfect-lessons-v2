@@ -1,0 +1,167 @@
+name: Rebuild Checkpoint 2 prepared read models
+
+on:
+  push:
+    branches:
+      - rebuild/portal-v2-performance-2026-09-13
+    paths:
+      - 'rebuild/shared/read-models/**'
+      - 'rebuild/student/src/index.js'
+      - 'rebuild/student/src/prepared-catalogue.generated.js'
+      - 'scripts/rebuild-checkpoint2-prepare-catalogue.mjs'
+      - 'tests/rebuild-checkpoint2-read-models.mjs'
+      - 'docs/rebuild/CHECKPOINT_2_PREPARED_READ_MODELS.md'
+      - '.github/workflows/rebuild-checkpoint2-prepared-read-models.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint2-prepared-read-models
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_WORKER: fpt-portal-v2-worker
+  EXPECTED_PROD_DEPLOYMENT: b803da70-766c-4a16-a4aa-c8bc238d3e77
+  EXPECTED_PROD_VERSION: 971509f0-ce1e-4b27-8e8d-0d96a64cfa50
+  LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  STUDENT_STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  WORKERS_SUBDOMAIN: futureperfectlessons
+
+jobs:
+  build-test-deploy:
+    name: Prepare and verify read models in isolated Student staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Static and semantic read-model tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'rebuild/portal-v2-performance-2026-09-13'
+          git merge-base --is-ancestor e4c7bde7ad9a9402136da5798d7ab690ab30322c HEAD
+          node --check rebuild/shared/read-models/view-registry.mjs
+          node --check rebuild/shared/read-models/catalogue.mjs
+          node --check rebuild/shared/read-models/access-snapshot.mjs
+          node --check scripts/rebuild-checkpoint2-prepare-catalogue.mjs
+          node --check rebuild/student/src/index.js
+          node tests/rebuild-checkpoint2-read-models.mjs | tee /tmp/checkpoint2-tests.json
+          grep -Fq 'REBUILD_CHECKPOINT2_READ_MODELS_PASS' /tmp/checkpoint2-tests.json
+          ! grep -R --line-number --fixed-strings 'name = "fpt-portal-v2-worker"' rebuild/student/wrangler.toml rebuild/adminops/wrangler.toml
+          ! grep -R --line-number -E '\[\[kv_namespaces\]\]|\[\[d1_databases\]\]|\[\[r2_buckets\]\]|\[\[send_email\]\]|(^|[[:space:]])routes?[[:space:]]*=' rebuild/student/wrangler.toml rebuild/adminops/wrangler.toml
+
+      - name: Verify production anchor and exact read-only LESSONS_KV source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-before.json
+          jq -e '.success == true' /tmp/prod-before.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
+          echo "PRODUCTION_DEPLOYMENT_BEFORE=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_BEFORE=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-settings.json
+          jq -e '.success == true' /tmp/prod-settings.json >/dev/null
+          LIVE_LESSONS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/prod-settings.json)"
+          echo "PRODUCTION_LESSONS_KV=${LIVE_LESSONS}"
+          test "${LIVE_LESSONS}" = "${LESSONS_KV_NAMESPACE_ID}"
+
+      - name: Compile current live catalogue metadata read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint2-prepare-catalogue.mjs \
+            rebuild/student/src/prepared-catalogue.generated.js \
+            /tmp/checkpoint2-catalogue-evidence.json \
+            | tee /tmp/checkpoint2-catalogue-summary.log
+          jq -e '.marker == "REBUILD_CHECKPOINT2_CATALOGUE_PREPARED"' /tmp/checkpoint2-catalogue-evidence.json >/dev/null
+          jq -e '.sourceType == "production-lessons-kv-readonly"' /tmp/checkpoint2-catalogue-evidence.json >/dev/null
+          jq -e '.curriculumCodes == 11 and .views == 15 and .canonicalLessonIds > 0' /tmp/checkpoint2-catalogue-evidence.json >/dev/null
+          jq -e '[.viewLessonCounts[]] | all(. > 0)' /tmp/checkpoint2-catalogue-evidence.json >/dev/null
+          node --input-type=module - <<'NODE'
+          import { PREPARED_CATALOGUE, PREPARED_CATALOGUE_SHA256 } from './rebuild/student/src/prepared-catalogue.generated.js';
+          if (!PREPARED_CATALOGUE || PREPARED_CATALOGUE.kind !== 'prepared-catalogue') throw new Error('prepared catalogue missing');
+          if (!PREPARED_CATALOGUE_SHA256 || PREPARED_CATALOGUE.navigation.length !== 15) throw new Error('prepared catalogue identity invalid');
+          const ids = new Set(PREPARED_CATALOGUE.navigation.map(row => row.viewId));
+          if (ids.has('english-year2-11plus') || ids.has('english-year3-11plus')) throw new Error('forbidden Y2/Y3 11+ view');
+          const text = JSON.stringify(PREPARED_CATALOGUE);
+          for (const forbidden of ['r2Key','embedUrl','watchUrl','contentUrl','shareUrl','answerPassword','loginPassword']) {
+            if (text.includes(`"${forbidden}"`)) throw new Error(`forbidden prepared field: ${forbidden}`);
+          }
+          console.log(`PREPARED_CATALOGUE_RUNTIME_VERIFY_PASS sha=${PREPARED_CATALOGUE_SHA256}`);
+          NODE
+
+      - name: Dry-run and deploy prepared Student staging bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          cd rebuild/student
+          $W deploy --config wrangler.toml --env staging --dry-run --outdir /tmp/checkpoint2-student-build | tee /tmp/checkpoint2-dryrun.log
+          ! grep -E 'STUDENTS_KV|LESSONS_KV|MATERIALS_R2|D1 Database|send_email' /tmp/checkpoint2-dryrun.log
+          $W deploy --config wrangler.toml --env staging \
+            --message "Portal V2 Performance Rebuild Checkpoint 2 prepared read models" \
+            | tee /tmp/checkpoint2-deploy.log
+          cd ../..
+
+      - name: Verify prepared staging endpoints
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="https://${STUDENT_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if curl --fail --silent --show-error "${BASE}/health" -o /tmp/checkpoint2-health.json; then
+              if jq -e '.ok == true and .checkpoint == 2 and .runtime == "student" and .environment == "staging" and .productionTarget == false and .preparedCatalogue.ready == true and .preparedCatalogue.sourceType == "production-lessons-kv-readonly" and .preparedCatalogue.views == 15 and .preparedCatalogue.uniqueLessons > 0' /tmp/checkpoint2-health.json >/dev/null; then
+                break
+              fi
+            fi
+            sleep 2
+          done
+          jq -e '.preparedCatalogue.ready == true' /tmp/checkpoint2-health.json >/dev/null
+          curl --fail --silent --show-error "${BASE}/read-models/status" -o /tmp/checkpoint2-status.json
+          jq -e '.ok == true and .checkpoint == 2 and .catalogue.ready == true' /tmp/checkpoint2-status.json >/dev/null
+          curl --fail --silent --show-error "${BASE}/read-models/navigation" -o /tmp/checkpoint2-navigation.json
+          jq -e '.ok == true and (.navigation | length) == 15' /tmp/checkpoint2-navigation.json >/dev/null
+          jq -e '[.navigation[].viewId] | index("english-year2-11plus") == null and index("english-year3-11plus") == null' /tmp/checkpoint2-navigation.json >/dev/null
+          test "$(jq -r '.catalogueSha256' /tmp/checkpoint2-navigation.json)" = "$(jq -r '.preparedCatalogue.sha256' /tmp/checkpoint2-health.json)"
+          echo 'REBUILD_CHECKPOINT2_STAGING_READ_MODELS_PASS'
+
+      - name: Verify production unchanged after Checkpoint 2 staging deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-after.json
+          jq -e '.success == true' /tmp/prod-after.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+          echo "PRODUCTION_DEPLOYMENT_AFTER=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_AFTER=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+          echo 'REBUILD_CHECKPOINT2_GATE_PASS'
