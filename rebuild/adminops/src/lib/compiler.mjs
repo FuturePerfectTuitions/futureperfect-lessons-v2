@@ -7,6 +7,8 @@ import {
   assertNoSensitiveSnapshotFields
 } from '../../../shared/read-models/access-snapshot.mjs';
 import { compileVideoVariants } from '../../../shared/read-models/video.mjs';
+import { collectPhase11ExtensionResources } from '../../../shared/read-models/phase11-extension-resources.mjs';
+import { resourcePresentationScopes } from '../../../shared/read-models/resource-visibility.mjs';
 import { prepareAccessInputForParity } from './backfill-parity-audit.mjs';
 
 const clean = value => String(value ?? '').trim();
@@ -65,6 +67,45 @@ function namedResource(value, fallbackName) {
   };
 }
 
+function mergePresentationScopes(left, right) {
+  const combined = new Set([
+    ...resourcePresentationScopes(left),
+    ...resourcePresentationScopes(right)
+  ]);
+  if (combined.has('core')) return undefined;
+  return [...combined].sort();
+}
+
+function deduplicateResources(resources) {
+  const byObjectKey = new Map();
+  for (const source of resources) {
+    const objectKey = clean(source?.objectKey);
+    if (!objectKey) continue;
+    const existing = byObjectKey.get(objectKey);
+    if (!existing) {
+      const scopes = resourcePresentationScopes(source);
+      byObjectKey.set(objectKey, {
+        ...source,
+        ...(scopes.length === 1 && scopes[0] === 'core' ? {} : { presentationScopes: scopes })
+      });
+      continue;
+    }
+    const presentationScopes = mergePresentationScopes(existing, source);
+    const protectedResource = existing.protected === true || source.protected === true;
+    const type = protectedResource && (existing.type === 'answer-pack' || source.type === 'answer-pack')
+      ? 'answer-pack'
+      : (existing.type || source.type);
+    byObjectKey.set(objectKey, {
+      ...existing,
+      type,
+      ...(protectedResource ? { protected: true } : {}),
+      ...(presentationScopes ? { presentationScopes } : {})
+    });
+    if (!presentationScopes) delete byObjectKey.get(objectKey).presentationScopes;
+  }
+  return [...byObjectKey.values()];
+}
+
 function collectLessonResources(record) {
   const core = record?.core && typeof record.core === 'object' ? record.core : {};
   const pre = Array.isArray(record?.preLessonSheets)
@@ -93,7 +134,9 @@ function collectLessonResources(record) {
     const resource = namedResource(item, `Resource ${index + 1}`);
     if (resource) resources.push({ type: 'other', ...resource });
   });
-  return resources;
+
+  resources.push(...collectPhase11ExtensionResources(record));
+  return deduplicateResources(resources);
 }
 
 async function compileLessonDetail(record, options = {}) {
@@ -108,11 +151,13 @@ async function compileLessonDetail(record, options = {}) {
   for (const resource of resources) {
     const exists = await resourceExists(resource.objectKey, resource);
     if (!exists) throw new Error(`RESOURCE_MISSING:${lessonId}:${resource.objectKey}`);
+    const scopes = resourcePresentationScopes(resource);
     validated.push({
       type: resource.type,
       displayName: resource.displayName,
       objectKey: resource.objectKey,
-      ...(resource.protected ? { protected: true } : {})
+      ...(resource.protected ? { protected: true } : {}),
+      ...(scopes.length === 1 && scopes[0] === 'core' ? {} : { presentationScopes: scopes })
     });
   }
 
