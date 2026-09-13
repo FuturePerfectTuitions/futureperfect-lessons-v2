@@ -1,0 +1,255 @@
+name: Rebuild Checkpoint 4 dual-write compatibility
+
+on:
+  push:
+    branches:
+      - rebuild/portal-v2-performance-2026-09-13
+    paths:
+      - 'rebuild/adminops/src/**'
+      - 'rebuild/adminops/schema/checkpoint4-compatibility.sql'
+      - 'rebuild/adminops/wrangler.toml'
+      - 'tests/rebuild-checkpoint4-dual-write-compatibility.mjs'
+      - 'docs/rebuild/CHECKPOINT_4_DUAL_WRITE_COMPATIBILITY.md'
+      - '.github/workflows/rebuild-checkpoint4-dual-write-compatibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint4-dual-write-compatibility
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_WORKER: fpt-portal-v2-worker
+  EXPECTED_PROD_DEPLOYMENT: b803da70-766c-4a16-a4aa-c8bc238d3e77
+  EXPECTED_PROD_VERSION: 971509f0-ce1e-4b27-8e8d-0d96a64cfa50
+  LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  READ_MODELS_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_STAGING
+  COMPAT_D1_NAME: fpt_portal_v2_rebuild_compat_staging
+  ADMINOPS_STAGING_WORKER: fpt-portal-v2-rebuild-adminops-staging
+  WORKERS_SUBDOMAIN: futureperfectlessons
+
+jobs:
+  compatibility-gate:
+    name: Verify dual-write compatibility in isolated staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify deterministic compatibility semantics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'rebuild/portal-v2-performance-2026-09-13'
+          git merge-base --is-ancestor e4c7bde7ad9a9402136da5798d7ab690ab30322c HEAD
+          node --check rebuild/adminops/src/lib/compatibility.mjs
+          node --check rebuild/adminops/src/lib/reconciliation.mjs
+          node --check rebuild/adminops/src/index.js
+          node --check tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs | tee /tmp/checkpoint4-tests.log
+          grep -Fq 'REBUILD_CHECKPOINT4_DUAL_WRITE_COMPATIBILITY_PASS' /tmp/checkpoint4-tests.log
+          test "$(grep -c '^CHECKPOINT = "4"$' rebuild/adminops/wrangler.toml)" = '2'
+          ! grep -R --line-number --fixed-strings 'name = "fpt-portal-v2-worker"' rebuild/adminops
+          ! grep -R --line-number -E 'DROP[[:space:]]+TABLE|DROP[[:space:]]+COLUMN|ALTER[[:space:]]+TABLE' rebuild/adminops/schema/checkpoint4-compatibility.sql
+          ! grep -R --line-number -E '\[\[kv_namespaces\]\]|\[\[d1_databases\]\]|\[\[r2_buckets\]\]|\[\[send_email\]\]|(^|[[:space:]])routes?[[:space:]]*=' rebuild/adminops/wrangler.toml
+
+      - name: Verify production anchor and source namespace before compatibility work
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-before.json
+          jq -e '.success == true' /tmp/prod-before.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
+          echo "PRODUCTION_DEPLOYMENT_BEFORE=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_BEFORE=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-settings.json
+          jq -e '.success == true' /tmp/prod-settings.json >/dev/null
+          LIVE_LESSONS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/prod-settings.json)"
+          test "${LIVE_LESSONS}" = "${LESSONS_KV_NAMESPACE_ID}"
+
+      - name: Resolve isolated rebuild KV and compatibility D1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          KV_BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces"
+          curl --fail --silent --show-error "${KV_BASE}?per_page=100" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/kv-list.json
+          jq -e '.success == true' /tmp/kv-list.json >/dev/null
+          KV_ID="$(jq -r --arg title "${READ_MODELS_KV_TITLE}" '.result[] | select(.title == $title) | .id' /tmp/kv-list.json | head -n1)"
+          test -n "${KV_ID}"
+          test "${KV_ID}" != "${LESSONS_KV_NAMESPACE_ID}"
+          echo "READ_MODELS_KV_NAMESPACE_ID=${KV_ID}" >> "${GITHUB_ENV}"
+
+          D1_BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database"
+          curl --fail --silent --show-error "${D1_BASE}?per_page=100" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/d1-list.json
+          jq -e '.success == true' /tmp/d1-list.json >/dev/null
+          D1_ID="$(jq -r --arg name "${COMPAT_D1_NAME}" '.result[] | select(.name == $name) | (.uuid // .id // empty)' /tmp/d1-list.json | head -n1)"
+          if [ -z "${D1_ID}" ]; then
+            jq -n --arg name "${COMPAT_D1_NAME}" '{name:$name,primary_location_hint:"weur"}' > /tmp/d1-create.json
+            curl --fail --silent --show-error --request POST "${D1_BASE}" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/d1-create.json \
+              --output /tmp/d1-create-response.json
+            jq -e '.success == true' /tmp/d1-create-response.json >/dev/null
+            D1_ID="$(jq -r '.result.uuid // .result.id // empty' /tmp/d1-create-response.json)"
+          fi
+          test -n "${D1_ID}"
+          echo "COMPAT_D1_ID=${D1_ID}" >> "${GITHUB_ENV}"
+          echo "CHECKPOINT4_READ_MODELS_KV=${KV_ID}"
+          echo "CHECKPOINT4_COMPAT_D1=${D1_ID}"
+
+      - name: Refresh complete global read model in rebuild KV
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export CHECKPOINT3_VERSION_SUFFIX="cp4-run${GITHUB_RUN_ID}"
+          node scripts/rebuild-checkpoint3-compile-publish.mjs /tmp/checkpoint4-global-publish.json \
+            | tee /tmp/checkpoint4-global-publish.log
+          jq -e '.marker == "REBUILD_CHECKPOINT3_COMPILE_PUBLISH_PASS" and .sourceCanonicalLessonIds > 0 and .preparedViews == 15' /tmp/checkpoint4-global-publish.json >/dev/null
+          echo "CHECKPOINT4_GLOBAL_VERSION=$(jq -r '.version' /tmp/checkpoint4-global-publish.json)" >> "${GITHUB_ENV}"
+          echo "CHECKPOINT4_GLOBAL_SHA=$(jq -r '.payloadSha256' /tmp/checkpoint4-global-publish.json)" >> "${GITHUB_ENV}"
+
+      - name: Build staging-only AdminOps configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cp rebuild/adminops/wrangler.toml rebuild/adminops/wrangler.cp4.toml
+          cat >> rebuild/adminops/wrangler.cp4.toml <<EOF
+
+          [[env.staging.kv_namespaces]]
+          binding = "READ_MODELS_KV"
+          id = "${READ_MODELS_KV_NAMESPACE_ID}"
+
+          [[env.staging.d1_databases]]
+          binding = "COMPAT_DB"
+          database_name = "${COMPAT_D1_NAME}"
+          database_id = "${COMPAT_D1_ID}"
+          EOF
+          grep -Fq 'binding = "READ_MODELS_KV"' rebuild/adminops/wrangler.cp4.toml
+          grep -Fq 'binding = "COMPAT_DB"' rebuild/adminops/wrangler.cp4.toml
+          ! grep -E 'STUDENTS_KV|LESSONS_KV|MATERIALS_R2|send_email' rebuild/adminops/wrangler.cp4.toml
+
+      - name: Apply additive compatibility schema and reset synthetic fixture only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W d1 execute COMPAT_DB --remote \
+            --config rebuild/adminops/wrangler.cp4.toml --env staging \
+            --file rebuild/adminops/schema/checkpoint4-compatibility.sql \
+            | tee /tmp/checkpoint4-schema.log
+          cat > /tmp/checkpoint4-clean.sql <<'SQL'
+          DELETE FROM rebuild_shadow_reconciliation WHERE portal_user_id_norm = 'cp4synthetic';
+          DELETE FROM online_prelesson_entitlements WHERE portal_user_id_norm = 'cp4synthetic';
+          DELETE FROM lesson_entitlements WHERE portal_user_id_norm = 'cp4synthetic';
+          DELETE FROM student_batch_assignments WHERE portal_user_id_norm = 'cp4synthetic';
+          DELETE FROM compat_synthetic_users WHERE portal_user_id_norm = 'cp4synthetic';
+          DELETE FROM batch_definitions WHERE batch_key = 'CP4-Y5M';
+          SQL
+          $W d1 execute COMPAT_DB --remote \
+            --config rebuild/adminops/wrangler.cp4.toml --env staging \
+            --file /tmp/checkpoint4-clean.sql \
+            | tee /tmp/checkpoint4-clean.log
+
+      - name: Dry-run and deploy isolated Checkpoint 4 AdminOps staging
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          cd rebuild/adminops
+          $W deploy --config wrangler.cp4.toml --env staging --dry-run --outdir /tmp/checkpoint4-adminops-build \
+            | tee /tmp/checkpoint4-adminops-dryrun.log
+          grep -Fq 'READ_MODELS_KV' /tmp/checkpoint4-adminops-dryrun.log
+          grep -Fq 'COMPAT_DB' /tmp/checkpoint4-adminops-dryrun.log
+          ! grep -E 'STUDENTS_KV|LESSONS_KV|MATERIALS_R2|send_email' /tmp/checkpoint4-adminops-dryrun.log
+          $W deploy --config wrangler.cp4.toml --env staging \
+            --message "Portal V2 Performance Rebuild Checkpoint 4 dual-write compatibility" \
+            | tee /tmp/checkpoint4-adminops-deploy.log
+          rm -f wrangler.cp4.toml
+          cd ../..
+
+      - name: Verify deployed compatibility release in both legacy and compiled state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="https://${ADMINOPS_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev"
+          READY=0
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "${BASE}/health" -o /tmp/checkpoint4-health.json \
+              && jq -e '.ok == true and .checkpoint == 4 and .runtime == "admin-operations" and .environment == "staging" and .productionTarget == false and .compatibility.legacyRemainsAuthoritative == true and .compatibility.shadowReadModelWrites == true and .compatibility.compatDbPresent == true and .compatibility.syntheticHarnessEnabled == true and .compatibility.destructiveMigrations == false' /tmp/checkpoint4-health.json >/dev/null \
+              && curl --fail --silent --show-error "${BASE}/read-models/current" -o /tmp/checkpoint4-global.json \
+              && jq -e --arg version "${CHECKPOINT4_GLOBAL_VERSION}" --arg sha "${CHECKPOINT4_GLOBAL_SHA}" '.ok == true and .checkpoint == 4 and .current.version == $version and .current.sha256 == $sha and .current.views == 15' /tmp/checkpoint4-global.json >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 2
+          done
+          test "${READY}" = '1'
+
+          curl --fail --silent --show-error --request POST \
+            "${BASE}/compatibility/test-release?scenario=completed" \
+            --output /tmp/checkpoint4-completed.json
+          jq -e '.ok == true and .fixture == "synthetic-only" and .legacy.full == true and .shadow.lessonAccess.core == true and .shadow.lessonAccess.preLessonOnly == false and .parity.match == true and .compatibility.legacyApplied == true and .compatibility.shadowApplied == true and .compatibility.reconciliationRequired == false and .reconciliation.status == "SYNCED"' /tmp/checkpoint4-completed.json >/dev/null
+
+          curl --fail --silent --show-error --request POST \
+            "${BASE}/compatibility/test-release?scenario=continuing" \
+            --output /tmp/checkpoint4-continuing.json
+          jq -e '.ok == true and .legacy.full == true and .shadow.lessonAccess.core == true and .parity.match == true and .compatibility.shadowApplied == true and .reconciliation.status == "SYNCED"' /tmp/checkpoint4-continuing.json >/dev/null
+
+          curl --fail --silent --show-error --request POST \
+            "${BASE}/compatibility/test-release?scenario=shadow-failure" \
+            --output /tmp/checkpoint4-shadow-failure.json
+          jq -e '.ok == true and .legacy.full == true and .compatibility.legacyApplied == true and .compatibility.shadowApplied == false and .compatibility.reconciliationRequired == true and .compatibility.pointerUnchangedOnInjectedFailure == true and .reconciliation.status == "RECONCILE_REQUIRED"' /tmp/checkpoint4-shadow-failure.json >/dev/null
+
+          curl --fail --silent --show-error --request POST \
+            "${BASE}/compatibility/test-release?scenario=reconcile" \
+            --output /tmp/checkpoint4-reconcile.json
+          jq -e '.ok == true and .legacy.full == true and .shadow.lessonAccess.core == true and .parity.match == true and .compatibility.shadowApplied == true and .reconciliation.status == "SYNCED"' /tmp/checkpoint4-reconcile.json >/dev/null
+
+          curl --fail --silent --show-error "${BASE}/compatibility/status" -o /tmp/checkpoint4-status.json
+          jq -e '.ok == true and .checkpoint == 4 and .compatibility.enabled == true and .compatibility.fixture == "synthetic-only" and .compatibility.legacyEntitlements >= 2 and .compatibility.reconcileRequired == 0 and (.compatibility.currentVersion | length) > 0 and (.compatibility.currentSha256 | length) == 64' /tmp/checkpoint4-status.json >/dev/null
+          echo 'REBUILD_CHECKPOINT4_STAGING_GATE_PASS'
+
+      - name: Verify production remained unchanged throughout Checkpoint 4 staging gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-after.json
+          jq -e '.success == true' /tmp/prod-after.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+          echo "PRODUCTION_DEPLOYMENT_AFTER=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_AFTER=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+          echo 'REBUILD_CHECKPOINT4_GATE_PASS'
