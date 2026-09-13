@@ -19,6 +19,7 @@ DEPLOYMENT_IDENTITY = "student-staging-cp9"
 CHECKPOINT = "9"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
 STUDENT_LOGIN_ENABLED = "true"
+ALLOWED_ORIGINS = "https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev"
 
 [[env.staging.kv_namespaces]]
 binding = "READ_MODELS_KV"
