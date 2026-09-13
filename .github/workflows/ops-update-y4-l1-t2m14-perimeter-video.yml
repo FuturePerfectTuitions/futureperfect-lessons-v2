@@ -43,7 +43,8 @@ jobs:
           const account = process.env.CLOUDFLARE_ACCOUNT_ID;
           const token = process.env.CLOUDFLARE_API_TOKEN;
           const ns = process.env.LESSONS_KV_ID;
-          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const valuesBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const keysBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`;
           const auth = { Authorization: `Bearer ${token}` };
 
           const LEVEL_DISPLAY_ID = 'L1T2M14';
@@ -83,19 +84,37 @@ jobs:
           }
 
           async function getJson(key) {
-            const r = await fetch(base + encodeURIComponent(key), { headers: auth });
+            const r = await fetch(valuesBase + encodeURIComponent(key), { headers: auth });
             if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
             const text = await r.text();
             try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
           }
 
           async function putJson(key, value) {
-            const r = await fetch(base + encodeURIComponent(key), {
+            const r = await fetch(valuesBase + encodeURIComponent(key), {
               method: 'PUT',
               headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
               body: JSON.stringify(value)
             });
             if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          async function listLessonKeys() {
+            const names = [];
+            let cursor = '';
+            do {
+              const u = new URL(keysBase);
+              u.searchParams.set('prefix', 'lesson:');
+              u.searchParams.set('limit', '1000');
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const r = await fetch(u, { headers: auth });
+              if (!r.ok) throw new Error(`LIST lesson keys failed HTTP ${r.status}`);
+              const body = await r.json();
+              if (!body?.success || !Array.isArray(body?.result)) throw new Error('LIST lesson keys returned unexpected payload');
+              for (const item of body.result) if (item?.name) names.push(item.name);
+              cursor = String(body?.result_info?.cursor || '');
+            } while (cursor);
+            return names;
           }
 
           function hasExpectedDisplayId(r) {
@@ -112,20 +131,22 @@ jobs:
           }
 
           (async () => {
-            const curriculum = await getJson('curriculum:MATHS_Y4');
-            if (curriculum?.curriculumCode !== 'MATHS_Y4') throw new Error('MATHS_Y4 curriculum identity mismatch');
-            if (!Array.isArray(curriculum.lessonIds) || !curriculum.lessonIds.length) throw new Error('MATHS_Y4 lessonIds missing');
+            const lessonKeys = await listLessonKeys();
+            if (!lessonKeys.length) throw new Error('No lesson keys found in production LESSONS_KV');
 
             const matches = [];
-            for (const lessonId of curriculum.lessonIds) {
-              const rec = await getJson(`lesson:${lessonId}`);
-              if (hasExpectedDisplayId(rec)) matches.push(rec);
+            for (const key of lessonKeys) {
+              const rec = await getJson(key);
+              if (hasExpectedDisplayId(rec)) matches.push({ key, rec });
             }
-            if (matches.length !== 1) throw new Error(`Expected exactly one Y4/L1 T2M14 lesson; found ${matches.length}`);
+            if (matches.length !== 1) {
+              console.log('MATCH_DEBUG=' + JSON.stringify(matches.map(x => ({ key: x.key, lessonId: x.rec?.lessonId, title: x.rec?.title, displayIds: x.rec?.displayIds }))));
+              throw new Error(`Expected exactly one Y4/L1 T2M14 lesson; found ${matches.length}`);
+            }
 
-            const before = matches[0];
+            const lessonKey = matches[0].key;
+            const before = matches[0].rec;
             guardLesson(before);
-            const lessonKey = `lesson:${before.lessonId}`;
 
             const next = JSON.parse(JSON.stringify(before));
             next.description = description;
@@ -159,6 +180,7 @@ jobs:
             }
 
             console.log('Y4_L1_T2M14_VERIFIED=' + JSON.stringify({
+              lessonKey,
               lessonId: verified.lessonId,
               levelDisplayId: verified?.displayIds?.['maths-level1'] || null,
               yearDisplayId: verified?.displayIds?.['maths-year4'] || null,
