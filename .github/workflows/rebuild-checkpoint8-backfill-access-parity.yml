@@ -22,13 +22,20 @@ jobs:
       - name: Syntax check Checkpoint 8 audit
         run: |
           node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
+          node --check rebuild/adminops/src/lib/legacy-resource-oracle.mjs
           node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check rebuild/shared/read-models/phase11-extension-resources.mjs
+          node --check rebuild/shared/read-models/resource-visibility.mjs
+          node --check rebuild/student/src/lib/runtime.mjs
           node --check tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node --check tests/rebuild-checkpoint8-phase11-resource-parity.mjs
           node --check scripts/rebuild-checkpoint8-live-audit.mjs
           node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
           node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
       - name: Checkpoint 8 synthetic access parity gate
         run: node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+      - name: Checkpoint 8 authoritative Phase 11 resource parity gate
+        run: node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
       - name: Checkpoint 6 new Student Worker regression
         run: node tests/rebuild-checkpoint6-new-student-worker.mjs
       - name: Checkpoint 5 authentication capability regression
