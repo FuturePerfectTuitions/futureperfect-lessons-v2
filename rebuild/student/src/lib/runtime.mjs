@@ -13,6 +13,7 @@ import { opaqueAccessScopeId } from './access-scope.mjs';
 import { kvReadStore, resolveCurrentScope, sha256Hex } from './read-model-resolver.mjs';
 import { environmentAdapters } from './runtime-adapters.mjs';
 import { videoForView } from '../../../shared/read-models/video.mjs';
+import { resourceVisibleForView } from '../../../shared/read-models/resource-visibility.mjs';
 
 export const CHECKPOINT = 6;
 const clean = value => String(value ?? '').trim();
@@ -196,8 +197,9 @@ function selectLesson(global, snapshotValue, lessonId, requestedViewId) {
   return row ? {view,row} : null;
 }
 
-function resourceAllowed(resource, state) {
+function resourceAllowed(resource, state, viewId) {
   if (!state?.open || state.blocked) return false;
+  if (!resourceVisibleForView(resource, viewId, state)) return false;
   if (state.accessMode === 'prelesson-only') return clean(resource?.type) === 'prelesson';
   return true;
 }
@@ -212,7 +214,7 @@ async function availableResources(detail, state, viewId) {
   const video = state?.accessMode === 'full' ? videoForView(detail?.payload?.videoVariants, viewId) : null;
   if (video?.targetUrl) rows.push({ type: 'video', displayName: video.displayName || 'Lesson Video', targetUrl: video.targetUrl });
   for (const resource of Array.isArray(detail?.payload?.resources) ? detail.payload.resources : []) {
-    if (resourceAllowed(resource, state)) rows.push(resource);
+    if (resourceAllowed(resource, state, viewId)) rows.push(resource);
   }
   return rows;
 }
@@ -300,7 +302,6 @@ export function createStudentRuntime(overrides = {}) {
           const verified = await adapters.authenticateCredentials({ username, password, request });
           if (!verified?.ok || !clean(verified.userId)) return json({ok:false,error:'LOGIN_INVALID'},401);
           const issued = await createAuthenticatedSession({ secret:requireSecret(env,'AUTH_SIGNING_SECRET'), userId:verified.userId, now:now() });
-          // Fail closed if a signed identity has no current prepared access snapshot.
           const access = await resolveAccess(env, issued.session);
           const snap = snapshot(access);
           return json({ ok:true, checkpoint:CHECKPOINT, expiresAt:issued.session.exp, account:snap?.account||{}, accountLocked:preparedAccountLocked(snap, now()), modelVersion:access.version }, 200, { 'set-cookie': issued.setCookie });
