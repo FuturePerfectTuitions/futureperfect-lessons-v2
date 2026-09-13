@@ -1,0 +1,81 @@
+name: Rebuild Checkpoint 11 - Reversible Cutover
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint11-reversible-cutover-2026-09-13
+      - rebuild/portal-v2-performance-2026-09-13
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  EXPECTED_PROD_DEPLOYMENT: ce193be0-d018-403f-a417-999e9e6eea41
+  EXPECTED_PROD_VERSION: aed13a31-21fa-49c3-8830-c37fd8645c31
+  EXPECTED_FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  PROD_SHADOW_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  PROD_SHADOW_D1_ID: 3a17180e-b554-4740-a629-bcaca6a2eeb5
+  NEW_STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  NEW_BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  CHECKPOINT8_AS_OF_DATE: '2026-09-13'
+
+jobs:
+  cp11-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm CP11 remains read-only before cutover implementation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$PROD_WORKER" = 'fpt-portal-v2-worker'
+          node --check scripts/rebuild-checkpoint11-preflight.mjs
+          node --check scripts/rebuild-checkpoint8-live-audit.mjs
+          node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
+      - name: Freeze exact production, DNS, route and frontend anchors read-only
+        run: node scripts/rebuild-checkpoint11-preflight.mjs
+      - name: Re-run current production profile mode inventory read-only
+        run: node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+      - name: Re-run current production special-area access audit read-only
+        run: node scripts/rebuild-checkpoint8-special-area-audit.mjs
+      - name: Re-run full production access/resource parity read-only
+        run: node scripts/rebuild-checkpoint8-live-audit.mjs
+      - name: Assemble CP11 preflight gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker 'REBUILD_CHECKPOINT11_PREFLIGHT_FULL_PASS' \
+            --arg sha "$GITHUB_SHA" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --slurpfile preflight /tmp/checkpoint11-preflight.json \
+            --slurpfile parity /tmp/checkpoint8-live-summary.json \
+            '{marker:$marker,sha:$sha,branch:$branch,runId:$runId,preflight:$preflight[0],parity:$parity[0]}' \
+            > /tmp/checkpoint11-preflight-gate.json
+          jq -e '.preflight.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .preflight.safety.readOnly==true and .parity.status=="PASS"' /tmp/checkpoint11-preflight-gate.json >/dev/null
+      - name: Upload CP11 preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint11-preflight-evidence
+          path: |
+            /tmp/checkpoint11-preflight.json
+            /tmp/checkpoint11-preflight-gate.json
+            /tmp/checkpoint8-live-summary.json
+            /tmp/checkpoint8-profile-mode-inventory.json
+            /tmp/checkpoint8-special-area-summary.json
+          if-no-files-found: ignore
+          retention-days: 30
