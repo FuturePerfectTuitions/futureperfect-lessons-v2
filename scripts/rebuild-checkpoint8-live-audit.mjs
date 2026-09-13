@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { compileGlobalScope, compileAccessScope, collectLessonResources, globalToCatalogue } from '../rebuild/adminops/src/lib/compiler.mjs';
-import { buildAuthoritativeParityOracle, diffAccessParity, auditLessonResourceParity } from '../rebuild/adminops/src/lib/backfill-parity-audit.mjs';
+import { buildAuthoritativeParityOracle, diffAccessParity } from '../rebuild/adminops/src/lib/backfill-parity-audit.mjs';
+import { auditLegacyLessonResourceParity, legacyPhase11Inventory } from '../rebuild/adminops/src/lib/legacy-resource-oracle.mjs';
 
 const token=process.env.CLOUDFLARE_API_TOKEN||'', account=process.env.CLOUDFLARE_ACCOUNT_ID||'', worker=process.env.WORKER_NAME||'fpt-portal-v2-worker', asOf=process.env.CHECKPOINT8_AS_OF_DATE||'2026-09-13';
 if(!token||!account) throw new Error('Cloudflare read-only credentials are required.');
@@ -65,10 +66,11 @@ const [definitions,assignments,entitlements,preLesson]=await Promise.all([
 const group=(rows,key='portal_user_id_norm')=>{const m=new Map();for(const r of rows){const k=norm(r?.[key]);if(!k)continue;const a=m.get(k)||[];a.push(r);m.set(k,a);}return m;};
 const byAssignments=group(assignments), byEntitlements=group(entitlements), byPre=group(preLesson);
 
-const resourceMismatches=[]; let cumulativeLessons=0, answerPackLessons=0, satsLessons=0;
+const resourceMismatches=[]; let cumulativeLessons=0, answerPackLessons=0, satsLessons=0, phase11Lessons=0, phase11ExtensionEntries=0;
 for(const [id,record] of Object.entries(lessons)) {
-  const compiled=collectLessonResources(record), parity=auditLessonResourceParity(record,compiled); if(!parity.pass) resourceMismatches.push(id);
-  const names=compiled.map(x=>norm(x.displayName)); if(names.some(x=>x.includes('cumulative'))) cumulativeLessons++; if(compiled.some(x=>x.type==='answer-pack')) answerPackLessons++; if(/sat/i.test(clean(record?.title))||/sat/i.test(id)) satsLessons++;
+  const compiled=collectLessonResources(record), parity=auditLegacyLessonResourceParity(record,compiled); if(!parity.pass) resourceMismatches.push(id);
+  const phase11=legacyPhase11Inventory(record); if(phase11.extensionEntries>0) phase11Lessons++; phase11ExtensionEntries+=phase11.extensionEntries; if(phase11.cumulativePairs>0)cumulativeLessons++;
+  if(compiled.some(x=>x.type==='answer-pack'&&x.protected===true)) answerPackLessons++; if(/sat/i.test(clean(record?.title))||/sat/i.test(id)) satsLessons++;
 }
 
 const userKeys=await kvKeys(studentsNs,'user:');
@@ -92,6 +94,6 @@ for(const key of userKeys.sort()) {
   audited++; if(!parity.pass){unexplained+=parity.unexplained.length;safeFailures.push({student:digest(id),differenceIds:parity.unexplained.map(x=>x.id).slice(0,30)});}
 }
 
-const summary={marker:'REBUILD_CHECKPOINT8_LIVE_READONLY_AUDIT',asOfDate:asOf,status:unexplained===0&&resourceMismatches.length===0?'PASS':'FAIL',catalogue:{curriculumCount:curriculumCodes.length,presentationCount:Object.keys(global.catalogues||{}).length,lessonCount:Object.keys(lessons).length,satsLessons,cumulativeLessons,answerPackLessons,resourceMismatchCount:resourceMismatches.length,resourceMismatchLessonIds:resourceMismatches.slice(0,50)},students:{profileKeyCount:userKeys.length,auditedCurrentStudents:audited,excludedAdmin,excludedInactive,unexplainedDifferenceCount:unexplained,featureCounts,failures:safeFailures.slice(0,25)}};
+const summary={marker:'REBUILD_CHECKPOINT8_LIVE_READONLY_AUDIT',asOfDate:asOf,status:unexplained===0&&resourceMismatches.length===0?'PASS':'FAIL',catalogue:{curriculumCount:curriculumCodes.length,presentationCount:Object.keys(global.catalogues||{}).length,lessonCount:Object.keys(lessons).length,satsLessons,cumulativeLessons,answerPackLessons,phase11Lessons,phase11ExtensionEntries,resourceMismatchCount:resourceMismatches.length,resourceMismatchLessonIds:resourceMismatches.slice(0,50)},students:{profileKeyCount:userKeys.length,auditedCurrentStudents:audited,excludedAdmin,excludedInactive,unexplainedDifferenceCount:unexplained,featureCounts,failures:safeFailures.slice(0,25)}};
 fs.writeFileSync('/tmp/checkpoint8-live-summary.json',JSON.stringify(summary,null,2)); console.log(JSON.stringify(summary,null,2));
 if(summary.status!=='PASS') process.exitCode=1;
