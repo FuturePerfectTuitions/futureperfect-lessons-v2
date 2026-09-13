@@ -1,0 +1,165 @@
+name: Rebuild Checkpoint 9 - Production-shaped Staging UAT
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint9-production-shaped-staging-2026-09-13
+    paths:
+      - 'rebuild/student/**'
+      - 'rebuild/shared/**'
+      - 'rebuild/adminops/src/lib/**'
+      - 'scripts/rebuild-checkpoint9-*.mjs'
+      - 'tests/rebuild-checkpoint*.mjs'
+      - '.github/workflows/rebuild-checkpoint9-production-shaped-uat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint9-uat
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  STAGING_READ_MODELS_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_STAGING
+  STAGING_STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
+  STAGING_R2: fpt-portal-v2-rebuild-materials-staging
+  STAGING_BASE_URL: https://fpt-portal-v2-rebuild-student-staging.futureperfectlessons.workers.dev
+  WRANGLER_VERSION: 4.129.0
+
+jobs:
+  checkpoint9-production-shaped-uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm safety boundary and generate synthetic UAT secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          [[ "$STAGING_WORKER" == *rebuild*staging* ]]
+          [[ "$STAGING_R2" == *rebuild*staging* ]]
+          [[ "$STAGING_STUDENTS_KV_TITLE" == *REBUILD*STAGING* ]]
+          python - <<'PY' >> "$GITHUB_ENV"
+          import secrets,string
+          def four():
+              chars=[secrets.choice(string.ascii_uppercase),secrets.choice(string.ascii_lowercase),secrets.choice(string.digits),secrets.choice(string.ascii_letters+string.digits)]
+              secrets.SystemRandom().shuffle(chars)
+              return ''.join(chars)
+          print('UAT_LOGIN_PASSWORD='+four())
+          print('UAT_ANSWER_PASSWORD='+four())
+          print('AUTH_SIGNING_SECRET='+secrets.token_hex(32))
+          print('ACCESS_SCOPE_SECRET='+secrets.token_hex(32))
+          PY
+      - name: Mask generated secrets
+        shell: bash
+        run: |
+          echo "::add-mask::$UAT_LOGIN_PASSWORD"
+          echo "::add-mask::$UAT_ANSWER_PASSWORD"
+          echo "::add-mask::$AUTH_SIGNING_SECRET"
+          echo "::add-mask::$ACCESS_SCOPE_SECRET"
+      - name: Pin Wrangler
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Syntax and prior-checkpoint regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/rebuild-checkpoint9-seed-staging.mjs
+          node --check scripts/rebuild-checkpoint9-copy-r2.mjs
+          node --check scripts/rebuild-checkpoint9-staging-uat.mjs
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/runtime.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+      - name: Resolve isolated staging resource IDs and freeze production anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv.json
+          READ_ID="$(jq -r --arg title "$STAGING_READ_MODELS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          STUDENT_ID="$(jq -r --arg title "$STAGING_STUDENTS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          test -n "$READ_ID"; test -n "$STUDENT_ID"
+          echo "STAGING_READ_MODELS_KV_ID=$READ_ID" >> "$GITHUB_ENV"
+          echo "STAGING_STUDENTS_KV_ID=$STUDENT_ID" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-before.json
+          PROD_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
+          PROD_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
+          test -n "$PROD_DEPLOYMENT"; test -n "$PROD_VERSION"
+          echo "PROD_DEPLOYMENT=$PROD_DEPLOYMENT" >> "$GITHUB_ENV"
+          echo "PROD_VERSION=$PROD_VERSION" >> "$GITHUB_ENV"
+      - name: Compile and publish production-shaped staging seed
+        run: node scripts/rebuild-checkpoint9-seed-staging.mjs
+      - name: Copy representative production resources read-only into isolated staging R2
+        run: node scripts/rebuild-checkpoint9-copy-r2.mjs
+      - name: Install isolated staging Worker secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$AUTH_SIGNING_SECRET" | npx wrangler secret put AUTH_SIGNING_SECRET --env staging --config rebuild/student/wrangler.toml
+          printf '%s' "$ACCESS_SCOPE_SECRET" | npx wrangler secret put ACCESS_SCOPE_SECRET --env staging --config rebuild/student/wrangler.toml
+      - name: Deploy only the isolated CP9 Student Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUTPUT="$(npx wrangler deploy --env staging --config rebuild/student/wrangler.toml 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          echo "$OUTPUT" | grep -F "$STAGING_WORKER" >/dev/null
+          if echo "$OUTPUT" | grep -F 'fpt-portal-v2-worker' >/dev/null; then
+            echo 'Production Worker name appeared in staging deployment output.' >&2
+            exit 1
+          fi
+      - name: Wait for isolated staging health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --output /tmp/health.json --write-out '%{http_code}' "$STAGING_BASE_URL/health" || true)"
+            if [ "$CODE" = 200 ] && jq -e '.ok==true and .environment=="staging" and .productionTarget==false and .preparedReadModels.kvBound==true and .auth.studentStoreBound==true and .resources.r2Bound==true and .resources.answerRateStoreBound==true' /tmp/health.json >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/health.json 2>/dev/null || true
+          exit 1
+      - name: Run production-shaped API UAT
+        run: node scripts/rebuild-checkpoint9-staging-uat.mjs
+      - name: Prove production deployment remained unchanged
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-after.json
+          AFTER_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+          AFTER_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+          test "$AFTER_DEPLOYMENT" = "$PROD_DEPLOYMENT"
+          test "$AFTER_VERSION" = "$PROD_VERSION"
+          jq -n --arg deployment "$AFTER_DEPLOYMENT" --arg version "$AFTER_VERSION" '{productionChanged:false,deploymentId:$deployment,versionId:$version}' > /tmp/checkpoint9-production-anchor.json
+      - name: Upload redacted CP9 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint9-production-shaped-uat-evidence
+          path: |
+            /tmp/checkpoint9-seed-summary.json
+            /tmp/checkpoint9-r2-copy-summary.json
+            /tmp/checkpoint9-uat-summary.json
+            /tmp/checkpoint9-production-anchor.json
+          retention-days: 30
+          if-no-files-found: warn
