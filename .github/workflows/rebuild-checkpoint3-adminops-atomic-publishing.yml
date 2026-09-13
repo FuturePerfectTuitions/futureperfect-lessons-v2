@@ -1,0 +1,219 @@
+name: Rebuild Checkpoint 3 AdminOps atomic publishing
+
+on:
+  push:
+    branches:
+      - rebuild/portal-v2-performance-2026-09-13
+    paths:
+      - 'rebuild/adminops/src/**'
+      - 'rebuild/adminops/wrangler.toml'
+      - 'scripts/rebuild-checkpoint3-compile-publish.mjs'
+      - 'tests/rebuild-checkpoint3-atomic-publishing.mjs'
+      - 'docs/rebuild/CHECKPOINT_3_ADMINOPS_COMPILER_ATOMIC_PUBLISHING.md'
+      - '.github/workflows/rebuild-checkpoint3-adminops-atomic-publishing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint3-adminops-atomic-publishing
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_WORKER: fpt-portal-v2-worker
+  EXPECTED_PROD_DEPLOYMENT: b803da70-766c-4a16-a4aa-c8bc238d3e77
+  EXPECTED_PROD_VERSION: 971509f0-ce1e-4b27-8e8d-0d96a64cfa50
+  LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  READ_MODELS_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_STAGING
+  ADMINOPS_STAGING_WORKER: fpt-portal-v2-rebuild-adminops-staging
+  WORKERS_SUBDOMAIN: futureperfectlessons
+
+jobs:
+  compile-publish-deploy:
+    name: Compile, fail safely, publish and verify isolated AdminOps staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify Checkpoint 3 compiler and atomic-publishing semantics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'rebuild/portal-v2-performance-2026-09-13'
+          git merge-base --is-ancestor e4c7bde7ad9a9402136da5798d7ab690ab30322c HEAD
+          node --check rebuild/adminops/src/lib/atomic-publisher.mjs
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check scripts/rebuild-checkpoint3-compile-publish.mjs
+          node --check rebuild/adminops/src/index.js
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs | tee /tmp/checkpoint3-tests.log
+          grep -Fq 'REBUILD_CHECKPOINT3_ATOMIC_PUBLISHING_PASS' /tmp/checkpoint3-tests.log
+          test "$(grep -c '^CHECKPOINT = "3"$' rebuild/adminops/wrangler.toml)" = '2'
+          ! grep -R --line-number --fixed-strings 'name = "fpt-portal-v2-worker"' rebuild/adminops
+          ! grep -R --line-number -E '\[\[kv_namespaces\]\]|\[\[d1_databases\]\]|\[\[r2_buckets\]\]|\[\[send_email\]\]|(^|[[:space:]])routes?[[:space:]]*=' rebuild/adminops/wrangler.toml
+
+      - name: Verify production anchor and live LESSONS_KV source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-before.json
+          jq -e '.success == true' /tmp/prod-before.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
+          echo "PRODUCTION_DEPLOYMENT_BEFORE=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_BEFORE=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-settings.json
+          jq -e '.success == true' /tmp/prod-settings.json >/dev/null
+          LIVE_LESSONS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/prod-settings.json)"
+          echo "PRODUCTION_LESSONS_KV=${LIVE_LESSONS}"
+          test "${LIVE_LESSONS}" = "${LESSONS_KV_NAMESPACE_ID}"
+
+      - name: Create or reuse isolated staging read-model namespace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces"
+          curl --fail --silent --show-error "${BASE}?per_page=100" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/kv-namespaces.json
+          jq -e '.success == true' /tmp/kv-namespaces.json >/dev/null
+          ID="$(jq -r --arg title "${READ_MODELS_KV_TITLE}" '.result[] | select(.title == $title) | .id' /tmp/kv-namespaces.json | head -n1)"
+          if [ -z "${ID}" ]; then
+            jq -n --arg title "${READ_MODELS_KV_TITLE}" '{title:$title}' > /tmp/create-kv.json
+            curl --fail --silent --show-error --request POST "${BASE}" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/create-kv.json \
+              --output /tmp/create-kv-response.json
+            jq -e '.success == true' /tmp/create-kv-response.json >/dev/null
+            ID="$(jq -r '.result.id // empty' /tmp/create-kv-response.json)"
+          fi
+          test -n "${ID}"
+          test "${ID}" != "${LESSONS_KV_NAMESPACE_ID}"
+          echo "READ_MODELS_KV_NAMESPACE_ID=${ID}" >> "${GITHUB_ENV}"
+          echo "READ_MODELS_KV_NAMESPACE_CONFIRMED=${ID}"
+
+      - name: Compile current live global model and publish complete version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export CHECKPOINT3_VERSION_SUFFIX="run${GITHUB_RUN_ID}-a"
+          node scripts/rebuild-checkpoint3-compile-publish.mjs /tmp/checkpoint3-publish.json \
+            | tee /tmp/checkpoint3-publish.log
+          jq -e '.marker == "REBUILD_CHECKPOINT3_COMPILE_PUBLISH_PASS"' /tmp/checkpoint3-publish.json >/dev/null
+          jq -e '.sourceType == "production-lessons-kv-readonly" and .sourceCurriculumCodes == 11 and .sourceCanonicalLessonIds > 0 and .preparedViews == 15 and .preparedLessonIndexRows > 0' /tmp/checkpoint3-publish.json >/dev/null
+          echo "CHECKPOINT3_PUBLISHED_VERSION=$(jq -r '.version' /tmp/checkpoint3-publish.json)" >> "${GITHUB_ENV}"
+          echo "CHECKPOINT3_PUBLISHED_SHA=$(jq -r '.payloadSha256' /tmp/checkpoint3-publish.json)" >> "${GITHUB_ENV}"
+          echo 'REBUILD_CHECKPOINT3_COMPILE_PUBLISH_PASS'
+
+      - name: Prove deliberately failed publication cannot move current pointer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          KEY_ENC="$(python - <<'PY'
+          import urllib.parse
+          print(urllib.parse.quote('rm:v1:scope:global:current', safe=''))
+          PY
+          )"
+          POINTER_URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${READ_MODELS_KV_NAMESPACE_ID}/values/${KEY_ENC}"
+          curl --fail --silent --show-error "${POINTER_URL}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/pointer-before-failure.json
+          jq -e --arg version "${CHECKPOINT3_PUBLISHED_VERSION}" '.current.version == $version' /tmp/pointer-before-failure.json >/dev/null
+
+          set +e
+          CHECKPOINT3_FAIL_AFTER_CANDIDATE=1 \
+          CHECKPOINT3_VERSION_SUFFIX="run${GITHUB_RUN_ID}-deliberate-failure" \
+            node scripts/rebuild-checkpoint3-compile-publish.mjs /tmp/should-not-exist.json \
+            > /tmp/checkpoint3-failure.stdout 2> /tmp/checkpoint3-failure.stderr
+          RC=$?
+          set -e
+          test "${RC}" = '42'
+          grep -Fq 'REBUILD_CHECKPOINT3_EXPECTED_INJECTED_FAILURE' /tmp/checkpoint3-failure.stderr
+
+          curl --fail --silent --show-error "${POINTER_URL}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/pointer-after-failure.json
+          cmp --silent /tmp/pointer-before-failure.json /tmp/pointer-after-failure.json
+          jq -e --arg version "${CHECKPOINT3_PUBLISHED_VERSION}" '.current.version == $version' /tmp/pointer-after-failure.json >/dev/null
+          echo 'REBUILD_CHECKPOINT3_FAILED_COMPILE_POINTER_UNCHANGED_PASS'
+
+      - name: Build isolated staging config and deploy Admin Operations runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cp rebuild/adminops/wrangler.toml rebuild/adminops/wrangler.cp3.toml
+          cat >> rebuild/adminops/wrangler.cp3.toml <<EOF
+
+          [[env.staging.kv_namespaces]]
+          binding = "READ_MODELS_KV"
+          id = "${READ_MODELS_KV_NAMESPACE_ID}"
+          EOF
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          cd rebuild/adminops
+          $W deploy --config wrangler.cp3.toml --env staging --dry-run --outdir /tmp/checkpoint3-adminops-build \
+            | tee /tmp/checkpoint3-adminops-dryrun.log
+          grep -Fq 'READ_MODELS_KV' /tmp/checkpoint3-adminops-dryrun.log
+          ! grep -E 'STUDENTS_KV|LESSONS_KV|MATERIALS_R2|D1 Database|send_email' /tmp/checkpoint3-adminops-dryrun.log
+          $W deploy --config wrangler.cp3.toml --env staging \
+            --message "Portal V2 Performance Rebuild Checkpoint 3 AdminOps atomic publishing" \
+            | tee /tmp/checkpoint3-adminops-deploy.log
+          rm -f wrangler.cp3.toml
+          cd ../..
+
+      - name: Verify deployed Admin Operations resolver
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="https://${ADMINOPS_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev"
+          READY=0
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "${BASE}/health" -o /tmp/checkpoint3-health.json \
+              && jq -e '.ok == true and .checkpoint == 3 and .runtime == "admin-operations" and .environment == "staging" and .productionTarget == false and .atomicPublishing.readModelsBindingPresent == true' /tmp/checkpoint3-health.json >/dev/null \
+              && curl --fail --silent --show-error "${BASE}/read-models/current" -o /tmp/checkpoint3-current.json \
+              && jq -e --arg version "${CHECKPOINT3_PUBLISHED_VERSION}" --arg sha "${CHECKPOINT3_PUBLISHED_SHA}" '.ok == true and .checkpoint == 3 and .current.version == $version and .current.sha256 == $sha and .current.sourceType == "production-lessons-kv-readonly" and .current.views == 15 and .current.uniqueLessons > 0' /tmp/checkpoint3-current.json >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 2
+          done
+          test "${READY}" = '1'
+          echo 'REBUILD_CHECKPOINT3_STAGING_PASS'
+
+      - name: Verify production unchanged after Checkpoint 3
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-after.json
+          jq -e '.success == true' /tmp/prod-after.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+          echo "PRODUCTION_DEPLOYMENT_AFTER=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_AFTER=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+          echo 'REBUILD_CHECKPOINT3_GATE_PASS'
