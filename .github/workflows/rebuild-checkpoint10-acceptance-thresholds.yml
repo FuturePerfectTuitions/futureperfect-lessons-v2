@@ -1,0 +1,270 @@
+name: Rebuild Checkpoint 10 - Acceptance Thresholds
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint10-acceptance-thresholds-2026-09-13
+      - rebuild/portal-v2-performance-2026-09-13
+    paths:
+      - 'rebuild/student/**'
+      - 'rebuild/browser-staging/**'
+      - 'rebuild/shared/**'
+      - 'rebuild/adminops/src/lib/**'
+      - 'scripts/rebuild-checkpoint9-*.mjs'
+      - 'scripts/rebuild-checkpoint10-*.mjs'
+      - 'tests/rebuild-checkpoint*.mjs'
+      - 'docs/rebuild/CHECKPOINT_10_ACCEPTANCE_THRESHOLDS.md'
+      - '.github/workflows/rebuild-checkpoint10-acceptance-thresholds.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint10-acceptance
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  STAGING_READ_MODELS_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_STAGING
+  STAGING_STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
+  STAGING_R2: fpt-portal-v2-rebuild-materials-staging
+  STAGING_BASE_URL: https://fpt-portal-v2-rebuild-student-staging.futureperfectlessons.workers.dev
+  BROWSER_STAGING_WORKER: fpt-portal-v2-rebuild-browser-staging-cp9
+  CP10_BROWSER_BASE_URL: https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev
+  CP7_FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  CP7_FRONTEND_SHA: a4513da67ee66f51212114620c8e401bd5e31a8c
+  WRANGLER_VERSION: 4.129.0
+  PLAYWRIGHT_VERSION: 1.55.0
+
+jobs:
+  checkpoint10-acceptance-thresholds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Confirm safety boundary and generate masked synthetic acceptance secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          [[ "$STAGING_WORKER" == *rebuild*staging* ]]
+          [[ "$STAGING_R2" == *rebuild*staging* ]]
+          [[ "$STAGING_STUDENTS_KV_TITLE" == *REBUILD*STAGING* ]]
+          [[ "$BROWSER_STAGING_WORKER" == *rebuild*staging* ]]
+          [[ "$CP10_BROWSER_BASE_URL" == https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev ]]
+          [[ "$CP7_FRONTEND_SHA" =~ ^[0-9a-f]{40}$ ]]
+          python - <<'PY' > /tmp/cp10-secrets.env
+          import secrets,string
+          def four():
+              chars=[secrets.choice(string.ascii_uppercase),secrets.choice(string.ascii_lowercase),secrets.choice(string.digits),secrets.choice(string.ascii_letters+string.digits)]
+              secrets.SystemRandom().shuffle(chars)
+              return ''.join(chars)
+          print('UAT_LOGIN_PASSWORD='+four())
+          print('UAT_ANSWER_PASSWORD='+four())
+          print('AUTH_SIGNING_SECRET='+secrets.token_hex(32))
+          print('ACCESS_SCOPE_SECRET='+secrets.token_hex(32))
+          PY
+          while IFS='=' read -r key value; do
+            test -n "$key"; test -n "$value"
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done < /tmp/cp10-secrets.env
+          rm -f /tmp/cp10-secrets.env
+
+      - name: Pin Wrangler and browser runner
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}"
+
+      - name: Syntax and prior-checkpoint regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/rebuild-checkpoint9-seed-staging.mjs
+          node --check scripts/rebuild-checkpoint9-copy-r2.mjs
+          node --check scripts/rebuild-checkpoint9-staging-uat.mjs
+          node --check scripts/rebuild-checkpoint10-acceptance.mjs
+          node --check rebuild/browser-staging/src/index.js
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/runtime.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+
+      - name: Resolve isolated staging IDs and freeze production anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv.json
+          READ_ID="$(jq -r --arg title "$STAGING_READ_MODELS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          STUDENT_ID="$(jq -r --arg title "$STAGING_STUDENTS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          test -n "$READ_ID"; test -n "$STUDENT_ID"
+          echo "STAGING_READ_MODELS_KV_ID=$READ_ID" >> "$GITHUB_ENV"
+          echo "STAGING_STUDENTS_KV_ID=$STUDENT_ID" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-before.json
+          PROD_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
+          PROD_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
+          test -n "$PROD_DEPLOYMENT"; test -n "$PROD_VERSION"
+          echo "PROD_DEPLOYMENT=$PROD_DEPLOYMENT" >> "$GITHUB_ENV"
+          echo "PROD_VERSION=$PROD_VERSION" >> "$GITHUB_ENV"
+
+      - name: Publish production-shaped acceptance seed
+        run: node scripts/rebuild-checkpoint9-seed-staging.mjs
+
+      - name: Refresh representative real resources in isolated staging R2
+        run: node scripts/rebuild-checkpoint9-copy-r2.mjs
+
+      - name: Install isolated staging Worker secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$AUTH_SIGNING_SECRET" | npx wrangler secret put AUTH_SIGNING_SECRET --env staging --config rebuild/student/wrangler.toml
+          printf '%s' "$ACCESS_SCOPE_SECRET" | npx wrangler secret put ACCESS_SCOPE_SECRET --env staging --config rebuild/student/wrangler.toml
+
+      - name: Deploy only isolated Student Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUTPUT="$(npx wrangler deploy --env staging --config rebuild/student/wrangler.toml 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          echo "$OUTPUT" | grep -F "$STAGING_WORKER" >/dev/null
+          if echo "$OUTPUT" | grep -F 'fpt-portal-v2-worker' >/dev/null; then
+            echo 'Production Worker name appeared in CP10 staging deployment output.' >&2
+            exit 1
+          fi
+
+      - name: Wait for isolated staging health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --output /tmp/health.json --write-out '%{http_code}' "$STAGING_BASE_URL/health" || true)"
+            if [ "$CODE" = 200 ] && jq -e '.ok==true and .environment=="staging" and .productionTarget==false and .preparedReadModels.kvBound==true and .auth.studentStoreBound==true and .resources.r2Bound==true and .resources.answerRateStoreBound==true' /tmp/health.json >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/health.json 2>/dev/null || true
+          exit 1
+
+      - name: Checkout exact accepted CP7 frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: a4513da67ee66f51212114620c8e401bd5e31a8c
+          path: cp7-frontend
+          persist-credentials: false
+
+      - name: Build exact CP7 frontend and prepare same-origin facade
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C cp7-frontend rev-parse HEAD)" = "$CP7_FRONTEND_SHA"
+          cd cp7-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          npm run build
+          ! grep -R -F 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a cp7-frontend/dist/. rebuild/browser-staging/public/
+
+      - name: Install supported browser engine
+        run: npx playwright install --with-deps chromium
+
+      - name: Deploy isolated same-origin browser facade
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUTPUT="$(npx wrangler deploy --config rebuild/browser-staging/wrangler.toml 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          echo "$OUTPUT" | grep -F "$BROWSER_STAGING_WORKER" >/dev/null
+          if echo "$OUTPUT" | grep -F 'fpt-portal-v2-worker' >/dev/null; then
+            echo 'Production Worker name appeared in CP10 browser staging deployment output.' >&2
+            exit 1
+          fi
+
+      - name: Verify facade and same-origin service binding before acceptance timing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --location --output /tmp/cp10-index.html --write-out '%{http_code}' "$CP10_BROWSER_BASE_URL/" || true)"
+            if [ "$CODE" = 200 ] && grep -F 'Future Perfect Tuitions' /tmp/cp10-index.html >/dev/null; then
+              break
+            fi
+            if [ "$i" = 30 ]; then exit 1; fi
+            sleep 2
+          done
+          HOME_CODE="$(curl --silent --show-error -D /tmp/cp10-home.headers -o /tmp/cp10-home.json --write-out '%{http_code}' "$CP10_BROWSER_BASE_URL/api/v2/student/home" || true)"
+          test "$HOME_CODE" = 401
+          grep -i '^x-fpt-cp9-browser-facade: service-binding' /tmp/cp10-home.headers >/dev/null
+
+      - name: Run Checkpoint 10 acceptance thresholds
+        run: node scripts/rebuild-checkpoint10-acceptance.mjs
+
+      - name: Reconfirm CP9 backend functional UAT after measurements
+        run: node scripts/rebuild-checkpoint9-staging-uat.mjs
+
+      - name: Prove production deployment remained unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${PROD_DEPLOYMENT:-}"
+          test -n "${PROD_VERSION:-}"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-after.json
+          AFTER_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+          AFTER_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+          test "$AFTER_DEPLOYMENT" = "$PROD_DEPLOYMENT"
+          test "$AFTER_VERSION" = "$PROD_VERSION"
+          jq -n --arg deployment "$AFTER_DEPLOYMENT" --arg version "$AFTER_VERSION" '{productionChanged:false,deploymentId:$deployment,versionId:$version}' > /tmp/checkpoint10-production-anchor.json
+
+      - name: Assemble exact-SHA Checkpoint 10 evidence
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker 'REBUILD_CHECKPOINT10_FULL_GATE_PASS' \
+            --arg candidateSha "$GITHUB_SHA" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg frontendSha "$CP7_FRONTEND_SHA" \
+            --slurpfile acceptance /tmp/checkpoint10-acceptance-summary.json \
+            --slurpfile cp9 /tmp/checkpoint9-uat-summary.json \
+            --slurpfile production /tmp/checkpoint10-production-anchor.json \
+            '{marker:$marker,candidateSha:$candidateSha,branch:$branch,runId:$runId,frontendSha:$frontendSha,acceptance:$acceptance[0],cp9Functional:$cp9[0],production:$production[0]}' \
+            > /tmp/checkpoint10-full-gate-summary.json
+          jq -e '.acceptance.marker=="REBUILD_CHECKPOINT10_ACCEPTANCE_THRESHOLDS_PASS" and .cp9Functional.marker=="REBUILD_CHECKPOINT9_STAGING_UAT_PASS" and .production.productionChanged==false' /tmp/checkpoint10-full-gate-summary.json >/dev/null
+
+      - name: Upload redacted Checkpoint 10 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint10-acceptance-thresholds-evidence
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            /tmp/checkpoint10-acceptance-summary.json
+            /tmp/checkpoint10-acceptance-failure.json
+            /tmp/checkpoint10-full-gate-summary.json
+            /tmp/checkpoint10-production-anchor.json
+            /tmp/checkpoint9-uat-summary.json
+            /tmp/checkpoint9-seed-summary.json
