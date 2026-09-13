@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - rebuild/checkpoint9-production-shaped-staging-2026-09-13
+      - rebuild/portal-v2-performance-2026-09-13
     paths:
       - 'rebuild/student/**'
+      - 'rebuild/browser-staging/**'
       - 'rebuild/shared/**'
       - 'rebuild/adminops/src/lib/**'
       - 'scripts/rebuild-checkpoint9-*.mjs'
       - 'tests/rebuild-checkpoint*.mjs'
+      - 'docs/rebuild/CHECKPOINT_9_PRODUCTION_SHAPED_STAGING_UAT.md'
       - '.github/workflows/rebuild-checkpoint9-production-shaped-uat.yml'
   workflow_dispatch:
 
@@ -29,12 +32,17 @@ env:
   STAGING_STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
   STAGING_R2: fpt-portal-v2-rebuild-materials-staging
   STAGING_BASE_URL: https://fpt-portal-v2-rebuild-student-staging.futureperfectlessons.workers.dev
+  BROWSER_STAGING_WORKER: fpt-portal-v2-rebuild-browser-staging-cp9
+  CP9_BROWSER_BASE_URL: https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev
+  CP7_FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  CP7_FRONTEND_SHA: a4513da67ee66f51212114620c8e401bd5e31a8c
   WRANGLER_VERSION: 4.129.0
+  PLAYWRIGHT_VERSION: 1.55.0
 
 jobs:
   checkpoint9-production-shaped-uat:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,6 +57,9 @@ jobs:
           [[ "$STAGING_WORKER" == *rebuild*staging* ]]
           [[ "$STAGING_R2" == *rebuild*staging* ]]
           [[ "$STAGING_STUDENTS_KV_TITLE" == *REBUILD*STAGING* ]]
+          [[ "$BROWSER_STAGING_WORKER" == *rebuild*staging* ]]
+          [[ "$CP9_BROWSER_BASE_URL" == https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev ]]
+          [[ "$CP7_FRONTEND_SHA" =~ ^[0-9a-f]{40}$ ]]
           python - <<'PY' > /tmp/cp9-secrets.env
           import secrets,string
           def four():
@@ -66,8 +77,8 @@ jobs:
             printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done < /tmp/cp9-secrets.env
           rm -f /tmp/cp9-secrets.env
-      - name: Pin Wrangler
-        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Pin Wrangler and browser runner
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}"
       - name: Syntax and prior-checkpoint regressions
         shell: bash
         run: |
@@ -75,6 +86,8 @@ jobs:
           node --check scripts/rebuild-checkpoint9-seed-staging.mjs
           node --check scripts/rebuild-checkpoint9-copy-r2.mjs
           node --check scripts/rebuild-checkpoint9-staging-uat.mjs
+          node --check scripts/rebuild-checkpoint9-browser-uat.mjs
+          node --check rebuild/browser-staging/src/index.js
           node --check rebuild/student/src/index.js
           node --check rebuild/student/src/lib/runtime.mjs
           node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
@@ -138,6 +151,64 @@ jobs:
           exit 1
       - name: Run production-shaped API UAT
         run: node scripts/rebuild-checkpoint9-staging-uat.mjs
+      - name: Checkout exact accepted CP7 frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: a4513da67ee66f51212114620c8e401bd5e31a8c
+          path: cp7-frontend
+          persist-credentials: false
+      - name: Build exact CP7 frontend and record provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C cp7-frontend rev-parse HEAD)" = "$CP7_FRONTEND_SHA"
+          cd cp7-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          npm run build
+          ! grep -R -F 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a cp7-frontend/dist/. rebuild/browser-staging/public/
+          find rebuild/browser-staging/public -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/checkpoint9-frontend-files.sha256
+          FRONTEND_TREE_SHA="$(sha256sum /tmp/checkpoint9-frontend-files.sha256 | awk '{print $1}')"
+          jq -n \
+            --arg marker 'REBUILD_CHECKPOINT9_FRONTEND_PROVENANCE' \
+            --arg repository "$CP7_FRONTEND_REPO" \
+            --arg sha "$CP7_FRONTEND_SHA" \
+            --arg treeSha "$FRONTEND_TREE_SHA" \
+            --arg note 'Exact CP7 Vite build; no production worker URL present; runtime API base remains same-origin.' \
+            '{marker:$marker,repository:$repository,sha:$sha,builtTreeSha256:$treeSha,note:$note}' > /tmp/checkpoint9-frontend-provenance.json
+      - name: Install supported real browser engines
+        run: npx playwright install --with-deps chromium webkit
+      - name: Deploy isolated same-origin CP9 browser facade
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUTPUT="$(npx wrangler deploy --config rebuild/browser-staging/wrangler.toml 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          echo "$OUTPUT" | grep -F "$BROWSER_STAGING_WORKER" >/dev/null
+          if echo "$OUTPUT" | grep -F 'fpt-portal-v2-worker' >/dev/null; then
+            echo 'Production Worker name appeared in browser staging deployment output.' >&2
+            exit 1
+          fi
+      - name: Wait for isolated CP9 browser facade
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --location --output /tmp/cp9-browser-index.html --write-out '%{http_code}' "$CP9_BROWSER_BASE_URL/" || true)"
+            if [ "$CODE" = 200 ] && grep -F 'Future Perfect Tuitions' /tmp/cp9-browser-index.html >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/cp9-browser-index.html 2>/dev/null || true
+          exit 1
+      - name: Run real CP7 browser UAT against production-shaped staging
+        run: node scripts/rebuild-checkpoint9-browser-uat.mjs
       - name: Prove production deployment remained unchanged
         if: always()
         shell: bash
@@ -153,6 +224,25 @@ jobs:
           test "$AFTER_DEPLOYMENT" = "$PROD_DEPLOYMENT"
           test "$AFTER_VERSION" = "$PROD_VERSION"
           jq -n --arg deployment "$AFTER_DEPLOYMENT" --arg version "$AFTER_VERSION" '{productionChanged:false,deploymentId:$deployment,versionId:$version}' > /tmp/checkpoint9-production-anchor.json
+      - name: Assemble exact-SHA CP9 gate evidence
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker 'REBUILD_CHECKPOINT9_FULL_GATE_PASS' \
+            --arg candidateSha "$GITHUB_SHA" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg frontendSha "$CP7_FRONTEND_SHA" \
+            --slurpfile api /tmp/checkpoint9-uat-summary.json \
+            --slurpfile browser /tmp/checkpoint9-browser-uat-summary.json \
+            --slurpfile production /tmp/checkpoint9-production-anchor.json \
+            --slurpfile frontend /tmp/checkpoint9-frontend-provenance.json \
+            '{marker:$marker,candidateSha:$candidateSha,branch:$branch,runId:$runId,runAttempt:$runAttempt,frontendSha:$frontendSha,api:$api[0],browser:$browser[0],production:$production[0],frontendProvenance:$frontend[0]}' \
+            > /tmp/checkpoint9-full-gate-summary.json
+          jq -e '.api.marker=="REBUILD_CHECKPOINT9_STAGING_UAT_PASS" and .browser.marker=="REBUILD_CHECKPOINT9_BROWSER_UAT_PASS" and .browser.cookieTopology.approvedCookieArchitectureUnchanged==true and .browser.cookieTopology.sameSite=="Lax" and .browser.cookieTopology.productionBrowserRequestCount==0 and .production.productionChanged==false' /tmp/checkpoint9-full-gate-summary.json >/dev/null
       - name: Upload redacted CP9 evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -163,5 +253,11 @@ jobs:
             /tmp/checkpoint9-r2-copy-summary.json
             /tmp/checkpoint9-uat-summary.json
             /tmp/checkpoint9-production-anchor.json
+            /tmp/checkpoint9-frontend-provenance.json
+            /tmp/checkpoint9-frontend-files.sha256
+            /tmp/checkpoint9-browser-uat-summary.json
+            /tmp/checkpoint9-browser-uat-failure.json
+            /tmp/checkpoint9-full-gate-summary.json
+            /tmp/checkpoint9-browser-evidence/
           retention-days: 30
           if-no-files-found: warn
