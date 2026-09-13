@@ -6,6 +6,7 @@ import {
   compileAccessSnapshot,
   assertNoSensitiveSnapshotFields
 } from '../../../shared/read-models/access-snapshot.mjs';
+import { compileVideoVariants } from '../../../shared/read-models/video.mjs';
 
 const clean = value => String(value ?? '').trim();
 
@@ -29,7 +30,15 @@ function compileGlobalScope(input, options = {}) {
 function compileAccessScope(input, catalogue, options = {}) {
   const scopeId = clean(options.scopeId);
   if (!scopeId) throw new Error('An opaque access scopeId is required.');
-  const snapshot = compileAccessSnapshot(input, catalogue, { asOfDate: options.asOfDate || input?.asOfDate });
+  const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
+  const normalizedInput = {
+    ...(input || {}),
+    user: {
+      ...sourceUser,
+      accountStatus: clean(sourceUser.accountStatus || sourceUser.status || 'active') || 'active'
+    }
+  };
+  const snapshot = compileAccessSnapshot(normalizedInput, catalogue, { asOfDate: options.asOfDate || input?.asOfDate });
   assertNoSensitiveSnapshotFields(snapshot);
   return {
     schemaVersion: 1,
@@ -105,14 +114,16 @@ async function compileLessonDetail(record, options = {}) {
     });
   }
 
+  const videoVariants = compileVideoVariants(record);
   return {
     schemaVersion: 1,
     kind: 'prepared-lesson-detail',
     lessonId,
     title: clean(record.title),
     description: String(record.description || record.desc || ''),
-    resourceCount: validated.length,
-    resources: validated
+    resourceCount: validated.length + (videoVariants ? 1 : 0),
+    resources: validated,
+    ...(videoVariants ? { videoVariants } : {})
   };
 }
 
