@@ -1,0 +1,269 @@
+name: Checkpoint 4 production shadow deploy
+
+on:
+  push:
+    branches:
+      - production/checkpoint4-shadow-2026-09-13
+    paths:
+      - '.github/checkpoint4-production-shadow-approved.trigger'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checkpoint4-production-shadow-deploy
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_WORKER: fpt-portal-v2-worker
+  EXPECTED_PRE_CP4_DEPLOYMENT: b803da70-766c-4a16-a4aa-c8bc238d3e77
+  EXPECTED_PRE_CP4_VERSION: 971509f0-ce1e-4b27-8e8d-0d96a64cfa50
+  STUDENTS_KV_NAMESPACE_ID: c9723c8806334e4ea54d1b456d31b794
+  LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  PROD_DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  PROD_R2_BUCKET: fpt-materials-dev
+  REBUILD_SHADOW_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_PROD_SHADOW
+  REBUILD_SHADOW_DB_NAME: fpt_portal_v2_rebuild_shadow_reconciliation
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify exact pre-Checkpoint-4 production anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'production/checkpoint4-shadow-2026-09-13'
+          git merge-base --is-ancestor e4c7bde7ad9a9402136da5798d7ab690ab30322c HEAD
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PROD_WORKER}/deployments" -H "$AUTH" -o /tmp/cp4-deployments-before.json
+          jq -e '.success == true' /tmp/cp4-deployments-before.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/cp4-deployments-before.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/cp4-deployments-before.json)"
+          echo "PRE_CP4_DEPLOYMENT=${DEPLOYMENT}"
+          echo "PRE_CP4_VERSION=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PRE_CP4_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PRE_CP4_VERSION}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PROD_WORKER}/settings" -H "$AUTH" -o /tmp/cp4-settings-before.json
+          jq -e --arg id "$STUDENTS_KV_NAMESPACE_ID" '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace" and .namespace_id==$id)' /tmp/cp4-settings-before.json >/dev/null
+          jq -e --arg id "$LESSONS_KV_NAMESPACE_ID" '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace" and .namespace_id==$id)' /tmp/cp4-settings-before.json >/dev/null
+          jq -e --arg id "$PROD_DB_ID" '.result.bindings[]|select(.name=="DB" and .type=="d1" and .id==$id)' /tmp/cp4-settings-before.json >/dev/null
+          jq -e --arg name "$PROD_R2_BUCKET" '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$name)' /tmp/cp4-settings-before.json >/dev/null
+          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/cp4-settings-before.json >/tmp/cp4-secret-names-before.json
+
+      - name: Run production-shadow regression and legacy wiring tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/checkpoint4-shadow-atomic.mjs
+          node --check worker/src/checkpoint4-shadow-access.mjs
+          node --check worker/src/checkpoint4-shadow-compat.mjs
+          node --check worker/src/index-checkpoint4-shadow.js
+          node --check scripts/checkpoint4-prod-shadow-global.mjs
+          node --check scripts/checkpoint4-prod-shadow-backfill-one.mjs
+          node tests/checkpoint4-production-shadow-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-superuser-static-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          grep -Fq "import legacyWorker from './index-phase23-protected-view-stability.js'" worker/src/index-checkpoint4-shadow.js
+          grep -Fq "const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm'" worker/src/index-checkpoint4-shadow.js
+          ! grep -E 'DROP[[:space:]]+TABLE|ALTER[[:space:]]+TABLE' worker/migrations/checkpoint4_shadow_reconciliation.sql
+          echo 'CHECKPOINT4_PRODUCTION_SHADOW_PREDEPLOY_TESTS_PASS'
+
+      - name: Create or reuse isolated production-shadow resources
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          KV_BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces"
+          curl --fail --silent --show-error "${KV_BASE}?per_page=100" -H "$AUTH" -o /tmp/cp4-kv-list.json
+          jq -e '.success == true' /tmp/cp4-kv-list.json >/dev/null
+          KV_ID="$(jq -r --arg title "$REBUILD_SHADOW_KV_TITLE" '.result[]|select(.title==$title)|.id' /tmp/cp4-kv-list.json | head -n1)"
+          if [ -z "$KV_ID" ]; then
+            jq -n --arg title "$REBUILD_SHADOW_KV_TITLE" '{title:$title}' >/tmp/cp4-create-kv.json
+            curl --fail --silent --show-error -X POST "$KV_BASE" -H "$AUTH" -H 'Content-Type: application/json' --data @/tmp/cp4-create-kv.json -o /tmp/cp4-create-kv-response.json
+            jq -e '.success == true' /tmp/cp4-create-kv-response.json >/dev/null
+            KV_ID="$(jq -r '.result.id // empty' /tmp/cp4-create-kv-response.json)"
+          fi
+          test -n "$KV_ID"
+          test "$KV_ID" != "$STUDENTS_KV_NAMESPACE_ID"
+          test "$KV_ID" != "$LESSONS_KV_NAMESPACE_ID"
+          echo "REBUILD_SHADOW_KV_NAMESPACE_ID=${KV_ID}" >> "$GITHUB_ENV"
+
+          D1_BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database"
+          curl --fail --silent --show-error "${D1_BASE}?per_page=100" -H "$AUTH" -o /tmp/cp4-d1-list.json
+          jq -e '.success == true' /tmp/cp4-d1-list.json >/dev/null
+          D1_ID="$(jq -r --arg name "$REBUILD_SHADOW_DB_NAME" '.result[]|select(.name==$name)|(.uuid // .id // empty)' /tmp/cp4-d1-list.json | head -n1)"
+          if [ -z "$D1_ID" ]; then
+            jq -n --arg name "$REBUILD_SHADOW_DB_NAME" '{name:$name,primary_location_hint:"weur"}' >/tmp/cp4-create-d1.json
+            curl --fail --silent --show-error -X POST "$D1_BASE" -H "$AUTH" -H 'Content-Type: application/json' --data @/tmp/cp4-create-d1.json -o /tmp/cp4-create-d1-response.json
+            jq -e '.success == true' /tmp/cp4-create-d1-response.json >/dev/null
+            D1_ID="$(jq -r '.result.uuid // .result.id // empty' /tmp/cp4-create-d1-response.json)"
+          fi
+          test -n "$D1_ID"
+          test "$D1_ID" != "$PROD_DB_ID"
+          echo "REBUILD_SHADOW_DB_ID=${D1_ID}" >> "$GITHUB_ENV"
+          echo "CHECKPOINT4_SHADOW_RESOURCES_READY kv=${KV_ID} d1=${D1_ID}"
+
+      - name: Initialize private scope salt without logging it
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${REBUILD_SHADOW_KV_NAMESPACE_ID}/values/meta%3Ascope-salt"
+          CODE="$(curl --silent --show-error -H "$AUTH" -o /tmp/cp4-scope-salt.txt -w '%{http_code}' "$URL")"
+          if [ "$CODE" = '404' ]; then
+            SALT="$(openssl rand -hex 32)"
+            printf '%s' "$SALT" | curl --fail --silent --show-error -X PUT "$URL" -H "$AUTH" --data-binary @- >/dev/null
+            unset SALT
+            curl --fail --silent --show-error -H "$AUTH" "$URL" -o /tmp/cp4-scope-salt.txt
+          else
+            test "$CODE" = '200'
+          fi
+          test "$(wc -c </tmp/cp4-scope-salt.txt | tr -d ' ')" -ge 32
+          rm -f /tmp/cp4-scope-salt.txt
+          echo 'CHECKPOINT4_PRIVATE_SCOPE_SALT_READY'
+
+      - name: Apply additive production-shadow reconciliation schema
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > worker/wrangler.checkpoint4-schema.toml <<EOF
+          name = "fpt-portal-v2-checkpoint4-shadow-schema-helper"
+          main = "src/index-checkpoint4-shadow.js"
+          compatibility_date = "2026-08-20"
+          [[d1_databases]]
+          binding = "REBUILD_SHADOW_DB"
+          database_name = "${REBUILD_SHADOW_DB_NAME}"
+          database_id = "${REBUILD_SHADOW_DB_ID}"
+          EOF
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute REBUILD_SHADOW_DB --remote \
+            --config worker/wrangler.checkpoint4-schema.toml \
+            --file worker/migrations/checkpoint4_shadow_reconciliation.sql \
+            >/tmp/cp4-shadow-schema.log
+          echo 'CHECKPOINT4_SHADOW_SCHEMA_PASS'
+
+      - name: Publish current global model to production-shadow KV
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export CHECKPOINT4_VERSION_SUFFIX="prod-${GITHUB_SHA:0:12}"
+          node scripts/checkpoint4-prod-shadow-global.mjs /tmp/cp4-global-evidence.json | tee /tmp/cp4-global.log
+          jq -e '.marker=="CHECKPOINT4_PROD_SHADOW_GLOBAL_PASS" and .canonicalLessonIds>0 and .views==15 and (.payloadSha256|length)==64' /tmp/cp4-global-evidence.json >/dev/null
+
+      - name: Deploy outer shadow wrapper preserving all existing production behaviour bindings and secrets
+        id: deploy_shadow
+        shell: bash
+        env:
+          WORKER_NAME: fpt-portal-v2-worker
+          DEPLOY_MESSAGE: Portal V2 Checkpoint 4 legacy-authoritative production shadow
+        run: |
+          set -Eeuo pipefail
+          bash ops/deploy_checkpoint4_shadow_preserve.sh | tee /tmp/cp4-deploy.log
+          echo 'deployed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify live legacy behaviour and new shadow bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          PASS=0
+          for attempt in $(seq 1 12); do
+            CODE="$(curl --silent --show-error --header "Origin: $ORIGIN" --dump-header /tmp/cp4-protected-headers.txt --output /tmp/cp4-protected-body.json --write-out '%{http_code}' "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+            HOME="$(curl --silent --show-error --header "Origin: $ORIGIN" --output /tmp/cp4-home-body.json --write-out '%{http_code}' "$BASE/api/v1/student/home")"
+            if test "$CODE" = '410' \
+              && grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/cp4-protected-headers.txt \
+              && grep -Fq 'ANSWER_VIEW_INVALID' /tmp/cp4-protected-body.json \
+              && test "$HOME" = '401'; then
+              PASS=1
+              break
+            fi
+            sleep 5
+          done
+          test "$PASS" = '1'
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PROD_WORKER}/settings" -H "$AUTH" -o /tmp/cp4-settings-after.json
+          jq -e --arg id "$STUDENTS_KV_NAMESPACE_ID" '.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace" and .namespace_id==$id)' /tmp/cp4-settings-after.json >/dev/null
+          jq -e --arg id "$LESSONS_KV_NAMESPACE_ID" '.result.bindings[]|select(.name=="LESSONS_KV" and .type=="kv_namespace" and .namespace_id==$id)' /tmp/cp4-settings-after.json >/dev/null
+          jq -e --arg id "$REBUILD_SHADOW_KV_NAMESPACE_ID" '.result.bindings[]|select(.name=="REBUILD_SHADOW_KV" and .type=="kv_namespace" and .namespace_id==$id)' /tmp/cp4-settings-after.json >/dev/null
+          jq -e --arg id "$PROD_DB_ID" '.result.bindings[]|select(.name=="DB" and .type=="d1" and .id==$id)' /tmp/cp4-settings-after.json >/dev/null
+          jq -e --arg id "$REBUILD_SHADOW_DB_ID" '.result.bindings[]|select(.name=="REBUILD_SHADOW_DB" and .type=="d1" and .id==$id)' /tmp/cp4-settings-after.json >/dev/null
+          jq -e --arg name "$PROD_R2_BUCKET" '.result.bindings[]|select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$name)' /tmp/cp4-settings-after.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="EMAIL")' /tmp/cp4-settings-after.json >/dev/null
+          jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/cp4-settings-after.json >/tmp/cp4-secret-names-after.json
+          cmp -s /tmp/cp4-secret-names-before.json /tmp/cp4-secret-names-after.json
+          echo 'CHECKPOINT4_LIVE_LEGACY_BEHAVIOUR_AND_BINDINGS_PASS'
+
+      - name: Verify one existing real release read-only in the production shadow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/checkpoint4-prod-shadow-backfill-one.mjs /tmp/cp4-existing-release-evidence.json | tee /tmp/cp4-existing-release.log
+          jq -e '.marker=="CHECKPOINT4_EXISTING_RELEASE_SHADOW_PARITY_PASS" and .legacyCore==true and .shadowCore==true and .blocked==false and .studentIdentityDisclosed==false and .legacyMutationPerformed==false and (.sha256|length)==64' /tmp/cp4-existing-release-evidence.json >/dev/null
+          echo 'CHECKPOINT4_EXISTING_RELEASE_PARITY_PASS'
+
+      - name: Record exact post-Checkpoint-4 production deployment and version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PROD_WORKER}/deployments" -H "$AUTH" -o /tmp/cp4-deployments-after.json
+          jq -e '.success == true' /tmp/cp4-deployments-after.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/cp4-deployments-after.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/cp4-deployments-after.json)"
+          test -n "$DEPLOYMENT"
+          test -n "$VERSION"
+          test "$VERSION" != "$EXPECTED_PRE_CP4_VERSION"
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg deployment "$DEPLOYMENT" \
+            --arg version "$VERSION" \
+            --arg shadowKv "$REBUILD_SHADOW_KV_NAMESPACE_ID" \
+            --arg shadowDb "$REBUILD_SHADOW_DB_ID" \
+            --slurpfile global /tmp/cp4-global-evidence.json \
+            --slurpfile parity /tmp/cp4-existing-release-evidence.json \
+            '{marker:"CHECKPOINT4_PRODUCTION_SHADOW_GATE_PASS",sourceSha:$sourceSha,deploymentId:$deployment,versionId:$version,shadowKvNamespaceId:$shadowKv,shadowDbId:$shadowDb,global:$global[0],existingReleaseParity:$parity[0],legacyAuthoritative:true,studentReadCutover:false}' \
+            >/tmp/cp4-final-evidence.json
+          cat /tmp/cp4-final-evidence.json
+          echo 'CHECKPOINT4_PRODUCTION_SHADOW_GATE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: checkpoint4-production-shadow-evidence
+          path: |
+            /tmp/cp4-final-evidence.json
+            /tmp/cp4-global-evidence.json
+            /tmp/cp4-existing-release-evidence.json
+          retention-days: 30
+
+      - name: Emergency rollback to exact pre-Checkpoint-4 source if post-deploy verification fails
+        if: failure() && steps.deploy_shadow.outputs.deployed == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git checkout --force e4c7bde7ad9a9402136da5798d7ab690ab30322c
+          export WORKER_NAME='fpt-portal-v2-worker'
+          export WRANGLER_VERSION='4.125.0'
+          export WORKER_ENTRYPOINT='src/index-phase23-protected-view-stability.js'
+          export DEPLOY_MESSAGE='Emergency rollback after Checkpoint 4 shadow verification failure'
+          bash ops/deploy_current_worker_preserve.sh
+          echo 'CHECKPOINT4_EMERGENCY_ROLLBACK_TO_BASELINE_SOURCE_COMPLETE'
