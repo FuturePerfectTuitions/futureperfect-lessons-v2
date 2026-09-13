@@ -7,6 +7,7 @@ import {
   assertNoSensitiveSnapshotFields
 } from '../../../shared/read-models/access-snapshot.mjs';
 import { compileVideoVariants } from '../../../shared/read-models/video.mjs';
+import { prepareAccessInputForParity } from './backfill-parity-audit.mjs';
 
 const clean = value => String(value ?? '').trim();
 
@@ -31,14 +32,15 @@ function compileAccessScope(input, catalogue, options = {}) {
   const scopeId = clean(options.scopeId);
   if (!scopeId) throw new Error('An opaque access scopeId is required.');
   const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
-  const normalizedInput = {
+  const asOfDate = options.asOfDate || input?.asOfDate;
+  const normalizedInput = prepareAccessInputForParity({
     ...(input || {}),
     user: {
       ...sourceUser,
       accountStatus: clean(sourceUser.accountStatus || sourceUser.status || 'active') || 'active'
     }
-  };
-  const snapshot = compileAccessSnapshot(normalizedInput, catalogue, { asOfDate: options.asOfDate || input?.asOfDate });
+  }, catalogue, { asOfDate });
+  const snapshot = compileAccessSnapshot(normalizedInput, catalogue, { asOfDate });
   assertNoSensitiveSnapshotFields(snapshot);
   return {
     schemaVersion: 1,
