@@ -135,9 +135,11 @@ jobs:
             if (!lessonKeys.length) throw new Error('No lesson keys found in production LESSONS_KV');
 
             const matches = [];
-            for (const key of lessonKeys) {
-              const rec = await getJson(key);
-              if (hasExpectedDisplayId(rec)) matches.push({ key, rec });
+            const batchSize = 25;
+            for (let i = 0; i < lessonKeys.length; i += batchSize) {
+              const batch = lessonKeys.slice(i, i + batchSize);
+              const records = await Promise.all(batch.map(async key => ({ key, rec: await getJson(key) })));
+              for (const item of records) if (hasExpectedDisplayId(item.rec)) matches.push(item);
             }
             if (matches.length !== 1) {
               console.log('MATCH_DEBUG=' + JSON.stringify(matches.map(x => ({ key: x.key, lessonId: x.rec?.lessonId, title: x.rec?.title, displayIds: x.rec?.displayIds }))));
