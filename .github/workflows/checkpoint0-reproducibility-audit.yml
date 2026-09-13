@@ -1,0 +1,55 @@
+name: Checkpoint 0 reproducibility audit
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/checkpoint0-reproducibility-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: Reproduce frozen production bundle without deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact live source commit
+        uses: actions/checkout@v6
+        with:
+          ref: e4c7bde7ad9a9402136da5798d7ab690ab30322c
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Rebuild canonical generated manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'e4c7bde7ad9a9402136da5798d7ab690ab30322c'
+          rm -rf /tmp/fpt-navigation-package /tmp/fpt-dryrun
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/fpt-navigation-package >/tmp/fpt-navigation-package.log
+          grep -Fq 'Navigation manifest SHA-256: d82ab8d3dbefc83f1b81b1d888a85eb1de9c759326042f446ad94efdfdb22083' worker/src/phase11-navigation-manifest.generated.js
+
+      - name: Wrangler dry-run only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.125.0 deploy --config worker/wrangler.toml --dry-run --outdir /tmp/fpt-dryrun
+          echo '=== dry-run files ==='
+          find /tmp/fpt-dryrun -maxdepth 2 -type f -print -exec sha256sum {} \;
+          JS_FILE="$(find /tmp/fpt-dryrun -maxdepth 2 -type f -name '*.js' | head -n 1)"
+          test -n "$JS_FILE"
+          DIGEST="$(sha256sum "$JS_FILE" | awk '{print $1}')"
+          echo "DRY_RUN_MODULE_SHA256=$DIGEST"
+          echo 'LIVE_MODULE_SHA256=f992cc97119b6573dfac4042a036e4c75f8872cb1e0ec73a560c07e55fbad349'
+          if test "$DIGEST" = 'f992cc97119b6573dfac4042a036e4c75f8872cb1e0ec73a560c07e55fbad349'; then
+            echo 'CHECKPOINT0_REPRODUCIBLE_MODULE_MATCH=PASS'
+          else
+            echo 'CHECKPOINT0_REPRODUCIBLE_MODULE_MATCH=FAIL'
+            exit 1
+          fi
