@@ -116,6 +116,44 @@ await assert.rejects(
   /capability ttl/
 );
 
+// A short-lived capability can never extend beyond its parent 8-hour session.
+const nearExpirySession = await verifySessionToken({
+  secret: SECRET,
+  token: loginA.token,
+  now: plus(SESSION_MAX_AGE_SECONDS - 20)
+});
+const nearExpiryCapability = await issueCapability({
+  ...base,
+  session: nearExpirySession,
+  type: 'download',
+  now: plus(SESSION_MAX_AGE_SECONDS - 20)
+});
+assert.equal(nearExpiryCapability.capability.exp, nearExpirySession.exp);
+await verifyCapability({
+  secret: SECRET,
+  token: nearExpiryCapability.token,
+  expected: { ...expected, sessionId: nearExpirySession.sid },
+  now: plus(SESSION_MAX_AGE_SECONDS - 1)
+});
+await rejectsCode(
+  () => verifyCapability({
+    secret: SECRET,
+    token: nearExpiryCapability.token,
+    expected: { ...expected, sessionId: nearExpirySession.sid },
+    now: plus(SESSION_MAX_AGE_SECONDS)
+  }),
+  'token_expired'
+);
+await rejectsCode(
+  () => issueCapability({
+    ...base,
+    session: nearExpirySession,
+    type: 'download',
+    now: plus(SESSION_MAX_AGE_SECONDS)
+  }),
+  'session_expired_or_invalid'
+);
+
 // Answer Pack password is live/current on every open, never cached into capability.
 let currentPassword = 'Aa1x';
 let validationCalls = 0;
