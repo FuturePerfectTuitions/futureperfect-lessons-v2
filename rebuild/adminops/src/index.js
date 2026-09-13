@@ -8,6 +8,7 @@ import {
   recordD1Reconciliation,
   releaseParity
 } from './lib/compatibility.mjs';
+import { resolvePendingReconciliationD1 } from './lib/reconciliation.mjs';
 
 const BASELINE_SOURCE_SHA = 'e4c7bde7ad9a9402136da5798d7ab690ab30322c';
 const COMPAT_USER = 'cp4synthetic';
@@ -39,7 +40,7 @@ function hasCompatDb(env) {
 function compatibilityHarnessEnabled(env) {
   return String(env?.ENVIRONMENT || '') === 'staging' &&
     String(env?.COMPAT_TEST_ENABLED || '').toLowerCase() === 'true' &&
-    hasReadModelBinding(env) && hasCompatDb(env) && Boolean(clean(env?.COMPAT_SCOPE_SECRET));
+    hasReadModelBinding(env) && hasCompatDb(env) && Boolean(clean(env?.COMPAT_SCOPE_TEST_KEY));
 }
 
 async function currentGlobal(env) {
@@ -139,7 +140,7 @@ async function runCompatibilityRelease(request, env) {
     vrAccess: 0
   };
 
-  const accessScopeId = await opaqueAccessScopeId(COMPAT_USER, env.COMPAT_SCOPE_SECRET);
+  const accessScopeId = await opaqueAccessScopeId(COMPAT_USER, env.COMPAT_SCOPE_TEST_KEY);
   const readModelStore = kvBindingStore(env.READ_MODELS_KV);
   let pointerBefore = null;
   try { pointerBefore = await env.READ_MODELS_KV.get(pointerKey(`access:${accessScopeId}`)); } catch {}
@@ -148,7 +149,7 @@ async function runCompatibilityRelease(request, env) {
     operationId,
     portalUserIdNorm: COMPAT_USER,
     scopeId: accessScopeId,
-    scopeSecret: env.COMPAT_SCOPE_SECRET,
+    scopeSecret: env.COMPAT_SCOPE_TEST_KEY,
     readModelStore,
     globalReadModel: globalResolved.payload,
     asOfDate: '2026-09-13',
@@ -158,6 +159,16 @@ async function runCompatibilityRelease(request, env) {
     loadAccessInput: () => syntheticAccessInput(env),
     recordReconciliation: row => recordD1Reconciliation(env.COMPAT_DB, row)
   });
+
+  if (result.shadowApplied && result.shadow) {
+    await resolvePendingReconciliationD1(env.COMPAT_DB, {
+      portalUserIdNorm: COMPAT_USER,
+      operationId,
+      shadowScope: result.shadow.scope,
+      shadowVersion: result.shadow.version,
+      shadowSha256: result.shadow.payloadSha256
+    });
+  }
 
   const legacyState = await legacyLessonState(env.COMPAT_DB, COMPAT_USER, lessonId);
   let shadowResolved = null;
@@ -204,7 +215,7 @@ async function compatibilityStatus(env) {
   if (!compatibilityHarnessEnabled(env)) {
     return { enabled:false };
   }
-  const scopeId = await opaqueAccessScopeId(COMPAT_USER, env.COMPAT_SCOPE_SECRET);
+  const scopeId = await opaqueAccessScopeId(COMPAT_USER, env.COMPAT_SCOPE_TEST_KEY);
   const store = kvBindingStore(env.READ_MODELS_KV);
   let resolved = null;
   try { resolved = await resolveCurrentScope(store, `access:${scopeId}`); } catch {}
