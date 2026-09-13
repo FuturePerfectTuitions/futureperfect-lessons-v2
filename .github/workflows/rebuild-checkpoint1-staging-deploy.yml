@@ -1,0 +1,171 @@
+name: Rebuild Checkpoint 1 isolated staging deploy
+
+on:
+  push:
+    branches:
+      - rebuild/portal-v2-performance-2026-09-13
+    paths:
+      - 'rebuild/**'
+      - 'tests/rebuild-checkpoint1-static-verification.mjs'
+      - '.github/workflows/rebuild-checkpoint1-staging-deploy.yml'
+      - 'docs/rebuild/CHECKPOINT_1_PARALLEL_NAMESPACE.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint1-staging
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_WORKER: fpt-portal-v2-worker
+  EXPECTED_PROD_DEPLOYMENT: b803da70-766c-4a16-a4aa-c8bc238d3e77
+  EXPECTED_PROD_VERSION: 971509f0-ce1e-4b27-8e8d-0d96a64cfa50
+  STUDENT_STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  ADMINOPS_STAGING_WORKER: fpt-portal-v2-rebuild-adminops-staging
+  WORKERS_SUBDOMAIN: futureperfectlessons
+
+jobs:
+  preflight:
+    name: Verify isolation and production anchor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify branch ancestry and isolated configs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'rebuild/portal-v2-performance-2026-09-13'
+          git merge-base --is-ancestor e4c7bde7ad9a9402136da5798d7ab690ab30322c HEAD
+          node --check rebuild/student/src/index.js
+          node --check rebuild/adminops/src/index.js
+          node tests/rebuild-checkpoint1-static-verification.mjs
+          ! grep -R --line-number --fixed-strings 'name = "fpt-portal-v2-worker"' rebuild
+          ! grep -R --line-number -E '\[\[kv_namespaces\]\]|\[\[d1_databases\]\]|\[\[r2_buckets\]\]|\[\[send_email\]\]|(^|[[:space:]])routes?[[:space:]]*=' rebuild
+
+      - name: Verify production Worker still matches Checkpoint 0 anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-deployments.json
+          jq -e '.success == true' /tmp/prod-deployments.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-deployments.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-deployments.json)"
+          echo "PRODUCTION_DEPLOYMENT_BEFORE=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_BEFORE=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+
+  deploy-student-staging:
+    name: Deploy Student Runtime staging
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Dry-run and deploy isolated Student Runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          cd rebuild/student
+          $W deploy --config wrangler.toml --env staging --dry-run --outdir /tmp/rebuild-student-build
+          $W deploy --config wrangler.toml --env staging \
+            --message "Portal V2 Performance Rebuild Checkpoint 1 Student staging"
+          URL="https://${STUDENT_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev/health"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if curl --fail --silent --show-error "$URL" -o /tmp/student-health.json; then break; fi
+            sleep 2
+          done
+          jq -e --arg sha 'e4c7bde7ad9a9402136da5798d7ab690ab30322c' \
+            '.ok == true and .checkpoint == 1 and .runtime == "student" and .environment == "staging" and .deploymentIdentity == "student-staging" and .baselineSourceSha == $sha and .productionTarget == false' \
+            /tmp/student-health.json >/dev/null
+          echo 'STUDENT_STAGING_HEALTH_PASS'
+          cat /tmp/student-health.json
+
+  deploy-adminops-staging:
+    name: Deploy Admin Operations Runtime staging
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Dry-run and deploy isolated Admin Operations Runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          cd rebuild/adminops
+          $W deploy --config wrangler.toml --env staging --dry-run --outdir /tmp/rebuild-adminops-build
+          $W deploy --config wrangler.toml --env staging \
+            --message "Portal V2 Performance Rebuild Checkpoint 1 Admin Operations staging"
+          URL="https://${ADMINOPS_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev/health"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if curl --fail --silent --show-error "$URL" -o /tmp/adminops-health.json; then break; fi
+            sleep 2
+          done
+          jq -e --arg sha 'e4c7bde7ad9a9402136da5798d7ab690ab30322c' \
+            '.ok == true and .checkpoint == 1 and .runtime == "admin-operations" and .environment == "staging" and .deploymentIdentity == "adminops-staging" and .baselineSourceSha == $sha and .productionTarget == false' \
+            /tmp/adminops-health.json >/dev/null
+          echo 'ADMINOPS_STAGING_HEALTH_PASS'
+          cat /tmp/adminops-health.json
+
+  postflight:
+    name: Prove staging independence and production unchanged
+    needs: [deploy-student-staging, deploy-adminops-staging]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify both independent staging identities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error \
+            "https://${STUDENT_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev/health" \
+            --output /tmp/student.json
+          curl --fail --silent --show-error \
+            "https://${ADMINOPS_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev/health" \
+            --output /tmp/adminops.json
+          jq -e '.ok == true and .runtime == "student" and .environment == "staging" and .productionTarget == false' /tmp/student.json >/dev/null
+          jq -e '.ok == true and .runtime == "admin-operations" and .environment == "staging" and .productionTarget == false' /tmp/adminops.json >/dev/null
+          test "$(jq -r '.deploymentIdentity' /tmp/student.json)" != "$(jq -r '.deploymentIdentity' /tmp/adminops.json)"
+
+      - name: Verify production deployment and version are unchanged
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${PROD_WORKER}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/prod-deployments-after.json
+          jq -e '.success == true' /tmp/prod-deployments-after.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-deployments-after.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-deployments-after.json)"
+          echo "PRODUCTION_DEPLOYMENT_AFTER=${DEPLOYMENT}"
+          echo "PRODUCTION_VERSION_AFTER=${VERSION}"
+          test "${DEPLOYMENT}" = "${EXPECTED_PROD_DEPLOYMENT}"
+          test "${VERSION}" = "${EXPECTED_PROD_VERSION}"
+          echo 'REBUILD_CHECKPOINT1_GATE_PASS'
