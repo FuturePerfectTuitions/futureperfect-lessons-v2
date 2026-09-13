@@ -46,46 +46,75 @@ jobs:
           AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           JSON=(--header 'Content-Type: application/json')
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          BEFORE_DEPLOYMENT=''
+          BEFORE_VERSION=''
 
-          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-before.json
+          cf_call() {
+            local label="$1" method="$2" url="$3" body="${4:-}"
+            local output="/tmp/${label}.json" code
+            if [ -n "$body" ]; then
+              code="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' --request "$method" "$url" "${AUTH[@]}" "${JSON[@]}" --data "$body")"
+            else
+              code="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' --request "$method" "$url" "${AUTH[@]}")"
+            fi
+            echo "${label}:HTTP_${code}"
+            if [[ ! "$code" =~ ^2 ]]; then
+              jq -c '{success,errors,messages}' "$output" 2>/dev/null || true
+              return 1
+            fi
+          }
+
+          verify_production_anchor() {
+            local code after_deployment after_version
+            [ -n "$BEFORE_DEPLOYMENT" ] || return 0
+            code="$(curl --silent --show-error --output /tmp/prod-after.json --write-out '%{http_code}' "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" || true)"
+            if [ "$code" != 200 ]; then
+              echo "production_anchor_recheck:HTTP_${code}" >&2
+              return 1
+            fi
+            after_deployment="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+            after_version="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+            test "$after_deployment" = "$BEFORE_DEPLOYMENT"
+            test "$after_version" = "$BEFORE_VERSION"
+            echo 'production_anchor:UNCHANGED'
+          }
+          trap 'verify_production_anchor' EXIT
+
+          cf_call prod-before GET "${API}/workers/scripts/${PROD_WORKER}/deployments"
           BEFORE_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
           BEFORE_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
           test -n "$BEFORE_DEPLOYMENT"
           test -n "$BEFORE_VERSION"
 
-          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv-list.json
+          cf_call kv-list GET "${API}/storage/kv/namespaces?per_page=100"
           STUDENTS_KV_ID="$(jq -r --arg title "$STUDENTS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv-list.json | head -n1)"
           if [ -z "$STUDENTS_KV_ID" ]; then
-            curl --fail --silent --show-error --request POST "${API}/storage/kv/namespaces" "${AUTH[@]}" "${JSON[@]}" \
-              --data "$(jq -nc --arg title "$STUDENTS_KV_TITLE" '{title:$title}')" -o /tmp/kv-create.json
+            cf_call kv-create POST "${API}/storage/kv/namespaces" "$(jq -nc --arg title "$STUDENTS_KV_TITLE" '{title:$title}')"
             jq -e '.success == true' /tmp/kv-create.json >/dev/null
             STUDENTS_KV_ID="$(jq -r '.result.id' /tmp/kv-create.json)"
           fi
           test -n "$STUDENTS_KV_ID"
+          echo 'students_kv:READY'
 
-          curl --fail --silent --show-error "${API}/r2/buckets?per_page=100" "${AUTH[@]}" -o /tmp/r2-list.json
+          cf_call r2-list GET "${API}/r2/buckets?per_page=100"
           R2_EXISTS="$(jq -r --arg name "$MATERIALS_R2_BUCKET" '[.result.buckets[]? | select(.name==$name)] | length' /tmp/r2-list.json)"
           if [ "$R2_EXISTS" = "0" ]; then
-            curl --fail --silent --show-error --request POST "${API}/r2/buckets" "${AUTH[@]}" "${JSON[@]}" \
-              --data "$(jq -nc --arg name "$MATERIALS_R2_BUCKET" '{name:$name}')" -o /tmp/r2-create.json
+            cf_call r2-create POST "${API}/r2/buckets" "$(jq -nc --arg name "$MATERIALS_R2_BUCKET" '{name:$name}')"
             jq -e '.success == true' /tmp/r2-create.json >/dev/null
           fi
+          echo 'materials_r2:READY'
 
-          curl --fail --silent --show-error "${API}/d1/database/${STAGING_D1_ID}" "${AUTH[@]}" -o /tmp/d1.json
-          jq -e --arg name "$STAGING_D1_NAME" '.success == true and .result.name == $name' /tmp/d1.json >/dev/null
+          cf_call d1-list GET "${API}/d1/database?per_page=100"
+          jq -e --arg id "$STAGING_D1_ID" --arg name "$STAGING_D1_NAME" '.result[] | select(.uuid==$id and .name==$name)' /tmp/d1-list.json >/dev/null
           SQL='CREATE TABLE IF NOT EXISTS answer_password_rate_limits (session_token_hash TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, attempt_count INTEGER NOT NULL);'
-          curl --fail --silent --show-error --request POST "${API}/d1/database/${STAGING_D1_ID}/query" "${AUTH[@]}" "${JSON[@]}" \
-            --data "$(jq -nc --arg sql "$SQL" '{sql:$sql}')" -o /tmp/d1-create.json
-          jq -e '.success == true' /tmp/d1-create.json >/dev/null
-          curl --fail --silent --show-error --request POST "${API}/d1/database/${STAGING_D1_ID}/query" "${AUTH[@]}" "${JSON[@]}" \
-            --data "$(jq -nc '{sql:"PRAGMA table_info(answer_password_rate_limits);"}')" -o /tmp/d1-schema.json
+          cf_call d1-create-table POST "${API}/d1/database/${STAGING_D1_ID}/query" "$(jq -nc --arg sql "$SQL" '{sql:$sql}')"
+          jq -e '.success == true and ([.result[]?.success] | all(. == true))' /tmp/d1-create-table.json >/dev/null
+          cf_call d1-schema POST "${API}/d1/database/${STAGING_D1_ID}/query" "$(jq -nc '{sql:"PRAGMA table_info(answer_password_rate_limits);"}')"
           jq -e '.success == true and ([.result[].results[]?.name] | sort) == (["attempt_count","session_token_hash","window_started_at"] | sort)' /tmp/d1-schema.json >/dev/null
+          echo 'staging_d1:READY'
 
-          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-after.json
-          AFTER_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
-          AFTER_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
-          test "$AFTER_DEPLOYMENT" = "$BEFORE_DEPLOYMENT"
-          test "$AFTER_VERSION" = "$BEFORE_VERSION"
+          verify_production_anchor
+          trap - EXIT
 
           jq -n \
             --arg studentsKvId "$STUDENTS_KV_ID" \
@@ -93,8 +122,8 @@ jobs:
             --arg r2 "$MATERIALS_R2_BUCKET" \
             --arg d1Id "$STAGING_D1_ID" \
             --arg d1Name "$STAGING_D1_NAME" \
-            --arg prodDeployment "$AFTER_DEPLOYMENT" \
-            --arg prodVersion "$AFTER_VERSION" \
+            --arg prodDeployment "$BEFORE_DEPLOYMENT" \
+            --arg prodVersion "$BEFORE_VERSION" \
             '{checkpoint:9, mode:"isolated-staging-provision", studentsKv:{id:$studentsKvId,title:$studentsKvTitle}, materialsR2:{name:$r2}, d1:{id:$d1Id,name:$d1Name,answerRateLimitTable:true}, productionAnchor:{deploymentId:$prodDeployment,versionId:$prodVersion}, productionChanged:false}' \
             > /tmp/checkpoint9-provision.json
           cat /tmp/checkpoint9-provision.json
