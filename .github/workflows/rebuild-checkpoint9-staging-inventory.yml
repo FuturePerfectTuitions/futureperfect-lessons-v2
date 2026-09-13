@@ -1,0 +1,75 @@
+name: Rebuild Checkpoint 9 - Staging Inventory
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint9-production-shaped-staging-2026-09-13
+    paths:
+      - '.github/workflows/rebuild-checkpoint9-staging-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint9-inventory
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  STUDENT_STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  ADMINOPS_STAGING_WORKER: fpt-portal-v2-rebuild-adminops-staging
+
+jobs:
+  inventory-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm credentials without printing them
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Read Cloudflare staging inventory and production anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv.json
+          curl --fail --silent --show-error "${API}/d1/database?per_page=100" "${AUTH[@]}" -o /tmp/d1.json
+          curl --fail --silent --show-error "${API}/r2/buckets?per_page=100" "${AUTH[@]}" -o /tmp/r2.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod.json
+
+          for WORKER in "$STUDENT_STAGING_WORKER" "$ADMINOPS_STAGING_WORKER"; do
+            CODE="$(curl --silent --show-error --output "/tmp/${WORKER}.json" --write-out '%{http_code}' "${API}/workers/scripts/${WORKER}/deployments" "${AUTH[@]}")"
+            if [ "$CODE" != 200 ] && [ "$CODE" != 404 ]; then
+              echo "Unexpected staging Worker inventory status ${CODE}" >&2
+              exit 1
+            fi
+          done
+
+          jq -n \
+            --argjson kv "$(jq '[.result[] | select((.title // "") | test("FPT_PORTAL_V2_REBUILD|fpt-portal-v2-rebuild"; "i")) | {id,title}]' /tmp/kv.json)" \
+            --argjson d1 "$(jq '[.result[] | select((.name // "") | test("FPT_PORTAL_V2_REBUILD|fpt-portal-v2-rebuild"; "i")) | {uuid,name}]' /tmp/d1.json)" \
+            --argjson r2 "$(jq '[.result.buckets[]? | select((.name // "") | test("fpt.*rebuild|rebuild.*fpt"; "i")) | {name}]' /tmp/r2.json)" \
+            --arg prodDeployment "$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod.json)" \
+            --arg prodVersion "$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod.json)" \
+            --arg studentStaging "$(jq -r '.success // false' /tmp/${STUDENT_STAGING_WORKER}.json 2>/dev/null || echo false)" \
+            --arg adminopsStaging "$(jq -r '.success // false' /tmp/${ADMINOPS_STAGING_WORKER}.json 2>/dev/null || echo false)" \
+            '{checkpoint:9, mode:"read-only-inventory", rebuildKv:$kv, rebuildD1:$d1, rebuildR2:$r2, production:{worker:"fpt-portal-v2-worker",deploymentId:$prodDeployment,versionId:$prodVersion}, stagingWorkers:{studentExists:($studentStaging=="true"),adminopsExists:($adminopsStaging=="true")}}' \
+            > /tmp/checkpoint9-staging-inventory.json
+
+          jq -e '.production.deploymentId != "" and .production.versionId != ""' /tmp/checkpoint9-staging-inventory.json >/dev/null
+          cat /tmp/checkpoint9-staging-inventory.json
+      - name: Upload redacted inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint9-staging-inventory
+          path: /tmp/checkpoint9-staging-inventory.json
+          retention-days: 30
