@@ -21,7 +21,6 @@ env:
   PROD_WORKER: fpt-portal-v2-worker
   STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
   MATERIALS_R2_BUCKET: fpt-portal-v2-rebuild-materials-staging
-  STAGING_D1_ID: 7b3a97be-b018-423b-9dd0-42a4baa164ba
   STAGING_D1_NAME: fpt_portal_v2_rebuild_compat_staging
 
 jobs:
@@ -105,7 +104,9 @@ jobs:
           echo 'materials_r2:READY'
 
           cf_call d1-list GET "${API}/d1/database?per_page=100"
-          jq -e --arg id "$STAGING_D1_ID" --arg name "$STAGING_D1_NAME" '.result[] | select(.uuid==$id and .name==$name)' /tmp/d1-list.json >/dev/null
+          STAGING_D1_ID="$(jq -r --arg name "$STAGING_D1_NAME" '.result[] | select(.name==$name) | (.uuid // .id // empty)' /tmp/d1-list.json | head -n1)"
+          test -n "$STAGING_D1_ID"
+          echo 'staging_d1_identity:RESOLVED'
           SQL='CREATE TABLE IF NOT EXISTS answer_password_rate_limits (session_token_hash TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, attempt_count INTEGER NOT NULL);'
           cf_call d1-create-table POST "${API}/d1/database/${STAGING_D1_ID}/query" "$(jq -nc --arg sql "$SQL" '{sql:$sql}')"
           jq -e '.success == true and ([.result[]?.success] | all(. == true))' /tmp/d1-create-table.json >/dev/null
