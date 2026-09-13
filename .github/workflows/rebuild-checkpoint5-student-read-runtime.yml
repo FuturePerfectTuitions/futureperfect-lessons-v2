@@ -1,0 +1,280 @@
+name: Rebuild Checkpoint 5 student read runtime
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint5-student-read-runtime-2026-09-13
+    paths:
+      - 'rebuild/student/**'
+      - 'scripts/rebuild-checkpoint5-seed-student-staging.mjs'
+      - 'tests/rebuild-checkpoint5-student-read-runtime.mjs'
+      - 'docs/rebuild/CHECKPOINT_5_STUDENT_READ_RUNTIME.md'
+      - '.github/workflows/rebuild-checkpoint5-student-read-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint5-student-read-runtime
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_WORKER: fpt-portal-v2-worker
+  EXPECTED_PROD_DEPLOYMENT: ce193be0-d018-403f-a417-999e9e6eea41
+  EXPECTED_PROD_VERSION: aed13a31-21fa-49c3-8830-c37fd8645c31
+  LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  READ_MODELS_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_STAGING
+  READ_MODELS_KV_NAMESPACE_ID: 0aaa397a1c8c409e9f29d3a148dcc56e
+  STUDENT_STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  WORKERS_SUBDOMAIN: futureperfectlessons
+
+jobs:
+  student-read-runtime-gate:
+    name: Verify Checkpoint 5 isolated student hot reads
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify Checkpoint 5 source and deterministic semantics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'rebuild/checkpoint5-student-read-runtime-2026-09-13'
+          git merge-base --is-ancestor 0369b0bdb22d532e2d870f41fe1ffb2b8f7ea212 HEAD
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/read-model-resolver.mjs
+          node --check scripts/rebuild-checkpoint5-seed-student-staging.mjs
+          node --experimental-default-type=module tests/rebuild-checkpoint5-student-read-runtime.mjs | tee /tmp/checkpoint5-tests.log
+          grep -Fq 'REBUILD_CHECKPOINT5_STUDENT_READ_RUNTIME_PASS' /tmp/checkpoint5-tests.log
+          test "$(grep -c '^CHECKPOINT = "5"$' rebuild/student/wrangler.toml)" = '2'
+          grep -Fq 'binding = "READ_MODELS_KV"' rebuild/student/wrangler.toml
+          grep -Fq 'id = "0aaa397a1c8c409e9f29d3a148dcc56e"' rebuild/student/wrangler.toml
+          ! grep -E '\[\[env\.staging\.d1_databases\]\]|\[\[env\.staging\.r2_buckets\]\]|\[\[env\.staging\.send_email\]\]' rebuild/student/wrangler.toml
+          ! grep -E 'STUDENTS_KV|LESSONS_KV|MATERIALS_R2|DB\.prepare|student_batch_assignments|lesson_entitlements' rebuild/student/src/index.js
+          ! grep -E '\.put[[:space:]]*\(' rebuild/student/src/lib/read-model-resolver.mjs
+          echo 'REBUILD_CHECKPOINT5_STATIC_GATE_PASS'
+
+      - name: Verify exact Checkpoint 4 production anchor before staging work
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PROD_WORKER}/deployments" -H "$AUTH" -o /tmp/cp5-prod-before.json
+          jq -e '.success == true' /tmp/cp5-prod-before.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/cp5-prod-before.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/cp5-prod-before.json)"
+          echo "PROD_DEPLOYMENT_BEFORE=${DEPLOYMENT}" >> "$GITHUB_ENV"
+          echo "PROD_VERSION_BEFORE=${VERSION}" >> "$GITHUB_ENV"
+          echo "CHECKPOINT5_PRODUCTION_BEFORE deployment=${DEPLOYMENT} version=${VERSION}"
+          test "$DEPLOYMENT" = "$EXPECTED_PROD_DEPLOYMENT"
+          test "$VERSION" = "$EXPECTED_PROD_VERSION"
+
+      - name: Confirm isolated staging read-model namespace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${READ_MODELS_KV_NAMESPACE_ID}" -H "$AUTH" -o /tmp/cp5-kv.json
+          jq -e --arg id "$READ_MODELS_KV_NAMESPACE_ID" --arg title "$READ_MODELS_KV_TITLE" '.success==true and .result.id==$id and .result.title==$title' /tmp/cp5-kv.json >/dev/null
+          test "$READ_MODELS_KV_NAMESPACE_ID" != "$LESSONS_KV_NAMESPACE_ID"
+          echo 'REBUILD_CHECKPOINT5_STAGING_NAMESPACE_PASS'
+
+      - name: Refresh complete global read model in isolated staging KV
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export CHECKPOINT3_VERSION_SUFFIX="cp5-run${GITHUB_RUN_ID}"
+          node scripts/rebuild-checkpoint3-compile-publish.mjs /tmp/checkpoint5-global.json | tee /tmp/checkpoint5-global.log
+          jq -e '.marker=="REBUILD_CHECKPOINT3_COMPILE_PUBLISH_PASS" and .sourceCanonicalLessonIds>0 and .preparedViews==15 and (.payloadSha256|length)==64' /tmp/checkpoint5-global.json >/dev/null
+          echo "CP5_GLOBAL_VERSION=$(jq -r '.version' /tmp/checkpoint5-global.json)" >> "$GITHUB_ENV"
+          echo "CP5_GLOBAL_SHA=$(jq -r '.payloadSha256' /tmp/checkpoint5-global.json)" >> "$GITHUB_ENV"
+
+      - name: Publish synthetic staging access scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint5-seed-student-staging.mjs /tmp/checkpoint5-access.json | tee /tmp/checkpoint5-access.log
+          jq -e '.marker=="REBUILD_CHECKPOINT5_SYNTHETIC_ACCESS_PASS" and .fixture=="synthetic-only" and .studentIdentityDisclosed==false and .ordinaryTo11PlusWidening==false and .productionMutationPerformed==false and (.accessSha256|length)==64' /tmp/checkpoint5-access.json >/dev/null
+          echo "CP5_ACCESS_VERSION=$(jq -r '.accessVersion' /tmp/checkpoint5-access.json)" >> "$GITHUB_ENV"
+          echo "CP5_ACCESS_SHA=$(jq -r '.accessSha256' /tmp/checkpoint5-access.json)" >> "$GITHUB_ENV"
+          echo "CP5_FULL_LESSON=$(jq -r '.fullLessonId' /tmp/checkpoint5-access.json)" >> "$GITHUB_ENV"
+          echo "CP5_PRE_LESSON=$(jq -r '.preLessonId' /tmp/checkpoint5-access.json)" >> "$GITHUB_ENV"
+          echo "CP5_BLOCKED_LESSON=$(jq -r '.blockedLessonId' /tmp/checkpoint5-access.json)" >> "$GITHUB_ENV"
+
+      - name: Dry-run and deploy isolated Checkpoint 5 Student staging Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          cd rebuild/student
+          $W deploy --config wrangler.toml --env staging --dry-run --outdir /tmp/checkpoint5-student-build | tee /tmp/checkpoint5-student-dryrun.log
+          grep -Fq 'READ_MODELS_KV' /tmp/checkpoint5-student-dryrun.log
+          ! grep -E 'STUDENTS_KV|LESSONS_KV|MATERIALS_R2|D1 Database|Send Email' /tmp/checkpoint5-student-dryrun.log
+          $W deploy --config wrangler.toml --env staging --message "Portal V2 Performance Rebuild Checkpoint 5 student prepared-read runtime" | tee /tmp/checkpoint5-student-deploy.log
+          cd ../..
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${STUDENT_STAGING_WORKER}/deployments" -H "$AUTH" -o /tmp/checkpoint5-student-deployments.json
+          STAGING_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/checkpoint5-student-deployments.json)"
+          STAGING_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/checkpoint5-student-deployments.json)"
+          test -n "$STAGING_DEPLOYMENT"
+          test -n "$STAGING_VERSION"
+          echo "CP5_STAGING_DEPLOYMENT=${STAGING_DEPLOYMENT}" >> "$GITHUB_ENV"
+          echo "CP5_STAGING_VERSION=${STAGING_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Verify live Checkpoint 5 hot-read semantics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="https://${STUDENT_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev"
+          READY=0
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error "$BASE/health" -o /tmp/cp5-health.json \
+              && jq -e '.ok==true and .checkpoint==5 and .runtime=="student" and .environment=="staging" and .productionTarget==false and .preparedReadModels.kvBound==true and .preparedReadModels.syntheticAccessScopeConfigured==true and .preparedReadModels.d1Bound==false and .preparedReadModels.r2Bound==false and .preparedReadModels.productionStudentsKvBound==false' /tmp/cp5-health.json >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 2
+          done
+          test "$READY" = '1'
+
+          curl --fail --silent --show-error "$BASE/read-models/status" -o /tmp/cp5-status.json
+          jq -e --arg gv "$CP5_GLOBAL_VERSION" --arg gs "$CP5_GLOBAL_SHA" --arg av "$CP5_ACCESS_VERSION" --arg as "$CP5_ACCESS_SHA" '.ok==true and .checkpoint==5 and .global.version==$gv and .global.sha256==$gs and .access.version==$av and .access.sha256==$as and .global.usedFallback==false and .access.usedFallback==false' /tmp/cp5-status.json >/dev/null
+
+          curl --fail --silent --show-error "$BASE/api/v2/student/home" -o /tmp/cp5-home.json
+          jq -e '.ok==true and .checkpoint==5 and .source=="prepared-access-read-model" and (.views|map(select(.viewId=="maths-year5" and .group=="current" and .lockedPreview==false))|length)==1 and (.views|map(select(.viewId=="maths-year4" and .group=="previous"))|length)==1 and (.views|map(select(.viewId=="maths-level2" and .lockedPreview==true))|length)==1' /tmp/cp5-home.json >/dev/null
+
+          curl --fail --silent --show-error "$BASE/api/v2/student/views/maths-year5/lessons" -o /tmp/cp5-y5.json
+          jq -e --arg full "$CP5_FULL_LESSON" --arg pre "$CP5_PRE_LESSON" --arg blocked "$CP5_BLOCKED_LESSON" '(.lessons|map(select(.lessonId==$full and .open==true and .accessMode=="full"))|length)==1 and (.lessons|map(select(.lessonId==$pre and .open==true and .accessMode=="prelesson-only"))|length)==1 and (.lessons|map(select(.lessonId==$blocked and .open==false and .blocked==true))|length)==1' /tmp/cp5-y5.json >/dev/null
+
+          curl --fail --silent --show-error "$BASE/api/v2/student/views/maths-level2/lessons" -o /tmp/cp5-l2.json
+          jq -e '.ok==true and .view.lockedPreview==true and ([.lessons[]|select(.open==true)]|length)==0 and ([.lessons[]|select(.locked!=true)]|length)==0' /tmp/cp5-l2.json >/dev/null
+
+          curl --fail --silent --show-error "$BASE/api/v2/student/lessons/${CP5_FULL_LESSON}?viewId=maths-year5" -o /tmp/cp5-lesson.json
+          jq -e --arg full "$CP5_FULL_LESSON" '.ok==true and .lesson.lessonId==$full and .lesson.open==true and .lesson.accessMode=="full" and .resourcesIncluded==false' /tmp/cp5-lesson.json >/dev/null
+
+          curl --fail --silent --show-error "$BASE/api/v2/student/views/maths-year5/special-areas" -o /tmp/cp5-special.json
+          jq -e '.ok==true and .viewId=="maths-year5" and .lockedPreview==false and .specialAreas==["CP5_SYNTHETIC_AREA"]' /tmp/cp5-special.json >/dev/null
+
+          curl --fail --silent --show-error "$BASE/api/v2/student/views/maths-level2/special-areas" -o /tmp/cp5-special-preview.json
+          jq -e '.ok==true and .lockedPreview==true and .specialAreas==[]' /tmp/cp5-special-preview.json >/dev/null
+          echo 'REBUILD_CHECKPOINT5_LIVE_SEMANTICS_PASS'
+
+      - name: Benchmark representative staging hot reads
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="https://${STUDENT_STAGING_WORKER}.${WORKERS_SUBDOMAIN}.workers.dev"
+          : > /tmp/cp5-timings.tsv
+          benchmark() {
+            local name="$1"
+            local url="$2"
+            for i in $(seq 1 20); do
+              read -r code total <<<"$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}' "$url")"
+              test "$code" = '200'
+              printf '%s\t%s\n' "$name" "$total" >> /tmp/cp5-timings.tsv
+            done
+          }
+          benchmark home "$BASE/api/v2/student/home"
+          benchmark year5 "$BASE/api/v2/student/views/maths-year5/lessons"
+          benchmark lesson "$BASE/api/v2/student/lessons/${CP5_FULL_LESSON}?viewId=maths-year5"
+          benchmark special "$BASE/api/v2/student/views/maths-year5/special-areas"
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          rows = {}
+          for line in Path('/tmp/cp5-timings.tsv').read_text().splitlines():
+              name, raw = line.split('\t')
+              rows.setdefault(name, []).append(float(raw))
+          out = {}
+          for name, values in sorted(rows.items()):
+              values = sorted(values)
+              def q(p):
+                  idx = max(0, min(len(values)-1, math.ceil(p*len(values))-1))
+                  return values[idx]
+              out[name] = {'samples':len(values),'p50Seconds':q(.50),'p95Seconds':q(.95),'maxSeconds':max(values)}
+              if out[name]['p95Seconds'] >= 2.0:
+                  raise SystemExit(f'{name} p95 failed 2-second gate: {out[name]["p95Seconds"]}')
+          evidence = {'marker':'REBUILD_CHECKPOINT5_PERFORMANCE_PASS','gateP95Seconds':2.0,'routes':out}
+          Path('/tmp/checkpoint5-performance.json').write_text(json.dumps(evidence, indent=2)+'\n')
+          print(json.dumps(evidence))
+          PY
+          echo 'REBUILD_CHECKPOINT5_PERFORMANCE_GATE_PASS'
+
+      - name: Verify production remained exactly on Checkpoint 4
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PROD_WORKER}/deployments" -H "$AUTH" -o /tmp/cp5-prod-after.json
+          jq -e '.success == true' /tmp/cp5-prod-after.json >/dev/null
+          DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/cp5-prod-after.json)"
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/cp5-prod-after.json)"
+          test "$DEPLOYMENT" = "$EXPECTED_PROD_DEPLOYMENT"
+          test "$VERSION" = "$EXPECTED_PROD_VERSION"
+          test "$DEPLOYMENT" = "$PROD_DEPLOYMENT_BEFORE"
+          test "$VERSION" = "$PROD_VERSION_BEFORE"
+          echo "PROD_DEPLOYMENT_AFTER=${DEPLOYMENT}" >> "$GITHUB_ENV"
+          echo "PROD_VERSION_AFTER=${VERSION}" >> "$GITHUB_ENV"
+          echo 'REBUILD_CHECKPOINT5_PRODUCTION_UNCHANGED_PASS'
+
+      - name: Record Checkpoint 5 gate evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg stagingDeployment "$CP5_STAGING_DEPLOYMENT" \
+            --arg stagingVersion "$CP5_STAGING_VERSION" \
+            --arg prodDeployment "$PROD_DEPLOYMENT_AFTER" \
+            --arg prodVersion "$PROD_VERSION_AFTER" \
+            --slurpfile global /tmp/checkpoint5-global.json \
+            --slurpfile access /tmp/checkpoint5-access.json \
+            --slurpfile performance /tmp/checkpoint5-performance.json \
+            '{
+              marker:"REBUILD_CHECKPOINT5_GATE_PASS",
+              sourceSha:$sourceSha,
+              branch:$branch,
+              studentStagingDeploymentId:$stagingDeployment,
+              studentStagingVersionId:$stagingVersion,
+              productionDeploymentId:$prodDeployment,
+              productionVersionId:$prodVersion,
+              global:$global[0],
+              syntheticAccess:$access[0],
+              performance:$performance[0],
+              studentReadRuntime:"prepared-read-models",
+              productionStudentReadCutover:false,
+              productionMutation:false,
+              realPupilStagingExposure:false,
+              resourceDeliveryCutover:false,
+              checkpoint6Started:false
+            }' >/tmp/checkpoint5-final-evidence.json
+          cat /tmp/checkpoint5-final-evidence.json
+          echo 'REBUILD_CHECKPOINT5_GATE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint5-student-read-runtime-evidence
+          path: |
+            /tmp/checkpoint5-final-evidence.json
+            /tmp/checkpoint5-global.json
+            /tmp/checkpoint5-access.json
+            /tmp/checkpoint5-performance.json
+          retention-days: 30
