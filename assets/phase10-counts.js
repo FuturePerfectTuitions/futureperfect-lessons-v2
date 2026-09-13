@@ -6,6 +6,12 @@
   if (!base) return;
 
   const upstreamFetch = window.fetch.bind(window);
+  const SPECIAL_COUNT_VIEW_IDS = new Set([
+    'maths-level2',
+    'maths-level3',
+    'english-year4-11plus',
+    'english-year5-11plus'
+  ]);
 
   function requestUrl(input) {
     try {
@@ -20,6 +26,10 @@
     return String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
   }
 
+  function requestSignal(input, init) {
+    return init?.signal || (input instanceof Request ? input.signal : undefined);
+  }
+
   function isHomeRequest(input, init) {
     if (requestMethod(input, init) !== 'GET') return false;
     const url = requestUrl(input);
@@ -31,14 +41,15 @@
     }
   }
 
-  async function specialLessonCount(viewId) {
+  async function specialLessonCount(viewId, signal) {
     const response = await upstreamFetch(
       `${base}/api/v1/student/special-areas?viewId=${encodeURIComponent(String(viewId || ''))}`,
       {
         method: 'GET',
         headers: { Accept: 'application/json' },
         credentials: 'include',
-        cache: 'no-store'
+        cache: 'no-store',
+        signal
       }
     );
     if (!response.ok) return 0;
@@ -46,7 +57,7 @@
     return body?.ok && Array.isArray(body.areas) ? body.areas.length : 0;
   }
 
-  async function augmentHomeResponse(response) {
+  async function augmentHomeResponse(response, signal) {
     if (!response?.ok) return response;
 
     const body = await response.clone().json().catch(() => null);
@@ -62,7 +73,9 @@
 
     await Promise.all(openViews.map(async view => {
       const ordinaryOpenCount = Number(view.openLessonCount || 0);
-      const specialCount = await specialLessonCount(view.viewId).catch(() => 0);
+      const specialCount = SPECIAL_COUNT_VIEW_IDS.has(String(view.viewId || ''))
+        ? await specialLessonCount(view.viewId, signal).catch(() => 0)
+        : 0;
       view.ordinaryOpenLessonCount = Number.isFinite(ordinaryOpenCount) ? ordinaryOpenCount : 0;
       view.specialLessonCount = specialCount;
       view.openLessonCount = view.ordinaryOpenLessonCount + specialCount;
@@ -81,6 +94,8 @@
 
   window.fetch = async (input, init) => {
     const response = await upstreamFetch(input, init);
-    return isHomeRequest(input, init) ? augmentHomeResponse(response) : response;
+    return isHomeRequest(input, init)
+      ? augmentHomeResponse(response, requestSignal(input, init))
+      : response;
   };
 })();
