@@ -189,7 +189,7 @@ export async function verifySessionToken({ secret, token, now = Date.now(), expe
   return payload;
 }
 
-export function serializeSessionCookie(token, { secure = true } = {}) {
+export function serializeSessionCookie(token) {
   const value = String(token ?? '');
   if (!value || /[;\r\n]/.test(value)) throw new TypeError('invalid session token');
   return [
@@ -197,18 +197,18 @@ export function serializeSessionCookie(token, { secure = true } = {}) {
     'Path=/',
     `Max-Age=${SESSION_MAX_AGE_SECONDS}`,
     'HttpOnly',
-    secure ? 'Secure' : null,
+    'Secure',
     'SameSite=Lax'
   ].filter(Boolean).join('; ');
 }
 
-export function clearSessionCookie({ secure = true } = {}) {
+export function clearSessionCookie() {
   return [
     `${SESSION_COOKIE_NAME}=`,
     'Path=/',
     'Max-Age=0',
     'HttpOnly',
-    secure ? 'Secure' : null,
+    'Secure',
     'SameSite=Lax'
   ].filter(Boolean).join('; ');
 }
@@ -244,6 +244,11 @@ function capabilityClaims({ type, session, viewId, lessonId, resourceId, accessV
   if (!Number.isInteger(ttl) || ttl < 1 || ttl > CAPABILITY_MAX_AGE_SECONDS) {
     throw new TypeError(`capability ttl must be between 1 and ${CAPABILITY_MAX_AGE_SECONDS} seconds`);
   }
+  if (!Number.isInteger(session.iat) || !Number.isInteger(session.exp) ||
+      session.exp - session.iat !== SESSION_MAX_AGE_SECONDS || session.exp <= iat) {
+    throw new AuthTokenError('session_expired_or_invalid');
+  }
+  const exp = Math.min(iat + ttl, session.exp);
   return {
     v: 1,
     iss: TOKEN_ISSUER,
@@ -259,7 +264,7 @@ function capabilityClaims({ type, session, viewId, lessonId, resourceId, accessV
       : requiredIdentifier(accessVersion, 'accessVersion'),
     jti: randomId(18),
     iat,
-    exp: iat + ttl
+    exp
   };
 }
 
