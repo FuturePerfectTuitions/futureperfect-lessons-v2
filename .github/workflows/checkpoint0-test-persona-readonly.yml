@@ -1,0 +1,52 @@
+name: Checkpoint 0 test persona read-only eligibility
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/checkpoint0-test-persona-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check controlled test persona without mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Read live settings and test profile only
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          STUDENTS="$(jq -r '[.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' /tmp/settings.json)"
+          PROD_ALLOW="$(jq -r '[.result.bindings[]|select(.name=="PROD_LOGIN_ALLOWLIST" and .type=="plain_text")|.text][0] // ""' /tmp/settings.json)"
+          test -n "$STUDENTS"
+          STATUS="$(curl --silent --show-error --output /tmp/test-profile.json --write-out '%{http_code}' "$API/storage/kv/namespaces/${STUDENTS}/values/user%3Atesty411m" -H "$AUTH")"
+          if test "$STATUS" = '200'; then
+            echo 'CONTROLLED_TEST_PROFILE_EXISTS=true'
+            jq -e 'type=="object"' /tmp/test-profile.json >/dev/null
+          else
+            echo "CONTROLLED_TEST_PROFILE_EXISTS=false (HTTP $STATUS)"
+          fi
+          case ",$PROD_ALLOW," in
+            *,testy411m,*) echo 'CONTROLLED_TEST_PROFILE_PROD_ALLOWLISTED=true' ;;
+            *) echo 'CONTROLLED_TEST_PROFILE_PROD_ALLOWLISTED=false' ;;
+          esac
+          if test "$STATUS" = '200'; then
+            if jq -e '.p == "Te12"' /tmp/test-profile.json >/dev/null 2>&1; then
+              echo 'CONTROLLED_TEST_PROFILE_KNOWN_FIXTURE_PASSWORD_MATCH=true'
+            else
+              echo 'CONTROLLED_TEST_PROFILE_KNOWN_FIXTURE_PASSWORD_MATCH=false'
+            fi
+          fi
+          rm -f /tmp/test-profile.json /tmp/settings.json
+          echo 'CHECKPOINT0_TEST_PERSONA_READONLY_COMPLETE'
