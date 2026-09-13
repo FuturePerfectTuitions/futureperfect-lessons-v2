@@ -24,6 +24,7 @@ jobs:
           node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
           node --check rebuild/adminops/src/lib/compiler.mjs
           node --check tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node --check scripts/rebuild-checkpoint8-live-audit.mjs
       - name: Checkpoint 8 synthetic access parity gate
         run: node tests/rebuild-checkpoint8-backfill-access-parity.mjs
       - name: Checkpoint 6 new Student Worker regression
@@ -36,3 +37,35 @@ jobs:
         run: node tests/rebuild-checkpoint3-atomic-publishing.mjs
       - name: Checkpoint 2 prepared read-model regression
         run: node tests/rebuild-checkpoint2-read-models.mjs
+
+  checkpoint8-live-readonly:
+    needs: checkpoint8-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      CHECKPOINT8_AS_OF_DATE: '2026-09-13'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm read-only audit credentials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo "Cloudflare credentials are present; values are not printed."
+      - name: Audit every current student and presentation catalogue read-only
+        run: node scripts/rebuild-checkpoint8-live-audit.mjs
+      - name: Upload redacted Checkpoint 8 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint8-live-readonly-summary
+          path: /tmp/checkpoint8-live-summary.json
+          if-no-files-found: ignore
+          retention-days: 30
