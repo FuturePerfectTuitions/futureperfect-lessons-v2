@@ -6,7 +6,7 @@ workers_dev = true
 [vars]
 ENVIRONMENT = "development"
 DEPLOYMENT_IDENTITY = "student-development"
-CHECKPOINT = "2"
+CHECKPOINT = "5"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
 
 [env.staging]
@@ -16,5 +16,10 @@ workers_dev = true
 [env.staging.vars]
 ENVIRONMENT = "staging"
 DEPLOYMENT_IDENTITY = "student-staging"
-CHECKPOINT = "2"
+CHECKPOINT = "5"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
+STAGING_ACCESS_SCOPE_ID = "u-917b05289ef8fa1f2c7bb6369bff9cbd2a59cd3c"
+
+[[env.staging.kv_namespaces]]
+binding = "READ_MODELS_KV"
+id = "0aaa397a1c8c409e9f29d3a148dcc56e"
