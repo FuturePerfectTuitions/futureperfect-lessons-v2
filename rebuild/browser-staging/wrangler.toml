@@ -3,8 +3,9 @@ main = "src/index.js"
 compatibility_date = "2026-08-20"
 workers_dev = true
 
-[vars]
-UPSTREAM_ORIGIN = "https://fpt-portal-v2-rebuild-student-staging.futureperfectlessons.workers.dev"
+[[services]]
+binding = "STAGING_API"
+service = "fpt-portal-v2-rebuild-student-staging"
 
 [assets]
 directory = "./public"
