@@ -6,7 +6,7 @@ workers_dev = true
 [vars]
 ENVIRONMENT = "development"
 DEPLOYMENT_IDENTITY = "student-development"
-CHECKPOINT = "1"
+CHECKPOINT = "2"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
 
 [env.staging]
@@ -16,5 +16,5 @@ workers_dev = true
 [env.staging.vars]
 ENVIRONMENT = "staging"
 DEPLOYMENT_IDENTITY = "student-staging"
-CHECKPOINT = "1"
+CHECKPOINT = "2"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
