@@ -125,9 +125,9 @@ try {
 
   await subjectLocal(page, 'Maths');
   const beforeColdScreenPal = screenPalCount();
-  measurements.coldCatalogueMs = Math.round(await openView(page, 'maths-year6'));
+  measurements.coldCatalogueMs = await openView(page, 'maths-year6');
   assert.equal(screenPalCount(), beforeColdScreenPal, 'Catalogue navigation contacted ScreenPal before View');
-  assert(measurements.coldCatalogueMs < thresholds.coldCatalogueMs, `Cold Year/Level catalogue ${measurements.coldCatalogueMs}ms >= ${thresholds.coldCatalogueMs}ms`);
+  assert(measurements.coldCatalogueMs < thresholds.coldCatalogueMs, `Cold Year/Level catalogue ${measurements.coldCatalogueMs.toFixed(1)}ms >= ${thresholds.coldCatalogueMs}ms`);
 
   for (let i = 0; i < 5; i += 1) {
     await backToViews(page, 'Maths');
@@ -244,8 +244,8 @@ try {
     const started = performance.now();
     await p.locator('[data-view="english-year5"]').click();
     await p.getByRole('button', { name: 'Try again' }).waitFor({ state: 'visible', timeout: thresholds.boundedFailureMs + 1000 });
-    measurements.boundedFailureMs = Math.round(performance.now() - started);
-    assert(measurements.boundedFailureMs <= thresholds.boundedFailureMs, `Metadata failure was not bounded: ${measurements.boundedFailureMs}ms`);
+    measurements.boundedFailureMs = performance.now() - started;
+    assert(measurements.boundedFailureMs <= thresholds.boundedFailureMs, `Metadata failure was not bounded: ${measurements.boundedFailureMs.toFixed(1)}ms`);
     assert.equal(await p.locator('.spinner').count(), 0, 'Infinite spinner remained after bounded failure');
     assertions.boundedMetadataFailure = true;
     assertions.zeroInfiniteSpinner = true;
