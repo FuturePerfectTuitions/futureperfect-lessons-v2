@@ -1,10 +1,19 @@
 import { compileAccessReadModel, deriveOpaqueScopeId, clean, norm } from './checkpoint4-shadow-access.mjs';
 import { kvStore, publishScopeAtomic, resolveCurrentScope } from './checkpoint4-shadow-atomic.mjs';
 
+const SCOPE_SALT_KEY = 'meta:scope-salt';
+
 function londonToday() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date());
+}
+
+async function loadScopeSalt(env) {
+  if (!env?.REBUILD_SHADOW_KV) throw new Error('SHADOW_KV_UNAVAILABLE');
+  const salt = clean(await env.REBUILD_SHADOW_KV.get(SCOPE_SALT_KEY));
+  if (salt.length < 32) throw new Error('SHADOW_SCOPE_SALT_UNAVAILABLE');
+  return salt;
 }
 
 async function loadUser(env, portalUserIdNorm) {
@@ -75,18 +84,17 @@ async function recordReconciliation(env, row) {
 }
 
 async function publishUserShadow(env, portalUserIdNorm, options = {}) {
-  if (!env?.REBUILD_SHADOW_KV || !env?.STUDENTS_KV || !env?.DB || !env?.ADMIN_IMPORT_SESSION_SECRET) {
-    throw new Error('SHADOW_BINDINGS_UNAVAILABLE');
-  }
+  if (!env?.REBUILD_SHADOW_KV || !env?.STUDENTS_KV || !env?.DB) throw new Error('SHADOW_BINDINGS_UNAVAILABLE');
   const userId = norm(portalUserIdNorm);
   if (!userId) throw new Error('SHADOW_USER_ID_REQUIRED');
-  const scopeId = await deriveOpaqueScopeId(userId, env.ADMIN_IMPORT_SESSION_SECRET);
-  const scope = `access:${scopeId}`;
-  const [globalResolved, user, accessRows] = await Promise.all([
+  const [salt, globalResolved, user, accessRows] = await Promise.all([
+    loadScopeSalt(env),
     loadGlobal(env),
     loadUser(env, userId),
     loadAccessRows(env, userId)
   ]);
+  const scopeId = await deriveOpaqueScopeId(userId, salt);
+  const scope = `access:${scopeId}`;
   const asOfDate = clean(options.asOfDate) || londonToday();
   const input = { asOfDate, user, ...accessRows };
   const payload = compileAccessReadModel(input, globalResolved.payload, scopeId, asOfDate);
@@ -117,8 +125,7 @@ async function publishUserShadow(env, portalUserIdNorm, options = {}) {
 
 async function markShadowFailure(env, portalUserIdNorm, options = {}, error) {
   try {
-    if (!env?.ADMIN_IMPORT_SESSION_SECRET) return;
-    const scopeId = await deriveOpaqueScopeId(portalUserIdNorm, env.ADMIN_IMPORT_SESSION_SECRET);
+    const scopeId = await deriveOpaqueScopeId(portalUserIdNorm, await loadScopeSalt(env));
     await recordReconciliation(env, {
       operationId:clean(options.operationId) || `cp4-failure-${crypto.randomUUID()}`,
       userScope:scopeId,
@@ -163,7 +170,9 @@ async function updateAffectedUsersFromConfirm(env, confirmBody, options = {}) {
 }
 
 export {
+  SCOPE_SALT_KEY,
   londonToday,
+  loadScopeSalt,
   loadUser,
   loadAccessRows,
   loadGlobal,
