@@ -69,9 +69,11 @@ async function openView(page, label) {
 async function openLessonById(page, lessonId, action = /Open|Preview/) {
   const search = page.getByLabel('Search lessons');
   await search.fill(lessonId);
-  const row = page.locator('.lesson-row').filter({ hasText: lessonId }).first();
-  await row.waitFor({ state: 'visible', timeout: 10_000 });
-  await row.getByRole('button', { name: action }).click();
+  const escaped = String(lessonId).replace(/(["\\])/g, '\\$1');
+  const button = page.locator(`[data-lesson="${escaped}"]`).first();
+  await button.waitFor({ state: 'visible', timeout: 10_000 });
+  assert(action.test((await button.textContent()) || ''), `Unexpected action for lesson ${lessonId}`);
+  await button.click();
   await page.locator('.lesson-heading').waitFor({ state: 'visible', timeout: 15_000 });
   assert((await page.locator('.lesson-code').first().textContent())?.includes(lessonId), `Expected lesson ${lessonId}`);
 }
