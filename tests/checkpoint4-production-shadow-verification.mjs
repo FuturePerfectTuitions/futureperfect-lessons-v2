@@ -46,7 +46,7 @@ assert.equal(JSON.stringify(model).includes('synthetic-user'),false);
 
 const wrapper=fs.readFileSync(new URL('../worker/src/index-checkpoint4-shadow.js',import.meta.url),'utf8');
 const legacyCall=wrapper.indexOf('await legacyWorker.fetch(request, env, ctx)');
-const scheduleCall=wrapper.indexOf('scheduleShadow(ctx');
+const scheduleCall=wrapper.indexOf('scheduleShadow(ctx, shadowFromLegacyResponse',legacyCall);
 const returnCall=wrapper.indexOf('return legacyResponse;',scheduleCall);
 assert.ok(legacyCall>=0 && scheduleCall>legacyCall && returnCall>scheduleCall,'legacy response must be produced first, shadow scheduled second, legacy response returned unchanged');
 assert.equal(wrapper.includes('REBUILD_SHADOW_KV'),false,'outer wrapper must delegate shadow internals instead of changing legacy request handling');
