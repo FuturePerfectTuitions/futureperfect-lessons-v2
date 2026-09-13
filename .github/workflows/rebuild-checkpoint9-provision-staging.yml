@@ -1,0 +1,101 @@
+name: Rebuild Checkpoint 9 - Provision Staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint9-provision
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
+  MATERIALS_R2_BUCKET: fpt-portal-v2-rebuild-materials-staging
+  STAGING_D1_ID: 7b3a97be-b018-423b-9dd0-42a4baa164ba
+  STAGING_D1_NAME: fpt_portal_v2_rebuild_compat_staging
+
+jobs:
+  provision-isolated-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm credentials without printing them
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          [[ "$STUDENTS_KV_TITLE" == *REBUILD*STAGING* ]]
+          [[ "$MATERIALS_R2_BUCKET" == *rebuild*staging* ]]
+          [[ "$STAGING_D1_NAME" == *rebuild*staging* ]]
+      - name: Provision only isolated CP9 stores
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          JSON=(--header 'Content-Type: application/json')
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-before.json
+          BEFORE_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-before.json)"
+          BEFORE_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-before.json)"
+          test -n "$BEFORE_DEPLOYMENT"
+          test -n "$BEFORE_VERSION"
+
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv-list.json
+          STUDENTS_KV_ID="$(jq -r --arg title "$STUDENTS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv-list.json | head -n1)"
+          if [ -z "$STUDENTS_KV_ID" ]; then
+            curl --fail --silent --show-error --request POST "${API}/storage/kv/namespaces" "${AUTH[@]}" "${JSON[@]}" \
+              --data "$(jq -nc --arg title "$STUDENTS_KV_TITLE" '{title:$title}')" -o /tmp/kv-create.json
+            jq -e '.success == true' /tmp/kv-create.json >/dev/null
+            STUDENTS_KV_ID="$(jq -r '.result.id' /tmp/kv-create.json)"
+          fi
+          test -n "$STUDENTS_KV_ID"
+
+          curl --fail --silent --show-error "${API}/r2/buckets?per_page=100" "${AUTH[@]}" -o /tmp/r2-list.json
+          R2_EXISTS="$(jq -r --arg name "$MATERIALS_R2_BUCKET" '[.result.buckets[]? | select(.name==$name)] | length' /tmp/r2-list.json)"
+          if [ "$R2_EXISTS" = "0" ]; then
+            curl --fail --silent --show-error --request POST "${API}/r2/buckets" "${AUTH[@]}" "${JSON[@]}" \
+              --data "$(jq -nc --arg name "$MATERIALS_R2_BUCKET" '{name:$name}')" -o /tmp/r2-create.json
+            jq -e '.success == true' /tmp/r2-create.json >/dev/null
+          fi
+
+          curl --fail --silent --show-error "${API}/d1/database/${STAGING_D1_ID}" "${AUTH[@]}" -o /tmp/d1.json
+          jq -e --arg name "$STAGING_D1_NAME" '.success == true and .result.name == $name' /tmp/d1.json >/dev/null
+          SQL='CREATE TABLE IF NOT EXISTS answer_password_rate_limits (session_token_hash TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, attempt_count INTEGER NOT NULL);'
+          curl --fail --silent --show-error --request POST "${API}/d1/database/${STAGING_D1_ID}/query" "${AUTH[@]}" "${JSON[@]}" \
+            --data "$(jq -nc --arg sql "$SQL" '{sql:$sql}')" -o /tmp/d1-create.json
+          jq -e '.success == true' /tmp/d1-create.json >/dev/null
+          curl --fail --silent --show-error --request POST "${API}/d1/database/${STAGING_D1_ID}/query" "${AUTH[@]}" "${JSON[@]}" \
+            --data "$(jq -nc '{sql:"PRAGMA table_info(answer_password_rate_limits);"}')" -o /tmp/d1-schema.json
+          jq -e '.success == true and ([.result[].results[]?.name] | sort) == (["attempt_count","session_token_hash","window_started_at"] | sort)' /tmp/d1-schema.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${PROD_WORKER}/deployments" "${AUTH[@]}" -o /tmp/prod-after.json
+          AFTER_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/prod-after.json)"
+          AFTER_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/prod-after.json)"
+          test "$AFTER_DEPLOYMENT" = "$BEFORE_DEPLOYMENT"
+          test "$AFTER_VERSION" = "$BEFORE_VERSION"
+
+          jq -n \
+            --arg studentsKvId "$STUDENTS_KV_ID" \
+            --arg studentsKvTitle "$STUDENTS_KV_TITLE" \
+            --arg r2 "$MATERIALS_R2_BUCKET" \
+            --arg d1Id "$STAGING_D1_ID" \
+            --arg d1Name "$STAGING_D1_NAME" \
+            --arg prodDeployment "$AFTER_DEPLOYMENT" \
+            --arg prodVersion "$AFTER_VERSION" \
+            '{checkpoint:9, mode:"isolated-staging-provision", studentsKv:{id:$studentsKvId,title:$studentsKvTitle}, materialsR2:{name:$r2}, d1:{id:$d1Id,name:$d1Name,answerRateLimitTable:true}, productionAnchor:{deploymentId:$prodDeployment,versionId:$prodVersion}, productionChanged:false}' \
+            > /tmp/checkpoint9-provision.json
+          cat /tmp/checkpoint9-provision.json
+      - name: Upload provisioning evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint9-staging-provision
+          path: /tmp/checkpoint9-provision.json
+          retention-days: 30
