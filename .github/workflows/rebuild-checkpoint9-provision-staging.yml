@@ -1,6 +1,11 @@
 name: Rebuild Checkpoint 9 - Provision Staging
 
 on:
+  push:
+    branches:
+      - rebuild/checkpoint9-production-shaped-staging-2026-09-13
+    paths:
+      - '.github/workflows/rebuild-checkpoint9-provision-staging.yml'
   workflow_dispatch:
 
 permissions:
