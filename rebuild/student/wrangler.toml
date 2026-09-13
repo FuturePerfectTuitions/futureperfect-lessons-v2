@@ -15,11 +15,24 @@ workers_dev = true
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
-DEPLOYMENT_IDENTITY = "student-staging"
-CHECKPOINT = "6"
+DEPLOYMENT_IDENTITY = "student-staging-cp9"
+CHECKPOINT = "9"
 BASELINE_SOURCE_SHA = "e4c7bde7ad9a9402136da5798d7ab690ab30322c"
-STUDENT_LOGIN_ENABLED = "false"
+STUDENT_LOGIN_ENABLED = "true"
 
 [[env.staging.kv_namespaces]]
 binding = "READ_MODELS_KV"
 id = "0aaa397a1c8c409e9f29d3a148dcc56e"
+
+[[env.staging.kv_namespaces]]
+binding = "STUDENTS_KV"
+id = "a5e5c581c8b745b482e20ff63e122e3d"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "fpt_portal_v2_rebuild_compat_staging"
+database_id = "7b3a3bdf-7d62-45ff-9cdc-3ad38d76a57b"
+
+[[env.staging.r2_buckets]]
+binding = "MATERIALS_R2"
+bucket_name = "fpt-portal-v2-rebuild-materials-staging"
