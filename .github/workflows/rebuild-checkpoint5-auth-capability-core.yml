@@ -1,0 +1,40 @@
+name: Rebuild Checkpoint 5 - Authentication Capability Core
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint5-auth-capability-core-2026-09-13
+      - rebuild/portal-v2-performance-2026-09-13
+    paths:
+      - 'rebuild/shared/auth/**'
+      - 'tests/rebuild-checkpoint5-auth-capability-core.mjs'
+      - 'docs/rebuild/CHECKPOINT_5_AUTHENTICATION_CAPABILITY_CORE.md'
+      - '.github/workflows/rebuild-checkpoint5-auth-capability-core.yml'
+  pull_request:
+    paths:
+      - 'rebuild/shared/auth/**'
+      - 'tests/rebuild-checkpoint5-auth-capability-core.mjs'
+      - 'docs/rebuild/CHECKPOINT_5_AUTHENTICATION_CAPABILITY_CORE.md'
+      - '.github/workflows/rebuild-checkpoint5-auth-capability-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkpoint5-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Official Checkpoint 5 gate
+        run: node tests/rebuild-checkpoint5-auth-capability-core.mjs
+      - name: Preserve Checkpoint 2 prepared-model gate
+        run: node tests/rebuild-checkpoint2-read-models.mjs
+      - name: Preserve Checkpoint 3 atomic-publishing gate
+        run: node tests/rebuild-checkpoint3-atomic-publishing.mjs
+      - name: Preserve Checkpoint 4 compatibility gate
+        run: node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
