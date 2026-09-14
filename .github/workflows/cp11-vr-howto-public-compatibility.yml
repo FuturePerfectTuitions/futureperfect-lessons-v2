@@ -1,9 +1,7 @@
 name: CP11 VR How-To Public Compatibility
 
 on:
-  push:
-    branches:
-      - rebuild/checkpoint11-reversible-cutover-2026-09-13
+  workflow_dispatch:
 
 permissions:
   contents: read
