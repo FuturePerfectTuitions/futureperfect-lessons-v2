@@ -1,13 +1,16 @@
+import crypto from 'node:crypto';
 import { compileAccessScope } from '../rebuild/adminops/src/lib/compiler.mjs';
+import { resolveCurrentScope } from '../rebuild/adminops/src/lib/atomic-publisher.mjs';
 
-const token=process.env.CLOUDFLARE_API_TOKEN||'', account=process.env.CLOUDFLARE_ACCOUNT_ID||'', worker=process.env.WORKER_NAME||'fpt-portal-v2-worker', asOf=process.env.CHECKPOINT8_AS_OF_DATE||'2026-09-13';
-const cp11Gate=Boolean(process.env.CHECKPOINT11_AS_OF_DATE);
+const token=process.env.CLOUDFLARE_API_TOKEN||'', account=process.env.CLOUDFLARE_ACCOUNT_ID||'', worker=process.env.WORKER_NAME||process.env.PROD_WORKER||'fpt-portal-v2-worker', asOf=process.env.CHECKPOINT8_AS_OF_DATE||'2026-09-13';
+const cp11Gate=Boolean(process.env.CHECKPOINT11_AS_OF_DATE), shadowKv=String(process.env.PROD_SHADOW_KV_ID||'').trim();
 if(!token||!account) throw new Error('Cloudflare read-only credentials are required.');
 const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`}, clean=v=>String(v??'').trim(), norm=v=>clean(v).toLowerCase();
 async function env(path){const r=await fetch(`${base}${path}`,{headers});const b=await r.json().catch(()=>null);if(!r.ok||b?.success!==true)throw new Error(`Cloudflare read failed: ${r.status}`);return b;}
-async function get(ns,key){const r=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read failed: ${r.status}`);return r.json().catch(()=>null);}
+async function getText(ns,key){const r=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read failed: ${r.status}`);return r.text();}
+async function get(ns,key){const text=await getText(ns,key);if(text==null)return null;try{return JSON.parse(text);}catch{return null;}}
 async function keys(ns,prefix){const out=[];let cursor='';do{const q=new URLSearchParams({limit:'1000',prefix});if(cursor)q.set('cursor',cursor);const b=await env(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);out.push(...(b.result||[]).map(x=>x.name).filter(Boolean));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
-const settings=(await env(`/accounts/${account}/workers/scripts/${worker}/settings`)).result, binding=(settings.bindings||[]).find(x=>x.name==='STUDENTS_KV'), ns=clean(binding?.namespace_id);if(!ns)throw new Error('STUDENTS_KV binding was not resolved.');
+const settings=(await env(`/accounts/${account}/workers/scripts/${worker}/settings`)).result, binding=name=>(settings.bindings||[]).find(x=>x.name===name)||{}, ns=clean(binding('STUDENTS_KV').namespace_id), lessonsNs=clean(binding('LESSONS_KV').namespace_id);if(!ns)throw new Error('STUDENTS_KV binding was not resolved.');
 const emptyCatalogue={schemaVersion:1,kind:'prepared-catalogue',source:{},navigation:[],views:{},lessonToViews:{}};
 let audited=0,withSpecial=0,mismatches=0;const tokenCounts=new Map(),manualCounts=new Map(),directCounts=new Map();
 for(const key of await keys(ns,'user:')){
@@ -26,7 +29,16 @@ for(const key of await keys(ns,'user:')){
 const counts=map=>Object.fromEntries([...map.entries()].sort(([a],[b])=>a.localeCompare(b)));
 const supportedForCp11=new Set(['VR_HOWTO']);
 const unsupportedForCp11=[...tokenCounts.keys()].filter(value=>!supportedForCp11.has(value)).sort();
-const cutoverCompatible=!cp11Gate||unsupportedForCp11.length===0;
+let catalogueRevision={checked:false,inSync:true,liveSourceRevision:null,preparedSourceRevision:null,preparedVersion:null};
+if(cp11Gate){
+  if(!lessonsNs||!shadowKv)throw new Error('CP11 special-area gate requires LESSONS_KV and PROD_SHADOW_KV_ID.');
+  const live=await get(lessonsNs,'special:VR_HOWTO');
+  const liveSourceRevision=live?crypto.createHash('sha256').update(JSON.stringify(live)).digest('hex'):null;
+  let prepared=null;try{prepared=await resolveCurrentScope({get:key=>getText(shadowKv,key)},'special:VR_HOWTO');}catch{}
+  const preparedSourceRevision=clean(prepared?.payload?.sourceRevision)||null;
+  catalogueRevision={checked:true,inSync:Boolean(liveSourceRevision&&prepared?.payload?.kind==='prepared-special-area'&&preparedSourceRevision===liveSourceRevision),liveSourceRevision,preparedSourceRevision,preparedVersion:clean(prepared?.version)||null};
+}
+const cutoverCompatible=!cp11Gate||(unsupportedForCp11.length===0&&catalogueRevision.inSync);
 const status=mismatches===0&&cutoverCompatible?'PASS':'FAIL';
-const result={marker:'REBUILD_CHECKPOINT8_SPECIAL_AREA_PARITY',asOfDate:asOf,status,auditedCurrentProfiles:audited,profilesWithSpecialAreas:withSpecial,mismatchCount:mismatches,tokenCounts:counts(tokenCounts),manualTokenCounts:counts(manualCounts),directTokenCounts:counts(directCounts),cp11RuntimeGate:{enabled:cp11Gate,supported:[...supportedForCp11],unsupportedCurrentTokens:unsupportedForCp11,compatible:cutoverCompatible}};
+const result={marker:'REBUILD_CHECKPOINT8_SPECIAL_AREA_PARITY',asOfDate:asOf,status,auditedCurrentProfiles:audited,profilesWithSpecialAreas:withSpecial,mismatchCount:mismatches,tokenCounts:counts(tokenCounts),manualTokenCounts:counts(manualCounts),directTokenCounts:counts(directCounts),cp11RuntimeGate:{enabled:cp11Gate,supported:[...supportedForCp11],unsupportedCurrentTokens:unsupportedForCp11,catalogueRevision,compatible:cutoverCompatible}};
 console.log(JSON.stringify(result,null,2));if(status!=='PASS')process.exitCode=1;
