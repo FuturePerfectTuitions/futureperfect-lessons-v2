@@ -1,0 +1,291 @@
+name: CP12 Admin Incident Shadow Deploy
+
+on:
+  push:
+    branches:
+      - incident/cp12-admin-principal-2026-09-14
+    paths:
+      - .github/workflows/cp12-admin-incident-shadow-deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-admin-incident-shadow-deploy
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  EXPECTED_CURRENT_BROWSER: fpt-lessons-v2-browser-production
+  EXPECTED_CURRENT_STUDENT: rebuild-student-v2-production
+  SHADOW_STUDENT: rebuild-student-v2-cp12-admin-incident
+  SHADOW_BROWSER: fpt-lessons-v2-cp12-admin-incident
+  CP12_BASE_SHA: 7f9986f84a7e05d679499924a0e6026d21090507
+  ACCEPTED_FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  ACCEPTED_FRONTEND_SHA: a4513da67ee66f51212114620c8e401bd5e31a8c
+  WRANGLER_VERSION: 4.129.0
+
+jobs:
+  deploy-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate exact incident branch before Cloudflare access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF_NAME" = 'incident/cp12-admin-principal-2026-09-14'
+          git merge-base --is-ancestor "$CP12_BASE_SHA" "$GITHUB_SHA"
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuild-cp12-admin-vr-decorator.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+
+      - name: Fresh read-only production topology and binding gate
+        id: topology
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          ACCOUNT_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/cp12-zones.json
+          jq -e '.success==true' /tmp/cp12-zones.json >/dev/null
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/cp12-zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/cp12-routes.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$EXPECTED_CURRENT_BROWSER" '.success==true and any(.result[]; .pattern==$host and .script==$browser)' /tmp/cp12-routes.json >/dev/null
+
+          curl --fail --silent --show-error "${ACCOUNT_API}/workers/scripts/${EXPECTED_CURRENT_BROWSER}/settings" "${AUTH[@]}" -o /tmp/cp12-browser-settings.json
+          curl --fail --silent --show-error "${ACCOUNT_API}/workers/scripts/${EXPECTED_CURRENT_STUDENT}/settings" "${AUTH[@]}" -o /tmp/cp12-student-settings.json
+          jq -e '.success==true' /tmp/cp12-browser-settings.json >/dev/null
+          jq -e '.success==true' /tmp/cp12-student-settings.json >/dev/null
+          jq -e --arg student "$EXPECTED_CURRENT_STUDENT" '.result.bindings | any(.name=="STAGING_API" and .type=="service" and .service==$student)' /tmp/cp12-browser-settings.json >/dev/null
+          jq -e '.result.bindings | any(.name=="AUTH_SIGNING_SECRET" and .type=="secret_text") and any(.name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")' /tmp/cp12-student-settings.json >/dev/null
+
+          READ_MODELS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | (.namespace_id // .id // "")' /tmp/cp12-student-settings.json | head -n1)"
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | (.namespace_id // .id // "")' /tmp/cp12-student-settings.json | head -n1)"
+          D1_ID="$(jq -r '.result.bindings[] | select(.name=="DB" and .type=="d1") | (.database_id // .id // "")' /tmp/cp12-student-settings.json | head -n1)"
+          R2_BUCKET="$(jq -r '.result.bindings[] | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | (.bucket_name // .bucket // "")' /tmp/cp12-student-settings.json | head -n1)"
+          test -n "$READ_MODELS_KV_ID"
+          test -n "$STUDENTS_KV_ID"
+          test -n "$D1_ID"
+          test -n "$R2_BUCKET"
+
+          curl --fail --silent --show-error "${ACCOUNT_API}/workers/subdomain" "${AUTH[@]}" -o /tmp/cp12-workers-subdomain.json
+          jq -e '.success==true and (.result.subdomain|length)>0' /tmp/cp12-workers-subdomain.json >/dev/null
+          WORKERS_SUBDOMAIN="$(jq -r '.result.subdomain' /tmp/cp12-workers-subdomain.json)"
+          SHADOW_STUDENT_URL="https://${SHADOW_STUDENT}.${WORKERS_SUBDOMAIN}.workers.dev"
+          SHADOW_BROWSER_URL="https://${SHADOW_BROWSER}.${WORKERS_SUBDOMAIN}.workers.dev"
+
+          curl --fail --silent --show-error "${ACCOUNT_API}/workers/scripts/${EXPECTED_CURRENT_STUDENT}/deployments" "${AUTH[@]}" -o /tmp/cp12-student-deployments.json
+          jq -e '.success==true and (.result.deployments|length)>0' /tmp/cp12-student-deployments.json >/dev/null
+          CURRENT_STUDENT_DEPLOYMENT="$(jq -r '.result.deployments[0].id // ""' /tmp/cp12-student-deployments.json)"
+          CURRENT_STUDENT_VERSION="$(jq -r '.result.deployments[0].versions[0].version_id // ""' /tmp/cp12-student-deployments.json)"
+          test -n "$CURRENT_STUDENT_DEPLOYMENT"
+          test -n "$CURRENT_STUDENT_VERSION"
+
+          {
+            echo "READ_MODELS_KV_ID=$READ_MODELS_KV_ID"
+            echo "STUDENTS_KV_ID=$STUDENTS_KV_ID"
+            echo "D1_ID=$D1_ID"
+            echo "R2_BUCKET=$R2_BUCKET"
+            echo "WORKERS_SUBDOMAIN=$WORKERS_SUBDOMAIN"
+            echo "SHADOW_STUDENT_URL=$SHADOW_STUDENT_URL"
+            echo "SHADOW_BROWSER_URL=$SHADOW_BROWSER_URL"
+            echo "CURRENT_STUDENT_DEPLOYMENT=$CURRENT_STUDENT_DEPLOYMENT"
+            echo "CURRENT_STUDENT_VERSION=$CURRENT_STUDENT_VERSION"
+          } >> "$GITHUB_ENV"
+
+          jq -n \
+            --arg marker 'CP12_ADMIN_INCIDENT_SHADOW_PREFLIGHT_PASS' \
+            --arg observedAt "$(date -u +%FT%TZ)" \
+            --arg route "${PROD_HOST}/*" \
+            --arg browser "$EXPECTED_CURRENT_BROWSER" \
+            --arg student "$EXPECTED_CURRENT_STUDENT" \
+            --arg deployment "$CURRENT_STUDENT_DEPLOYMENT" \
+            --arg version "$CURRENT_STUDENT_VERSION" \
+            --arg readKv "$READ_MODELS_KV_ID" \
+            --arg studentsKv "$STUDENTS_KV_ID" \
+            --arg d1 "$D1_ID" \
+            --arg r2 "$R2_BUCKET" \
+            '{marker:$marker,readOnly:true,observedAt:$observedAt,route:$route,browser:$browser,student:$student,currentStudentDeployment:$deployment,currentStudentVersion:$version,bindings:{readModelsKv:$readKv,studentsKv:$studentsKv,d1:$d1,r2:$r2}}' \
+            > /tmp/cp12-admin-shadow-preflight.json
+          cat /tmp/cp12-admin-shadow-preflight.json
+
+      - name: Pin Wrangler and resolve production-shaped D1 name
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          ACCOUNT_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${ACCOUNT_API}/d1/database?per_page=100" "${AUTH[@]}" -o /tmp/cp12-d1-list.json
+          D1_NAME="$(jq -r --arg id "$D1_ID" '.result[] | select((.uuid // .id // "")==$id) | .name' /tmp/cp12-d1-list.json | head -n1)"
+          test -n "$D1_NAME"
+          echo "D1_NAME=$D1_NAME" >> "$GITHUB_ENV"
+
+      - name: Deploy isolated incident Student shadow with current production-shaped bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > rebuild/student/wrangler.cp12-admin-incident.toml <<TOML
+          name = "${SHADOW_STUDENT}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [vars]
+          ENVIRONMENT = "production"
+          DEPLOYMENT_IDENTITY = "student-cp12-admin-incident-shadow"
+          CHECKPOINT = "12"
+          STUDENT_LOGIN_ENABLED = "true"
+          ALLOWED_ORIGINS = "${SHADOW_BROWSER_URL},https://${PROD_HOST}"
+
+          [[kv_namespaces]]
+          binding = "READ_MODELS_KV"
+          id = "${READ_MODELS_KV_ID}"
+
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${STUDENTS_KV_ID}"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${D1_NAME}"
+          database_id = "${D1_ID}"
+
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${R2_BUCKET}"
+          TOML
+          npx wrangler deploy --config rebuild/student/wrangler.cp12-admin-incident.toml
+
+      - name: Install isolated shadow signing/scope secrets without exposing values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          ACCOUNT_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${ACCOUNT_API}/storage/kv/namespaces/${READ_MODELS_KV_ID}/values/meta%3Ascope-salt" "${AUTH[@]}" -o /tmp/cp12-access-scope-secret
+          ACCESS_SCOPE_SECRET="$(cat /tmp/cp12-access-scope-secret)"
+          test "$(printf '%s' "$ACCESS_SCOPE_SECRET" | wc -c | tr -d ' ')" -ge 64
+          AUTH_SIGNING_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::${ACCESS_SCOPE_SECRET}"
+          echo "::add-mask::${AUTH_SIGNING_SECRET}"
+          printf '%s' "$AUTH_SIGNING_SECRET" | npx wrangler secret put AUTH_SIGNING_SECRET --config rebuild/student/wrangler.cp12-admin-incident.toml
+          printf '%s' "$ACCESS_SCOPE_SECRET" | npx wrangler secret put ACCESS_SCOPE_SECRET --config rebuild/student/wrangler.cp12-admin-incident.toml
+          rm -f /tmp/cp12-access-scope-secret
+
+      - name: Verify isolated Student shadow health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --show-error --output /tmp/cp12-shadow-health.json --write-out '%{http_code}' "$SHADOW_STUDENT_URL/health" || true)"
+            if [ "$CODE" = 200 ] && jq -e '.ok==true and .runtime=="student" and .environment=="production" and .preparedReadModels.kvBound==true and .auth.signedCookie==true and .auth.d1SessionLookup==false and .auth.activityWrites==false and .resources.r2Bound==true and .resources.answerPasswordLiveStore==true and .resources.answerRateStoreBound==true' /tmp/cp12-shadow-health.json >/dev/null; then
+              break
+            fi
+            if [ "$i" = 30 ]; then cat /tmp/cp12-shadow-health.json 2>/dev/null || true; exit 1; fi
+            sleep 1
+          done
+
+      - name: Checkout and verify exact accepted frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: a4513da67ee66f51212114620c8e401bd5e31a8c
+          path: cp12-frontend
+          persist-credentials: false
+
+      - name: Build accepted frontend for isolated Browser shadow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C cp12-frontend rev-parse HEAD)" = "$ACCEPTED_FRONTEND_SHA"
+          cd cp12-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          npm run build
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a cp12-frontend/dist/. rebuild/browser-staging/public/
+
+      - name: Deploy isolated Browser shadow bound only to isolated Student shadow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > rebuild/browser-staging/wrangler.cp12-admin-incident.toml <<TOML
+          name = "${SHADOW_BROWSER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [[services]]
+          binding = "STAGING_API"
+          service = "${SHADOW_STUDENT}"
+
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+          npx wrangler deploy --config rebuild/browser-staging/wrangler.cp12-admin-incident.toml
+
+      - name: Shadow browser/service-binding smoke without credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            ROOT_CODE="$(curl --silent --show-error --output /tmp/cp12-shadow-root.html --write-out '%{http_code}' "$SHADOW_BROWSER_URL/" || true)"
+            if [ "$ROOT_CODE" = 200 ] && grep -qi 'Future Perfect Tuitions' /tmp/cp12-shadow-root.html; then break; fi
+            if [ "$i" = 30 ]; then exit 1; fi
+            sleep 1
+          done
+          HOME_CODE="$(curl --silent --show-error --output /tmp/cp12-shadow-home.json --write-out '%{http_code}' -H "Origin: ${SHADOW_BROWSER_URL}" "$SHADOW_BROWSER_URL/api/v2/student/home")"
+          test "$HOME_CODE" = 401
+          jq -e '.ok==false and .error=="AUTH_REQUIRED"' /tmp/cp12-shadow-home.json >/dev/null
+          LOGIN_CODE="$(curl --silent --show-error --output /tmp/cp12-shadow-invalid-login.json --write-out '%{http_code}' -X POST -H "Origin: ${SHADOW_BROWSER_URL}" -H 'Content-Type: application/json' --data '{"username":"cp12-invalid-smoke","password":"A1bc"}' "$SHADOW_BROWSER_URL/api/v2/auth/login")"
+          test "$LOGIN_CODE" = 401
+          jq -e '.ok==false and .error=="LOGIN_INVALID"' /tmp/cp12-shadow-invalid-login.json >/dev/null
+
+          jq -n \
+            --arg marker 'CP12_ADMIN_INCIDENT_SHADOW_DEPLOY_PASS' \
+            --arg sha "$GITHUB_SHA" \
+            --arg studentUrl "$SHADOW_STUDENT_URL" \
+            --arg browserUrl "$SHADOW_BROWSER_URL" \
+            --arg productionStudentDeployment "$CURRENT_STUDENT_DEPLOYMENT" \
+            --arg productionStudentVersion "$CURRENT_STUDENT_VERSION" \
+            '{marker:$marker,sha:$sha,productionUntouched:true,productionStudentBefore:{deploymentId:$productionStudentDeployment,versionId:$productionStudentVersion},shadow:{studentUrl:$studentUrl,browserUrl:$browserUrl,health:true,frontend:true,serviceBinding:true,unauthenticatedHomeFailsClosed:true,invalidLoginFailsClosed:true}}' \
+            > /tmp/cp12-admin-shadow-deploy.json
+          cat /tmp/cp12-admin-shadow-deploy.json
+
+      - name: Upload safe shadow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-admin-incident-shadow-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/cp12-admin-shadow-preflight.json
+            /tmp/cp12-admin-shadow-deploy.json
+            /tmp/cp12-shadow-health.json
+            /tmp/cp12-shadow-home.json
+            /tmp/cp12-shadow-invalid-login.json
