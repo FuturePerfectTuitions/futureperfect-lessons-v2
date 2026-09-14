@@ -1,0 +1,57 @@
+name: CP12 VR full catalogue post-apply verification
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-cp12-vr-full-catalogue-postapply-verify.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prove all 372 prepared lessons exactly match corrected compiler
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim(), token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const worker=clean(process.env.LEGACY_WORKER), expectedLessons=clean(process.env.EXPECTED_LESSONS_KV_ID), rm=clean(process.env.EXPECTED_READ_MODELS_KV_ID);
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function req(path){const r=await fetch(`${base}${path}`,{headers});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}return{r,text,body};}
+          async function cf(path){const o=await req(path);if(!o.r.ok||o.body?.success!==true)throw new Error(`CF_READ_FAILED:${o.r.status}:${path}`);return o.body.result;}
+          async function text(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV_READ_FAILED:${o.r.status}:${key}`);return o.text;}
+          async function json(ns,key){const t=await text(ns,key);return t==null?null:JSON.parse(t);}
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/settings`), bindings=settings?.bindings||[];
+          const lessonsNs=clean(bindings.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);if(lessonsNs!==expectedLessons)throw new Error(`LESSONS_KV_DRIFT:${lessonsNs}`);
+          const codes=['MATHS_Y2','MATHS_Y3','MATHS_L1','MATHS_L2','MATHS_L3','MATHS_Y6_EXTRA','ENGLISH_Y2','ENGLISH_Y3','ENGLISH_Y4','ENGLISH_Y5','ENGLISH_Y6'];
+          const ids=new Set();for(const code of codes){const raw=await json(lessonsNs,`curriculum:${code}`);for(const x of (Array.isArray(raw)?raw:(raw?.lessonIds||raw?.lessons||raw?.items||[]))){const id=typeof x==='string'?clean(x):clean(x?.lessonId);if(id)ids.add(id);}}
+          if(ids.size!==372)throw new Error(`LESSON_COUNT_DRIFT:${ids.size}`);
+          const mismatch=[], vrAnswers=[];let resourceCount=0;
+          for(const id of [...ids].sort()){
+            const source=await json(lessonsNs,`lesson:${id}`);const expected=await compileLessonDetail(source,{resourceExists:async()=>true});
+            const p=await json(rm,pointerKey(`lesson:${id}`)), v=clean(p?.current?.version);if(!v)throw new Error(`POINTER_MISSING:${id}`);
+            const e=await json(rm,versionKey(`lesson:${id}`,v)), actual=e?.payload;if(stableStringify(actual)!==stableStringify(expected))mismatch.push(id);
+            for(const r of actual?.resources||[]){resourceCount++;if((r.presentationScopes||[]).includes('vr')&&r.type==='answer-pack')vrAnswers.push({id,ok:r.protected===true});}
+          }
+          if(mismatch.length)throw new Error(`PREPARED_LESSON_MISMATCH:${mismatch.length}:${mismatch.slice(0,20).join(',')}`);
+          if(vrAnswers.some(x=>!x.ok))throw new Error('UNPROTECTED_VR_ANSWER_FOUND');
+          console.log(JSON.stringify({marker:'CP12_VR_FULL_CATALOGUE_POSTAPPLY_PASS',lessonCount:ids.size,mismatchCount:0,resourceCount,vrAnswerCount:vrAnswers.length,allVrAnswersProtected:true}));
+          NODE
