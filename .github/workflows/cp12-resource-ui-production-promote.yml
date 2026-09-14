@@ -1,0 +1,351 @@
+name: CP12 resource UI guarded production promotion
+
+on:
+  push:
+    branches: [fix/cp12-resource-collapsible-ui-2026-09-14]
+    paths: ['docs/rebuild/CP12_RESOURCE_UI_PRODUCTION_TRIGGER.md']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-resource-ui-production
+  cancel-in-progress: false
+
+env:
+  PROD_BASE: https://lessons.futureperfect.education
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_DB: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  EXPECTED_STUDENT_ROLLBACK: 0751feed-5aa3-40fb-854f-5847c8603872
+  EXPECTED_LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+  OFFICIAL_CP12_SHA: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+  METADATA_COMMIT: 9793028e34b16972defa64d3e465db907868e645
+  CANDIDATE_FRONTEND_SHA: 2337732822b82bb8b782b57aaa512b8b0c973f82
+  WRANGLER_VERSION: 4.129.0
+  PLAYWRIGHT_VERSION: 1.55.0
+
+jobs:
+  promote:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Exact source and official CP12 freeze gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$OFFICIAL_CP12_SHA"
+          git merge-base --is-ancestor "$METADATA_COMMIT" HEAD
+          node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          echo CP12_RESOURCE_UI_EXACT_SOURCE_GATE_PASS
+
+      - name: Install pinned tools
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}"
+
+      - name: Checkout and build exact staging-proven frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.CANDIDATE_FRONTEND_SHA }}
+          path: candidate-frontend
+          persist-credentials: false
+      - name: Validate and stage production browser assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C candidate-frontend rev-parse HEAD)" = "$CANDIDATE_FRONTEND_SHA"
+          cd candidate-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          npm run build
+          grep -R -F 'Verbal Reasoning' dist >/dev/null
+          grep -R -F 'data-resource-toggle' dist >/dev/null
+          ! grep -R -F 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a candidate-frontend/dist/. rebuild/browser-staging/public/
+
+      - name: Immediate pre-write topology version binding and rollback verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json | head -n1)"; test -n "$ZONE_ID"
+          echo "ZONE_ID=$ZONE_ID" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes-before.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes-before.json >/dev/null
+          for worker in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/settings" "${AUTH[@]}" -o "/tmp/${worker}-settings-before.json"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/${worker}-deployments-before.json"
+          done
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and ([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV" 'any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg id "$EXPECTED_STUDENTS_KV" 'any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg id "$EXPECTED_DB" 'any(.result.bindings[];.name=="DB" and (.database_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg bucket "$EXPECTED_R2" 'any(.result.bindings[];.name=="MATERIALS_R2" and (.bucket_name//.bucket)==$bucket)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          STUDENT_BEFORE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments-before.json" | head -n1)"
+          BROWSER_BEFORE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments-before.json" | head -n1)"
+          LEGACY_BEFORE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments-before.json" | head -n1)"
+          test "$STUDENT_BEFORE" = "$EXPECTED_STUDENT_VERSION"
+          test "$LEGACY_BEFORE" = "$EXPECTED_LEGACY_VERSION"
+          test -n "$BROWSER_BEFORE"
+          echo "STUDENT_BEFORE=$STUDENT_BEFORE" >> "$GITHUB_ENV"
+          echo "BROWSER_BEFORE=$BROWSER_BEFORE" >> "$GITHUB_ENV"
+          echo "LEGACY_BEFORE=$LEGACY_BEFORE" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions-before.json
+          jq -e --arg v "$EXPECTED_STUDENT_ROLLBACK" 'any(.result.items[];.id==$v)' /tmp/student-versions-before.json >/dev/null
+          jq '[.result.bindings[]|if ((.type//"")|test("secret";"i")) then {name,type} else . end]|sort_by(.name)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/tmp/student-bindings-before.json
+          jq '[.result.bindings[]|if .type=="assets" then {name,type} else . end]|sort_by(.name)' "/tmp/${BROWSER_WORKER}-settings-before.json" >/tmp/browser-bindings-before.json
+          echo CP12_RESOURCE_UI_IMMEDIATE_PREWRITE_GATE_PASS
+
+      - name: Generate exact binding-preserving Student and Browser configs and dry-run
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/d1/database?per_page=100" "${AUTH[@]}" -o /tmp/d1-list.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d1=json.load(open('/tmp/d1-list.json')).get('result') or []
+          if isinstance(d1,dict): d1=d1.get('items') or d1.get('databases') or []
+          db_names={str(x.get('uuid') or x.get('id') or ''):str(x.get('name') or x.get('database_name') or '') for x in d1}
+          def q(v): return json.dumps(str(v))
+          def worker_config(settings_path,name,main,kind):
+              settings=json.load(open(settings_path))['result']; bindings=settings.get('bindings') or []
+              allowed={'plain_text','secret_text','kv_namespace','d1','r2_bucket'} if kind=='student' else {'plain_text','service','assets'}
+              unknown=[(b.get('name'),b.get('type')) for b in bindings if b.get('type') not in allowed]
+              if unknown: raise SystemExit(f'Unsupported {kind} bindings: {unknown}')
+              lines=[f'name = {q(name)}',f'main = {q(main)}','compatibility_date = "2026-08-20"','workers_dev = true','keep_vars = true','']
+              plain=sorted((b for b in bindings if b.get('type')=='plain_text'),key=lambda x:x['name'])
+              if plain:
+                  lines.append('[vars]')
+                  for b in plain: lines.append(f"{b['name']} = {q(b.get('text') or '')}")
+                  lines.append('')
+              secrets=sorted(b['name'] for b in bindings if 'secret' in str(b.get('type','')).lower())
+              if secrets:
+                  lines.append('[secrets]'); lines.append('required = ['+', '.join(q(x) for x in secrets)+']'); lines.append('')
+              for b in sorted((x for x in bindings if x.get('type')=='kv_namespace'),key=lambda x:x['name']):
+                  ident=b.get('namespace_id') or b.get('id');
+                  if not ident: raise SystemExit(f"Missing KV id {b['name']}")
+                  lines += ['[[kv_namespaces]]',f"binding = {q(b['name'])}",f"id = {q(ident)}",'']
+              for b in sorted((x for x in bindings if x.get('type')=='d1'),key=lambda x:x['name']):
+                  ident=str(b.get('database_id') or b.get('id') or ''); dbname=db_names.get(ident,'')
+                  if not ident or not dbname: raise SystemExit(f"Missing D1 name {b['name']}:{ident}")
+                  lines += ['[[d1_databases]]',f"binding = {q(b['name'])}",f"database_name = {q(dbname)}",f"database_id = {q(ident)}",'']
+              for b in sorted((x for x in bindings if x.get('type')=='r2_bucket'),key=lambda x:x['name']):
+                  bucket=b.get('bucket_name') or b.get('bucket');
+                  if not bucket: raise SystemExit(f"Missing R2 name {b['name']}")
+                  lines += ['[[r2_buckets]]',f"binding = {q(b['name'])}",f"bucket_name = {q(bucket)}",'']
+              if kind=='browser':
+                  services=[b for b in bindings if b.get('type')=='service']
+                  if len(services)!=1 or services[0].get('name')!='STAGING_API': raise SystemExit('Browser service binding drift')
+                  b=services[0]; lines += ['[[services]]',f"binding = {q(b['name'])}",f"service = {q(b.get('service'))}",'','[assets]','directory = "./rebuild/browser-staging/public"','binding = "ASSETS"','run_worker_first = true','']
+              return '\n'.join(lines)+'\n'
+          Path('/tmp/cp12-student-prod.toml').write_text(worker_config('/tmp/fpt-portal-v2-rebuild-student-prod-settings-before.json','fpt-portal-v2-rebuild-student-prod','rebuild/student/src/index.js','student'))
+          Path('/tmp/cp12-browser-prod.toml').write_text(worker_config('/tmp/fpt-portal-v2-rebuild-browser-prod-settings-before.json','fpt-portal-v2-rebuild-browser-prod','rebuild/browser-staging/src/index.js','browser'))
+          PY
+          npx wrangler@"$WRANGLER_VERSION" deploy --config /tmp/cp12-student-prod.toml --keep-vars --dry-run --outdir /tmp/cp12-student-dry | tee /tmp/student-dry.log
+          npx wrangler@"$WRANGLER_VERSION" deploy --config /tmp/cp12-browser-prod.toml --keep-vars --dry-run --outdir /tmp/cp12-browser-dry | tee /tmp/browser-dry.log
+          grep -Fq 'Total Upload' /tmp/student-dry.log
+          grep -Fq 'Total Upload' /tmp/browser-dry.log
+          echo CP12_RESOURCE_UI_EXACT_CONFIG_DRY_RUN_PASS
+
+      - name: Atomically publish presentation-group metadata to prepared lesson models only
+        id: metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, sha256Hex, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const lessons=clean(process.env.EXPECTED_LESSONS_KV), read=clean(process.env.EXPECTED_READ_MODELS_KV), run=clean(process.env.GITHUB_RUN_ID);
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}`, headers={Authorization:`Bearer ${token}`};
+          async function req(path,options={}){const r=await fetch(api+path,{...options,headers:{...headers,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{};return{r,text,body};}
+          async function kvText(ns,key){const o=await req(`/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read ${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);if(t==null)return null;return JSON.parse(t);}
+          async function list(prefix){let cursor='',out=[];do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const o=await req(`/storage/kv/namespaces/${lessons}/keys?${q}`);if(!o.r.ok||o.body?.success!==true)throw new Error('KV list failed');out.push(...(o.body.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(o.body.result_info?.cursor);}while(cursor);return out;}
+          async function bulk(items){for(let i=0;i<items.length;i+=40){const o=await req(`/storage/kv/namespaces/${read}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(items.slice(i,i+40))});if(!o.r.ok||o.body?.success!==true||(o.body?.result?.unsuccessful_keys||[]).length)throw new Error(`KV bulk write failed:${o.r.status}`);}}
+          function stripGroups(value){if(Array.isArray(value))return value.map(stripGroups);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>k!=='presentationGroup').map(([k,v])=>[k,stripGroups(v)]));return value;}
+          const allowed=new Set(['core-prelesson','core-homework','core-other','core-cumulative','core-answers','elevenplus-prelesson','elevenplus-homework','elevenplus-cumulative','elevenplus-answers','vr-prelesson','vr-homework','vr-answers']);
+          const keys=(await list('lesson:')).filter(k=>/^lesson:[A-Za-z0-9]+$/.test(k)).sort(); if(keys.length<300)throw new Error(`Unexpected lesson count:${keys.length}`);
+          const candidates=[], backups={}; let totalResources=0;
+          for(const key of keys){
+            const record=await kvJson(lessons,key); if(!record?.lessonId)throw new Error(`Invalid lesson source:${key}`);
+            const detail=await compileLessonDetail(record,{resourceExists:async()=>true});
+            for(const r of detail.resources||[]){const g=clean(r.presentationGroup);if(!g||!allowed.has(g))throw new Error(`Ungrouped resource:${record.lessonId}:${clean(r.objectKey)}`);totalResources++;}
+            const scope=`lesson:${record.lessonId}`, pKey=pointerKey(scope), pointerRaw=await kvText(read,pKey); if(!pointerRaw)throw new Error(`Pointer missing:${scope}`);
+            const pointer=JSON.parse(pointerRaw), oldVersion=clean(pointer?.current?.version); if(!oldVersion)throw new Error(`Current version missing:${scope}`);
+            const oldEnvelopeRaw=await kvText(read,versionKey(scope,oldVersion)); if(!oldEnvelopeRaw)throw new Error(`Envelope missing:${scope}`);
+            const oldEnvelope=JSON.parse(oldEnvelopeRaw); if(!oldEnvelope?.payload)throw new Error(`Payload missing:${scope}`);
+            if(stableStringify(stripGroups(oldEnvelope.payload))!==stableStringify(stripGroups(detail)))throw new Error(`NON_METADATA_DRIFT:${scope}`);
+            if(stableStringify(oldEnvelope.payload)===stableStringify(detail))continue;
+            const payloadText=stableStringify(detail), payloadSha256=await sha256Hex(payloadText), version=`cp12-ui-${payloadSha256.slice(0,16)}-${run}`;
+            const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha256,payload:detail};
+            const envelopeText=stableStringify(envelope), envelopeSha256=await sha256Hex(envelopeText);
+            candidates.push({scope,pKey,version,payloadSha256,envelopeSha256,envelopeText,key:versionKey(scope,version),oldCurrent:pointer.current});
+            backups[scope]={pointerRaw,oldVersion};
+          }
+          if(!candidates.length)throw new Error('No metadata migration candidates');
+          fs.writeFileSync('/tmp/cp12-resource-ui-pointer-backup.json',JSON.stringify({readModelsKv:read,backups},null,2)+'\n');
+          let pointersFlipped=false;
+          try{
+            await bulk(candidates.map(c=>({key:c.key,value:c.envelopeText})));
+            for(const c of candidates){if(await kvText(read,c.key)!==c.envelopeText)throw new Error(`Candidate verify failed:${c.scope}`);}
+            const now=new Date().toISOString();
+            await bulk(candidates.map(c=>({key:c.pKey,value:stableStringify({schemaVersion:1,kind:'prepared-read-model-pointer',scope:c.scope,current:{version:c.version,sha256:c.payloadSha256,envelopeSha256:c.envelopeSha256},previous:c.oldCurrent||null,updatedAt:now})})));
+            pointersFlipped=true;
+            for(const c of candidates){const p=await kvJson(read,c.pKey);if(clean(p?.current?.version)!==c.version||clean(p?.current?.sha256)!==c.payloadSha256)throw new Error(`Pointer verify failed:${c.scope}`);}
+            fs.writeFileSync('/tmp/cp12-resource-ui-metadata-apply.json',JSON.stringify({marker:'CP12_RESOURCE_UI_METADATA_APPLY_PASS',status:'PASS',lessonSources:keys.length,changedLessonScopes:candidates.length,totalResources,onlyPresentationGroupChanged:true,accessScopesChanged:false,globalScopeChanged:false},null,2)+'\n');
+            console.log(`CP12_RESOURCE_UI_METADATA_APPLY_PASS changed=${candidates.length} resources=${totalResources}`);
+          }catch(error){
+            if(pointersFlipped)await bulk(Object.values(backups).map(b=>({key:pointerKey(JSON.parse(b.pointerRaw).scope),value:b.pointerRaw})));
+            throw error;
+          }
+          NODE
+          echo 'METADATA_PUBLISHED=true' >> "$GITHUB_ENV"
+
+      - name: Deploy metadata-aware Student runtime with all live bindings preserved
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler@"$WRANGLER_VERSION" deploy --config /tmp/cp12-student-prod.toml --keep-vars --message 'CP12 resource presentation metadata runtime' | tee /tmp/student-deploy.log
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/settings" "${AUTH[@]}" -o /tmp/student-settings-after.json
+          jq '[.result.bindings[]|if ((.type//"")|test("secret";"i")) then {name,type} else . end]|sort_by(.name)' /tmp/student-settings-after.json >/tmp/student-bindings-after.json
+          cmp /tmp/student-bindings-before.json /tmp/student-bindings-after.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-deployments-after.json
+          STUDENT_AFTER="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/student-deployments-after.json | head -n1)"
+          test -n "$STUDENT_AFTER"; test "$STUDENT_AFTER" != "$STUDENT_BEFORE"
+          echo "STUDENT_AFTER=$STUDENT_AFTER" >> "$GITHUB_ENV"
+          echo CP12_RESOURCE_UI_STUDENT_DEPLOY_PASS
+
+      - name: Deploy exact staging-proven collapsible Browser frontend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler@"$WRANGLER_VERSION" deploy --config /tmp/cp12-browser-prod.toml --keep-vars --message 'CP12 collapsible resource hierarchy' | tee /tmp/browser-deploy.log
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser-settings-after.json
+          jq '[.result.bindings[]|if .type=="assets" then {name,type} else . end]|sort_by(.name)' /tmp/browser-settings-after.json >/tmp/browser-bindings-after.json
+          cmp /tmp/browser-bindings-before.json /tmp/browser-bindings-after.json
+          jq -e --arg student "$STUDENT_WORKER" '([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .service==$student)' /tmp/browser-settings-after.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/browser-deployments-after.json
+          BROWSER_AFTER="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/browser-deployments-after.json | head -n1)"
+          test -n "$BROWSER_AFTER"; test "$BROWSER_AFTER" != "$BROWSER_BEFORE"
+          echo "BROWSER_AFTER=$BROWSER_AFTER" >> "$GITHUB_ENV"
+          echo CP12_RESOURCE_UI_BROWSER_DEPLOY_PASS
+
+      - name: Cache-safe public Admin browser UAT and protected-answer gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx playwright install --with-deps chromium
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          ADMIN_JSON="$(curl --fail --silent --show-error "${API}/storage/kv/namespaces/${EXPECTED_STUDENTS_KV}/values/user%3Aadmin" "${AUTH[@]}")"
+          UAT_LOGIN_PASSWORD="$(printf '%s' "$ADMIN_JSON" | jq -r '.p // empty')"
+          test -n "$UAT_LOGIN_PASSWORD"
+          echo "::add-mask::$UAT_LOGIN_PASSWORD"
+          export UAT_LOGIN_PASSWORD CP12_BROWSER_BASE_URL="$PROD_BASE"
+          sed -e "s/'cp12vrui'/'admin'/g" -e "s/'cp12coreui'/'admin'/g" -e 's/CP12_RESOURCE_UI_STAGING_BROWSER_UAT_PASS/CP12_RESOURCE_UI_PRODUCTION_BROWSER_UAT_PASS/g' -e 's/pupilDataSynthetic:true,productionMutation:false/pupilDataSynthetic:false,productionMutation:true/g' scripts/cp12-resource-ui-browser-uat.mjs >/tmp/cp12-resource-ui-production-browser-uat.mjs
+          node /tmp/cp12-resource-ui-production-browser-uat.mjs
+          jq -e '.marker=="CP12_RESOURCE_UI_PRODUCTION_BROWSER_UAT_PASS" and .vr.outerSection==true and .vr.preLessonSubgroup==true and .vr.homeworkSubgroup==true and .vr.collapsedByDefault==true and .ordinary.vrSectionAbsent==true and .ordinary.homeworkCollapsible==true' /tmp/cp12-resource-ui-browser-uat.json >/dev/null
+          echo CP12_RESOURCE_UI_PUBLIC_BROWSER_UAT_PASS
+
+      - name: Post-deploy topology legacy-guard rollback and health verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes-after.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes-after.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/deployments" "${AUTH[@]}" -o /tmp/legacy-after.json
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/legacy-after.json | head -n1)" = "$EXPECTED_LEGACY_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions-after.json
+          jq -e --arg old "$STUDENT_BEFORE" 'any(.result.items[];.id==$old)' /tmp/student-versions-after.json >/dev/null
+          jq -e --arg old "$EXPECTED_STUDENT_ROLLBACK" 'any(.result.items[];.id==$old)' /tmp/student-versions-after.json >/dev/null
+          code="$(curl --silent --show-error --output /tmp/home-unauth.json --write-out '%{http_code}' "$PROD_BASE/api/v2/student/home")"; test "$code" = 401
+          code="$(curl --silent --show-error --output /tmp/root.html --write-out '%{http_code}' "$PROD_BASE/?cp12-post=${GITHUB_RUN_ID}")"; test "$code" = 200
+          echo CP12_RESOURCE_UI_POSTDEPLOY_INFRA_PASS
+
+      - name: Assemble promotion evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n --arg marker CP12_RESOURCE_UI_PRODUCTION_PROMOTION_PASS --arg backend "$METADATA_COMMIT" --arg frontend "$CANDIDATE_FRONTEND_SHA" --arg studentBefore "$STUDENT_BEFORE" --arg studentAfter "$STUDENT_AFTER" --arg browserBefore "$BROWSER_BEFORE" --arg browserAfter "$BROWSER_AFTER" --arg legacy "$LEGACY_BEFORE" --slurpfile metadata /tmp/cp12-resource-ui-metadata-apply.json --slurpfile browser /tmp/cp12-resource-ui-browser-uat.json '{marker:$marker,status:"PASS",backendMetadataCommit:$backend,frontendSha:$frontend,preparedMetadata:$metadata[0],student:{before:$studentBefore,after:$studentAfter,bindingsPreserved:true},browser:{before:$browserBefore,after:$browserAfter,serviceBindingPreserved:true,uat:$browser[0]},legacyOperations:{version:$legacy,unchanged:true},topology:{publicRoute:"Browser",browserToStudentOnly:true,browserToAdminOps:false},rollback:{preparedPointersBackedUp:true,studentPriorVersionRetained:true,browserPriorVersion:$browserBefore}}' >/tmp/cp12-resource-ui-production-promotion.json
+
+      - name: Automatic rollback on any failed post-write gate
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo 'CP12 resource UI promotion failed; executing rollback where applicable.'
+          if [ -n "${BROWSER_BEFORE:-}" ]; then npx wrangler@"$WRANGLER_VERSION" rollback "$BROWSER_BEFORE" --name "$BROWSER_WORKER" --message 'CP12 automatic rollback: collapsible UI gate failure'; fi
+          if [ -n "${STUDENT_BEFORE:-}" ]; then npx wrangler@"$WRANGLER_VERSION" rollback "$STUDENT_BEFORE" --name "$STUDENT_WORKER" --message 'CP12 automatic rollback: resource metadata runtime gate failure'; fi
+          if [ -s /tmp/cp12-resource-ui-pointer-backup.json ]; then
+            node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            const clean=v=>String(v??'').trim(), data=JSON.parse(fs.readFileSync('/tmp/cp12-resource-ui-pointer-backup.json','utf8'));
+            const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN),ns=clean(data.readModelsKv);
+            const api=`https://api.cloudflare.com/client/v4/accounts/${account}`,headers={Authorization:`Bearer ${token}`,'content-type':'application/json'};
+            const items=Object.values(data.backups||{}).map(b=>{const p=JSON.parse(b.pointerRaw);return{key:`ptr:${p.scope}`,value:b.pointerRaw}});
+            for(let i=0;i<items.length;i+=40){const r=await fetch(`${api}/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers,body:JSON.stringify(items.slice(i,i+40))});const body=await r.json();if(!r.ok||body.success!==true)throw new Error('Prepared pointer rollback failed');}
+            console.log(`Restored ${items.length} prepared lesson pointers.`);
+            NODE
+          fi
+          exit 0
+
+      - name: Upload safe promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-resource-ui-production-promotion
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            /tmp/cp12-resource-ui-production-promotion.json
+            /tmp/cp12-resource-ui-metadata-apply.json
+            /tmp/cp12-resource-ui-pointer-backup.json
+            /tmp/cp12-resource-ui-browser-uat.json
+            /tmp/cp12-resource-ui-browser-evidence/*.png
+            /tmp/student-bindings-before.json
+            /tmp/student-bindings-after.json
+            /tmp/browser-bindings-before.json
+            /tmp/browser-bindings-after.json
+            /tmp/student-dry.log
+            /tmp/browser-dry.log
