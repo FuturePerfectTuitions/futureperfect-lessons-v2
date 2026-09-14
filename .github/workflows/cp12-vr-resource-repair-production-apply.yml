@@ -1,0 +1,231 @@
+name: CP12 VR resource repair production apply
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - 'docs/rebuild/CP12_VR_RESOURCE_REPAIR_APPLY_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_HOST: lessons.futureperfect.education
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+      EXPECTED_STUDENT_ROLLBACK_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Re-run repair and parity regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/cp12-vr-resource-collector-verification.mjs
+          node tests/cp12-vr-resource-canonical-source-verification.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+      - name: Fresh topology verification and atomic production publication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, sha256Hex, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const legacy=clean(process.env.LEGACY_WORKER);
+          const browser=clean(process.env.BROWSER_WORKER);
+          const student=clean(process.env.STUDENT_WORKER);
+          const expectedLessons=clean(process.env.EXPECTED_LESSONS_KV_ID);
+          const expectedReadModels=clean(process.env.EXPECTED_READ_MODELS_KV_ID);
+          const expectedStudentVersion=clean(process.env.EXPECTED_STUDENT_VERSION);
+          const expectedRollback=clean(process.env.EXPECTED_STUDENT_ROLLBACK_VERSION);
+          const runTag=clean(process.env.GITHUB_RUN_ID||Date.now()).replace(/[^A-Za-z0-9._-]+/g,'-').slice(0,40);
+          const base='https://api.cloudflare.com/client/v4';
+          const auth={Authorization:`Bearer ${token}`};
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+          async function request(path,options={}){
+            const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            return {r,text,body};
+          }
+          async function cf(path,options={}){
+            const out=await request(path,options);
+            if(!out.r.ok||out.body?.success!==true) throw new Error(`Cloudflare request failed ${out.r.status}: ${path}: ${clean(out.body?.errors?.[0]?.message||out.text).slice(0,220)}`);
+            return out.body.result;
+          }
+          async function kvText(ns,key){
+            const out=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);
+            if(out.r.status===404) return null;
+            if(!out.r.ok) throw new Error(`KV read failed ${out.r.status}: ${key}`);
+            return out.text;
+          }
+          async function kvJson(ns,key){const t=await kvText(ns,key);if(t==null)return null;try{return JSON.parse(t);}catch{throw new Error(`KV JSON invalid: ${key}`);}}
+          async function kvBulk(ns,items){
+            if(!items.length)return;
+            const body=await cf(`/accounts/${account}/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(items)});
+            if((body?.unsuccessful_keys||[]).length) throw new Error(`KV bulk write incomplete: ${body.unsuccessful_keys.length}`);
+          }
+          async function freshTopology(){
+            const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+            const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+            if(!zone) throw new Error('Production zone unavailable');
+            const routes=await cf(`/zones/${zone.id}/workers/routes`);
+            const hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+            if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser) throw new Error(`Public route drift: ${JSON.stringify(hostRoutes)}`);
+            const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+            const browserBindings=Array.isArray(browserSettings?.bindings)?browserSettings.bindings:[];
+            const serviceBindings=browserBindings.filter(b=>clean(b.type)==='service');
+            if(serviceBindings.length!==1||clean(serviceBindings[0].service)!==student) throw new Error(`Browser service topology drift: ${JSON.stringify(serviceBindings.map(b=>({name:b.name,service:b.service})))}`);
+            if(browserBindings.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`))) throw new Error('Forbidden Browser Admin/AdminOps binding detected');
+            const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);
+            const studentBindings=Array.isArray(studentSettings?.bindings)?studentSettings.bindings:[];
+            const readBinding=studentBindings.find(b=>clean(b.name)==='READ_MODELS_KV');
+            if(clean(readBinding?.namespace_id)!==expectedReadModels) throw new Error(`READ_MODELS_KV drift: ${clean(readBinding?.namespace_id)}`);
+            const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`);
+            const rows=Array.isArray(deployments?.deployments)?deployments.deployments:Array.isArray(deployments)?deployments:[];
+            const activeVersions=Array.isArray(rows[0]?.versions)?rows[0].versions:[];
+            const active=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
+            if(active!==expectedStudentVersion) throw new Error(`Student active version drift: ${active}`);
+            const versions=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/versions`);
+            const versionRows=Array.isArray(versions)?versions:Array.isArray(versions?.items)?versions.items:[];
+            if(!versionRows.some(v=>clean(v.id||v.version_id)===expectedRollback)) throw new Error('Student rollback version no longer retained');
+            return {route:hostRoutes[0],browserBinding:{name:clean(serviceBindings[0].name),service:clean(serviceBindings[0].service)},studentVersion:active,readModelsKvId:expectedReadModels};
+          }
+
+          const topology=await freshTopology();
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const legacyBindings=Array.isArray(legacySettings?.bindings)?legacySettings.bindings:[];
+          const lessonsNs=clean(legacyBindings.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==expectedLessons) throw new Error(`Authoritative LESSONS_KV drift: ${lessonsNs}`);
+
+          const lessonIds=['Y4E1','Y5E2'];
+          const expectedByLesson={
+            Y4E1:['PRI260225Y4T1EE01VRH01.pdf','Answer Key PRI260225Y4T1EE01VRH01A.pdf'],
+            Y5E2:['FAR070225Y5T1EE01VRP01.pdf','Answer key FAR070225Y5T1EE01VRP01A.pdf','FAR210225Y5T1EE01VRH01.pdf','Answer Key - FAR210225Y5T1EE01VRH01A.pdf']
+          };
+          const source={}, candidates={}, backups={};
+          for(const id of lessonIds){
+            const row=await kvJson(lessonsNs,`lesson:${id}`);
+            if(!row||clean(row.lessonId)!==id) throw new Error(`Authoritative source lesson missing: ${id}`);
+            source[id]=row;
+            const detail=await compileLessonDetail(row,{resourceExists:async()=>true});
+            const bySuffix=suffix=>detail.resources.find(r=>clean(r.objectKey).endsWith(suffix));
+            for(const suffix of expectedByLesson[id]){
+              const r=bySuffix(suffix);
+              if(!r) throw new Error(`Compiled ${id} missing canonical VR resource: ${suffix}`);
+              if(JSON.stringify(r.presentationScopes)!==JSON.stringify(['vr'])) throw new Error(`Compiled ${id} VR scope drift: ${suffix}`);
+              if(/answer/i.test(suffix)&&!(r.type==='answer-pack'&&r.protected===true)) throw new Error(`Protected VR answer boundary lost: ${suffix}`);
+            }
+            const scope=`lesson:${id}`;
+            const pKey=pointerKey(scope);
+            const pointerRaw=await kvText(expectedReadModels,pKey);
+            if(!pointerRaw) throw new Error(`Existing production pointer missing: ${scope}`);
+            let priorPointer;try{priorPointer=JSON.parse(pointerRaw);}catch{throw new Error(`Existing production pointer invalid: ${scope}`);}
+            const currentVersion=clean(priorPointer?.current?.version);
+            if(!currentVersion) throw new Error(`Existing production current version missing: ${scope}`);
+            const currentEnvelopeRaw=await kvText(expectedReadModels,versionKey(scope,currentVersion));
+            if(!currentEnvelopeRaw) throw new Error(`Existing production envelope missing: ${scope}`);
+            let currentEnvelope;try{currentEnvelope=JSON.parse(currentEnvelopeRaw);}catch{throw new Error(`Existing production envelope invalid: ${scope}`);}
+            const currentPayload=currentEnvelope?.payload;
+            if(currentPayload?.kind!=='prepared-lesson-detail'||clean(currentPayload.lessonId)!==id) throw new Error(`Existing prepared lesson payload invalid: ${scope}`);
+            const strip=p=>({schemaVersion:p.schemaVersion,kind:p.kind,lessonId:p.lessonId,title:p.title,description:p.description,videoVariants:p.videoVariants||null});
+            if(stableStringify(strip(currentPayload))!==stableStringify(strip(detail))) throw new Error(`Targeted repair would alter non-resource lesson fields: ${scope}`);
+            const currentKeys=new Set((currentPayload.resources||[]).map(r=>clean(r.objectKey)).filter(Boolean));
+            const candidateKeys=new Set((detail.resources||[]).map(r=>clean(r.objectKey)).filter(Boolean));
+            for(const key of currentKeys) if(!candidateKeys.has(key)) throw new Error(`Targeted repair would remove existing resource: ${scope}:${key}`);
+            const added=(detail.resources||[]).filter(r=>!currentKeys.has(clean(r.objectKey)));
+            if(!added.length) throw new Error(`No missing resources detected in production prepared model: ${scope}`);
+            for(const r of added) if(JSON.stringify(r.presentationScopes)!==JSON.stringify(['vr'])) throw new Error(`Targeted repair would add non-VR resource: ${scope}:${r.objectKey}`);
+            const payloadText=stableStringify(detail);
+            const payloadSha256=await sha256Hex(payloadText);
+            const version=`cp12-vr-${payloadSha256.slice(0,16)}-${runTag}`;
+            const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha256,payload:detail};
+            const envelopeText=stableStringify(envelope);
+            const envelopeSha256=await sha256Hex(envelopeText);
+            candidates[scope]={scope,version,payloadSha256,envelopeSha256,envelopeText,key:versionKey(scope,version),detail,added:added.map(r=>({type:r.type,objectKey:r.objectKey,protected:r.protected===true,presentationScopes:r.presentationScopes}))};
+            backups[scope]={pointerRaw,currentVersion,currentEnvelopeSha256:await sha256Hex(currentEnvelopeRaw)};
+          }
+
+          const evidence={marker:'CP12_VR_RESOURCE_PRODUCTION_APPLY',startedAt:new Date().toISOString(),topology,lessons:{},rollbackPerformed:false,success:false};
+          fs.writeFileSync('/tmp/cp12-vr-production-backup.json',JSON.stringify({createdAt:new Date().toISOString(),backups:Object.fromEntries(Object.entries(backups).map(([s,b])=>[s,{currentVersion:b.currentVersion,currentEnvelopeSha256:b.currentEnvelopeSha256,pointer:JSON.parse(b.pointerRaw)}]))},null,2)+'\n');
+          let pointersWritten=false;
+          try{
+            await kvBulk(expectedReadModels,Object.values(candidates).map(c=>({key:c.key,value:c.envelopeText})));
+            for(const c of Object.values(candidates)){
+              const stored=await kvText(expectedReadModels,c.key);
+              if(stored!==c.envelopeText) throw new Error(`Candidate envelope verification failed: ${c.scope}`);
+            }
+            const pointerItems=[];
+            for(const [scope,c] of Object.entries(candidates)){
+              const old=JSON.parse(backups[scope].pointerRaw);
+              const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope,current:{version:c.version,sha256:c.payloadSha256,envelopeSha256:c.envelopeSha256},previous:old.current||null,updatedAt:new Date().toISOString()};
+              pointerItems.push({key:pointerKey(scope),value:stableStringify(pointer)});
+            }
+            await kvBulk(expectedReadModels,pointerItems);
+            pointersWritten=true;
+            for(const [scope,c] of Object.entries(candidates)){
+              const deadline=Date.now()+90000; let confirmed=null;
+              while(Date.now()<deadline){
+                confirmed=await kvJson(expectedReadModels,pointerKey(scope));
+                if(clean(confirmed?.current?.version)===c.version&&clean(confirmed?.current?.sha256)===c.payloadSha256) break;
+                await sleep(1500);
+              }
+              if(clean(confirmed?.current?.version)!==c.version) throw new Error(`Production pointer did not converge: ${scope}`);
+              const stored=await kvText(expectedReadModels,c.key);
+              if(stored!==c.envelopeText) throw new Error(`Production candidate changed after pointer flip: ${scope}`);
+              evidence.lessons[scope]={previousVersion:backups[scope].currentVersion,currentVersion:c.version,payloadSha256:c.payloadSha256,addedResources:c.added};
+            }
+            evidence.success=true;
+            evidence.completedAt=new Date().toISOString();
+            fs.writeFileSync('/tmp/cp12-vr-production-apply.json',JSON.stringify(evidence,null,2)+'\n');
+            console.log(JSON.stringify({marker:'CP12_VR_RESOURCE_PRODUCTION_APPLY_PASS',topology,evidence:evidence.lessons}));
+          }catch(error){
+            if(pointersWritten){
+              await kvBulk(expectedReadModels,Object.entries(backups).map(([scope,b])=>({key:pointerKey(scope),value:b.pointerRaw})));
+              for(const [scope,b] of Object.entries(backups)){
+                const restored=await kvJson(expectedReadModels,pointerKey(scope));
+                if(clean(restored?.current?.version)!==b.currentVersion) throw new Error(`ROLLBACK_FAILED:${scope}; original=${clean(error?.message||error)}`);
+              }
+              evidence.rollbackPerformed=true;
+            }
+            evidence.error=clean(error?.message||error);
+            evidence.completedAt=new Date().toISOString();
+            fs.writeFileSync('/tmp/cp12-vr-production-apply.json',JSON.stringify(evidence,null,2)+'\n');
+            throw error;
+          }
+          NODE
+      - name: Upload production repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-vr-resource-production-repair
+          path: |
+            /tmp/cp12-vr-production-backup.json
+            /tmp/cp12-vr-production-apply.json
+          if-no-files-found: error
+          retention-days: 30
