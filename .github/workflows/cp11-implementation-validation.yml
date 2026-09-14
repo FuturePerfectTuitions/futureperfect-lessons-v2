@@ -37,6 +37,7 @@ jobs:
             node --check scripts/rebuild-checkpoint11-backfill.mjs
             node --check scripts/rebuild-checkpoint11-special-backfill.mjs
             node --check scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs
+            node --check scripts/rebuild-checkpoint11-cutover.mjs
             node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
             node --check tests/rebuild-checkpoint11-vr-howto-runtime.mjs
           } 2>&1 | tee /tmp/cp11-validation-syntax.log
