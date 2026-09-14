@@ -1,84 +1,51 @@
-name: Rebuild Checkpoint 8 - Backfill Access Parity
+name: CP12 entitlement population audit - read only
 
 on:
   push:
     branches:
-      - rebuild/checkpoint8-backfill-access-parity-2026-09-13
-      - rebuild/portal-v2-performance-2026-09-13
+      - audit/cp12-entitlement-population-2026-09-14
+    paths:
+      - '.github/workflows/rebuild-checkpoint8-backfill-access-parity.yml'
+      - 'scripts/rebuild-checkpoint8-live-audit.mjs'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  checkpoint8-gate:
+  entitlement-population-audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Syntax check Checkpoint 8 audit
-        run: |
-          node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
-          node --check rebuild/adminops/src/lib/legacy-resource-oracle.mjs
-          node --check rebuild/adminops/src/lib/compiler.mjs
-          node --check rebuild/shared/read-models/phase11-extension-resources.mjs
-          node --check rebuild/shared/read-models/resource-visibility.mjs
-          node --check rebuild/student/src/lib/runtime.mjs
-          node --check tests/rebuild-checkpoint8-backfill-access-parity.mjs
-          node --check tests/rebuild-checkpoint8-phase11-resource-parity.mjs
-          node --check scripts/rebuild-checkpoint8-live-audit.mjs
-          node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
-          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
-      - name: Checkpoint 8 synthetic access parity gate
-        run: node tests/rebuild-checkpoint8-backfill-access-parity.mjs
-      - name: Checkpoint 8 authoritative Phase 11 resource parity gate
-        run: node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
-      - name: Checkpoint 6 new Student Worker regression
-        run: node tests/rebuild-checkpoint6-new-student-worker.mjs
-      - name: Checkpoint 5 authentication capability regression
-        run: node tests/rebuild-checkpoint5-auth-capability-core.mjs
-      - name: Checkpoint 4 dual-write compatibility regression
-        run: node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
-      - name: Checkpoint 3 atomic publishing regression
-        run: node tests/rebuild-checkpoint3-atomic-publishing.mjs
-      - name: Checkpoint 2 prepared read-model regression
-        run: node tests/rebuild-checkpoint2-read-models.mjs
-
-  checkpoint8-live-readonly:
-    needs: checkpoint8-gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      CHECKPOINT8_AS_OF_DATE: '2026-09-13'
+      STUDENT_WORKER_NAME: rebuild-student-v2-production
+      BROWSER_WORKER_NAME: fpt-lessons-v2-browser-production
+      CHECKPOINT8_AS_OF_DATE: '2026-09-14'
+      AYLA_PORTAL_ID: Ayla0108
+      REINA_PORTAL_ID: Rei0710
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Confirm read-only audit credentials exist
+      - name: Confirm read-only credentials exist
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo "Cloudflare credentials are present; values are not printed."
-      - name: Inventory current production profile access modes read-only
-        run: node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
-      - name: Audit special-area access for every current profile read-only
-        run: node scripts/rebuild-checkpoint8-special-area-audit.mjs
-      - name: Audit every current student and presentation catalogue read-only
+          echo 'Cloudflare credentials are present; values are not printed.'
+      - name: Syntax check population audit
+        run: node --check scripts/rebuild-checkpoint8-live-audit.mjs
+      - name: Audit every current student source entitlement against published access
         run: node scripts/rebuild-checkpoint8-live-audit.mjs
-      - name: Upload redacted Checkpoint 8 summary
+      - name: Upload complete entitlement audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: checkpoint8-live-readonly-summary
-          path: /tmp/checkpoint8-live-summary.json
-          if-no-files-found: ignore
+          name: cp12-entitlement-population-audit
+          path: /tmp/cp12-entitlement-population-audit.json
+          if-no-files-found: error
           retention-days: 30
