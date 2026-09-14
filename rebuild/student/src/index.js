@@ -1,7 +1,9 @@
 import { createStudentRuntime } from './lib/runtime.mjs';
+import { createVrHowToRuntime } from './lib/vr-howto-runtime.mjs';
 import { kvReadStore, resolveCurrentScope } from './lib/read-model-resolver.mjs';
 
-const runtime = createStudentRuntime();
+const baseRuntime = createStudentRuntime();
+const runtime = createVrHowToRuntime(baseRuntime);
 
 async function warmPreparedGlobal(env) {
   try {
@@ -14,7 +16,7 @@ async function warmPreparedGlobal(env) {
   }
 }
 
-export { createStudentRuntime };
+export { createStudentRuntime, createVrHowToRuntime };
 
 export default {
   async fetch(request, env) {
