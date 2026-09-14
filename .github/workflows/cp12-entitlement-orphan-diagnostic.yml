@@ -1,0 +1,45 @@
+name: CP12 entitlement orphan diagnostic - read only
+
+on:
+  push:
+    branches:
+      - audit/cp12-entitlement-population-2026-09-14
+    paths:
+      - '.github/workflows/cp12-entitlement-orphan-diagnostic.yml'
+      - 'scripts/cp12-entitlement-orphan-diagnostic.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  orphan-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm read-only credentials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'Cloudflare credentials are present; values are not printed.'
+      - name: Syntax check diagnostic
+        run: node --check scripts/cp12-entitlement-orphan-diagnostic.mjs
+      - name: Inspect orphaned entitlement lesson IDs
+        run: node scripts/cp12-entitlement-orphan-diagnostic.mjs
+      - name: Upload diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-entitlement-orphan-diagnostic
+          path: /tmp/cp12-entitlement-orphan-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
