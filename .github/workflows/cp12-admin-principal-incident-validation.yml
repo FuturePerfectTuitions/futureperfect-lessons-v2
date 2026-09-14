@@ -1,0 +1,44 @@
+name: CP12 Admin Principal Incident Validation
+
+on:
+  push:
+    branches:
+      - incident/cp12-admin-principal-2026-09-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          set -euo pipefail
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check tests/rebuild-cp12-admin-principal.mjs
+      - name: Admin principal incident validation
+        run: node tests/rebuild-cp12-admin-principal.mjs
+      - name: Ordinary student runtime regression
+        run: node tests/rebuild-checkpoint6-new-student-worker.mjs
+      - name: Auth capability regression
+        run: node tests/rebuild-checkpoint5-auth-capability-core.mjs
+      - name: Prepared read-model regression
+        run: node tests/rebuild-checkpoint2-read-models.mjs
+      - name: Canonical runtime architecture guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -F 'ADMINOPS' rebuild/browser-staging/src
+          ! grep -R -F 'api/v1/student' rebuild/student/src/lib/runtime.mjs
+          ! grep -R -F 'LESSONS_KV' rebuild/student/src/lib/runtime.mjs
+          ! grep -R -F 'student_sessions' rebuild/student/src/lib/runtime.mjs
+          ! grep -R -F 'student_batch_assignments' rebuild/student/src/lib/runtime.mjs
+          ! grep -R -F 'lesson_entitlements' rebuild/student/src/lib/runtime.mjs
+          echo CP12_ADMIN_PRINCIPAL_CANONICAL_RUNTIME_GUARD_PASS
