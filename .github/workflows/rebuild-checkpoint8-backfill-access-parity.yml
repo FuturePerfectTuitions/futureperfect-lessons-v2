@@ -1,6 +1,7 @@
 name: CP12 entitlement population audit - read only
 
 # Post-repair rerun: 2026-09-14 batch registry completion.
+# Rerun requested after Ayla0108 live access complaint at 2026-09-14 20:31 BST.
 on:
   push:
     branches:
