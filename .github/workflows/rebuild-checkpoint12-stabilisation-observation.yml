@@ -1,0 +1,462 @@
+name: Rebuild Checkpoint 12 - Stabilisation Observation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - .github/workflows/rebuild-checkpoint12-stabilisation-observation.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: portal-v2-rebuild-checkpoint12-observation
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  EXPECTED_PROD_DEPLOYMENT: ce193be0-d018-403f-a417-999e9e6eea41
+  EXPECTED_PROD_VERSION: aed13a31-21fa-49c3-8830-c37fd8645c31
+  EXPECTED_FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_PROD_R2: fpt-materials-dev
+  PROD_SHADOW_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  PROD_SHADOW_D1_ID: 3a17180e-b554-4740-a629-bcaca6a2eeb5
+  NEW_STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  NEW_BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_PRIVATE_BASE_URL: https://fpt-portal-v2-rebuild-student-prod.futureperfectlessons.workers.dev
+  BROWSER_PRIVATE_BASE_URL: https://fpt-portal-v2-rebuild-browser-prod.futureperfectlessons.workers.dev
+  EXPECTED_STUDENT_DEPLOYMENT: 386f0251-b495-4197-8091-7b807418df7c
+  EXPECTED_STUDENT_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  EXPECTED_BROWSER_DEPLOYMENT: dd94cb2c-0f21-470a-bcc4-59d482771f23
+  EXPECTED_BROWSER_VERSION: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+  EXECUTION_RUN_ID: '34823892175'
+  EXECUTION_SHA: dd5c222dfc1f82993de0379b77f42f8bbab8e71f
+  CP11_CUTOVER_AT: '2026-09-14T08:42:00Z'
+
+jobs:
+  cp12-readonly-observation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Assert CP12 observer cannot mutate production
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          WORKFLOW=.github/workflows/rebuild-checkpoint12-stabilisation-observation.yml
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const text=fs.readFileSync('.github/workflows/rebuild-checkpoint12-stabilisation-observation.yml','utf8');
+          const forbidden=[
+            ['wrangler','deploy'].join(' '),
+            ['wrangler','secret','put'].join(' '),
+            ['node','scripts/rebuild-checkpoint11-backfill.mjs'].join(' '),
+            ['node','scripts/rebuild-checkpoint11-special-backfill.mjs'].join(' '),
+            ['node','scripts/rebuild-checkpoint11-cutover.mjs'].join(' '),
+            ['-X','POST'].join(' '),
+            ['-X','PUT'].join(' '),
+            ['-X','PATCH'].join(' '),
+            ['-X','DELETE'].join(' ')
+          ];
+          const hits=forbidden.filter(x=>text.includes(x));
+          if(hits.length) throw new Error(`Mutating command present in CP12 observer: ${hits.join(', ')}`);
+          NODE
+          test -f docs/rebuild/CHECKPOINT_12_STABILISATION.md
+          grep -F '**Status: OPEN — INITIAL OBSERVATION ONLY**' docs/rebuild/CHECKPOINT_12_STABILISATION.md >/dev/null
+          echo REBUILD_CHECKPOINT12_READONLY_WORKFLOW_PASS
+
+      - name: Verify retained compatibility, rollback and reconciliation source paths
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for f in \
+            scripts/rebuild-checkpoint11-backfill.mjs \
+            scripts/rebuild-checkpoint11-special-backfill.mjs \
+            scripts/rebuild-checkpoint11-cutover.mjs \
+            scripts/rebuild-checkpoint8-live-audit.mjs \
+            scripts/rebuild-checkpoint8-special-area-audit.mjs \
+            scripts/rebuild-checkpoint8-profile-mode-inventory.mjs \
+            tests/rebuild-checkpoint11-scope-compatibility.mjs \
+            tests/rebuild-checkpoint11-vr-howto-runtime.mjs \
+            tests/rebuild-checkpoint8-phase11-resource-parity.mjs \
+            tests/rebuild-checkpoint8-backfill-access-parity.mjs \
+            tests/rebuild-checkpoint6-new-student-worker.mjs \
+            tests/rebuild-checkpoint5-auth-capability-core.mjs \
+            tests/rebuild-checkpoint4-dual-write-compatibility.mjs \
+            tests/rebuild-checkpoint3-atomic-publishing.mjs \
+            tests/rebuild-checkpoint2-read-models.mjs; do
+            test -f "$f" || { echo "Required retained path missing: $f"; exit 1; }
+          done
+          git ls-files > /tmp/checkpoint12-retained-source-paths.txt
+
+      - name: Recover exact successful CP11 execution evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: checkpoint11-reversible-cutover-execution-evidence
+          path: /tmp/cp11-execution-evidence
+          github-token: ${{ github.token }}
+          repository: FuturePerfectTuitions/futureperfect-lessons-v2
+          run-id: ${{ env.EXECUTION_RUN_ID }}
+
+      - name: Verify CP11 frozen invariants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          GATE=/tmp/cp11-execution-evidence/checkpoint11-execution-gate.json
+          test -s "$GATE"
+          jq -e --arg sha "$EXECUTION_SHA" --arg run "$EXECUTION_RUN_ID" '
+            .marker=="REBUILD_CHECKPOINT11_EXECUTION_PASS" and
+            .exactSha==$sha and .runId==$run and
+            .rehearsal.passed==true and
+            .cutover.marker=="REBUILD_CHECKPOINT11_PUBLIC_CUTOVER_PASS" and
+            .productionSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and
+            .productionSmoke.auth.positiveLogin==true and
+            .productionSmoke.auth.sessionCookie.secure==true and
+            .productionSmoke.auth.sessionCookie.httpOnly==true and
+            .productionSmoke.auth.sessionCookie.sameSite=="Lax" and
+            .productionSmoke.auth.sessionCookie.maxAgeSeconds==28800 and
+            .productionSmoke.auth.logoutCurrentBrowserCookie==true and
+            .productionSmoke.resources.ordinaryCapability==true and
+            .productionSmoke.resources.ordinaryDelivered==true and
+            .productionSmoke.resources.answerPackLivePassword==true and
+            .productionSmoke.resources.answerPackCapabilityMaxSeconds<=300 and
+            .productionSmoke.resources.answerPackDelivered==true and
+            .productionSmoke.resources.video.present==true and
+            .productionSmoke.resources.video.providerContactedOnlyAfterView==true and
+            .productionSmoke.resources.video.providerHost=="go.screenpal.com" and
+            .productionVrSmoke.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_LIVE_SMOKE_PASS" and
+            .productionVrSmoke.candidateCount==3 and .productionVrSmoke.guideCount==11 and
+            .productionVrSmoke.providerContactedOnlyAfterView==true and
+            .special.status=="PASS" and .special.manualTokenCounts.VR_HOWTO==3 and
+            (.special.directTokenCounts.VR_HOWTO // 0)==0 and
+            .parity.status=="PASS" and .parity.catalogue.resourceMismatchCount==0 and
+            .parity.students.unexplainedDifferenceCount==0 and
+            .workers.student.deploymentId==env.EXPECTED_STUDENT_DEPLOYMENT and
+            .workers.student.versionId==env.EXPECTED_STUDENT_VERSION and
+            .workers.browser.deploymentId==env.EXPECTED_BROWSER_DEPLOYMENT and
+            .workers.browser.versionId==env.EXPECTED_BROWSER_VERSION and
+            .publicVerify.marker=="REBUILD_CHECKPOINT11_PUBLIC_VERIFY_PASS"
+          ' "$GATE" >/dev/null
+          cp "$GATE" /tmp/checkpoint12-cp11-execution-gate.json
+
+      - name: Run authentication capability compatibility and publishing regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node --check scripts/rebuild-checkpoint8-live-audit.mjs
+          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
+          node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+          jq -n '{marker:"REBUILD_CHECKPOINT12_REGRESSION_PASS",status:"PASS",readOnly:true}' > /tmp/checkpoint12-regression.json
+
+      - name: Re-run full live parity and VR How-To special-area audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AS_OF="$(date -u +%F)"
+          node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs --as-of "$AS_OF" | tee /tmp/checkpoint12-profile-mode.json
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs --as-of "$AS_OF" --inventory /tmp/checkpoint12-profile-mode.json | tee /tmp/checkpoint12-special-area.json
+          node scripts/rebuild-checkpoint8-live-audit.mjs --as-of "$AS_OF" --inventory /tmp/checkpoint12-profile-mode.json
+          cp /tmp/checkpoint8-live-summary.json /tmp/checkpoint12-live-parity.json
+          jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint12-live-parity.json >/dev/null
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/checkpoint12-special-area.json >/dev/null
+
+      - name: Verify candidate Student and Browser health read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          STUDENT_CODE="$(curl --fail-with-body --silent --show-error --output /tmp/checkpoint12-student-health.json --write-out '%{http_code}' "$STUDENT_PRIVATE_BASE_URL/health")"
+          test "$STUDENT_CODE" = 200
+          jq -e '
+            .ok==true and .runtime=="student" and .environment=="production" and
+            .preparedReadModels.kvBound==true and
+            .auth.signedCookie==true and .auth.studentStoreBound==true and
+            .auth.d1SessionLookup==false and .auth.activityWrites==false and
+            .resources.r2Bound==true and .resources.answerPasswordLiveStore==true and
+            .resources.answerRateStoreBound==true and .resources.directScreenPalRedirect==true and
+            .resources.r2HeadFanout==false
+          ' /tmp/checkpoint12-student-health.json >/dev/null
+          ROOT_CODE="$(curl --silent --location --output /tmp/checkpoint12-browser-index.html --write-out '%{http_code}' "$BROWSER_PRIVATE_BASE_URL/")"
+          API_CODE="$(curl --silent --show-error -D /tmp/checkpoint12-browser-api.headers -o /tmp/checkpoint12-browser-api.json --write-out '%{http_code}' "$BROWSER_PRIVATE_BASE_URL/api/v2/student/home")"
+          test "$ROOT_CODE" = 200
+          grep -F 'Future Perfect Tuitions' /tmp/checkpoint12-browser-index.html >/dev/null
+          test "$API_CODE" = 401
+          grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/checkpoint12-browser-api.headers
+          jq -n --argjson studentCode "$STUDENT_CODE" --argjson rootCode "$ROOT_CODE" --argjson apiCode "$API_CODE" \
+            '{marker:"REBUILD_CHECKPOINT12_CANDIDATE_HEALTH_PASS",studentStatus:$studentCode,browserRootStatus:$rootCode,browserApiStatus:$apiCode,facade:true}' \
+            > /tmp/checkpoint12-candidate-health.json
+
+      - name: Verify authoritative topology deployments rollback anchors and retained data bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/cp12-topology.mjs <<'NODE'
+          import fs from 'node:fs';
+          import https from 'node:https';
+          import { Resolver, resolve4 } from 'node:dns/promises';
+
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const browser=clean(process.env.NEW_BROWSER_WORKER), student=clean(process.env.NEW_STUDENT_WORKER), legacyWorker=clean(process.env.PROD_WORKER);
+          const expectedLegacy={deploymentId:clean(process.env.EXPECTED_PROD_DEPLOYMENT),versionId:clean(process.env.EXPECTED_PROD_VERSION)};
+          const expectedStudent={deploymentId:clean(process.env.EXPECTED_STUDENT_DEPLOYMENT),versionId:clean(process.env.EXPECTED_STUDENT_VERSION)};
+          const expectedBrowser={deploymentId:clean(process.env.EXPECTED_BROWSER_DEPLOYMENT),versionId:clean(process.env.EXPECTED_BROWSER_VERSION)};
+          const expectedFrontend=clean(process.env.EXPECTED_FRONTEND_MAIN_SHA);
+          const expectedData=[
+            clean(process.env.EXPECTED_STUDENTS_KV_ID),
+            clean(process.env.EXPECTED_LESSONS_KV_ID),
+            clean(process.env.EXPECTED_PROD_D1_ID),
+            clean(process.env.EXPECTED_PROD_R2),
+            clean(process.env.PROD_SHADOW_KV_ID),
+            clean(process.env.PROD_SHADOW_D1_ID)
+          ].filter(Boolean);
+          if(!token||!account||!host||!browser||!student||!legacyWorker) throw new Error('CP12 topology check requires frozen inputs.');
+          const base='https://api.cloudflare.com/client/v4';
+          async function cf(path){
+            const r=await fetch(`${base}${path}`,{headers:{Authorization:`Bearer ${token}`}});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok||body?.success!==true) throw new Error(`Cloudflare read failed ${r.status}: ${path}`);
+            return body;
+          }
+          function anchor(body){
+            const rows=body?.result?.deployments||body?.result||[];
+            const first=Array.isArray(rows)?rows[0]:null;
+            const versions=Array.isArray(first?.versions)?first.versions:[];
+            return {deploymentId:clean(first?.id),versionId:clean((versions.find(v=>Number(v?.percentage||0)===100)||versions[0])?.version_id)};
+          }
+          const zones=(await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`)).result||[];
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('No Cloudflare zone for production host.');
+          const records=(await cf(`/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}&per_page=100`)).result||[];
+          if(records.length!==1||records[0].type!=='CNAME'||records[0].proxied!==true||clean(records[0].content).toLowerCase()!=='futureperfecttuitions.github.io') throw new Error('Production DNS drifted.');
+          const routeRows=(await cf(`/zones/${zone.id}/workers/routes`)).result||[];
+          const matching=routeRows.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          const route=matching.find(r=>clean(r.pattern).toLowerCase()===`${host}/*`&&clean(r.script)===browser);
+          if(!route||matching.some(r=>clean(r.script)!==browser)) throw new Error('Production Worker route drifted.');
+
+          const [legacySettings,studentSettings,browserSettings,legacyDeploy,studentDeploy,browserDeploy]=await Promise.all([
+            cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacyWorker)}/settings`),
+            cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`),
+            cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`),
+            cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacyWorker)}/deployments`),
+            cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`),
+            cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/deployments`)
+          ]);
+          const legacy=anchor(legacyDeploy), currentStudent=anchor(studentDeploy), currentBrowser=anchor(browserDeploy);
+          if(JSON.stringify(legacy)!==JSON.stringify(expectedLegacy)) throw new Error('Legacy rollback Worker anchor moved.');
+          if(JSON.stringify(currentStudent)!==JSON.stringify(expectedStudent)) throw new Error('Student candidate deployment moved.');
+          if(JSON.stringify(currentBrowser)!==JSON.stringify(expectedBrowser)) throw new Error('Browser candidate deployment moved.');
+
+          const settingsText=JSON.stringify({legacy:legacySettings.result,student:studentSettings.result,browser:browserSettings.result});
+          const retainedData={};
+          for(const id of expectedData) retainedData[id]=settingsText.includes(id);
+          const missing=Object.entries(retainedData).filter(([,present])=>!present).map(([id])=>id);
+          if(missing.length) throw new Error(`Expected retained data binding(s) absent from Worker settings: ${missing.join(',')}`);
+
+          const mainResponse=await fetch('https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-test/branches/main',{headers:{'user-agent':'fpt-cp12-observer'}});
+          if(!mainResponse.ok) throw new Error(`Rollback frontend query failed ${mainResponse.status}.`);
+          const frontendMain=clean((await mainResponse.json())?.commit?.sha);
+          if(frontendMain!==expectedFrontend) throw new Error('Rollback frontend main moved.');
+
+          const details=(await cf(`/zones/${zone.id}`)).result||{};
+          const nameservers=Array.isArray(details.name_servers)?details.name_servers.map(clean).filter(Boolean):[];
+          if(!nameservers.length) throw new Error('Cloudflare authoritative nameservers unavailable.');
+          let resolved=null,lastError='';
+          for(let attempt=0;attempt<45&&!resolved;attempt++){
+            for(const ns of nameservers){
+              let nsIps=[]; try{nsIps=await resolve4(ns);}catch(e){lastError=clean(e?.message);continue;}
+              for(const nsIp of nsIps){
+                try{
+                  const resolver=new Resolver(); resolver.setServers([nsIp]);
+                  const edgeIps=await resolver.resolve4(host);
+                  if(edgeIps.length){resolved={nameserver:ns,nameserverIp:nsIp,edgeIps:[...new Set(edgeIps)]};break;}
+                }catch(e){lastError=clean(e?.message);}
+              }
+              if(resolved) break;
+            }
+            if(!resolved) await new Promise(r=>setTimeout(r,1000));
+          }
+          if(!resolved) throw new Error(`Authoritative DNS did not publish expected edge addresses: ${lastError}`);
+
+          function direct(url,edgeIp){
+            const target=new URL(url);
+            return new Promise((resolve,reject)=>{
+              const req=https.request({
+                protocol:'https:',hostname:edgeIp,port:443,servername:target.hostname,
+                path:`${target.pathname}${target.search}`,method:'GET',
+                headers:{Host:target.host,'Cache-Control':'no-store','User-Agent':'fpt-cp12-observer-edge'},
+                rejectUnauthorized:true,timeout:10000
+              },res=>{
+                const chunks=[];res.on('data',c=>chunks.push(c));
+                res.on('end',()=>resolve({status:res.statusCode||0,text:Buffer.concat(chunks).toString('utf8'),headers:res.headers}));
+              });
+              req.on('timeout',()=>req.destroy(new Error('Direct edge request timed out.'))); req.on('error',reject); req.end();
+            });
+          }
+          let verified=null,edgeError='';
+          for(const edgeIp of resolved.edgeIps){
+            try{
+              const api=await direct(`https://${host}/api/v2/student/home`,edgeIp);
+              const root=await direct(`https://${host}/`,edgeIp);
+              const facade=clean(api.headers['x-fpt-cp9-browser-facade']).toLowerCase()==='service-binding';
+              const brand=root.status>=200&&root.status<300&&/Future Perfect Tuitions/i.test(root.text);
+              if(api.status===401&&facade&&brand){verified={edgeIp,apiStatus:api.status,rootStatus:root.status,facade:true};break;}
+            }catch(e){edgeError=clean(e?.message);}
+          }
+          if(!verified) throw new Error(`No authoritative edge served the rebuilt topology: ${edgeError}`);
+
+          const out={
+            marker:'REBUILD_CHECKPOINT12_TOPOLOGY_PASS',checkpoint:12,readOnly:true,host,
+            zone:{id:zone.id,name:zone.name},
+            dns:{id:records[0].id,type:records[0].type,content:records[0].content,proxied:true},
+            route:{id:route.id,pattern:route.pattern,script:route.script},
+            deployments:{legacy,currentStudent,currentBrowser},
+            rollbackFrontendMainSha:frontendMain,
+            retainedDataBindings:retainedData,
+            authoritative:{nameserver:resolved.nameserver,nameserverIp:resolved.nameserverIp,edgeIp:verified.edgeIp,rootStatus:verified.rootStatus,apiStatus:verified.apiStatus,facade:verified.facade}
+          };
+          fs.writeFileSync('/tmp/checkpoint12-topology.json',JSON.stringify(out,null,2));
+          console.log(JSON.stringify(out,null,2));
+          NODE
+          node /tmp/cp12-topology.mjs
+          jq -e '
+            .marker=="REBUILD_CHECKPOINT12_TOPOLOGY_PASS" and .readOnly==true and
+            .dns.proxied==true and .route.script=="fpt-portal-v2-rebuild-browser-prod" and
+            .authoritative.rootStatus==200 and .authoritative.apiStatus==401 and .authoritative.facade==true and
+            ([.retainedDataBindings[]] | all(.==true))
+          ' /tmp/checkpoint12-topology.json >/dev/null
+
+      - name: Observe normal operational release and import activity without mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/cp12-operational.mjs <<'NODE'
+          import fs from 'node:fs';
+          const repo='FuturePerfectTuitions/futureperfect-lessons-v2';
+          const token=process.env.GH_TOKEN;
+          const cutover=new Date(process.env.CP11_CUTOVER_AT);
+          const headers={Authorization:`Bearer ${token}`,'User-Agent':'fpt-cp12-observer','X-GitHub-Api-Version':'2022-11-28'};
+          const all=[];
+          for(let page=1;page<=5;page++){
+            const r=await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=100&page=${page}`,{headers});
+            if(!r.ok) throw new Error(`GitHub Actions read failed ${r.status}`);
+            const body=await r.json(); const rows=body.workflow_runs||[];
+            all.push(...rows);
+            if(rows.length<100) break;
+          }
+          const pattern=/(import|release|catalog|catalogue|snapshot|material|reconcil|refresh|publish|production)/i;
+          const excluded=/(checkpoint\s*11|checkpoint\s*12|reversible.cutover|stabilisation)/i;
+          const candidate=all.filter(r=>new Date(r.created_at)>=cutover && pattern.test(`${r.name||''} ${r.path||''}`) && !excluded.test(`${r.name||''} ${r.path||''}`));
+          const completed=candidate.filter(r=>r.status==='completed');
+          const failures=completed.filter(r=>r.conclusion!=='success'&&r.conclusion!=='skipped');
+          const out={
+            marker:'REBUILD_CHECKPOINT12_OPERATIONAL_CYCLE_OBSERVATION',
+            readOnly:true,
+            since:cutover.toISOString(),
+            observedAt:new Date().toISOString(),
+            matchingRuns:candidate.map(r=>({id:String(r.id),name:r.name,path:r.path,event:r.event,status:r.status,conclusion:r.conclusion,createdAt:r.created_at,updatedAt:r.updated_at,headSha:r.head_sha})),
+            completedMatchingRuns:completed.length,
+            failedMatchingRuns:failures.length,
+            representativeCycleGateMet:false,
+            note:'Initial/read-only observation only. CP12 closure requires genuinely representative normal release/import cycles and sustained clean operation; this observer never manufactures pupil mutations.'
+          };
+          fs.writeFileSync('/tmp/checkpoint12-operational-cycles.json',JSON.stringify(out,null,2));
+          console.log(JSON.stringify(out,null,2));
+          NODE
+          node /tmp/cp12-operational.mjs
+
+      - name: Assemble CP12 initial observation evidence while keeping checkpoint OPEN
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker 'REBUILD_CHECKPOINT12_OBSERVATION_PASS' \
+            --arg observedSha "$GITHUB_SHA" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg executionSha "$EXECUTION_SHA" \
+            --arg executionRunId "$EXECUTION_RUN_ID" \
+            --slurpfile regression /tmp/checkpoint12-regression.json \
+            --slurpfile parity /tmp/checkpoint12-live-parity.json \
+            --slurpfile special /tmp/checkpoint12-special-area.json \
+            --slurpfile health /tmp/checkpoint12-candidate-health.json \
+            --slurpfile topology /tmp/checkpoint12-topology.json \
+            --slurpfile operational /tmp/checkpoint12-operational-cycles.json \
+            '{
+              marker:$marker,checkpoint:12,checkpointStatus:"OPEN",
+              initialObservationStatus:"PASS",representativeCycleGateMet:false,cp13Allowed:false,
+              readOnly:true,noPupilMutationPerformed:true,
+              observedSha:$observedSha,branch:$branch,runId:$runId,observedAt:$observedAt,
+              cp11Execution:{sha:$executionSha,runId:$executionRunId},
+              regression:$regression[0],parity:$parity[0],special:$special[0],
+              candidateHealth:$health[0],topology:$topology[0],operationalCycles:$operational[0],
+              openReasons:[
+                "Sustained clean operation through representative normal release/import cycles has not yet been demonstrated.",
+                "CP13 deletion/retirement remains prohibited while CP12 is OPEN."
+              ]
+            }' > /tmp/checkpoint12-stabilisation-observation.json
+          jq -e '
+            .marker=="REBUILD_CHECKPOINT12_OBSERVATION_PASS" and
+            .checkpointStatus=="OPEN" and .initialObservationStatus=="PASS" and
+            .representativeCycleGateMet==false and .cp13Allowed==false and
+            .readOnly==true and .noPupilMutationPerformed==true and
+            .regression.status=="PASS" and
+            .parity.status=="PASS" and .parity.catalogue.resourceMismatchCount==0 and .parity.students.unexplainedDifferenceCount==0 and
+            .special.status=="PASS" and .special.manualTokenCounts.VR_HOWTO==3 and (.special.directTokenCounts.VR_HOWTO // 0)==0 and
+            .candidateHealth.marker=="REBUILD_CHECKPOINT12_CANDIDATE_HEALTH_PASS" and
+            .topology.marker=="REBUILD_CHECKPOINT12_TOPOLOGY_PASS"
+          ' /tmp/checkpoint12-stabilisation-observation.json >/dev/null
+          cat /tmp/checkpoint12-stabilisation-observation.json
+          echo REBUILD_CHECKPOINT12_OBSERVATION_PASS
+          echo 'CP12 REMAINS OPEN — representative operational-cycle gate not yet met; CP13 is not authorised.'
+
+      - name: Upload CP12 read-only stabilisation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint12-stabilisation-observation-evidence
+          retention-days: 90
+          if-no-files-found: ignore
+          path: |
+            /tmp/checkpoint12-stabilisation-observation.json
+            /tmp/checkpoint12-cp11-execution-gate.json
+            /tmp/checkpoint12-regression.json
+            /tmp/checkpoint12-live-parity.json
+            /tmp/checkpoint12-special-area.json
+            /tmp/checkpoint12-profile-mode.json
+            /tmp/checkpoint12-student-health.json
+            /tmp/checkpoint12-candidate-health.json
+            /tmp/checkpoint12-topology.json
+            /tmp/checkpoint12-operational-cycles.json
+            /tmp/checkpoint12-retained-source-paths.txt
