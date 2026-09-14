@@ -1,0 +1,107 @@
+name: CP12 VR resource repair production preflight
+
+on:
+  push:
+    branches:
+      - fix/cp12-vr-resource-repair-2026-09-14
+    paths:
+      - '.github/workflows/cp12-vr-resource-repair-production-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_HOST: lessons.futureperfect.education
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+      EXPECTED_STUDENT_ROLLBACK_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+      EXPECTED_CP12_SHA: a0f2bef3eb4c1560031cfa703029b54b298a2d0c
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fresh read-only topology and binding verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ACTUAL_CP12="$(git ls-remote origin refs/heads/rebuild/checkpoint12-stabilisation-2026-09-14 | awk '{print $1}')"
+          test "$ACTUAL_CP12" = "$EXPECTED_CP12_SHA"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const browser=clean(process.env.BROWSER_WORKER);
+          const student=clean(process.env.STUDENT_WORKER);
+          const expectedStudent=clean(process.env.EXPECTED_STUDENT_VERSION);
+          const expectedRollback=clean(process.env.EXPECTED_STUDENT_ROLLBACK_VERSION);
+          const base='https://api.cloudflare.com/client/v4';
+          async function cf(path){
+            const r=await fetch(`${base}${path}`,{headers:{Authorization:`Bearer ${token}`}});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok||body?.success!==true) throw new Error(`Cloudflare read failed ${r.status}: ${path}: ${clean(body?.errors?.[0]?.message||text).slice(0,200)}`);
+            return body.result;
+          }
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Zone not found');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser) throw new Error(`Public route drift: ${JSON.stringify(hostRoutes)}`);
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);
+          const bindings=x=>Array.isArray(x?.bindings)?x.bindings:[];
+          const browserBindings=bindings(browserSettings);
+          const studentBindings=bindings(studentSettings);
+          const studentBinding=browserBindings.find(b=>clean(b.name)==='STUDENT_RUNTIME'&&clean(b.service)===student);
+          if(!studentBinding) throw new Error(`Browser STUDENT_RUNTIME service binding drift: ${JSON.stringify(browserBindings.map(b=>({name:b.name,type:b.type,service:b.service})))}`);
+          if(browserBindings.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`))) throw new Error('Browser has forbidden Admin/AdminOps binding');
+          const readBinding=studentBindings.find(b=>clean(b.name)==='READ_MODELS_KV'&&clean(b.namespace_id));
+          const studentsBinding=studentBindings.find(b=>clean(b.name)==='STUDENTS_KV'&&clean(b.namespace_id));
+          const d1Binding=studentBindings.find(b=>clean(b.name)==='DB'&&clean(b.database_id||b.id));
+          const r2Binding=studentBindings.find(b=>clean(b.name)==='MATERIALS_R2'&&clean(b.bucket_name||b.bucket));
+          if(!readBinding||!studentsBinding||!d1Binding||!r2Binding) throw new Error('Student production bindings incomplete');
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`);
+          const rows=Array.isArray(deployments?.deployments)?deployments.deployments:Array.isArray(deployments)?deployments:[];
+          const activeDeployment=rows[0]||{};
+          const activeVersions=Array.isArray(activeDeployment.versions)?activeDeployment.versions:[];
+          const activeVersion=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
+          if(activeVersion!==expectedStudent) throw new Error(`Student active version drift: ${activeVersion}`);
+          const versions=await cf(`/accounts/${account}/workers/services/${encodeURIComponent(student)}/versions`);
+          const versionRows=Array.isArray(versions)?versions:Array.isArray(versions?.items)?versions.items:[];
+          if(!versionRows.some(v=>clean(v.id||v.version_id)===expectedRollback)) throw new Error(`Expected rollback version not retained: ${expectedRollback}`);
+          const browserDeployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/deployments`);
+          const browserRows=Array.isArray(browserDeployments?.deployments)?browserDeployments.deployments:Array.isArray(browserDeployments)?browserDeployments:[];
+          const browserVersions=Array.isArray(browserRows[0]?.versions)?browserRows[0].versions:[];
+          const browserActive=clean((browserVersions.find(v=>Number(v.percentage||0)===100)||browserVersions[0])?.version_id);
+          const evidence={
+            marker:'CP12_VR_PRODUCTION_PREFLIGHT_PASS',
+            observedAt:new Date().toISOString(),
+            route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},
+            browser:{worker:browser,activeVersion:browserActive,studentServiceBinding:clean(studentBinding.service),adminOpsBinding:false},
+            student:{worker:student,activeVersion,rollbackVersionRetained:true,readModelsKvId:clean(readBinding.namespace_id),studentsKvId:clean(studentsBinding.namespace_id),d1Id:clean(d1Binding.database_id||d1Binding.id),r2Bucket:clean(r2Binding.bucket_name||r2Binding.bucket)}
+          };
+          fs.writeFileSync('/tmp/cp12-vr-production-preflight.json',JSON.stringify(evidence,null,2)+'\n');
+          console.log(JSON.stringify(evidence));
+          NODE
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-vr-production-preflight
+          path: /tmp/cp12-vr-production-preflight.json
+          if-no-files-found: error
+          retention-days: 30
