@@ -1,0 +1,200 @@
+name: Rebuild Checkpoint 12 - Topology Diagnostic Read-only
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - .github/workflows/rebuild-checkpoint12-topology-diagnostic-readonly.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROD_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  EXPECTED_PROD_DEPLOYMENT: ce193be0-d018-403f-a417-999e9e6eea41
+  EXPECTED_PROD_VERSION: aed13a31-21fa-49c3-8830-c37fd8645c31
+  EXPECTED_FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_PROD_R2: fpt-materials-dev
+  PROD_SHADOW_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  PROD_SHADOW_D1_ID: 3a17180e-b554-4740-a629-bcaca6a2eeb5
+  NEW_STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  NEW_BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  EXPECTED_STUDENT_DEPLOYMENT: 386f0251-b495-4197-8091-7b807418df7c
+  EXPECTED_STUDENT_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  EXPECTED_BROWSER_DEPLOYMENT: dd94cb2c-0f21-470a-bcc4-59d482771f23
+  EXPECTED_BROWSER_VERSION: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert diagnostic contains no production mutation commands
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const text=fs.readFileSync('.github/workflows/rebuild-checkpoint12-topology-diagnostic-readonly.yml','utf8');
+          const forbidden=[
+            ['wrangler','deploy'].join(' '),
+            ['wrangler','secret','put'].join(' '),
+            ['-X','POST'].join(' '),
+            ['-X','PUT'].join(' '),
+            ['-X','PATCH'].join(' '),
+            ['-X','DELETE'].join(' ')
+          ];
+          const hits=forbidden.filter(x=>text.includes(x));
+          if(hits.length) throw new Error(`Mutating command present: ${hits.join(', ')}`);
+          NODE
+
+      - name: Capture topology diagnostics read-only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/cp12-topology-diagnostic.mjs <<'NODE'
+          import fs from 'node:fs';
+          import https from 'node:https';
+          import { Resolver, resolve4 } from 'node:dns/promises';
+
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const ghToken=clean(process.env.GH_TOKEN);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const browser=clean(process.env.NEW_BROWSER_WORKER);
+          const student=clean(process.env.NEW_STUDENT_WORKER);
+          const legacyWorker=clean(process.env.PROD_WORKER);
+          const expected={
+            legacy:{deploymentId:clean(process.env.EXPECTED_PROD_DEPLOYMENT),versionId:clean(process.env.EXPECTED_PROD_VERSION)},
+            student:{deploymentId:clean(process.env.EXPECTED_STUDENT_DEPLOYMENT),versionId:clean(process.env.EXPECTED_STUDENT_VERSION)},
+            browser:{deploymentId:clean(process.env.EXPECTED_BROWSER_DEPLOYMENT),versionId:clean(process.env.EXPECTED_BROWSER_VERSION)},
+            frontendMain:clean(process.env.EXPECTED_FRONTEND_MAIN_SHA),
+            data:[
+              clean(process.env.EXPECTED_STUDENTS_KV_ID),clean(process.env.EXPECTED_LESSONS_KV_ID),
+              clean(process.env.EXPECTED_PROD_D1_ID),clean(process.env.EXPECTED_PROD_R2),
+              clean(process.env.PROD_SHADOW_KV_ID),clean(process.env.PROD_SHADOW_D1_ID)
+            ].filter(Boolean)
+          };
+          const out={marker:'REBUILD_CHECKPOINT12_TOPOLOGY_DIAGNOSTIC',readOnly:true,observedAt:new Date().toISOString(),host,expected,checks:{}};
+          const base='https://api.cloudflare.com/client/v4';
+          async function cf(path){
+            const r=await fetch(`${base}${path}`,{headers:{Authorization:`Bearer ${token}`}});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok||body?.success!==true) throw new Error(`Cloudflare read failed ${r.status}: ${path}; ${clean(body?.errors?.[0]?.message||text).slice(0,240)}`);
+            return body;
+          }
+          function anchor(body){
+            const rows=body?.result?.deployments||body?.result||[];
+            const first=Array.isArray(rows)?rows[0]:null;
+            const versions=Array.isArray(first?.versions)?first.versions:[];
+            return {deploymentId:clean(first?.id),versionId:clean((versions.find(v=>Number(v?.percentage||0)===100)||versions[0])?.version_id)};
+          }
+          async function check(name,fn){
+            try{out.checks[name]={ok:true,value:await fn()};}
+            catch(e){out.checks[name]={ok:false,error:clean(e?.message||e)};}
+          }
+
+          let zone=null, records=[], routeRows=[], settingsText='';
+          await check('zone',async()=>{
+            const zones=(await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`)).result||[];
+            zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0]||null;
+            if(!zone) throw new Error('No Cloudflare zone for host');
+            return {id:zone.id,name:zone.name};
+          });
+          await check('dns',async()=>{
+            if(!zone) throw new Error('Zone unavailable');
+            records=(await cf(`/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}&per_page=100`)).result||[];
+            return records.map(r=>({id:r.id,type:r.type,name:r.name,content:r.content,proxied:r.proxied}));
+          });
+          await check('routes',async()=>{
+            if(!zone) throw new Error('Zone unavailable');
+            routeRows=(await cf(`/zones/${zone.id}/workers/routes`)).result||[];
+            return routeRows.filter(r=>clean(r.pattern).toLowerCase().includes(host)).map(r=>({id:r.id,pattern:r.pattern,script:r.script}));
+          });
+          const settings={};
+          for(const [label,script] of [['legacy',legacyWorker],['student',student],['browser',browser]]){
+            await check(`${label}Settings`,async()=>{
+              const body=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(script)}/settings`);
+              settings[label]=body.result;
+              const bindings=Array.isArray(body?.result?.bindings)?body.result.bindings:[];
+              return bindings.map(b=>({name:clean(b.name),type:clean(b.type),namespace_id:clean(b.namespace_id),database_id:clean(b.database_id),bucket_name:clean(b.bucket_name),service:clean(b.service)}));
+            });
+            await check(`${label}Deployment`,async()=>anchor(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(script)}/deployments`)));
+          }
+          settingsText=JSON.stringify(settings);
+          out.checks.retainedData={ok:true,value:Object.fromEntries(expected.data.map(id=>[id,settingsText.includes(id)]))};
+
+          await check('rollbackFrontend',async()=>{
+            const headers={'user-agent':'fpt-cp12-topology-diagnostic'};
+            if(ghToken) headers.Authorization=`Bearer ${ghToken}`;
+            const r=await fetch('https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-test/branches/main',{headers});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok) throw new Error(`GitHub rollback branch read failed ${r.status}: ${clean(body?.message||text).slice(0,200)}`);
+            return {sha:clean(body?.commit?.sha),rateRemaining:r.headers.get('x-ratelimit-remaining')};
+          });
+
+          await check('authoritativeEdge',async()=>{
+            if(!zone) throw new Error('Zone unavailable');
+            const details=(await cf(`/zones/${zone.id}`)).result||{};
+            const nameservers=Array.isArray(details.name_servers)?details.name_servers.map(clean).filter(Boolean):[];
+            if(!nameservers.length) throw new Error('No authoritative nameservers');
+            let resolved=null,lastError='';
+            for(const ns of nameservers){
+              let nsIps=[]; try{nsIps=await resolve4(ns);}catch(e){lastError=clean(e?.message);continue;}
+              for(const nsIp of nsIps){
+                try{const resolver=new Resolver();resolver.setServers([nsIp]);const edgeIps=await resolver.resolve4(host);if(edgeIps.length){resolved={nameserver:ns,nameserverIp:nsIp,edgeIps:[...new Set(edgeIps)]};break;}}catch(e){lastError=clean(e?.message);}
+              }
+              if(resolved) break;
+            }
+            if(!resolved) throw new Error(`Authoritative resolution failed: ${lastError}`);
+            function direct(path,edgeIp){
+              return new Promise((resolve,reject)=>{
+                const req=https.request({protocol:'https:',hostname:edgeIp,port:443,servername:host,path,method:'GET',headers:{Host:host,'Cache-Control':'no-store','User-Agent':'fpt-cp12-topology-diagnostic'},rejectUnauthorized:true,timeout:10000},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>resolve({status:res.statusCode||0,text:Buffer.concat(chunks).toString('utf8'),headers:res.headers}));});
+                req.on('timeout',()=>req.destroy(new Error('Direct edge timeout')));req.on('error',reject);req.end();
+              });
+            }
+            const edgeIp=resolved.edgeIps[0];
+            const api=await direct('/api/v2/student/home',edgeIp);
+            const root=await direct('/',edgeIp);
+            return {nameserver:resolved.nameserver,nameserverIp:resolved.nameserverIp,edgeIp,apiStatus:api.status,rootStatus:root.status,facade:clean(api.headers['x-fpt-cp9-browser-facade']).toLowerCase()==='service-binding',brand:/Future Perfect Tuitions/i.test(root.text)};
+          });
+
+          const values=out.checks;
+          const retained=values.retainedData?.value||{};
+          out.comparison={
+            dnsExpected:Boolean(values.dns?.ok && values.dns.value?.length===1 && values.dns.value[0]?.type==='CNAME' && values.dns.value[0]?.proxied===true && clean(values.dns.value[0]?.content).toLowerCase()==='futureperfecttuitions.github.io'),
+            routeExpected:Boolean(values.routes?.ok && values.routes.value?.some(r=>clean(r.pattern).toLowerCase()===`${host}/*`&&clean(r.script)===browser) && !values.routes.value?.some(r=>clean(r.script)!==browser)),
+            legacyDeploymentExpected:JSON.stringify(values.legacyDeployment?.value||{})===JSON.stringify(expected.legacy),
+            studentDeploymentExpected:JSON.stringify(values.studentDeployment?.value||{})===JSON.stringify(expected.student),
+            browserDeploymentExpected:JSON.stringify(values.browserDeployment?.value||{})===JSON.stringify(expected.browser),
+            frontendExpected:clean(values.rollbackFrontend?.value?.sha)===expected.frontendMain,
+            retainedDataExpected:expected.data.every(id=>retained[id]===true),
+            authoritativeEdgeExpected:Boolean(values.authoritativeEdge?.ok && values.authoritativeEdge.value?.rootStatus===200 && values.authoritativeEdge.value?.apiStatus===401 && values.authoritativeEdge.value?.facade===true && values.authoritativeEdge.value?.brand===true)
+          };
+          out.allExpected=Object.values(out.comparison).every(Boolean);
+          fs.writeFileSync('/tmp/checkpoint12-topology-diagnostic.json',JSON.stringify(out,null,2)+'\n');
+          console.log(JSON.stringify({marker:out.marker,allExpected:out.allExpected,comparison:out.comparison,failedReads:Object.fromEntries(Object.entries(out.checks).filter(([,v])=>v.ok===false).map(([k,v])=>[k,v.error]))},null,2));
+          NODE
+          node /tmp/cp12-topology-diagnostic.mjs
+
+      - name: Upload read-only topology diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint12-topology-diagnostic-readonly
+          path: /tmp/checkpoint12-topology-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
