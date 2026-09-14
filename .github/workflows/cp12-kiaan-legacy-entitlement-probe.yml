@@ -1,0 +1,29 @@
+name: CP12 Kiaan legacy entitlement probe
+
+on:
+  push:
+    branches:
+      - fix/cp12-complete-batch-view-registry-2026-09-14
+    paths:
+      - 'scripts/cp12-kiaan-legacy-entitlement-probe.mjs'
+      - '.github/workflows/cp12-kiaan-legacy-entitlement-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OPS_WORKER: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check scripts/cp12-kiaan-legacy-entitlement-probe.mjs
+      - run: node scripts/cp12-kiaan-legacy-entitlement-probe.mjs
