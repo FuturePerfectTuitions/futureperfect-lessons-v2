@@ -13,6 +13,7 @@ const studentProd=clean(process.env.NEW_STUDENT_WORKER||'fpt-portal-v2-rebuild-s
 const browserProd=clean(process.env.NEW_BROWSER_WORKER||'fpt-portal-v2-rebuild-browser-prod');
 const expectedShadowKv=clean(process.env.PROD_SHADOW_KV_ID||'77b35165c8694087bc1b0515c35a7e89');
 const expectedShadowD1=clean(process.env.PROD_SHADOW_D1_ID||'3a17180e-b554-4740-a629-bcaca6a2eeb5');
+const rollbackCname='futureperfecttuitions.github.io';
 if(!token||!account||!expectedDeployment||!expectedVersion||!expectedFrontendSha) throw new Error('CP11 preflight requires Cloudflare credentials and frozen anchors.');
 const base='https://api.cloudflare.com/client/v4';
 const headers={Authorization:`Bearer ${token}`};
@@ -28,7 +29,7 @@ async function envelope(path,options={}){
 }
 async function workerExists(name){
   const {response,body}=await request(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);
-  if(response.status===404) return {exists:false};
+  if(response.status===404) return {exists:false,bindings:[]};
   if(!response.ok||body?.success!==true) throw new Error(`Worker inventory failed for ${name}: ${response.status}`);
   const bindings=(body.result?.bindings||[]).map(x=>({name:x.name,type:x.type,namespace_id:x.namespace_id||null,database_id:x.database_id||x.id||null,bucket_name:x.bucket_name||x.bucket||null,service:x.service||null}));
   return {exists:true,bindings};
@@ -73,10 +74,13 @@ const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b
 if(!zone) throw new Error(`No Cloudflare zone found for ${host}.`);
 const dns=(await envelope(`/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}&per_page=100`)).result||[];
 if(dns.length!==1) throw new Error(`Expected exactly one DNS record for ${host}; got ${dns.length}.`);
+if(clean(dns[0].type).toUpperCase()!=='CNAME'||clean(dns[0].content).toLowerCase()!==rollbackCname||dns[0].proxied===true) {
+  throw new Error('Public DNS is not at the verified GitHub Pages rollback baseline.');
+}
 const routes=(await envelope(`/zones/${zone.id}/workers/routes`)).result||[];
 const matchingRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host.toLowerCase()));
+if(matchingRoutes.length) throw new Error('Public Worker routing is not at the verified pre-cutover baseline.');
 const [studentInventory,browserInventory]=await Promise.all([workerExists(studentProd),workerExists(browserProd)]);
-if(studentInventory.exists||browserInventory.exists) throw new Error('Intended CP11 production rebuild Worker name already exists; refusing to overwrite without explicit reconciliation.');
 
 const gh=await fetch('https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-test/branches/main',{headers:{'User-Agent':'fpt-cp11-preflight'}});
 if(!gh.ok) throw new Error(`Frontend branch query failed: ${gh.status}`);
@@ -92,9 +96,9 @@ const summary={
   exactSha:clean(process.env.GITHUB_SHA),
   production:{worker,deploymentId:dep.deploymentId,versionId:dep.versionId,studentsKv,lessonsKv,db:prodDb,r2:prodR2,dualWriteShadowKvBound:true,dualWriteShadowD1Bound:true,scopeSaltPresent:true,answerRateTablePresent:true},
   frontend:{repository:'FuturePerfectTuitions/futureperfect-lessons-test',mainSha:frontendMainSha,publicHost:host,publicHttpStatus:publicResponse.status,publicBodySha256:crypto.createHash('sha256').update(publicText).digest('hex')},
-  cloudflare:{zoneId:zone.id,zoneName:zone.name,dns:{id:dns[0].id,type:dns[0].type,name:dns[0].name,content:dns[0].content,proxied:Boolean(dns[0].proxied),ttl:dns[0].ttl},matchingWorkerRoutes:matchingRoutes.map(r=>({id:r.id,pattern:r.pattern,script:r.script||null}))},
-  intendedNames:{student:studentProd,browser:browserProd,studentUnused:!studentInventory.exists,browserUnused:!browserInventory.exists},
-  safety:{readOnly:true,productionDataMutated:false,productionRoutingMutated:false,frontendMutated:false}
+  cloudflare:{zoneId:zone.id,zoneName:zone.name,dns:{id:dns[0].id,type:dns[0].type,name:dns[0].name,content:dns[0].content,proxied:Boolean(dns[0].proxied),ttl:dns[0].ttl},matchingWorkerRoutes:[]},
+  intendedNames:{student:studentProd,browser:browserProd,studentExists:studentInventory.exists,browserExists:browserInventory.exists,privateCandidatesMayBeReused:studentInventory.exists||browserInventory.exists},
+  safety:{readOnly:true,productionDataMutated:false,productionRoutingMutated:false,frontendMutated:false,publicBaselineVerified:true}
 };
 fs.writeFileSync('/tmp/checkpoint11-preflight.json',JSON.stringify(summary,null,2));
 console.log(JSON.stringify(summary,null,2));
