@@ -61,42 +61,53 @@ const lesson=await kvJson(lessonsNs,'lesson:Y5E2');
 if(!lesson)throw new Error('Canonical Y5E2 source unavailable.');
 const detail=await compileLessonDetail(lesson,{resourceExists:async()=>true});
 const vrRows=(detail.resources||[]).filter(row=>(row.presentationScopes||[]).includes('vr'));
-const requiredGroups=new Set(['vr-prelesson','vr-homework']);
-for(const group of requiredGroups)if(!vrRows.some(row=>row.presentationGroup===group))throw new Error(`Y5E2 missing ${group} in compiled candidate.`);
+for(const group of ['vr-prelesson','vr-homework'])if(!vrRows.some(row=>row.presentationGroup===group))throw new Error(`Y5E2 missing ${group} in compiled candidate.`);
 if(!vrRows.some(row=>row.presentationGroup==='vr-prelesson'&&row.type==='answer-pack'&&row.protected===true))throw new Error('Y5E2 VR PreLesson protected answer missing.');
 if(!vrRows.some(row=>row.presentationGroup==='vr-homework'&&row.type==='answer-pack'&&row.protected===true))throw new Error('Y5E2 VR Homework protected answer missing.');
 
 const global=await currentPayload('global');
 const catalogue=globalToCatalogue(global);
-const username='cp12vrui';
-const scopeId=await opaqueAccessScopeId(username,accessSecret);
-const access=compileAccessScope({
-  asOfDate:asOf,
-  user:{firstName:'CP12 VR UI',accountStatus:'active',expiresOn:'2027-08-31'},
-  batchAssignments:[{batch_key:'CP12-Y5E11',subject:'english',school_year:5,stream:'11plus',effective_from:'2026-09-01',effective_to:null}],
-  entitlements:[{lesson_id:'Y5E2',viewId:'english-year5-11plus',core_access:1,vr_access:1,source:'cp12-ui-staging'}],
-  onlinePreLessonEntitlements:[]
-},catalogue,{scopeId,asOfDate:asOf});
-const state=access?.snapshot?.lessonAccess?.Y5E2;
-if(state?.core!==true||state?.vr!==true||state?.blocked===true)throw new Error('CP12 VR UI staging access did not compile as core+VR.');
-if(!(access?.snapshot?.views||[]).some(view=>view.viewId==='english-year5-11plus'&&view.lockedPreview!==true))throw new Error('CP12 VR UI staging 11+ English view unavailable.');
-
 const versionSuffix=crypto.createHash('sha256').update(`cp12-resource-ui:${Date.now()}`).digest('hex').slice(0,12);
-const rmItems=[
-  ...await scopePairs('lesson:Y5E2',detail,`cp12-ui-lesson-${versionSuffix}`),
-  ...await scopePairs(`access:${scopeId}`,access,`cp12-ui-access-${versionSuffix}`)
+const personas=[
+  {
+    username:'cp12vrui', firstName:'CP12 VR UI', viewId:'english-year5-11plus', expectVr:true,
+    batchAssignments:[{batch_key:'CP12-Y5E11',subject:'english',school_year:5,stream:'11plus',effective_from:'2026-09-01',effective_to:null}],
+    entitlement:{lesson_id:'Y5E2',viewId:'english-year5-11plus',core_access:1,vr_access:1,source:'cp12-ui-staging'}
+  },
+  {
+    username:'cp12coreui', firstName:'CP12 Core UI', viewId:'english-year5', expectVr:false,
+    batchAssignments:[{batch_key:'CP12-Y5E',subject:'english',school_year:5,stream:'normal',effective_from:'2026-09-01',effective_to:null}],
+    entitlement:{lesson_id:'Y5E2',viewId:'english-year5',core_access:1,vr_access:0,source:'cp12-ui-staging'}
+  }
 ];
+const rmItems=[...await scopePairs('lesson:Y5E2',detail,`cp12-ui-lesson-${versionSuffix}`)];
+const userItems=[];
+const accessSummary=[];
+for(const persona of personas){
+  const scopeId=await opaqueAccessScopeId(persona.username,accessSecret);
+  const access=compileAccessScope({
+    asOfDate:asOf,
+    user:{firstName:persona.firstName,accountStatus:'active',expiresOn:'2027-08-31'},
+    batchAssignments:persona.batchAssignments,
+    entitlements:[persona.entitlement],
+    onlinePreLessonEntitlements:[]
+  },catalogue,{scopeId,asOfDate:asOf});
+  const state=access?.snapshot?.lessonAccess?.Y5E2;
+  if(state?.core!==true||state?.blocked===true||Boolean(state?.vr)!==persona.expectVr)throw new Error(`CP12 UI access mismatch for ${persona.username}.`);
+  if(!(access?.snapshot?.views||[]).some(view=>view.viewId===persona.viewId&&view.lockedPreview!==true))throw new Error(`CP12 UI view unavailable for ${persona.username}.`);
+  rmItems.push(...await scopePairs(`access:${scopeId}`,access,`cp12-ui-access-${persona.username}-${versionSuffix}`));
+  userItems.push({key:`user:${persona.username}`,value:JSON.stringify({name:persona.firstName,p:loginPassword,answerPassword,status:'active',expires:'2027-08-31'})});
+  accessSummary.push({username:persona.username,viewId:persona.viewId,core:true,vr:persona.expectVr,credentialDisclosed:false});
+}
 await kvBulk(readNs,rmItems);
-await kvBulk(studentsNs,[{key:`user:${username}`,value:JSON.stringify({name:'CP12 VR UI',p:loginPassword,answerPassword,status:'active',expires:'2027-08-31'})}]);
+await kvBulk(studentsNs,userItems);
 
 const summary={
   marker:'CP12_RESOURCE_UI_STAGING_SEED_PASS',
-  username,
   lessonId:'Y5E2',
-  viewId:'english-year5-11plus',
-  credentialDisclosed:false,
+  accessSummary,
   vrRows:vrRows.map(row=>({type:row.type,displayName:row.displayName,protected:row.protected===true,presentationScopes:row.presentationScopes,presentationGroup:row.presentationGroup})),
   coreRows:(detail.resources||[]).filter(row=>!(row.presentationScopes||[]).includes('vr')).map(row=>({type:row.type,displayName:row.displayName,presentationGroup:row.presentationGroup||null}))
 };
 fs.writeFileSync('/tmp/cp12-resource-ui-staging-seed.json',JSON.stringify(summary,null,2)+'\n');
-console.log(JSON.stringify({marker:summary.marker,lessonId:summary.lessonId,vrRowCount:summary.vrRows.length,groups:[...new Set(summary.vrRows.map(row=>row.presentationGroup))]}));
+console.log(JSON.stringify({marker:summary.marker,lessonId:summary.lessonId,vrRowCount:summary.vrRows.length,groups:[...new Set(summary.vrRows.map(row=>row.presentationGroup))],personas:accessSummary.map(row=>({viewId:row.viewId,vr:row.vr}))}));
