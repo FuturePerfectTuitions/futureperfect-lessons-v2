@@ -1,3 +1,5 @@
+import { viewDefinition, viewIdForBatch } from '../../rebuild/shared/read-models/view-registry.mjs';
+
 const LOGIN_PATH = '/api/v1/admin/lesson-releases/login';
 const PREVIEW_PATH = '/api/v1/admin/lesson-releases/preview';
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';
@@ -200,6 +202,48 @@ function isBlocked(student, lessonId) {
   return new Set(Array.isArray(student?.blockedLessons) ? student.blockedLessons.map(String) : []).has(lessonId);
 }
 
+function lessonPresentationViewIds(lesson) {
+  const ids = new Set();
+  for (const source of [lesson?.displayIds, lesson?.displayLessonIds, lesson?.presentation?.displayIds]) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    for (const key of Object.keys(source)) {
+      const viewId = clean(key).toLowerCase();
+      if (viewDefinition(viewId)) ids.add(viewId);
+    }
+  }
+  return [...ids].sort();
+}
+
+async function validateAmbiguousBatchView(env, item, lesson) {
+  const views = lessonPresentationViewIds(lesson);
+  if (views.length <= 1) return null;
+  const batchKey = clean(item?.batchKey);
+  if (!batchKey) {
+    return {
+      error:'BATCH_DEFINITION_REQUIRED',
+      message:'This lesson has more than one Portal presentation, so the CSV Mode must have a configured batch definition before release.'
+    };
+  }
+  const batch = await env.DB.prepare(
+    `SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to
+     FROM batch_definitions WHERE batch_key = ?`
+  ).bind(batchKey).first();
+  if (!batch) {
+    return {
+      error:'BATCH_DEFINITION_REQUIRED',
+      message:'This lesson has more than one Portal presentation and the CSV Mode is not configured in batch definitions.'
+    };
+  }
+  const viewId = viewIdForBatch(batch);
+  if (!viewId || !views.includes(viewId)) {
+    return {
+      error:'BATCH_VIEW_MISMATCH',
+      message:'The CSV Mode batch definition does not map to a Portal presentation for this lesson.'
+    };
+  }
+  return { viewId };
+}
+
 async function validatePortalState(env, item, resolvedLesson = null) {
   const [student, lesson] = await Promise.all([
     env.STUDENTS_KV.get(`user:${item.portalUserIdNorm}`, { type:'json' }),
@@ -215,6 +259,9 @@ async function validatePortalState(env, item, resolvedLesson = null) {
   if (!['maths','english'].includes(subject)) {
     return { error:'INVALID_LESSON_SUBJECT', message:'Lesson subject is not a normal Maths/English entitlement subject.' };
   }
+
+  const batchView = await validateAmbiguousBatchView(env, item, lesson);
+  if (batchView?.error) return batchView;
 
   if (isBlocked(student, item.lessonId)) {
     return { error:'BLOCKED', message:'Lesson is blocked for this student.' };

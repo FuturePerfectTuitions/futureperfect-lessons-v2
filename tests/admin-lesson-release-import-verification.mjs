@@ -22,6 +22,12 @@ class MemoryDB {
   constructor() {
     this.entitlements = new Map();
     this.prelessons = new Map();
+    this.batchDefinitions = new Map([
+      ['Y511OE', {
+        batch_key:'Y511OE', subject:'english', school_year:5,
+        stream:'11plus', maths_level:null, active_from:'2026-09-01', active_to:null
+      }]
+    ]);
   }
   prepare(sql) { return new BoundStatement(this, sql); }
   async batch(statements) {
@@ -33,7 +39,6 @@ class MemoryDB {
 
   rejectBatchRosterDependency(sql) {
     if (
-      sql.includes('batch_definitions') ||
       sql.includes('student_batch_assignments') ||
       sql.includes('batch_lesson_releases')
     ) {
@@ -43,6 +48,9 @@ class MemoryDB {
 
   async first(sql, args) {
     this.rejectBatchRosterDependency(sql);
+    if (sql.includes('FROM batch_definitions')) {
+      return this.batchDefinitions.get(args[0]) || null;
+    }
     if (sql.includes('FROM lesson_entitlements')) {
       return this.entitlements.get(this.entitlementKey(args[0], args[1])) || null;
     }
@@ -148,7 +156,7 @@ const onlineReady = {
   Lesson:'Y5T1E01 Descriptive Writing Settings and Atmosphere',
   LessonDated:'7th September 2026',
   LessonStatus:'Ready',
-  Mode:'Y511OE_NEW_NOT_IN_D1',
+  Mode:'Y511OE',
   Student:'Pre0101'
 };
 
@@ -349,4 +357,31 @@ assert.equal(aliasPreview.response.status, 200);
 assert.equal(aliasPreview.body.results[0].lessonId, 'Y5E2');
 assert.equal(aliasPreview.body.results[0].action, 'ALREADY_FULL');
 
-console.log('Lesson release importer ignores D1 batch roster and verifies display IDs + FULL/PRELESSON_ONLY + continuing FULL release: PASS');
+// Ambiguous shared-curriculum lessons must not be released with an undefined
+// Mode/batch because the prepared access compiler could not derive a navigation view.
+const ambiguousUnknownBatch = { ...onlineReady, Mode:'Y511OE_NOT_CONFIGURED' };
+const guardedPreview = await call(
+  '/api/v1/admin/lesson-releases/preview',
+  { rows:[ambiguousUnknownBatch] },
+  token
+);
+assert.equal(guardedPreview.response.status, 200);
+assert.equal(guardedPreview.body.summary.errors, 1);
+assert.equal(guardedPreview.body.results[0].action, 'BATCH_DEFINITION_REQUIRED');
+const entitlementCountBeforeGuardedConfirm = db.entitlements.size;
+const prelessonCountBeforeGuardedConfirm = db.prelessons.size;
+const guardedConfirm = await call(
+  '/api/v1/admin/lesson-releases/confirm',
+  { rows:[ambiguousUnknownBatch] },
+  token
+);
+assert.equal(guardedConfirm.response.status, 409);
+assert.equal(guardedConfirm.body.error, 'VALIDATION_FAILED');
+assert.equal(db.entitlements.size, entitlementCountBeforeGuardedConfirm, 'Guarded confirm must not write full access');
+assert.equal(db.prelessons.size, prelessonCountBeforeGuardedConfirm, 'Guarded confirm must not write PreLesson access');
+
+// A single-presentation lesson may retain an unknown batch code as audit metadata;
+// the compiler has exactly one safe fallback view in that case.
+assert.equal(db.entitlements.get('full0202|Y3M1')?.source_batch_code, 'Y3FM_NEW_X');
+
+console.log('Lesson release importer validates ambiguous batch views and preserves safe single-view fallback + FULL/PRELESSON_ONLY + continuing FULL release: PASS');
