@@ -1,0 +1,102 @@
+name: CP12 importer guard production preflight
+
+on:
+  push:
+    branches: [fix/cp12-import-batch-view-guard-2026-09-14]
+    paths: ['.github/workflows/cp12-import-batch-view-guard-production-preflight.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-importer-guard-production
+  cancel-in-progress: false
+
+env:
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  LEGACY_WORKER: fpt-portal-v2-worker
+  ACTIVE_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  ROLLBACK_STUDENT_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  VALIDATED_SOURCE_COMMIT: c38b07c3fe73ed1806a616ed87e710a16df32dd8
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify validated source and Phase-23 entrypoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$VALIDATED_SOURCE_COMMIT" HEAD
+          grep -Fq 'name = "fpt-portal-v2-worker"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.toml
+          grep -Fq '[[send_email]]' worker/wrangler.toml
+          grep -Fq 'name = "EMAIL"' worker/wrangler.toml
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          echo CP12_IMPORTER_SOURCE_PREFLIGHT_PASS
+
+      - name: Fresh production topology version binding and rollback verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and any(.result[]; .pattern==$route and .script==$browser) and ([.result[]|select(.pattern==$route and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser.json
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[] | select(.type=="service" and .name!="STAGING_API")]|length)==0' /tmp/browser.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-deployments.json
+          ACTIVE="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/student-deployments.json | head -n1)"
+          test "$ACTIVE" = "$ACTIVE_STUDENT_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions.json
+          jq -e --arg old "$ROLLBACK_STUDENT_VERSION" 'any(.result.items[]; .id==$old)' /tmp/student-versions.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/settings" "${AUTH[@]}" -o /tmp/legacy-settings.json
+          jq -e '.success==true' /tmp/legacy-settings.json >/dev/null
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB EMAIL; do
+            jq -e --arg n "$binding" 'any(.result.bindings[]; .name==$n)' /tmp/legacy-settings.json >/dev/null
+          done
+          jq -e 'any(.result.bindings[]; .name=="EMAIL" and .type=="send_email")' /tmp/legacy-settings.json >/dev/null
+          jq -e 'any(.result.bindings[]; .name=="ADMIN_IMPORT_PASSWORD" and ((.type // "")|test("secret";"i")))' /tmp/legacy-settings.json >/dev/null
+          jq -e 'any(.result.bindings[]; .name=="ADMIN_IMPORT_SESSION_SECRET" and ((.type // "")|test("secret";"i")))' /tmp/legacy-settings.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/deployments" "${AUTH[@]}" -o /tmp/legacy-deployments.json
+          LEGACY_VERSION="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/legacy-deployments.json | head -n1)"
+          test -n "$LEGACY_VERSION"
+
+          jq -n \
+            --arg marker CP12_IMPORTER_GUARD_PRODUCTION_PREFLIGHT_PASS \
+            --arg browser "$BROWSER_WORKER" --arg student "$STUDENT_WORKER" --arg studentVersion "$ACTIVE" \
+            --arg rollback "$ROLLBACK_STUDENT_VERSION" --arg legacy "$LEGACY_WORKER" --arg legacyVersion "$LEGACY_VERSION" \
+            --argjson legacyBindings "$(jq '[.result.bindings[]|{name,type,namespace_id:(.namespace_id//null),database_id:(.database_id//null),bucket_name:(.bucket_name//null),service:(.service//null)}]|sort_by(.name)' /tmp/legacy-settings.json)" \
+            '{marker:$marker,status:"PASS",readOnly:true,publicRoute:{browser:$browser,studentService:$student,browserToAdminOps:false},student:{activeVersion:$studentVersion,rollbackRetained:$rollback},legacyOperations:{worker:$legacy,activeVersion:$legacyVersion,bindings:$legacyBindings}}' | tee /tmp/cp12-importer-production-preflight.json
+
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-importer-guard-production-preflight
+          path: /tmp/cp12-importer-production-preflight.json
+          if-no-files-found: error
+          retention-days: 30
