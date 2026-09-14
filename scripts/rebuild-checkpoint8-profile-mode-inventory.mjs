@@ -18,7 +18,7 @@ const curricula={}, ids=new Set();
 for(const code of curriculumCodes){let raw=await kv(lessonsNs,`curriculum:${code}`);if(!items(raw).length)for(const view of fallback[code]||[]){const probe=await kv(lessonsNs,`view:${view}`);if(items(probe).length){raw=probe;break;}}const rows=items(raw);curricula[code]={lessonIds:rows.map(x=>typeof x==='string'?clean(x):clean(x?.lessonId)).filter(Boolean)};for(const id of curricula[code].lessonIds)ids.add(id);}
 const lessons={};for(const id of [...ids].sort()){const row=await kv(lessonsNs,`lesson:${id}`);if(row)lessons[id]=row;}
 const catalogue=globalToCatalogue(compileGlobalScope({sourceType:'cp12-entitlement-route-audit',sourceRevision:'2026-09-14',curricula,lessons},{sourceType:'cp12-entitlement-route-audit',sourceRevision:'2026-09-14'}));
-const definitions=await d1(dbId,'SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions');
+const definitions=await d1(dbId,'SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions ORDER BY batch_key');
 const defMap=new Map(definitions.map(row=>[clean(row.batch_key),row]));
 const report=JSON.parse(fs.readFileSync('/tmp/cp12-entitlement-population-audit.json','utf8'));
 const missingDefs=new Map(), affected=[];
@@ -41,5 +41,5 @@ for(const student of report.students||[]){
   }
   if(issues.length)affected.push({portalUserId:student.portalUserId,firstName:student.firstName,issues});
 }
-const out={marker:'CP12_ENTITLEMENT_ROUTE_AUDIT',generatedAt:new Date().toISOString(),readOnly:true,batchDefinitionCount:definitions.length,missingReferencedBatchDefinitions:[...missingDefs.entries()].sort().map(([batchKey,rowCount])=>({batchKey,rowCount})),affectedStudentCount:affected.length,affectedStudentIds:affected.map(x=>x.portalUserId),affected};
-fs.writeFileSync('/tmp/cp12-entitlement-route-audit.json',JSON.stringify(out,null,2));console.log(JSON.stringify({marker:out.marker,batchDefinitionCount:out.batchDefinitionCount,missingReferencedBatchDefinitions:out.missingReferencedBatchDefinitions,affectedStudentCount:out.affectedStudentCount,affectedStudentIds:out.affectedStudentIds,affected:out.affected},null,2));
+const out={marker:'CP12_ENTITLEMENT_ROUTE_AUDIT',generatedAt:new Date().toISOString(),readOnly:true,batchDefinitionCount:definitions.length,batchDefinitions:definitions.map(row=>({...row,mappedView:viewIdForBatch(row)||null})),missingReferencedBatchDefinitions:[...missingDefs.entries()].sort().map(([batchKey,rowCount])=>({batchKey,rowCount})),affectedStudentCount:affected.length,affectedStudentIds:affected.map(x=>x.portalUserId),affected};
+fs.writeFileSync('/tmp/cp12-entitlement-route-audit.json',JSON.stringify(out,null,2));console.log(JSON.stringify({marker:out.marker,batchDefinitionCount:out.batchDefinitionCount,batchDefinitions:out.batchDefinitions,missingReferencedBatchDefinitions:out.missingReferencedBatchDefinitions,affectedStudentCount:out.affectedStudentCount,affectedStudentIds:out.affectedStudentIds,affected:out.affected},null,2));
