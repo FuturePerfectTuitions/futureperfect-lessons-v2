@@ -55,11 +55,13 @@ function pushPairs(rows, values, { primaryKeys, primaryType, primaryFallback, an
 
 function collectPhase11ExtensionResources(record) {
   const source = record?.phase11Resources;
-  if (!source || typeof source !== 'object') return [];
+  const canonicalVr = record?.vr && typeof record.vr === 'object' ? record.vr : {};
+  if ((!source || typeof source !== 'object') && !Object.keys(canonicalVr).length) return [];
 
-  const core = source.core && typeof source.core === 'object' ? source.core : {};
-  const elevenPlus = source.elevenPlus && typeof source.elevenPlus === 'object' ? source.elevenPlus : {};
-  const vr = source.vr && typeof source.vr === 'object' ? source.vr : {};
+  const extension = source && typeof source === 'object' ? source : {};
+  const core = extension.core && typeof extension.core === 'object' ? extension.core : {};
+  const elevenPlus = extension.elevenPlus && typeof extension.elevenPlus === 'object' ? extension.elevenPlus : {};
+  const vr = extension.vr && typeof extension.vr === 'object' ? extension.vr : {};
   const rows = [];
 
   pushPairs(rows, core.preLessonPairs, {
@@ -109,6 +111,20 @@ function collectPhase11ExtensionResources(record) {
     });
   }
 
+  pushPairs(rows, canonicalVr.preLesson, {
+    primaryKeys: ['sheet'],
+    primaryType: 'prelesson',
+    primaryFallback: 'VR PreLesson Sheet',
+    answerFallback: 'VR PreLesson Answer Pack',
+    scope: 'vr'
+  });
+  pushPairs(rows, canonicalVr.homeworks, {
+    primaryKeys: ['homework'],
+    primaryType: 'homework',
+    primaryFallback: 'VR Homework',
+    answerFallback: 'VR Homework Answer Pack',
+    scope: 'vr'
+  });
   for (const answer of Array.isArray(vr.supplementaryAnswers) ? vr.supplementaryAnswers : []) {
     pushFile(rows, answer, {
       type: 'answer-pack', fallbackName: 'Additional VR Answer Pack', scope: 'vr', protectedResource: true
