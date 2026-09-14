@@ -89,7 +89,7 @@ async function preparedContext(request, env, { requireArea = true } = {}) {
     return { error: json({ ok:false, error:'ACCESS_READ_MODEL_INVALID' }, 503) };
   }
   if (accountLocked(snapshot)) return { error: json({ ok:false, error:'ACCOUNT_LOCKED' }, 403) };
-  const specialGranted = (Array.isArray(snapshot.specialAreas) ? snapshot.specialAreas : [])
+  const specialGranted = (Array.isArray(access.payload.manualSpecialAreas) ? access.payload.manualSpecialAreas : [])
     .map(value => clean(value).toUpperCase()).includes(VR_HOWTO_BUCKET);
   const eligibleView = (Array.isArray(snapshot.views) ? snapshot.views : [])
     .filter(view => ELIGIBLE_ENGLISH_VIEWS.has(norm(view?.viewId)) && view?.lockedPreview !== true)
