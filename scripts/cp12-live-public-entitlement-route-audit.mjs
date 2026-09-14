@@ -22,7 +22,7 @@ async function kvText(ns,key){const r=await fetch(`${base}/accounts/${account}/s
 async function kvJson(ns,key){const t=await kvText(ns,key);if(t==null)return null;try{return JSON.parse(t);}catch{throw new Error(`KV JSON invalid: ${key}`);}}
 async function kvKeys(ns,prefix){const out=[];let cursor='';do{const q=new URLSearchParams({limit:'1000',prefix});if(cursor)q.set('cursor',cursor);const b=await cf(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);out.push(...(b.result||[]).map(x=>x.name).filter(Boolean));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
 function currentStudent(id,user){const role=norm(user?.role||user?.accountType);if(id==='admin'||role.includes('admin')||user?.isAdmin===true||user?.superuser===true)return false;const status=norm(user?.accountStatus||user?.status||'active');const expires=clean(user?.expiresOn||user?.expires);return !['inactive','disabled','expired','withdrawn'].includes(status)&&(!expires||expires>asOf);}
-function viewSummary(rows){return Object.fromEntries((Array.isArray(rows)?rows:[]).map(v=>[clean(v?.viewId),{subject:norm(v?.subject),current:v?.current===true,group:clean(v?.group),lockedPreview:v?.lockedPreview===true,openLessonCount:Number(v?.openLessonCount||0),visibleLessonCount:Number(v?.visibleLessonCount||0)}]));}
+function viewSummary(rows,{ignoreRuntimeCompat=false}={}){return Object.fromEntries((Array.isArray(rows)?rows:[]).filter(v=>!(ignoreRuntimeCompat&&clean(v?.viewId)==='special-vr-howto')).map(v=>[clean(v?.viewId),{subject:norm(v?.subject),current:v?.current===true,group:clean(v?.group),lockedPreview:v?.lockedPreview===true,openLessonCount:Number(v?.openLessonCount||0),visibleLessonCount:Number(v?.visibleLessonCount||0)}]));}
 function same(a,b){return JSON.stringify(a)===JSON.stringify(b);}
 async function jsonFetch(path,init={}){const r=await fetch(`${portalOrigin}${path}`,{redirect:'manual',...init});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{};return {status:r.status,headers:r.headers,body,text};}
 
@@ -41,7 +41,7 @@ for(const key of (await kvKeys(studentsNs,'user:')).sort()){
   const user=await kvJson(studentsNs,key);
   if(!user||!currentStudent(id,user))continue;
   const password=String(user?.p||'');
-  const row={portalUserId:id,firstName:clean(user?.firstName||user?.name),login:'NOT_RUN',home:'NOT_RUN',english:'NOT_RUN',maths:'NOT_RUN',status:'UNKNOWN',differences:[]};
+  const row={portalUserId:id,firstName:clean(user?.firstName||user?.name),login:'NOT_RUN',home:'NOT_RUN',english:'NOT_RUN',maths:'NOT_RUN',status:'UNKNOWN',runtimeVrHowTo:false,differences:[]};
   if(!password){row.login='MISSING_STORED_PASSWORD';row.status='FAIL';results.push(row);continue;}
 
   const scopeId=await opaqueAccessScopeId(id,scopeSecret);
@@ -61,7 +61,8 @@ for(const key of (await kvKeys(studentsNs,'user:')).sort()){
   const home=await jsonFetch('/api/v2/student/home',{headers:authHeaders});
   row.home=home.status===200&&home.body?.ok===true?'PASS':`FAIL_${home.status}_${clean(home.body?.error||'UNKNOWN')}`;
   if(row.home==='PASS'){
-    const actualHome=viewSummary(home.body.views);
+    row.runtimeVrHowTo=(home.body.views||[]).some(v=>clean(v?.viewId)==='special-vr-howto');
+    const actualHome=viewSummary(home.body.views,{ignoreRuntimeCompat:true});
     if(!same(expected,actualHome))row.differences.push({kind:'HOME_VIEW_MISMATCH',expectedViewIds:Object.keys(expected).sort(),actualViewIds:Object.keys(actualHome).sort()});
   }
 
@@ -70,7 +71,7 @@ for(const key of (await kvKeys(studentsNs,'user:')).sort()){
     row[subject]=response.status===200&&response.body?.ok===true?'PASS':`FAIL_${response.status}_${clean(response.body?.error||'UNKNOWN')}`;
     if(row[subject]==='PASS'){
       const expectedSubject=Object.fromEntries(Object.entries(expected).filter(([,v])=>v.subject===subject));
-      const actualSubject=viewSummary(response.body.views);
+      const actualSubject=viewSummary(response.body.views,{ignoreRuntimeCompat:true});
       if(!same(expectedSubject,actualSubject))row.differences.push({kind:`${subject.toUpperCase()}_SUBJECT_VIEW_MISMATCH`,expectedViewIds:Object.keys(expectedSubject).sort(),actualViewIds:Object.keys(actualSubject).sort()});
     }
   }
@@ -86,7 +87,7 @@ for(const key of (await kvKeys(studentsNs,'user:')).sort()){
   results.push(row);
 }
 const failures=results.filter(x=>x.status!=='PASS');
-const out={marker:'CP12_LIVE_PUBLIC_ENTITLEMENT_ROUTE_AUDIT',generatedAt:new Date().toISOString(),readOnly:true,portalOrigin,canonicalBrowserStudent:browserStudent,currentStudentCount:results.length,passCount:results.length-failures.length,failCount:failures.length,failureIds:failures.map(x=>x.portalUserId),results};
+const out={marker:'CP12_LIVE_PUBLIC_ENTITLEMENT_ROUTE_AUDIT',generatedAt:new Date().toISOString(),readOnly:true,portalOrigin,canonicalBrowserStudent:browserStudent,currentStudentCount:results.length,passCount:results.length-failures.length,failCount:failures.length,failureIds:failures.map(x=>x.portalUserId),runtimeVrHowToIds:results.filter(x=>x.runtimeVrHowTo).map(x=>x.portalUserId),results};
 fs.writeFileSync('/tmp/cp12-live-public-entitlement-route-audit.json',JSON.stringify(out,null,2));
-console.log(JSON.stringify({marker:out.marker,currentStudentCount:out.currentStudentCount,passCount:out.passCount,failCount:out.failCount,failureIds:out.failureIds,results:out.results.map(({portalUserId,firstName,login,home,english,maths,status,differences,aylaY4E1})=>({portalUserId,firstName,login,home,english,maths,status,differences,aylaY4E1}))},null,2));
+console.log(JSON.stringify({marker:out.marker,currentStudentCount:out.currentStudentCount,passCount:out.passCount,failCount:out.failCount,failureIds:out.failureIds,runtimeVrHowToIds:out.runtimeVrHowToIds,results:out.results.map(({portalUserId,firstName,login,home,english,maths,status,runtimeVrHowTo,differences,aylaY4E1})=>({portalUserId,firstName,login,home,english,maths,status,runtimeVrHowTo,differences,aylaY4E1}))},null,2));
 if(failures.length)throw new Error('One or more live public student entitlement routes do not match published access.');
