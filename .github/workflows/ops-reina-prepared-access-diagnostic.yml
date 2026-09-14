@@ -1,0 +1,143 @@
+name: Guarded Reina prepared access diagnostic
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths:
+      - '.github/workflows/ops-reina-prepared-access-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      TARGET_PORTAL_ID_SHA256: acb8827e79d68860d090bb7219cc744a2d2edd4ae1ee1f95d63b89d0857bd0bc
+
+    steps:
+      - name: Read and compare authoritative and prepared state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, sys, urllib.parse, urllib.request
+
+          account=os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          legacy=os.environ['LEGACY_WORKER']
+          student=os.environ['STUDENT_WORKER']
+          expected_rm=os.environ['EXPECTED_READ_MODELS_KV_ID']
+          target_hash=os.environ['TARGET_PORTAL_ID_SHA256']
+          base=f'https://api.cloudflare.com/client/v4/accounts/{account}'
+
+          def request(path, method='GET', body=None):
+              data=None if body is None else json.dumps(body).encode()
+              headers={'Authorization':f'Bearer {token}'}
+              if body is not None: headers['Content-Type']='application/json'
+              req=urllib.request.Request(base+path,data=data,headers=headers,method=method)
+              with urllib.request.urlopen(req,timeout=45) as r:
+                  raw=r.read().decode()
+              parsed=json.loads(raw)
+              if not parsed.get('success'):
+                  raise SystemExit('CLOUDFLARE_REQUEST_FAILED')
+              return parsed
+
+          def kv_text(ns,key):
+              url=base+f'/storage/kv/namespaces/{ns}/values/{urllib.parse.quote(key,safe="")}'
+              req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}'},method='GET')
+              try:
+                  with urllib.request.urlopen(req,timeout=45) as r: return r.read().decode()
+              except urllib.error.HTTPError as e:
+                  if e.code==404: return None
+                  raise
+
+          legacy_settings=request(f'/workers/scripts/{legacy}/settings')['result']
+          student_settings=request(f'/workers/scripts/{student}/settings')['result']
+          if not any(b.get('name')=='ENVIRONMENT' and b.get('text')=='production' for b in legacy_settings.get('bindings',[])):
+              raise SystemExit('LEGACY_NOT_PRODUCTION')
+          students=next((b.get('namespace_id') for b in legacy_settings.get('bindings',[]) if b.get('name')=='STUDENTS_KV'),None)
+          dbid=next(((b.get('id') or b.get('database_id')) for b in legacy_settings.get('bindings',[]) if b.get('name')=='DB'),None)
+          if not students or not dbid: raise SystemExit('AUTHORITATIVE_BINDINGS_MISSING')
+          if not any(b.get('namespace_id')==expected_rm for b in student_settings.get('bindings',[]) if b.get('type')=='kv_namespace'):
+              raise SystemExit('READ_MODEL_BINDING_DRIFT')
+
+          # Resolve target without printing the username.
+          matches=[]; cursor=''
+          while True:
+              q={'limit':'1000','prefix':'user:'}
+              if cursor: q['cursor']=cursor
+              out=request(f'/storage/kv/namespaces/{students}/keys?'+urllib.parse.urlencode(q))
+              for item in out.get('result') or []:
+                  name=str(item.get('name') or '')
+                  if not name.startswith('user:'): continue
+                  uid=name[5:].strip().lower()
+                  if hashlib.sha256(uid.encode()).hexdigest()==target_hash: matches.append((name,uid))
+              cursor=str((out.get('result_info') or {}).get('cursor') or '')
+              if not cursor: break
+          print('TARGET_MATCH_COUNT='+str(len(matches)))
+          if len(matches)!=1: raise SystemExit('TARGET_NOT_UNIQUE')
+          user_key,uid=matches[0]
+          user=json.loads(kv_text(students,user_key) or '{}')
+          manual=user.get('manualAccess') if isinstance(user.get('manualAccess'),dict) else {}
+          safe_user={
+              'fullLibraries':user.get('fullLibraries') if isinstance(user.get('fullLibraries'),list) else [],
+              'upsellViews':user.get('upsellViews') if isinstance(user.get('upsellViews'),list) else None,
+              'trialViews':user.get('trialViews') if isinstance(user.get('trialViews'),list) else [],
+              'batches':user.get('batches') if isinstance(user.get('batches'),list) else [],
+              'manualCoreLessons':manual.get('coreLessons') if isinstance(manual.get('coreLessons'),list) else [],
+              'blockedLessons':user.get('blockedLessons') if isinstance(user.get('blockedLessons'),list) else [],
+              'vrBuckets':user.get('vrBuckets') if isinstance(user.get('vrBuckets'),list) else [],
+              'vrEligible':bool(user.get('vrEligible') is True),
+              'accountStatus':str(user.get('accountStatus') or user.get('status') or 'active')
+          }
+          print('KV_STATE='+json.dumps(safe_user,separators=(',',':'),sort_keys=True))
+
+          def d1(sql):
+              out=request(f'/d1/database/{dbid}/query','POST',{'sql':sql,'params':[uid]})
+              result=(out.get('result') or [{}])[0]
+              return result.get('results') or []
+
+          full=d1('SELECT lesson_id,core_access,vr_access,source,source_batch_code,source_lesson_date,first_granted_at,last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY source_lesson_date,lesson_id')
+          pre=d1('SELECT lesson_id,batch_key,lesson_date,vr_access,first_granted_at,last_confirmed_at FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_date,lesson_id')
+          assignments=d1('SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from AS batch_active_from,b.active_to AS batch_active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.batch_key')
+          print('D1_STATE='+json.dumps({'lessonEntitlements':full,'prelessonEntitlements':pre,'assignments':assignments},separators=(',',':'),sort_keys=True))
+
+          salt=(kv_text(expected_rm,'meta:scope-salt') or '').strip()
+          if len(salt)!=64: raise SystemExit('SCOPE_SALT_INVALID')
+          sig=hmac.new(salt.encode(),f'rebuild-shadow-scope-v1:{uid}'.encode(),hashlib.sha256).hexdigest()[:40]
+          scope=f'access:u-{sig}'
+          encoded=urllib.parse.quote(scope,safe='').replace('%','_')
+          pointer_key=f'rm:v1:scope:{encoded}:current'
+          pointer_text=kv_text(expected_rm,pointer_key)
+          if not pointer_text: raise SystemExit('PREPARED_POINTER_MISSING')
+          pointer=json.loads(pointer_text)
+          current=pointer.get('current') or {}
+          version=str(current.get('version') or '')
+          if not version: raise SystemExit('PREPARED_VERSION_MISSING')
+          encoded_version=urllib.parse.quote(version,safe='').replace('%','_')
+          version_key=f'rm:v1:scope:{encoded}:version:{encoded_version}'
+          envelope_text=kv_text(expected_rm,version_key)
+          if not envelope_text: raise SystemExit('PREPARED_VERSION_DOCUMENT_MISSING')
+          envelope=json.loads(envelope_text)
+          payload=envelope.get('payload') or {}
+          snapshot=payload.get('snapshot') or {}
+          access=snapshot.get('lessonAccess') or {}
+          source_ids=sorted({str(r.get('lesson_id') or '') for r in full+pre if r.get('lesson_id')})
+          prepared_source_access={lesson_id:access.get(lesson_id) for lesson_id in source_ids}
+          safe_prepared={
+              'pointerVersion':version,
+              'pointerUpdatedAt':pointer.get('updatedAt'),
+              'views':snapshot.get('views') or [],
+              'sourceLessonAccess':prepared_source_access,
+              'lessonAccessCount':len(access)
+          }
+          print('PREPARED_STATE='+json.dumps(safe_prepared,separators=(',',':'),sort_keys=True))
+          print('READ_ONLY_DIAGNOSTIC_PASS=true')
+          PY
