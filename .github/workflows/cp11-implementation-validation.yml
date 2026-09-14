@@ -20,20 +20,38 @@ jobs:
           node-version: '22'
       - name: Syntax
         run: |
-          node --check rebuild/student/src/index.js
-          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
-          node --check scripts/rebuild-checkpoint11-special-backfill.mjs
-          node --check tests/rebuild-checkpoint11-vr-howto-runtime.mjs
-      - name: CP11 compatibility tests
+          set -o pipefail
+          {
+            node --check rebuild/student/src/index.js
+            node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+            node --check scripts/rebuild-checkpoint11-special-backfill.mjs
+            node --check tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          } 2>&1 | tee /tmp/cp11-validation-syntax.log
+      - name: Scope compatibility
         run: |
-          node tests/rebuild-checkpoint11-scope-compatibility.mjs
-          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          set -o pipefail
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs 2>&1 | tee /tmp/cp11-validation-scope.log
+      - name: VR How-To compatibility
+        run: |
+          set -o pipefail
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs 2>&1 | tee /tmp/cp11-validation-vr.log
       - name: Prior checkpoint regressions
         run: |
-          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
-          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
-          node tests/rebuild-checkpoint6-new-student-worker.mjs
-          node tests/rebuild-checkpoint5-auth-capability-core.mjs
-          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
-          node tests/rebuild-checkpoint3-atomic-publishing.mjs
-          node tests/rebuild-checkpoint2-read-models.mjs
+          set -o pipefail
+          {
+            node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+            node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+            node tests/rebuild-checkpoint6-new-student-worker.mjs
+            node tests/rebuild-checkpoint5-auth-capability-core.mjs
+            node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+            node tests/rebuild-checkpoint3-atomic-publishing.mjs
+            node tests/rebuild-checkpoint2-read-models.mjs
+          } 2>&1 | tee /tmp/cp11-validation-regressions.log
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp11-implementation-validation-logs
+          path: /tmp/cp11-validation-*.log
+          if-no-files-found: ignore
+          retention-days: 30
