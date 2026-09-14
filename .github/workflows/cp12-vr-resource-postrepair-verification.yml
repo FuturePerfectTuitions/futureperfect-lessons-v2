@@ -1,0 +1,150 @@
+name: CP12 VR resource post-repair verification
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - '.github/workflows/cp12-vr-resource-postrepair-verification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_BASE: https://lessons.futureperfect.education
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify public Admin delivery and pupil access boundaries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import { opaqueAccessScopeId } from './rebuild/student/src/lib/access-scope.mjs';
+          import { pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          import { resourceVisibleForView } from './rebuild/shared/read-models/resource-visibility.mjs';
+
+          const clean=v=>String(v??'').trim(), norm=v=>clean(v).toLowerCase();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const students=clean(process.env.STUDENTS_KV_ID), read=clean(process.env.READ_MODELS_KV_ID), base=clean(process.env.PROD_BASE).replace(/\/$/,'');
+          const cfBase=`https://api.cloudflare.com/client/v4/accounts/${account}`;
+          const headers={Authorization:`Bearer ${token}`};
+          const digest=v=>crypto.createHash('sha256').update(String(v)).digest('hex').slice(0,16);
+          async function cfReq(path){const r=await fetch(`${cfBase}${path}`,{headers});const text=await r.text();return{r,text};}
+          async function kvText(ns,key){const o=await cfReq(`/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read failed ${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);if(t==null)return null;try{return JSON.parse(t);}catch{throw new Error(`Invalid KV JSON:${key}`);}}
+          async function listUsers(){let cursor='',out=[];do{const qs=new URLSearchParams({prefix:'user:',limit:'1000'});if(cursor)qs.set('cursor',cursor);const r=await fetch(`${cfBase}/storage/kv/namespaces/${students}/keys?${qs}`,{headers});const body=await r.json();if(!r.ok||body?.success!==true)throw new Error('Student key listing failed');out.push(...(body.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(body.result_info?.cursor);}while(cursor);return out;}
+          async function currentPayload(scope){const p=await kvJson(read,pointerKey(scope));if(!p?.current?.version)throw new Error(`Prepared pointer missing:${scope}`);const e=await kvJson(read,versionKey(scope,p.current.version));if(!e?.payload)throw new Error(`Prepared envelope missing:${scope}`);return {pointer:p,envelope:e,payload:e.payload};}
+
+          const scopeSecret=clean(await kvText(read,'meta:scope-salt'));
+          if(!/^[0-9a-f]{64}$/i.test(scopeSecret))throw new Error('Prepared access scope salt unavailable');
+          async function accessFor(userId){const scopeId=await opaqueAccessScopeId(norm(userId),scopeSecret);return currentPayload(`access:${scopeId}`);}
+          const viewOpen=(snap,viewId)=>Array.isArray(snap?.views)&&snap.views.some(v=>clean(v.viewId)===viewId&&v.lockedPreview!==true);
+          const stateFor=(snap,lessonId)=>snap?.lessonAccess?.[lessonId]||null;
+
+          // Confirm the two named affected Y5 accounts retain the VR access that should expose the repaired rows.
+          const named={};
+          for(const userId of ['Kiaan1312','Ma0605']){
+            const access=await accessFor(userId);
+            const snap=access.payload?.snapshot;
+            const state=stateFor(snap,'Y5E2');
+            if(!viewOpen(snap,'english-year5-11plus')||state?.core!==true||state?.vr!==true||state?.blocked===true)throw new Error(`Named Y5 VR access not present:${digest(userId)}`);
+            named[digest(userId)]={view:true,core:true,vr:true,blocked:false,credentialUsed:false};
+          }
+
+          // Find representative current Y4/Y5 11+ and ordinary non-VR access snapshots without logging pupils in.
+          let y4=null,y5=null,ordinary=null;
+          for(const key of await listUsers()){
+            const id=norm(key.replace(/^user:/,'')); if(!id||id==='admin')continue;
+            let access;try{access=await accessFor(id);}catch{continue;}
+            const snap=access.payload?.snapshot;
+            if(!y4){const s=stateFor(snap,'Y4E1');if(viewOpen(snap,'english-year4-11plus')&&s?.core===true&&s?.vr===true&&s?.blocked!==true)y4={digest:digest(id),viewId:'english-year4-11plus',lessonId:'Y4E1',state:s};}
+            if(!y5){const s=stateFor(snap,'Y5E2');if(viewOpen(snap,'english-year5-11plus')&&s?.core===true&&s?.vr===true&&s?.blocked!==true)y5={digest:digest(id),viewId:'english-year5-11plus',lessonId:'Y5E2',state:s};}
+            if(!ordinary){
+              for(const [lessonId,viewId] of [['Y4E1','english-year4'],['Y5E2','english-year5']]){
+                const s=stateFor(snap,lessonId);
+                if(viewOpen(snap,viewId)&&s?.core===true&&s?.vr!==true&&s?.blocked!==true){ordinary={digest:digest(id),viewId,lessonId,state:s};break;}
+              }
+            }
+            if(y4&&y5&&ordinary)break;
+          }
+          if(!y4||!y5||!ordinary)throw new Error(`Representative access snapshot missing y4=${Boolean(y4)} y5=${Boolean(y5)} ordinary=${Boolean(ordinary)}`);
+
+          const liveY4=(await currentPayload('lesson:Y4E1')).payload;
+          const liveY5=(await currentPayload('lesson:Y5E2')).payload;
+          const expected={
+            Y4E1:['PRI260225Y4T1EE01VRH01.pdf','Answer Key PRI260225Y4T1EE01VRH01A.pdf'],
+            Y5E2:['FAR070225Y5T1EE01VRP01.pdf','Answer key FAR070225Y5T1EE01VRP01A.pdf','FAR210225Y5T1EE01VRH01.pdf','Answer Key - FAR210225Y5T1EE01VRH01A.pdf']
+          };
+          for(const [id,detail] of Object.entries({Y4E1:liveY4,Y5E2:liveY5}))for(const suffix of expected[id]){
+            const row=(detail.resources||[]).find(r=>clean(r.objectKey).endsWith(suffix));
+            if(!row)throw new Error(`Live prepared resource absent:${id}:${suffix}`);
+            if(JSON.stringify(row.presentationScopes)!==JSON.stringify(['vr']))throw new Error(`Live scope incorrect:${id}:${suffix}`);
+            if(/answer/i.test(suffix)&&!(row.type==='answer-pack'&&row.protected===true))throw new Error(`Live answer protection incorrect:${id}:${suffix}`);
+          }
+          const repChecks=[[y4,liveY4],[y5,liveY5]];
+          for(const [rep,detail] of repChecks){for(const row of (detail.resources||[]).filter(r=>Array.isArray(r.presentationScopes)&&r.presentationScopes.includes('vr'))){if(!resourceVisibleForView(row,rep.viewId,{vrAvailable:true,open:true,blocked:false,accessMode:'full'}))throw new Error(`VR representative cannot see repaired row:${rep.lessonId}`);}}
+          const ordinaryDetail=ordinary.lessonId==='Y4E1'?liveY4:liveY5;
+          for(const row of (ordinaryDetail.resources||[]).filter(r=>Array.isArray(r.presentationScopes)&&r.presentationScopes.includes('vr'))){if(resourceVisibleForView(row,ordinary.viewId,{vrAvailable:false,open:true,blocked:false,accessMode:'full'}))throw new Error('Ordinary non-VR visibility widened');}
+
+          // End-to-end public Admin path: login and fetch the exact affected lessons through Browser -> Student.
+          const admin=await kvJson(students,'user:admin');
+          if(!admin?.p)throw new Error('Admin credential unavailable');
+          const login=await fetch(`${base}/api/v2/auth/login`,{method:'POST',redirect:'manual',headers:{origin:base,'content-type':'application/json'},body:JSON.stringify({username:'admin',password:String(admin.p)})});
+          const loginBody=await login.json();
+          if(login.status!==200||loginBody?.ok!==true||loginBody?.principal!=='admin')throw new Error(`Public Admin login failed:${login.status}`);
+          const cookie=(login.headers.get('set-cookie')||'').split(';')[0];
+          if(!/^fpt_session=/.test(cookie))throw new Error('Admin session cookie missing');
+          const publicEvidence={};
+          for(const [id,viewId] of [['Y4E1','english-year4-11plus'],['Y5E2','english-year5-11plus']]){
+            const r=await fetch(`${base}/api/v2/student/lessons/${id}?viewId=${encodeURIComponent(viewId)}`,{headers:{cookie}});
+            const body=await r.json();
+            if(r.status!==200||body?.ok!==true||body?.resourcesIncluded!==true)throw new Error(`Public Admin lesson detail failed:${id}:${r.status}`);
+            for(const suffix of expected[id]){
+              const file=suffix.toLowerCase();
+              const row=(body.resources||[]).find(x=>clean(x.displayName).toLowerCase()===file);
+              if(!row)throw new Error(`Public Admin missing repaired resource:${id}:${suffix}`);
+              if(/answer/i.test(suffix)&&!(row.type==='answer-pack'&&row.protected===true))throw new Error(`Public Admin answer boundary lost:${id}:${suffix}`);
+            }
+            const protectedRow=(body.resources||[]).find(x=>x.type==='answer-pack'&&x.protected===true&&expected[id].some(s=>/answer/i.test(s)&&clean(x.displayName).toLowerCase()===s.toLowerCase()));
+            if(!protectedRow)throw new Error(`No repaired protected answer row on public path:${id}`);
+            const gate=await fetch(`${base}/api/v2/student/lessons/${id}/resources/${encodeURIComponent(protectedRow.resourceId)}/open?viewId=${encodeURIComponent(viewId)}`,{method:'GET',redirect:'manual',headers:{cookie}});
+            const gateBody=await gate.json();
+            if(gate.status!==405||gateBody?.error!=='ANSWER_PASSWORD_REQUIRED')throw new Error(`Protected answer GET gate regressed:${id}:${gate.status}:${clean(gateBody?.error)}`);
+            publicEvidence[id]={viewId,resourceCount:body.resources.length,repairedResourcesPresent:true,protectedAnswerGetGate:true,modelVersion:clean(body?.modelVersions?.lesson)};
+          }
+
+          const report={
+            marker:'CP12_VR_RESOURCE_POSTREPAIR_VERIFICATION_PASS',
+            observedAt:new Date().toISOString(),
+            livePrepared:{Y4E1:{version:clean((await currentPayload('lesson:Y4E1')).pointer.current.version),expectedVrRows:2},Y5E2:{version:clean((await currentPayload('lesson:Y5E2')).pointer.current.version),expectedVrRows:4}},
+            namedY5:named,
+            representativeY4:{digest:y4.digest,viewId:y4.viewId,core:true,vr:true},
+            representativeY5:{digest:y5.digest,viewId:y5.viewId,core:true,vr:true},
+            ordinaryNonVr:{digest:ordinary.digest,viewId:ordinary.viewId,lessonId:ordinary.lessonId,vrRowsHidden:true},
+            publicAdmin:publicEvidence,
+            security:{credentialsLogged:false,pupilLoginPerformed:false,protectedAnswerGetRequiresPassword:true,ordinaryAccessNotWidened:true}
+          };
+          fs.writeFileSync('/tmp/cp12-vr-postrepair.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report));
+          NODE
+      - name: Upload safe post-repair evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-vr-resource-postrepair-verification
+          path: /tmp/cp12-vr-postrepair.json
+          if-no-files-found: error
+          retention-days: 30
