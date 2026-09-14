@@ -71,6 +71,9 @@ function screenpalTarget(item) {
   if (!/^[A-Za-z0-9_-]+$/.test(id)) return '';
   return `https://go.screenpal.com/player/${encodeURIComponent(id)}?ff=1&title=0&dcc=0&bg=transparent&embedded=1`;
 }
+function hasR2Shape(item) {
+  return Boolean(item?.r2Key || item?.r2 || item?.objectKey || item?.storageKey || item?.key);
+}
 
 const settings = (await envelope(`/accounts/${account}/workers/scripts/${worker}/settings`)).result || {};
 const binding = name => (settings.bindings || []).find(row => row.name === name) || {};
@@ -82,10 +85,15 @@ if (!(settings.bindings || []).some(row => clean(row.namespace_id) === shadowKv)
 const source = await kvJson(lessonsNs, 'special:VR_HOWTO');
 if (!source || source.active === false) throw new Error('Live VR_HOWTO catalogue is unavailable.');
 const sourceItems = Array.isArray(source.items) ? source.items : [];
+if (!sourceItems.length) throw new Error('Live VR_HOWTO catalogue is empty.');
 const items = sourceItems.map((item, index) => {
   const itemId = clean(item?.id || `item-${index + 1}`);
-  const targetUrl = screenpalTarget(item);
-  const separator = item?.type === 'separator' || !targetUrl;
+  const declaredType = norm(item?.type);
+  const separator = declaredType === 'separator';
+  if (hasR2Shape(item)) throw new Error(`VR_HOWTO_UNSUPPORTED_R2_ITEM:${itemId}`);
+  if (!separator && declaredType && declaredType !== 'video') throw new Error(`VR_HOWTO_UNSUPPORTED_ITEM_TYPE:${itemId}:${declaredType}`);
+  const targetUrl = separator ? '' : screenpalTarget(item);
+  if (!separator && !targetUrl) throw new Error(`VR_HOWTO_UNSUPPORTED_VIDEO_TARGET:${itemId}`);
   return {
     itemId,
     title: clean(item?.title || `Item ${index + 1}`),
@@ -133,8 +141,8 @@ const summary = {
   marker:'REBUILD_CHECKPOINT11_VR_HOWTO_BACKFILL_PASS',
   checkpoint:11,
   sourceRevision:payload.sourceRevision,
-  catalogue:{ itemCount:items.length, playableItemCount:playable.length, type:payload.type, title:payload.title },
-  access:{ manualGrantedCurrent, directGrantedCurrent },
+  catalogue:{ itemCount:items.length, playableItemCount:playable.length, separatorCount:items.length-playable.length, type:payload.type, title:payload.title, screenpalOnly:true, unsupportedItemCount:0 },
+  access:{ manualGrantedCurrent, directGrantedCurrent, legacyGrantSource:'manualAccess.specialBuckets' },
   publication:{ scope:'special:VR_HOWTO', version:published.version, payloadSha256:published.payloadSha256, previousVersion:published.previousVersion },
   sourceMutated:false,
   studentIdentitiesIncluded:false
