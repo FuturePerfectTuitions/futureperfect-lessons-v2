@@ -54,6 +54,22 @@ jobs:
           grep -F 'directGrantedCurrent==0' "$WORKFLOW" >/dev/null
           grep -F 'manualGrantedCurrent==3' "$WORKFLOW" >/dev/null
           echo REBUILD_CHECKPOINT11_MAIN_ORCHESTRATION_VR_HOWTO_PASS | tee /tmp/cp11-validation-orchestration.log
+      - name: Public cutover bypasses stale recursive DNS and rollback stays fail-closed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SCRIPT=scripts/rebuild-checkpoint11-cutover.mjs
+          grep -F "Resolver" "$SCRIPT" >/dev/null
+          grep -F 'authoritativeEdgeCandidates' "$SCRIPT" >/dev/null
+          grep -F 'directEdgeApiProbe' "$SCRIPT" >/dev/null
+          grep -F 'sameRunnerRecursiveDnsBypassed:true' "$SCRIPT" >/dev/null
+          grep -F 'FPT_CP11_EDGE_PIN' "$SCRIPT" >/dev/null
+          grep -F 'pinPublicHost(edge.edgeIp,host)' "$SCRIPT" >/dev/null
+          grep -F 'unpinPublicHost()' "$SCRIPT" >/dev/null
+          grep -F 'restoreLegacyControlPlane' "$SCRIPT" >/dev/null
+          grep -F 'Legacy topology restoration failed control-plane verification.' "$SCRIPT" >/dev/null
+          grep -F 'hostPinRemoved:true' "$SCRIPT" >/dev/null
+          echo REBUILD_CHECKPOINT11_AUTHORITATIVE_EDGE_ROLLBACK_SAFETY_PASS | tee /tmp/cp11-validation-authoritative-edge.log
       - name: Backfill rerun safety is fail-closed and propagation-aware
         shell: bash
         run: |
