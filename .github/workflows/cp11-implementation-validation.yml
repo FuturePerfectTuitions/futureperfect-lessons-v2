@@ -1,0 +1,39 @@
+name: CP11 Implementation Validation
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint11-implementation-build-2026-09-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node --check scripts/rebuild-checkpoint11-special-backfill.mjs
+          node --check tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+      - name: CP11 compatibility tests
+        run: |
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+      - name: Prior checkpoint regressions
+        run: |
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
