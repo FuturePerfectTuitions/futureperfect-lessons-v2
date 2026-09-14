@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: portal-v2-rebuild-checkpoint11-cutover
+  cancel-in-progress: false
+
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -18,14 +22,24 @@ env:
   EXPECTED_PROD_DEPLOYMENT: ce193be0-d018-403f-a417-999e9e6eea41
   EXPECTED_PROD_VERSION: aed13a31-21fa-49c3-8830-c37fd8645c31
   EXPECTED_FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_PROD_R2: fpt-materials-dev
   PROD_SHADOW_KV_ID: 77b35165c8694087bc1b0515c35a7e89
   PROD_SHADOW_D1_ID: 3a17180e-b554-4740-a629-bcaca6a2eeb5
   NEW_STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
   NEW_BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
-  CHECKPOINT8_AS_OF_DATE: '2026-09-13'
+  STUDENT_PRIVATE_BASE_URL: https://fpt-portal-v2-rebuild-student-prod.futureperfectlessons.workers.dev
+  BROWSER_PRIVATE_BASE_URL: https://fpt-portal-v2-rebuild-browser-prod.futureperfectlessons.workers.dev
+  CHECKPOINT8_AS_OF_DATE: '2026-09-14'
+  CHECKPOINT11_AS_OF_DATE: '2026-09-14'
+  ACCEPTED_FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  ACCEPTED_FRONTEND_SHA: a4513da67ee66f51212114620c8e401bd5e31a8c
+  WRANGLER_VERSION: 4.129.0
 
 jobs:
-  cp11-preflight:
+  cp11-fresh-preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -33,49 +47,313 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Confirm CP11 remains read-only before cutover implementation
+      - name: Freshly freeze production anchors before any mutation
         shell: bash
         run: |
           set -Eeuo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test "$PROD_WORKER" = 'fpt-portal-v2-worker'
           node --check scripts/rebuild-checkpoint11-preflight.mjs
           node --check scripts/rebuild-checkpoint8-live-audit.mjs
-          node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
-          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
-      - name: Freeze exact production, DNS, route and frontend anchors read-only
-        run: node scripts/rebuild-checkpoint11-preflight.mjs
-      - name: Re-run current production profile mode inventory read-only
-        run: node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
-      - name: Re-run current production special-area access audit read-only
-        run: node scripts/rebuild-checkpoint8-special-area-audit.mjs
-      - name: Re-run full production access/resource parity read-only
-        run: node scripts/rebuild-checkpoint8-live-audit.mjs
-      - name: Assemble CP11 preflight gate
+          node scripts/rebuild-checkpoint11-preflight.mjs
+          node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs | tee /tmp/checkpoint8-profile-mode-inventory.json
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/checkpoint8-special-area-summary.json
+          node scripts/rebuild-checkpoint8-live-audit.mjs
+      - name: Assemble fresh pre-mutation gate
         shell: bash
         run: |
           set -Eeuo pipefail
           jq -n \
-            --arg marker 'REBUILD_CHECKPOINT11_PREFLIGHT_FULL_PASS' \
+            --arg marker 'REBUILD_CHECKPOINT11_FRESH_PREMUTATION_PASS' \
             --arg sha "$GITHUB_SHA" \
-            --arg branch "$GITHUB_REF_NAME" \
             --arg runId "$GITHUB_RUN_ID" \
             --slurpfile preflight /tmp/checkpoint11-preflight.json \
             --slurpfile parity /tmp/checkpoint8-live-summary.json \
-            '{marker:$marker,sha:$sha,branch:$branch,runId:$runId,preflight:$preflight[0],parity:$parity[0]}' \
-            > /tmp/checkpoint11-preflight-gate.json
-          jq -e '.preflight.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .preflight.safety.readOnly==true and .parity.status=="PASS"' /tmp/checkpoint11-preflight-gate.json >/dev/null
-      - name: Upload CP11 preflight evidence
+            '{marker:$marker,sha:$sha,runId:$runId,preflight:$preflight[0],parity:$parity[0]}' \
+            > /tmp/checkpoint11-fresh-premutation.json
+          jq -e '.preflight.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .preflight.safety.readOnly==true and .parity.status=="PASS" and .parity.catalogue.lessonCount==372 and .parity.students.unexplainedDifferenceCount==0' /tmp/checkpoint11-fresh-premutation.json >/dev/null
+      - name: Upload read-only pre-mutation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: checkpoint11-preflight-evidence
+          name: checkpoint11-fresh-premutation-evidence
+          retention-days: 30
+          if-no-files-found: ignore
           path: |
             /tmp/checkpoint11-preflight.json
-            /tmp/checkpoint11-preflight-gate.json
+            /tmp/checkpoint11-fresh-premutation.json
             /tmp/checkpoint8-live-summary.json
             /tmp/checkpoint8-profile-mode-inventory.json
             /tmp/checkpoint8-special-area-summary.json
-          if-no-files-found: ignore
+
+  cp11-reversible-cutover:
+    needs: cp11-fresh-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax and compatibility regressions before mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/rebuild-checkpoint11-backfill.mjs
+          node --check scripts/rebuild-checkpoint11-smoke.mjs
+          node --check scripts/rebuild-checkpoint11-cutover.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+
+      - name: Re-verify production anchor immediately before first mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint11-preflight.mjs
+          node scripts/rebuild-checkpoint8-live-audit.mjs
+          jq -e '.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .safety.readOnly==true' /tmp/checkpoint11-preflight.json >/dev/null
+          jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint8-live-summary.json >/dev/null
+          cp /tmp/checkpoint11-preflight.json /tmp/checkpoint11-immediate-premutation.json
+          cp /tmp/checkpoint8-live-summary.json /tmp/checkpoint11-immediate-premutation-parity.json
+
+      - name: Final production backfill and exact access/resource parity publication
+        run: node scripts/rebuild-checkpoint11-backfill.mjs
+
+      - name: Pin Wrangler
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+
+      - name: Resolve production D1 name and install private Student Worker configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/d1/database?per_page=100" "${AUTH[@]}" -o /tmp/cp11-d1-list.json
+          D1_NAME="$(jq -r --arg id "$EXPECTED_PROD_D1_ID" '.result[] | select((.uuid // .id // "")==$id) | .name' /tmp/cp11-d1-list.json | head -n1)"
+          test -n "$D1_NAME"
+          cat > rebuild/student/wrangler.cp11.toml <<TOML
+          name = "${NEW_STUDENT_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [vars]
+          ENVIRONMENT = "production"
+          DEPLOYMENT_IDENTITY = "student-production-cp11"
+          CHECKPOINT = "11"
+          STUDENT_LOGIN_ENABLED = "true"
+          ALLOWED_ORIGINS = "${BROWSER_PRIVATE_BASE_URL},https://${PROD_HOST}"
+
+          [[kv_namespaces]]
+          binding = "READ_MODELS_KV"
+          id = "${PROD_SHADOW_KV_ID}"
+
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${EXPECTED_STUDENTS_KV_ID}"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${D1_NAME}"
+          database_id = "${EXPECTED_PROD_D1_ID}"
+
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${EXPECTED_PROD_R2}"
+          TOML
+          npx wrangler deploy --config rebuild/student/wrangler.cp11.toml
+
+      - name: Install stable production Student Worker secrets without exposing values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces/${PROD_SHADOW_KV_ID}/values/meta%3Ascope-salt" "${AUTH[@]}" -o /tmp/cp11-access-scope-secret
+          test "$(wc -c < /tmp/cp11-access-scope-secret | tr -d ' ')" -ge 64
+          ACCESS_SCOPE_SECRET="$(cat /tmp/cp11-access-scope-secret)"
+          AUTH_SIGNING_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::${ACCESS_SCOPE_SECRET}"
+          echo "::add-mask::${AUTH_SIGNING_SECRET}"
+          printf '%s' "$AUTH_SIGNING_SECRET" | npx wrangler secret put AUTH_SIGNING_SECRET --config rebuild/student/wrangler.cp11.toml
+          printf '%s' "$ACCESS_SCOPE_SECRET" | npx wrangler secret put ACCESS_SCOPE_SECRET --config rebuild/student/wrangler.cp11.toml
+          rm -f /tmp/cp11-access-scope-secret
+
+      - name: Verify private Student Worker health before frontend deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --show-error --output /tmp/cp11-student-health.json --write-out '%{http_code}' "$STUDENT_PRIVATE_BASE_URL/health" || true)"
+            if [ "$CODE" = 200 ] && jq -e '.ok==true and .runtime=="student" and .environment=="production" and .preparedReadModels.kvBound==true and .auth.signedCookie==true and .auth.d1SessionLookup==false and .auth.activityWrites==false and .resources.r2Bound==true and .resources.answerPasswordLiveStore==true and .resources.answerRateStoreBound==true' /tmp/cp11-student-health.json >/dev/null; then
+              break
+            fi
+            if [ "$i" = 30 ]; then cat /tmp/cp11-student-health.json 2>/dev/null || true; exit 1; fi
+            sleep 1
+          done
+
+      - name: Checkout exact accepted frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: a4513da67ee66f51212114620c8e401bd5e31a8c
+          path: cp11-frontend
+          persist-credentials: false
+
+      - name: Build accepted frontend privately and record exact provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C cp11-frontend rev-parse HEAD)" = "$ACCEPTED_FRONTEND_SHA"
+          cd cp11-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          npm run build
+          ! grep -R -F 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a cp11-frontend/dist/. rebuild/browser-staging/public/
+          find rebuild/browser-staging/public -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/checkpoint11-frontend-files.sha256
+          FRONTEND_TREE_SHA="$(sha256sum /tmp/checkpoint11-frontend-files.sha256 | awk '{print $1}')"
+          jq -n --arg marker 'REBUILD_CHECKPOINT11_FRONTEND_PROVENANCE' --arg repository "$ACCEPTED_FRONTEND_REPO" --arg sha "$ACCEPTED_FRONTEND_SHA" --arg builtTreeSha256 "$FRONTEND_TREE_SHA" '{marker:$marker,repository:$repository,sha:$sha,builtTreeSha256:$builtTreeSha256,sameOriginApi:true}' > /tmp/checkpoint11-frontend-provenance.json
+
+      - name: Deploy accepted frontend privately behind production browser facade
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > rebuild/browser-staging/wrangler.cp11.toml <<TOML
+          name = "${NEW_BROWSER_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [[services]]
+          binding = "STAGING_API"
+          service = "${NEW_STUDENT_WORKER}"
+
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+          npx wrangler deploy --config rebuild/browser-staging/wrangler.cp11.toml
+          for i in $(seq 1 30); do
+            ROOT_CODE="$(curl --silent --location --output /tmp/cp11-browser-index.html --write-out '%{http_code}' "$BROWSER_PRIVATE_BASE_URL/" || true)"
+            API_CODE="$(curl --silent --show-error -D /tmp/cp11-browser-api.headers -o /tmp/cp11-browser-api.json --write-out '%{http_code}' "$BROWSER_PRIVATE_BASE_URL/api/v2/student/home" || true)"
+            if [ "$ROOT_CODE" = 200 ] && grep -F 'Future Perfect Tuitions' /tmp/cp11-browser-index.html >/dev/null && [ "$API_CODE" = 401 ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/cp11-browser-api.headers; then
+              break
+            fi
+            if [ "$i" = 30 ]; then exit 1; fi
+            sleep 1
+          done
+
+      - name: Positive private production-shaped smoke
+        env:
+          SMOKE_BASE_URL: ${{ env.BROWSER_PRIVATE_BASE_URL }}
+        run: node scripts/rebuild-checkpoint11-smoke.mjs private
+
+      - name: Capture private Worker deployment and version identities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/workers/scripts/${NEW_STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/cp11-student-deployments.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${NEW_BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/cp11-browser-deployments.json
+          STUDENT_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/cp11-student-deployments.json)"
+          STUDENT_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/cp11-student-deployments.json)"
+          BROWSER_DEPLOYMENT="$(jq -r '.result.deployments[0].id // .result[0].id // empty' /tmp/cp11-browser-deployments.json)"
+          BROWSER_VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0) == 100)) | .[0].version_id) // empty' /tmp/cp11-browser-deployments.json)"
+          test -n "$STUDENT_DEPLOYMENT"; test -n "$STUDENT_VERSION"; test -n "$BROWSER_DEPLOYMENT"; test -n "$BROWSER_VERSION"
+          jq -n --arg studentDeployment "$STUDENT_DEPLOYMENT" --arg studentVersion "$STUDENT_VERSION" --arg browserDeployment "$BROWSER_DEPLOYMENT" --arg browserVersion "$BROWSER_VERSION" '{student:{deploymentId:$studentDeployment,versionId:$studentVersion},browser:{deploymentId:$browserDeployment,versionId:$browserVersion}}' > /tmp/checkpoint11-worker-identities.json
+
+      - name: Rehearse real rollback mechanics before public switching
+        run: node scripts/rebuild-checkpoint11-cutover.mjs rehearse
+
+      - name: Perform the small reversible public route and DNS cutover
+        run: node scripts/rebuild-checkpoint11-cutover.mjs public
+
+      - name: Positive production smoke after public cutover
+        env:
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+        run: node scripts/rebuild-checkpoint11-smoke.mjs production
+
+      - name: Re-run full live parity and special-area verification after cutover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs | tee /tmp/checkpoint11-postcutover-profile-mode-inventory.json
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/checkpoint11-postcutover-special-area-summary.json
+          node scripts/rebuild-checkpoint8-live-audit.mjs
+          cp /tmp/checkpoint8-live-summary.json /tmp/checkpoint11-postcutover-live-parity.json
+          jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint11-postcutover-live-parity.json >/dev/null
+
+      - name: Freshly verify final public topology
+        run: node scripts/rebuild-checkpoint11-cutover.mjs verify
+
+      - name: Assemble CP11 reversible-cutover execution gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker 'REBUILD_CHECKPOINT11_EXECUTION_PASS' \
+            --arg exactSha "$GITHUB_SHA" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --slurpfile backfill /tmp/checkpoint11-backfill.json \
+            --slurpfile privateSmoke /tmp/checkpoint11-smoke-private.json \
+            --slurpfile workers /tmp/checkpoint11-worker-identities.json \
+            --slurpfile frontend /tmp/checkpoint11-frontend-provenance.json \
+            --slurpfile rehearsal /tmp/checkpoint11-rollback-rehearsal.json \
+            --slurpfile cutover /tmp/checkpoint11-public-cutover.json \
+            --slurpfile productionSmoke /tmp/checkpoint11-smoke-production.json \
+            --slurpfile parity /tmp/checkpoint11-postcutover-live-parity.json \
+            --slurpfile publicVerify /tmp/checkpoint11-public-verify.json \
+            '{marker:$marker,exactSha:$exactSha,branch:$branch,runId:$runId,backfill:$backfill[0],privateSmoke:$privateSmoke[0],workers:$workers[0],frontend:$frontend[0],rehearsal:$rehearsal[0],cutover:$cutover[0],productionSmoke:$productionSmoke[0],parity:$parity[0],publicVerify:$publicVerify[0]}' \
+            > /tmp/checkpoint11-execution-gate.json
+          jq -e '.backfill.marker=="REBUILD_CHECKPOINT11_BACKFILL_PASS" and .privateSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and .rehearsal.passed==true and .cutover.marker=="REBUILD_CHECKPOINT11_PUBLIC_CUTOVER_PASS" and .productionSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and .parity.status=="PASS" and .publicVerify.marker=="REBUILD_CHECKPOINT11_PUBLIC_VERIFY_PASS"' /tmp/checkpoint11-execution-gate.json >/dev/null
+
+      - name: Emergency rollback on any post-switch failure
+        if: failure()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -f /tmp/checkpoint11-public-cutover.json ]; then
+            node scripts/rebuild-checkpoint11-cutover.mjs rollback
+          else
+            echo 'Public cutover was not recorded; no public rollback required.'
+          fi
+
+      - name: Upload CP11 execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint11-reversible-cutover-execution-evidence
           retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/checkpoint11-immediate-premutation.json
+            /tmp/checkpoint11-immediate-premutation-parity.json
+            /tmp/checkpoint11-backfill.json
+            /tmp/cp11-student-health.json
+            /tmp/checkpoint11-frontend-provenance.json
+            /tmp/checkpoint11-frontend-files.sha256
+            /tmp/checkpoint11-smoke-private.json
+            /tmp/checkpoint11-worker-identities.json
+            /tmp/checkpoint11-rollback-rehearsal.json
+            /tmp/checkpoint11-public-cutover.json
+            /tmp/checkpoint11-smoke-production.json
+            /tmp/checkpoint11-postcutover-profile-mode-inventory.json
+            /tmp/checkpoint11-postcutover-special-area-summary.json
+            /tmp/checkpoint11-postcutover-live-parity.json
+            /tmp/checkpoint11-public-verify.json
+            /tmp/checkpoint11-execution-gate.json
+            /tmp/checkpoint11-emergency-rollback.json
