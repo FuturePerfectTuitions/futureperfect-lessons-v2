@@ -1,0 +1,26 @@
+name: CP12 importer live-auth capability check
+
+on:
+  push:
+    branches: [fix/cp12-import-batch-view-guard-2026-09-14]
+    paths: ['.github/workflows/cp12-importer-live-auth-capability-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ADMIN_IMPORT_PASSWORD: ${{ secrets.ADMIN_IMPORT_PASSWORD }}
+    steps:
+      - name: Check credential presence without disclosure
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ADMIN_IMPORT_PASSWORD:-}" ]; then
+            echo 'CP12_ADMIN_IMPORT_GITHUB_CREDENTIAL_AVAILABLE=true'
+          else
+            echo 'CP12_ADMIN_IMPORT_GITHUB_CREDENTIAL_AVAILABLE=false'
+          fi
