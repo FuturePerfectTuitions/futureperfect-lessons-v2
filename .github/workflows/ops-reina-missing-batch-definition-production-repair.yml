@@ -1,0 +1,148 @@
+name: Guarded Reina missing batch definition production repair
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-reina-missing-batch-definition-production-repair.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OFFICIAL_SHA: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+      PROD_HOST: lessons.futureperfect.education
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+      TARGET_PORTAL_ID_SHA256: acb8827e79d68860d090bb7219cc744a2d2edd4ae1ee1f95d63b89d0857bd0bc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OFFICIAL_SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Guarded repair and atomic prepared-access publication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import { compileAccessScope, globalToCatalogue } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { opaqueAccessScopeId } from './rebuild/student/src/lib/access-scope.mjs';
+          import { resolveCurrentScope, publishScopeAtomic, pointerKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+
+          const clean=v=>String(v??'').trim(), norm=v=>clean(v).toLowerCase();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase(), legacy=clean(process.env.LEGACY_WORKER);
+          const browser=clean(process.env.BROWSER_WORKER), student=clean(process.env.STUDENT_WORKER);
+          const expectedStudents=clean(process.env.EXPECTED_STUDENTS_KV_ID), expectedLessons=clean(process.env.EXPECTED_LESSONS_KV_ID);
+          const expectedDb=clean(process.env.EXPECTED_D1_ID), rm=clean(process.env.EXPECTED_READ_MODELS_KV_ID);
+          const expectedStudentVersion=clean(process.env.EXPECTED_STUDENT_VERSION), targetHash=clean(process.env.TARGET_PORTAL_ID_SHA256);
+          if(!token||!account) throw new Error('Cloudflare credentials unavailable');
+          const base='https://api.cloudflare.com/client/v4', auth={Authorization:`Bearer ${token}`};
+          async function request(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}return{r,text,body};}
+          async function cf(path,options={}){const o=await request(path,options);if(!o.r.ok||o.body?.success!==true)throw new Error(`CF_REQUEST_FAILED:${o.r.status}:${path}:${clean(o.body?.errors?.[0]?.message||o.text).slice(0,180)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV_READ_FAILED:${o.r.status}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          async function kvPut(ns,key,value){const o=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{'content-type':'text/plain;charset=UTF-8'},body:String(value)});if(!o.r.ok||o.body?.success!==true)throw new Error(`KV_WRITE_FAILED:${o.r.status}`);}
+          async function d1(sql,params=[]){const result=await cf(`/accounts/${account}/d1/database/${expectedDb}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql,params})});const first=Array.isArray(result)?result[0]:result;if(first?.success===false)throw new Error('D1_QUERY_FAILED');return first?.results||[];}
+          const store={get:key=>kvText(rm,key),put:(key,value)=>kvPut(rm,key,value)};
+
+          // Fresh topology immediately before the first production write.
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('ZONE_NOT_FOUND');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`), hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser)throw new Error('PUBLIC_ROUTE_DRIFT');
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`), bb=browserSettings?.bindings||[];
+          const services=bb.filter(b=>clean(b.type)==='service');
+          if(services.length!==1||clean(services[0].service)!==student||bb.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('BROWSER_SERVICE_TOPOLOGY_DRIFT');
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`), sb=studentSettings?.bindings||[];
+          if(clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id)!==rm)throw new Error('READ_MODEL_BINDING_DRIFT');
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`), depRows=Array.isArray(deployments?.deployments)?deployments.deployments:deployments;
+          const activeVersions=depRows?.[0]?.versions||[], active=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
+          if(active!==expectedStudentVersion)throw new Error(`STUDENT_VERSION_DRIFT:${active}`);
+
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`), lb=legacySettings?.bindings||[];
+          const students=clean(lb.find(b=>clean(b.name)==='STUDENTS_KV')?.namespace_id), lessons=clean(lb.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id), db=clean(lb.find(b=>clean(b.name)==='DB')?.database_id||lb.find(b=>clean(b.name)==='DB')?.id);
+          if(students!==expectedStudents||lessons!==expectedLessons||db!==expectedDb)throw new Error('AUTHORITATIVE_BINDING_DRIFT');
+          if(!lb.some(b=>clean(b.namespace_id)===rm))throw new Error('LEGACY_SHADOW_BINDING_MISSING');
+
+          // Resolve the one intended account without placing its username in the workflow source/logs.
+          let cursor='',matches=[];
+          do{const q=new URLSearchParams({limit:'1000',prefix:'user:'});if(cursor)q.set('cursor',cursor);const body=await request(`/accounts/${account}/storage/kv/namespaces/${students}/keys?${q}`);if(!body.r.ok||body.body?.success!==true)throw new Error('USER_KEY_ENUM_FAILED');for(const row of body.body.result||[]){const uid=norm(clean(row.name).replace(/^user:/,''));if(crypto.createHash('sha256').update(uid).digest('hex')===targetHash)matches.push(uid);}cursor=clean(body.body.result_info?.cursor);}while(cursor);
+          if(matches.length!==1)throw new Error(`TARGET_MATCH_COUNT_${matches.length}`);
+          const uid=matches[0], user=await kvJson(students,`user:${uid}`);if(!user)throw new Error('TARGET_USER_MISSING');
+
+          const fullBefore=await d1('SELECT lesson_id, core_access, source_batch_code, source_lesson_date FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id',[uid]);
+          const preBefore=await d1('SELECT lesson_id, batch_key, lesson_date FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id',[uid]);
+          const assignBefore=await d1('SELECT batch_key FROM student_batch_assignments WHERE portal_user_id_norm=? ORDER BY batch_key',[uid]);
+          const fullShape=fullBefore.map(r=>[r.lesson_id,Number(r.core_access),r.source_batch_code,r.source_lesson_date]);
+          const preShape=preBefore.map(r=>[r.lesson_id,r.batch_key,r.lesson_date]);
+          if(JSON.stringify(fullShape)!==JSON.stringify([['Y4E1',1,'Y411OE','2026-09-17'],['Y5M1',1,'Y411OM','2026-09-09']]))throw new Error(`TARGET_FULL_STATE_DRIFT:${JSON.stringify(fullShape)}`);
+          if(JSON.stringify(preShape)!==JSON.stringify([['Y5M2','Y411OM','2026-09-14']]))throw new Error(`TARGET_PRE_STATE_DRIFT:${JSON.stringify(preShape)}`);
+          if(assignBefore.length!==0)throw new Error('TARGET_ASSIGNMENT_STATE_DRIFT');
+
+          const desired={
+            Y411OM:{academic_year:'2026-27',subject:'maths',school_year:4,stream:'11plus',maths_level:2,active_from:'2026-09-07',active_to:null},
+            Y411OE:{academic_year:'2026-27',subject:'english',school_year:4,stream:'11plus',maths_level:null,active_from:'2026-09-10',active_to:null}
+          };
+          const existing=await d1("SELECT batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to FROM batch_definitions WHERE batch_key IN ('Y411OM','Y411OE') ORDER BY batch_key");
+          for(const row of existing){const want=desired[row.batch_key];const got={academic_year:row.academic_year,subject:row.subject,school_year:Number(row.school_year),stream:row.stream,maths_level:row.maths_level==null?null:Number(row.maths_level),active_from:row.active_from,active_to:row.active_to??null};if(JSON.stringify(got)!==JSON.stringify(want))throw new Error(`EXISTING_BATCH_DEFINITION_CONFLICT:${row.batch_key}`);}
+          const preExisting=new Set(existing.map(r=>r.batch_key));
+          const scopeSecret=clean(await kvText(rm,'meta:scope-salt'));if(!/^[0-9a-f]{64}$/i.test(scopeSecret))throw new Error('SCOPE_SALT_INVALID');
+          const scopeId=await opaqueAccessScopeId(uid,scopeSecret), scope=`access:${scopeId}`;
+          const oldPointer=await store.get(pointerKey(scope));if(!oldPointer)throw new Error('OLD_ACCESS_POINTER_MISSING');
+          const oldResolved=await resolveCurrentScope(store,scope);
+          if((oldResolved.payload?.snapshot?.views||[]).length!==0)throw new Error('TARGET_NO_LONGER_HAS_EMPTY_VIEWS');
+
+          let inserted=[]; let pointerChanged=false;
+          try{
+            const now=new Date().toISOString();
+            for(const [batchKey,w] of Object.entries(desired)){
+              if(preExisting.has(batchKey))continue;
+              await d1(`INSERT INTO batch_definitions(batch_key,academic_year,subject,school_year,stream,maths_level,active_from,active_to,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,[batchKey,w.academic_year,w.subject,w.school_year,w.stream,w.maths_level,w.active_from,w.active_to,now,now]);
+              inserted.push(batchKey);
+            }
+            const definitions=await d1('SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions ORDER BY batch_key');
+            for(const [batchKey,w] of Object.entries(desired)){const row=definitions.find(r=>r.batch_key===batchKey);if(!row)throw new Error(`BATCH_INSERT_MISSING:${batchKey}`);const got={academic_year:row.academic_year,subject:row.subject,school_year:Number(row.school_year),stream:row.stream,maths_level:row.maths_level==null?null:Number(row.maths_level),active_from:row.active_from,active_to:row.active_to??null};if(JSON.stringify(got)!==JSON.stringify(w))throw new Error(`BATCH_VERIFY_FAILED:${batchKey}`);}
+            const assignments=await d1(`SELECT a.assignment_id,a.portal_user_id_norm,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from AS batch_active_from,b.active_to AS batch_active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id`,[uid]);
+            const entitlements=await d1('SELECT portal_user_id_norm,lesson_id,core_access,vr_access,source_batch_code,source_lesson_date FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id',[uid]);
+            const prelesson=await d1('SELECT portal_user_id_norm,lesson_id,batch_key,lesson_date,vr_access FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id,batch_key',[uid]);
+            const global=await resolveCurrentScope(store,'global');
+            const asOf='2026-09-14';
+            const input={asOfDate:asOf,user,batchDefinitions:definitions,batchAssignments:assignments,entitlements,onlinePreLessonEntitlements:prelesson};
+            const compiled=compileAccessScope(input,globalToCatalogue(global.payload),{scopeId,asOfDate:asOf});
+            const views=(compiled.snapshot?.views||[]).map(v=>v.viewId).sort();
+            if(!views.includes('maths-level2')||!views.includes('english-year4-11plus'))throw new Error(`EXPECTED_VIEWS_NOT_COMPILED:${JSON.stringify(views)}`);
+            const access=compiled.snapshot?.lessonAccess||{};
+            if(Object.keys(access).sort().join(',')!=='Y4E1,Y5M1,Y5M2')throw new Error(`LESSON_ACCESS_WIDENED:${Object.keys(access).sort().join(',')}`);
+            if(access.Y4E1?.core!==true||access.Y5M1?.core!==true||access.Y5M2?.preLessonOnly!==true||access.Y5M2?.core===true)throw new Error('LESSON_ACCESS_MODE_DRIFT');
+            const version=`a-reina-batchfix-${clean(process.env.GITHUB_RUN_ID).slice(0,24)}`;
+            const published=await publishScopeAtomic(store,{scope,payload:compiled,version,updatedAt:new Date().toISOString()});
+            pointerChanged=true;
+            const verified=await resolveCurrentScope(store,scope), verifiedViews=(verified.payload?.snapshot?.views||[]).map(v=>v.viewId).sort();
+            if(verified.version!==published.version||!verifiedViews.includes('maths-level2')||!verifiedViews.includes('english-year4-11plus'))throw new Error('PUBLISHED_ACCESS_VERIFY_FAILED');
+            const postFull=await d1('SELECT lesson_id,core_access,source_batch_code,source_lesson_date FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id',[uid]);
+            const postPre=await d1('SELECT lesson_id,batch_key,lesson_date FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id',[uid]);
+            if(JSON.stringify(postFull)!==JSON.stringify(fullBefore)||JSON.stringify(postPre)!==JSON.stringify(preBefore))throw new Error('REPAIR_MUTATED_LESSON_GRANTS');
+            console.log(JSON.stringify({marker:'REINA_BATCH_DEFINITION_REPAIR_PASS',inserted,views:verifiedViews,lessonAccess:Object.fromEntries(Object.entries(verified.payload.snapshot.lessonAccess||{}).map(([k,v])=>[k,{core:v.core===true,preLessonOnly:v.preLessonOnly===true,blocked:v.blocked===true}])),version:verified.version,studentVersion:active}));
+          }catch(error){
+            if(pointerChanged)await store.put(pointerKey(scope),oldPointer);
+            for(const batchKey of inserted.reverse())await d1('DELETE FROM batch_definitions WHERE batch_key=?',[batchKey]);
+            throw error;
+          }
+          NODE
