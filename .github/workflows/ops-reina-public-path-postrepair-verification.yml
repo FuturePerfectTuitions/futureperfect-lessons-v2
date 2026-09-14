@@ -1,0 +1,87 @@
+name: Verify Reina public path after repair
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-reina-public-path-postrepair-verification.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_BASE: https://lessons.futureperfect.education
+      LEGACY_WORKER: fpt-portal-v2-worker
+      EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      TARGET_PORTAL_ID_SHA256: acb8827e79d68860d090bb7219cc744a2d2edd4ae1ee1f95d63b89d0857bd0bc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify public login home and exact lesson access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim(), norm=v=>clean(v).toLowerCase();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const base=clean(process.env.PROD_BASE).replace(/\/$/,''), legacy=clean(process.env.LEGACY_WORKER);
+          const expectedStudents=clean(process.env.EXPECTED_STUDENTS_KV_ID), targetHash=clean(process.env.TARGET_PORTAL_ID_SHA256);
+          if(!token||!account||!targetHash)throw new Error('Required verification inputs missing');
+          const cfBase='https://api.cloudflare.com/client/v4';
+          async function cf(path){const r=await fetch(`${cfBase}${path}`,{headers:{Authorization:`Bearer ${token}`}});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}if(!r.ok||body?.success!==true)throw new Error(`CF_READ_FAILED:${r.status}:${path}`);return body.result;}
+          async function kvText(ns,key){const r=await fetch(`${cfBase}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});if(r.status===404)return null;if(!r.ok)throw new Error(`KV_READ_FAILED:${r.status}`);return r.text();}
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const students=clean((settings?.bindings||[]).find(b=>clean(b.name)==='STUDENTS_KV')?.namespace_id);
+          if(students!==expectedStudents)throw new Error(`STUDENTS_KV_DRIFT:${students}`);
+          let cursor='',matches=[];
+          do{
+            const q=new URLSearchParams({limit:'1000',prefix:'user:'});if(cursor)q.set('cursor',cursor);
+            const page=await cf(`/accounts/${account}/storage/kv/namespaces/${students}/keys?${q}`);
+            const result=Array.isArray(page)?page:[];
+            for(const row of result){const uid=norm(clean(row?.name).replace(/^user:/,''));if(uid&&crypto.createHash('sha256').update(uid).digest('hex')===targetHash)matches.push(uid);}
+            // Cloudflare KV list through this helper does not expose result_info, so stop if fewer than 1000.
+            if(result.length<1000)cursor=''; else throw new Error('USER_ENUM_PAGINATION_REQUIRED');
+          }while(cursor);
+          if(matches.length!==1)throw new Error(`TARGET_MATCH_COUNT_${matches.length}`);
+          const uid=matches[0];
+          const raw=await kvText(students,`user:${uid}`);if(!raw)throw new Error('TARGET_USER_RECORD_MISSING');
+          const user=JSON.parse(raw);if(!clean(user?.p))throw new Error('TARGET_LOGIN_CREDENTIAL_MISSING');
+
+          const login=await fetch(`${base}/api/v2/auth/login`,{method:'POST',redirect:'manual',headers:{origin:base,'content-type':'application/json'},body:JSON.stringify({username:uid,password:String(user.p)})});
+          const loginBody=await login.json().catch(()=>null);
+          if(login.status!==200||loginBody?.ok!==true)throw new Error(`PUBLIC_LOGIN_FAILED:${login.status}:${clean(loginBody?.error)}`);
+          const cookie=(login.headers.get('set-cookie')||'').split(';')[0];
+          if(!/^fpt_session=/.test(cookie))throw new Error('PUBLIC_SESSION_COOKIE_MISSING');
+          const getJson=async path=>{const r=await fetch(`${base}${path}`,{headers:{cookie}});const body=await r.json().catch(()=>null);if(r.status!==200||body?.ok!==true)throw new Error(`PUBLIC_GET_FAILED:${path}:${r.status}:${clean(body?.error)}`);return body;};
+          const home=await getJson('/api/v2/student/home');
+          if(home.accountLocked===true)throw new Error('TARGET_ACCOUNT_LOCKED');
+          const openViews=new Set((home.views||[]).filter(v=>v.lockedPreview!==true).map(v=>clean(v.viewId)));
+          for(const viewId of ['maths-level2','english-year4-11plus'])if(!openViews.has(viewId))throw new Error(`EXPECTED_HOME_VIEW_MISSING:${viewId}`);
+
+          const maths=await getJson('/api/v2/student/views/maths-level2/lessons');
+          const english=await getJson('/api/v2/student/views/english-year4-11plus/lessons');
+          const row=(body,id)=>(body.lessons||[]).find(x=>clean(x.lessonId)===id);
+          const m1=row(maths,'Y5M1'), m2=row(maths,'Y5M2'), e1=row(english,'Y4E1');
+          if(!m1||m1.open!==true||clean(m1.accessMode)!=='full'||m1.blocked===true)throw new Error('Y5M1_PUBLIC_ACCESS_INCORRECT');
+          if(!m2||m2.open!==true||clean(m2.accessMode)!=='prelesson-only'||m2.blocked===true)throw new Error('Y5M2_PUBLIC_ACCESS_INCORRECT');
+          if(!e1||e1.open!==true||clean(e1.accessMode)!=='full'||e1.blocked===true)throw new Error('Y4E1_PUBLIC_ACCESS_INCORRECT');
+
+          const detail1=await getJson('/api/v2/student/lessons/Y5M1?viewId=maths-level2');
+          const detail2=await getJson('/api/v2/student/lessons/Y5M2?viewId=maths-level2');
+          const detailE=await getJson('/api/v2/student/lessons/Y4E1?viewId=english-year4-11plus');
+          if(detail1?.lesson?.open!==true||clean(detail1?.lesson?.accessMode)!=='full')throw new Error('Y5M1_DETAIL_INCORRECT');
+          if(detail2?.lesson?.open!==true||clean(detail2?.lesson?.accessMode)!=='prelesson-only')throw new Error('Y5M2_DETAIL_INCORRECT');
+          if(detailE?.lesson?.open!==true||clean(detailE?.lesson?.accessMode)!=='full')throw new Error('Y4E1_DETAIL_INCORRECT');
+
+          console.log(JSON.stringify({marker:'REINA_PUBLIC_PATH_POSTREPAIR_PASS',login:true,homeViews:['english-year4-11plus','maths-level2'],lessons:{Y4E1:'full',Y5M1:'full',Y5M2:'prelesson-only'},modelVersion:clean(home.modelVersion),credentialsLogged:false,identityLogged:false}));
+          NODE
