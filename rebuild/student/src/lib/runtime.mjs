@@ -18,6 +18,65 @@ import { resourceVisibleForView } from '../../../shared/read-models/resource-vis
 export const CHECKPOINT = 6;
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
+const ADMIN_USER_ID = 'admin';
+
+function isAdminPrincipal(value) {
+  return norm(value) === ADMIN_USER_ID;
+}
+
+function adminAccount() {
+  return {
+    firstName: 'Admin',
+    status: 'active',
+    expiresOn: null,
+    role: 'admin',
+    superuser: true
+  };
+}
+
+function adminView(view) {
+  if (!view || typeof view !== 'object') return null;
+  const lessonCount = Math.max(0, Number(view.lessonCount ?? view.visibleLessonCount ?? 0));
+  return {
+    ...view,
+    current: true,
+    group: 'current',
+    lockedPreview: false,
+    catalogueAvailable: lessonCount > 0,
+    visibleLessonCount: lessonCount,
+    openLessonCount: lessonCount,
+    lockedLessonCount: 0,
+    source: 'adminSuperuser'
+  };
+}
+
+function adminViews(global) {
+  return (Array.isArray(global?.payload?.navigation) ? global.payload.navigation : [])
+    .map(adminView)
+    .filter(Boolean);
+}
+
+function adminViewById(global, viewId) {
+  const id = clean(viewId);
+  return adminViews(global).find(view => clean(view?.viewId) === id) || null;
+}
+
+function adminAccessVersion(global) {
+  const version = clean(global?.version);
+  if (!version) throw new Error('GLOBAL_READ_MODEL_INVALID');
+  return `admin:${version}`;
+}
+
+function adminPresentationState() {
+  return {
+    open: true,
+    locked: false,
+    accessMode: 'full',
+    vrAvailable: true,
+    blocked: false,
+    sources: ['admin-superuser']
+  };
+}
 
 function allowedOrigins(env) {
   return new Set([
@@ -197,6 +256,16 @@ function selectLesson(global, snapshotValue, lessonId, requestedViewId) {
   return row ? {view,row} : null;
 }
 
+function selectAdminLesson(global, lessonId, requestedViewId) {
+  const id=clean(lessonId), requested=clean(requestedViewId);
+  const candidates=Array.isArray(global?.payload?.lessonToViews?.[id]) ? global.payload.lessonToViews[id] : [];
+  const viewId=requested || (candidates.length===1?candidates[0]:'');
+  if(!viewId||!candidates.includes(viewId))return null;
+  const view=adminViewById(global,viewId), catalogue=viewCatalogue(global,viewId);
+  const row=(Array.isArray(catalogue?.lessons)?catalogue.lessons:[]).find(item=>clean(item?.lessonId)===id);
+  return view && row ? {view,row} : null;
+}
+
 function resourceAllowed(resource, state, viewId) {
   if (!state?.open || state.blocked) return false;
   if (!resourceVisibleForView(resource, viewId, state)) return false;
@@ -256,6 +325,23 @@ function deliveryUrl(request, { token, viewId, lessonId, resourceId }) {
 }
 
 async function authorisedLesson(env, session, viewId, lessonId, { includeDetail = true, nowValue = Date.now() } = {}) {
+  if (isAdminPrincipal(session?.sub)) {
+    const global = await resolveGlobal(env);
+    const selected = selectAdminLesson(global, lessonId, viewId);
+    if (!selected) return { error: json({ ok:false, error:'LESSON_NOT_AVAILABLE' },404) };
+    const state = adminPresentationState();
+    const detail = includeDetail ? await resolveLessonDetail(env, lessonId) : null;
+    return {
+      global,
+      access: { version: adminAccessVersion(global), usedFallback: global.usedFallback === true },
+      snap: null,
+      selected,
+      state,
+      detail,
+      principal: 'admin'
+    };
+  }
+
   const [global, access] = await Promise.all([resolveGlobal(env), resolveAccess(env, session)]);
   const snap = snapshot(access);
   if (preparedAccountLocked(snap, nowValue)) return { error: accountLockedResponse() };
@@ -280,7 +366,7 @@ export function createStudentRuntime(overrides = {}) {
       const preflightResponse = preflight(request, env);
       if (preflightResponse) return preflightResponse;
       if (requiresTrustedOrigin(url, request.method) && !browserOriginAllowed(request, env)) {
-        return json({ ok:false, error:'FORBIDDEN_ORIGIN' }, 403);
+        return json({ok:false,error:'FORBIDDEN_ORIGIN'}, 403);
       }
       const execute = async () => {
         try {
@@ -302,6 +388,18 @@ export function createStudentRuntime(overrides = {}) {
           const verified = await adapters.authenticateCredentials({ username, password, request });
           if (!verified?.ok || !clean(verified.userId)) return json({ok:false,error:'LOGIN_INVALID'},401);
           const issued = await createAuthenticatedSession({ secret:requireSecret(env,'AUTH_SIGNING_SECRET'), userId:verified.userId, now:now() });
+
+          if (isAdminPrincipal(verified.userId)) {
+            return json({
+              ok:true,
+              checkpoint:CHECKPOINT,
+              expiresAt:issued.session.exp,
+              account:adminAccount(),
+              accountLocked:false,
+              principal:'admin'
+            }, 200, { 'set-cookie': issued.setCookie });
+          }
+
           const access = await resolveAccess(env, issued.session);
           const snap = snapshot(access);
           return json({ ok:true, checkpoint:CHECKPOINT, expiresAt:issued.session.exp, account:snap?.account||{}, accountLocked:preparedAccountLocked(snap, now()), modelVersion:access.version }, 200, { 'set-cookie': issued.setCookie });
@@ -315,6 +413,22 @@ export function createStudentRuntime(overrides = {}) {
         const session = await verifiedSession(request, env, now());
 
         if (url.pathname === '/api/v2/student/home' && request.method === 'GET') {
+          if (isAdminPrincipal(session.sub)) {
+            const global = await resolveGlobal(env);
+            return json({
+              ok:true,
+              checkpoint:CHECKPOINT,
+              runtime:'student',
+              source:'prepared-global-read-model',
+              modelVersion:global.version,
+              usedFallback:global.usedFallback,
+              account:adminAccount(),
+              accountLocked:false,
+              role:'admin',
+              superuser:true,
+              views:adminViews(global)
+            });
+          }
           const access=await resolveAccess(env,session), snap=snapshot(access), accountLocked=preparedAccountLocked(snap,now());
           return json({ok:true,checkpoint:CHECKPOINT,runtime:'student',source:'prepared-access-read-model',modelVersion:access.version,usedFallback:access.usedFallback,account:snap?.account||{},accountLocked,views:accountLocked?[]:(Array.isArray(snap?.views)?snap.views:[])});
         }
@@ -323,6 +437,11 @@ export function createStudentRuntime(overrides = {}) {
         if(subjectMatch&&request.method==='GET'){
           const subject=norm(decodeURIComponent(subjectMatch[1]));
           if(!['maths','english'].includes(subject))return json({ok:false,error:'SUBJECT_NOT_AVAILABLE'},404);
+          if (isAdminPrincipal(session.sub)) {
+            const global=await resolveGlobal(env);
+            const views=adminViews(global).filter(view=>norm(view?.subject)===subject);
+            return json({ok:true,subject,modelVersion:global.version,source:'prepared-global-read-model',role:'admin',superuser:true,views});
+          }
           const access=await resolveAccess(env,session),snap=snapshot(access);
           if(preparedAccountLocked(snap,now()))return accountLockedResponse();
           const views=(Array.isArray(snap?.views)?snap.views:[]).filter(view=>norm(view?.subject)===subject);
@@ -332,6 +451,23 @@ export function createStudentRuntime(overrides = {}) {
         const viewMatch=url.pathname.match(/^\/api\/v2\/student\/views\/([^/]+)\/lessons$/);
         if(viewMatch&&request.method==='GET'){
           const viewId=decodeURIComponent(viewMatch[1]);
+          if (isAdminPrincipal(session.sub)) {
+            const global=await resolveGlobal(env);
+            const view=adminViewById(global,viewId),catalogue=viewCatalogue(global,viewId);
+            if(!view||!catalogue)return json({ok:false,error:'VIEW_NOT_AVAILABLE'},404);
+            const lessons=(Array.isArray(catalogue.lessons)?catalogue.lessons:[]).map(row=>safeLessonRow(row,adminPresentationState()));
+            return json({
+              ok:true,
+              source:'prepared-global-read-model',
+              modelVersions:{global:global.version,access:adminAccessVersion(global)},
+              usedFallback:{global:global.usedFallback,access:false},
+              role:'admin',
+              superuser:true,
+              view,
+              lessonCount:lessons.length,
+              lessons
+            });
+          }
           const [global,access]=await Promise.all([resolveGlobal(env),resolveAccess(env,session)]),snap=snapshot(access);
           if(preparedAccountLocked(snap,now()))return accountLockedResponse();
           const view=visibleView(snap,viewId),catalogue=viewCatalogue(global,viewId);

@@ -176,6 +176,7 @@ async function decorateHomeOrSubject(response, request, env) {
   if (!response.ok) return response;
   const body = await response.clone().json().catch(() => null);
   if (!body?.ok || !Array.isArray(body.views)) return response;
+  if (body.role === 'admin' || body.superuser === true) return response;
   const context = await preparedContext(request, env, { requireArea:true });
   if (context.error || !context.eligibleView || !context.area) return response;
   if (body.views.some(view => clean(view?.viewId) === VR_HOWTO_VIEW)) return response;
