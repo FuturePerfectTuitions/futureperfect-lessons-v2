@@ -46,6 +46,8 @@ The CP12 branch carries `.github/workflows/rebuild-checkpoint12-stabilisation-ob
 
 The observer has read-only GitHub permissions and contains no deploy, secret-write, Cloudflare write, backfill, cutover, rollback, pupil mutation, or CP13-retirement action.
 
+The branch also carries `.github/workflows/rebuild-checkpoint12-operational-cycle-readonly.yml`, an identity-free production-D1 aggregate detector for the normal CSV lesson-release importer. It emits only counts, distinct lesson counts and timestamp buckets from importer-owned audit/source fields; it emits no pupil identifiers, rejects mutating SQL, never manufactures pupil activity and is structurally incapable of setting `representativeCycleGateMet=true` or authorising CP13. Any non-zero result remains only a candidate until manually validated and followed by the full stabilisation observer.
+
 ## Closure criteria
 
 CP12 may be recorded as CLOSED — PASS only when all of the following are evidenced together:
@@ -102,6 +104,31 @@ Therefore:
 - CP12 remains **OPEN**.
 
 The repository's lesson-release/import static-verification workflow is also not counted as operational evidence: it proves implementation/static checks, not that a genuine normal live release/import cycle occurred.
+
+## Identity-free normal-import observation — 2026-09-14
+
+To avoid relying on workflow-name heuristics, the CP12 branch added `.github/workflows/rebuild-checkpoint12-operational-cycle-readonly.yml` at commit `c8c40711c67d0d7d6f3d78ec1a62bb33b5d72ce9`. The detector reads aggregate-only production D1 timestamps written by the normal CSV lesson-release importer and cannot close CP12.
+
+Run `34830280662` completed successfully. Its retained artifact is:
+
+- artifact ID: `10341577800`;
+- name: `checkpoint12-operational-cycle-readonly-evidence`;
+- digest: `sha256:f19ba3e9773bcb0acf48884748b6133d7dcd3763721372e640c464aa241f0a22`.
+
+The exact post-cutover aggregate result was:
+
+- normal full-release importer rows confirmed after cutover: `0`;
+- distinct full-release lessons confirmed after cutover: `0`;
+- online PreLesson importer rows confirmed after cutover: `0`;
+- distinct online PreLesson lessons confirmed after cutover: `0`;
+- pupil/student identity fields emitted: `false`;
+- candidate real operational activity observed: `false`;
+- `representativeCycleGateMet = false`;
+- `cp13Allowed = false`.
+
+This directly corroborates the manual exclusion of the CP9/UAT Actions candidate: as of this observation there is still **no genuine normal CSV release/import cycle after cutover**. No pupil mutation was generated to satisfy the gate.
+
+A temporary one-shot repository-maintenance workflow was attempted only to repair the full observer's stale status-literal self-check. Its workspace patch step succeeded, but its repository-write step failed; it made no production change and did not alter the full observer. The temporary write-capable workflow was then removed. The full observer therefore remains read-only and otherwise unchanged; its stale status-literal self-check must be corrected before the next full rerun.
 
 ### Outstanding stabilisation evidence
 
