@@ -69,9 +69,10 @@ jobs:
             --arg runId "$GITHUB_RUN_ID" \
             --slurpfile preflight /tmp/checkpoint11-preflight.json \
             --slurpfile parity /tmp/checkpoint8-live-summary.json \
-            '{marker:$marker,sha:$sha,runId:$runId,preflight:$preflight[0],parity:$parity[0]}' \
+            --slurpfile special /tmp/checkpoint8-special-area-summary.json \
+            '{marker:$marker,sha:$sha,runId:$runId,preflight:$preflight[0],parity:$parity[0],special:$special[0]}' \
             > /tmp/checkpoint11-fresh-premutation.json
-          jq -e '.preflight.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .preflight.safety.readOnly==true and .parity.status=="PASS" and .parity.catalogue.lessonCount==372 and .parity.students.unexplainedDifferenceCount==0' /tmp/checkpoint11-fresh-premutation.json >/dev/null
+          jq -e '.preflight.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .preflight.safety.readOnly==true and .parity.status=="PASS" and .parity.catalogue.lessonCount==372 and .parity.students.unexplainedDifferenceCount==0 and .special.status=="PASS" and .special.profilesWithSpecialAreas==3 and .special.tokenCounts.VR_HOWTO==3 and .special.manualTokenCounts.VR_HOWTO==3 and (.special.directTokenCounts.VR_HOWTO // 0)==0 and .special.cp11RuntimeGate.enabled==true and .special.cp11RuntimeGate.compatible==true and (.special.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .special.cp11RuntimeGate.catalogueRevision.checked==true and .special.cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/checkpoint11-fresh-premutation.json >/dev/null
       - name: Upload read-only pre-mutation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -100,10 +101,18 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
           node --check scripts/rebuild-checkpoint11-backfill.mjs
+          node --check scripts/rebuild-checkpoint11-special-backfill.mjs
           node --check scripts/rebuild-checkpoint11-smoke.mjs
+          node --check scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs
           node --check scripts/rebuild-checkpoint11-cutover.mjs
+          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
+          node --check tests/rebuild-checkpoint11-vr-howto-runtime.mjs
           node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
           node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
           node tests/rebuild-checkpoint8-backfill-access-parity.mjs
           node tests/rebuild-checkpoint6-new-student-worker.mjs
@@ -117,14 +126,25 @@ jobs:
         run: |
           set -Eeuo pipefail
           node scripts/rebuild-checkpoint11-preflight.mjs
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/checkpoint11-immediate-premutation-special-area.json
           node scripts/rebuild-checkpoint8-live-audit.mjs
           jq -e '.marker=="REBUILD_CHECKPOINT11_PREFLIGHT_PASS" and .safety.readOnly==true' /tmp/checkpoint11-preflight.json >/dev/null
           jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint8-live-summary.json >/dev/null
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/checkpoint11-immediate-premutation-special-area.json >/dev/null
           cp /tmp/checkpoint11-preflight.json /tmp/checkpoint11-immediate-premutation.json
           cp /tmp/checkpoint8-live-summary.json /tmp/checkpoint11-immediate-premutation-parity.json
 
       - name: Final production backfill and exact access/resource parity publication
         run: node scripts/rebuild-checkpoint11-backfill.mjs
+
+      - name: Publish exact VR How-To prepared special area and fail closed on grant drift
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint11-special-backfill.mjs
+          jq -e '.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_BACKFILL_PASS" and .catalogue.itemCount==11 and .catalogue.playableItemCount==11 and .catalogue.separatorCount==0 and .catalogue.screenpalOnly==true and .catalogue.unsupportedItemCount==0 and .access.manualGrantedCurrent==3 and .access.directGrantedCurrent==0 and .access.legacyGrantSource=="manualAccess.specialBuckets" and .sourceMutated==false and .studentIdentitiesIncluded==false' /tmp/checkpoint11-vr-howto-backfill.json >/dev/null
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/checkpoint11-post-special-backfill-audit.json
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/checkpoint11-post-special-backfill-audit.json >/dev/null
 
       - name: Pin Wrangler
         run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
@@ -260,6 +280,16 @@ jobs:
           SMOKE_BASE_URL: ${{ env.BROWSER_PRIVATE_BASE_URL }}
         run: node scripts/rebuild-checkpoint11-smoke.mjs private
 
+      - name: Positive private VR How-To manual-only live smoke
+        env:
+          SMOKE_BASE_URL: ${{ env.BROWSER_PRIVATE_BASE_URL }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs
+          cp /tmp/checkpoint11-vr-howto-live-smoke.json /tmp/checkpoint11-vr-howto-smoke-private.json
+          jq -e '.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_LIVE_SMOKE_PASS" and .candidateCount==3 and .guideCount==11 and .providerHost=="go.screenpal.com" and .providerContactedOnlyAfterView==true and .credentialsDisclosed==false' /tmp/checkpoint11-vr-howto-smoke-private.json >/dev/null
+
       - name: Capture private Worker deployment and version identities
         shell: bash
         run: |
@@ -286,6 +316,16 @@ jobs:
           SMOKE_BASE_URL: https://lessons.futureperfect.education
         run: node scripts/rebuild-checkpoint11-smoke.mjs production
 
+      - name: Positive production VR How-To manual-only live smoke
+        env:
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs
+          cp /tmp/checkpoint11-vr-howto-live-smoke.json /tmp/checkpoint11-vr-howto-smoke-production.json
+          jq -e '.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_LIVE_SMOKE_PASS" and .candidateCount==3 and .guideCount==11 and .providerHost=="go.screenpal.com" and .providerContactedOnlyAfterView==true and .credentialsDisclosed==false' /tmp/checkpoint11-vr-howto-smoke-production.json >/dev/null
+
       - name: Re-run full live parity and special-area verification after cutover
         shell: bash
         run: |
@@ -295,6 +335,7 @@ jobs:
           node scripts/rebuild-checkpoint8-live-audit.mjs
           cp /tmp/checkpoint8-live-summary.json /tmp/checkpoint11-postcutover-live-parity.json
           jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint11-postcutover-live-parity.json >/dev/null
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/checkpoint11-postcutover-special-area-summary.json >/dev/null
 
       - name: Freshly verify final public topology
         run: node scripts/rebuild-checkpoint11-cutover.mjs verify
@@ -308,18 +349,24 @@ jobs:
             --arg exactSha "$GITHUB_SHA" \
             --arg branch "$GITHUB_REF_NAME" \
             --arg runId "$GITHUB_RUN_ID" \
+            --slurpfile immediateSpecial /tmp/checkpoint11-immediate-premutation-special-area.json \
             --slurpfile backfill /tmp/checkpoint11-backfill.json \
+            --slurpfile vrBackfill /tmp/checkpoint11-vr-howto-backfill.json \
+            --slurpfile vrBackfillAudit /tmp/checkpoint11-post-special-backfill-audit.json \
             --slurpfile privateSmoke /tmp/checkpoint11-smoke-private.json \
+            --slurpfile privateVrSmoke /tmp/checkpoint11-vr-howto-smoke-private.json \
             --slurpfile workers /tmp/checkpoint11-worker-identities.json \
             --slurpfile frontend /tmp/checkpoint11-frontend-provenance.json \
             --slurpfile rehearsal /tmp/checkpoint11-rollback-rehearsal.json \
             --slurpfile cutover /tmp/checkpoint11-public-cutover.json \
             --slurpfile productionSmoke /tmp/checkpoint11-smoke-production.json \
+            --slurpfile productionVrSmoke /tmp/checkpoint11-vr-howto-smoke-production.json \
+            --slurpfile special /tmp/checkpoint11-postcutover-special-area-summary.json \
             --slurpfile parity /tmp/checkpoint11-postcutover-live-parity.json \
             --slurpfile publicVerify /tmp/checkpoint11-public-verify.json \
-            '{marker:$marker,exactSha:$exactSha,branch:$branch,runId:$runId,backfill:$backfill[0],privateSmoke:$privateSmoke[0],workers:$workers[0],frontend:$frontend[0],rehearsal:$rehearsal[0],cutover:$cutover[0],productionSmoke:$productionSmoke[0],parity:$parity[0],publicVerify:$publicVerify[0]}' \
+            '{marker:$marker,exactSha:$exactSha,branch:$branch,runId:$runId,immediateSpecial:$immediateSpecial[0],backfill:$backfill[0],vrBackfill:$vrBackfill[0],vrBackfillAudit:$vrBackfillAudit[0],privateSmoke:$privateSmoke[0],privateVrSmoke:$privateVrSmoke[0],workers:$workers[0],frontend:$frontend[0],rehearsal:$rehearsal[0],cutover:$cutover[0],productionSmoke:$productionSmoke[0],productionVrSmoke:$productionVrSmoke[0],special:$special[0],parity:$parity[0],publicVerify:$publicVerify[0]}' \
             > /tmp/checkpoint11-execution-gate.json
-          jq -e '.backfill.marker=="REBUILD_CHECKPOINT11_BACKFILL_PASS" and .privateSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and .rehearsal.passed==true and .cutover.marker=="REBUILD_CHECKPOINT11_PUBLIC_CUTOVER_PASS" and .productionSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and .parity.status=="PASS" and .publicVerify.marker=="REBUILD_CHECKPOINT11_PUBLIC_VERIFY_PASS"' /tmp/checkpoint11-execution-gate.json >/dev/null
+          jq -e '.immediateSpecial.status=="PASS" and .immediateSpecial.manualTokenCounts.VR_HOWTO==3 and (.immediateSpecial.directTokenCounts.VR_HOWTO // 0)==0 and .backfill.marker=="REBUILD_CHECKPOINT11_BACKFILL_PASS" and .vrBackfill.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_BACKFILL_PASS" and .vrBackfill.catalogue.itemCount==11 and .vrBackfill.catalogue.playableItemCount==11 and .vrBackfill.access.manualGrantedCurrent==3 and .vrBackfill.access.directGrantedCurrent==0 and .vrBackfill.access.legacyGrantSource=="manualAccess.specialBuckets" and .vrBackfillAudit.status=="PASS" and .vrBackfillAudit.cp11RuntimeGate.catalogueRevision.inSync==true and .privateSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and .privateVrSmoke.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_LIVE_SMOKE_PASS" and .privateVrSmoke.guideCount==11 and .rehearsal.passed==true and .cutover.marker=="REBUILD_CHECKPOINT11_PUBLIC_CUTOVER_PASS" and .productionSmoke.marker=="REBUILD_CHECKPOINT11_SMOKE_PASS" and .productionVrSmoke.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_LIVE_SMOKE_PASS" and .productionVrSmoke.guideCount==11 and .special.status=="PASS" and .special.manualTokenCounts.VR_HOWTO==3 and (.special.directTokenCounts.VR_HOWTO // 0)==0 and .special.cp11RuntimeGate.catalogueRevision.inSync==true and .parity.status=="PASS" and .publicVerify.marker=="REBUILD_CHECKPOINT11_PUBLIC_VERIFY_PASS"' /tmp/checkpoint11-execution-gate.json >/dev/null
 
       - name: Emergency rollback on any post-switch failure
         if: failure()
@@ -342,15 +389,20 @@ jobs:
           path: |
             /tmp/checkpoint11-immediate-premutation.json
             /tmp/checkpoint11-immediate-premutation-parity.json
+            /tmp/checkpoint11-immediate-premutation-special-area.json
             /tmp/checkpoint11-backfill.json
+            /tmp/checkpoint11-vr-howto-backfill.json
+            /tmp/checkpoint11-post-special-backfill-audit.json
             /tmp/cp11-student-health.json
             /tmp/checkpoint11-frontend-provenance.json
             /tmp/checkpoint11-frontend-files.sha256
             /tmp/checkpoint11-smoke-private.json
+            /tmp/checkpoint11-vr-howto-smoke-private.json
             /tmp/checkpoint11-worker-identities.json
             /tmp/checkpoint11-rollback-rehearsal.json
             /tmp/checkpoint11-public-cutover.json
             /tmp/checkpoint11-smoke-production.json
+            /tmp/checkpoint11-vr-howto-smoke-production.json
             /tmp/checkpoint11-postcutover-profile-mode-inventory.json
             /tmp/checkpoint11-postcutover-special-area-summary.json
             /tmp/checkpoint11-postcutover-live-parity.json
