@@ -67,8 +67,10 @@ jobs:
           const bindings=x=>Array.isArray(x?.bindings)?x.bindings:[];
           const browserBindings=bindings(browserSettings);
           const studentBindings=bindings(studentSettings);
-          const studentBinding=browserBindings.find(b=>clean(b.name)==='STUDENT_RUNTIME'&&clean(b.service)===student);
-          if(!studentBinding) throw new Error(`Browser STUDENT_RUNTIME service binding drift: ${JSON.stringify(browserBindings.map(b=>({name:b.name,type:b.type,service:b.service})))}`);
+          const serviceBindings=browserBindings.filter(b=>clean(b.type)==='service');
+          const studentBindingsFromBrowser=serviceBindings.filter(b=>clean(b.service)===student);
+          if(serviceBindings.length!==1||studentBindingsFromBrowser.length!==1) throw new Error(`Browser service-binding topology drift: ${JSON.stringify(serviceBindings.map(b=>({name:b.name,type:b.type,service:b.service})))}`);
+          const studentBinding=studentBindingsFromBrowser[0];
           if(browserBindings.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`))) throw new Error('Browser has forbidden Admin/AdminOps binding');
           const readBinding=studentBindings.find(b=>clean(b.name)==='READ_MODELS_KV'&&clean(b.namespace_id));
           const studentsBinding=studentBindings.find(b=>clean(b.name)==='STUDENTS_KV'&&clean(b.namespace_id));
@@ -92,7 +94,7 @@ jobs:
             marker:'CP12_VR_PRODUCTION_PREFLIGHT_PASS',
             observedAt:new Date().toISOString(),
             route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},
-            browser:{worker:browser,activeVersion:browserActive,studentServiceBinding:clean(studentBinding.service),adminOpsBinding:false},
+            browser:{worker:browser,activeVersion:browserActive,studentServiceBindingName:clean(studentBinding.name),studentServiceBinding:clean(studentBinding.service),adminOpsBinding:false},
             student:{worker:student,activeVersion,rollbackVersionRetained:true,readModelsKvId:clean(readBinding.namespace_id),studentsKvId:clean(studentsBinding.namespace_id),d1Id:clean(d1Binding.database_id||d1Binding.id),r2Bucket:clean(r2Binding.bucket_name||r2Binding.bucket)}
           };
           fs.writeFileSync('/tmp/cp12-vr-production-preflight.json',JSON.stringify(evidence,null,2)+'\n');
