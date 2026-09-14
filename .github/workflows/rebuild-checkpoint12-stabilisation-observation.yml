@@ -181,9 +181,11 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           AS_OF="$(date -u +%F)"
-          node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs --as-of "$AS_OF" | tee /tmp/checkpoint12-profile-mode.json
-          node scripts/rebuild-checkpoint8-special-area-audit.mjs --as-of "$AS_OF" --inventory /tmp/checkpoint12-profile-mode.json | tee /tmp/checkpoint12-special-area.json
-          node scripts/rebuild-checkpoint8-live-audit.mjs --as-of "$AS_OF" --inventory /tmp/checkpoint12-profile-mode.json
+          export CHECKPOINT8_AS_OF_DATE="$AS_OF"
+          export CHECKPOINT11_AS_OF_DATE="$AS_OF"
+          node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs | tee /tmp/checkpoint12-profile-mode.json
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/checkpoint12-special-area.json
+          node scripts/rebuild-checkpoint8-live-audit.mjs
           cp /tmp/checkpoint8-live-summary.json /tmp/checkpoint12-live-parity.json
           jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint12-live-parity.json >/dev/null
           jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/checkpoint12-special-area.json >/dev/null
