@@ -48,6 +48,8 @@ The observer has read-only GitHub permissions and contains no deploy, secret-wri
 
 The branch also carries `.github/workflows/rebuild-checkpoint12-operational-cycle-readonly.yml`, an identity-free production-D1 aggregate detector for the normal CSV lesson-release importer. It emits only counts, distinct lesson counts and timestamp buckets from importer-owned audit/source fields; it emits no pupil identifiers, rejects mutating SQL, never manufactures pupil activity and is structurally incapable of setting `representativeCycleGateMet=true` or authorising CP13. Any non-zero result remains only a candidate until manually validated and followed by the full stabilisation observer.
 
+A separate `.github/workflows/rebuild-checkpoint12-topology-diagnostic-readonly.yml` exists only to diagnose read-path failures without mutating Cloudflare or production. It records expected-vs-observed topology/rollback/data-binding anchors and cannot alter them.
+
 ## Closure criteria
 
 CP12 may be recorded as CLOSED — PASS only when all of the following are evidenced together:
@@ -128,10 +130,56 @@ The exact post-cutover aggregate result was:
 
 This directly corroborates the manual exclusion of the CP9/UAT Actions candidate: as of this observation there is still **no genuine normal CSV release/import cycle after cutover**. No pupil mutation was generated to satisfy the gate.
 
-A temporary one-shot repository-maintenance workflow was attempted only to repair the full observer's stale status-literal self-check. Its workspace patch step succeeded, but its repository-write step failed; it made no production change and did not alter the full observer. The temporary write-capable workflow was then removed. The full observer therefore remains read-only and otherwise unchanged; its stale status-literal self-check must be corrected before the next full rerun.
+A temporary one-shot repository-maintenance workflow was attempted only to repair the full observer's stale status-literal self-check. Its workspace patch step succeeded, but its repository-write step failed; it made no production change. The temporary write-capable workflow was removed. The stale observer status self-check was then corrected directly, while retaining the observer's read-only permissions and mutation guard, at commit `8a86f0114c79394be866d4fd98119eeb2b05a7a3`.
+
+## Fresh full read-only stabilisation observation — 2026-09-14
+
+The observer run at exact SHA `8a86f0114c79394be866d4fd98119eeb2b05a7a3` is run `34830592811`.
+
+Attempt 1 passed the observer immutability guard, retained-source checks, CP11 frozen-invariant validation, the full authentication/capability/compatibility/publishing regression suite, live parity, VR How-To special-area checks, and candidate Student/Browser health. It then failed only because the observer's unauthenticated GitHub REST read of the legacy frontend `main` branch returned HTTP `403`. The failure occurred before topology evidence assembly; no production mutation occurred.
+
+A dedicated read-only topology diagnostic was added at commit `c857b2c79d6c07211fa9f5e083364130587776eb` and run as `34830839522`. It completed successfully. Artifact:
+
+- artifact ID: `10341822957`;
+- name: `checkpoint12-topology-diagnostic-readonly`;
+- digest: `sha256:2762881dd8ee86b6368c196a6722a49b190dceb8b13b52dde6bcda3ef37315b3`.
+
+That diagnostic proved there was **no topology or rollback drift**: production DNS, Worker route, legacy Worker deployment/version, candidate Student deployment/version, candidate Browser deployment/version, legacy frontend `main`, all required retained KV/D1/R2 bindings, and direct authoritative-edge behaviour all matched the frozen CP11 anchors exactly.
+
+The same full observer job was then rerun on a fresh runner. Attempt 2 completed **SUCCESS** and produced:
+
+- artifact ID: `10341514063`;
+- name: `checkpoint12-stabilisation-observation-evidence`;
+- digest: `sha256:a0a79885b9c6fcc67b959d25e9a9616b27aa0b7a2201c365e3d75a22d8f3a9c5`;
+- evidence marker: `REBUILD_CHECKPOINT12_OBSERVATION_PASS`;
+- observed SHA: `8a86f0114c79394be866d4fd98119eeb2b05a7a3`;
+- observation timestamp: `2026-09-14T10:02:57Z`.
+
+Attempt 2 re-established all required current point-in-time evidence:
+
+- full live parity: PASS — `372` lessons, `0` resource mismatches, `23` current students, `0` unexplained student differences;
+- VR How-To: PASS — `3` current profiles, `manual=3`, `direct=0`;
+- candidate Student/Browser health: PASS — Student health `200`, Browser root `200`, unauthenticated Student API `401`, service-binding facade present;
+- authentication/capability/compatibility/publishing/read-model regressions: PASS;
+- authoritative Cloudflare topology/direct edge: PASS;
+- legacy Worker rollback deployment/version: unchanged;
+- candidate Student and Browser deployments/versions: unchanged;
+- legacy frontend `main`: unchanged at `96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7`;
+- all required retained KV/D1/R2 bindings: present;
+- exact CP11 execution invariants: revalidated;
+- no pupil mutation performed.
+
+The Actions-name heuristic still reports only run `34824632012`, the already-validated CP9 production-shaped staging/UAT run. It remains excluded. The stronger production-D1 importer detector remains the governing operational-cycle evidence and had found zero genuine post-cutover normal importer activity.
+
+Therefore after this fresh observation:
+
+- `initialObservationStatus = PASS`;
+- `representativeCycleGateMet = false`;
+- `cp13Allowed = false`;
+- CP12 remains **OPEN**.
 
 ### Outstanding stabilisation evidence
 
-The initial observer proves a clean point-in-time state. It does **not** by itself prove sustained clean operation across the stability window. Before CP12 can close, evidence must cover genuine representative normal release/import activity and subsequent clean operation, including the required absence of material server errors/timeouts, snapshot or catalogue-build failures, protected-view failures and resource-load failures during the representative observation window.
+The repeated observer evidence proves a clean point-in-time state, but it still does **not** prove sustained clean operation through genuine representative normal release/import cycles. Before CP12 can close, evidence must cover genuine representative normal release/import activity and subsequent clean operation, including the required absence of material server errors/timeouts, snapshot or catalogue-build failures, protected-view failures and resource-load failures during the representative observation window.
 
 No synthetic pupil mutation is to be created merely to satisfy that gate. CP13 remains prohibited until this evidence exists and CP12 is formally recorded CLOSED — PASS.
