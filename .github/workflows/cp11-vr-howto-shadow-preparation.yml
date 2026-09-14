@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - rebuild/checkpoint11-implementation-build-2026-09-14
+    paths:
+      - .github/workflows/cp11-vr-howto-shadow-preparation.yml
   workflow_dispatch:
 
 permissions:
@@ -21,7 +23,6 @@ env:
 
 jobs:
   prepare-vr-howto-shadow:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'CP11: publish prepared VR How-To shadow model'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
