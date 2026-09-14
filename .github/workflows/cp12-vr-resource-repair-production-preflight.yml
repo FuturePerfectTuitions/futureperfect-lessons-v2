@@ -83,9 +83,9 @@ jobs:
           const activeVersions=Array.isArray(activeDeployment.versions)?activeDeployment.versions:[];
           const activeVersion=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
           if(activeVersion!==expectedStudent) throw new Error(`Student active version drift: ${activeVersion}`);
-          const versions=await cf(`/accounts/${account}/workers/services/${encodeURIComponent(student)}/versions`);
+          const versions=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/versions`);
           const versionRows=Array.isArray(versions)?versions:Array.isArray(versions?.items)?versions.items:[];
-          if(!versionRows.some(v=>clean(v.id||v.version_id)===expectedRollback)) throw new Error(`Expected rollback version not retained: ${expectedRollback}`);
+          if(!versionRows.some(v=>clean(v.id||v.version_id)===expectedRollback)) throw new Error(`Expected rollback version not retained: ${expectedRollback}; observed=${JSON.stringify(versionRows.map(v=>clean(v.id||v.version_id)).filter(Boolean).slice(0,20))}`);
           const browserDeployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/deployments`);
           const browserRows=Array.isArray(browserDeployments?.deployments)?browserDeployments.deployments:Array.isArray(browserDeployments)?browserDeployments:[];
           const browserVersions=Array.isArray(browserRows[0]?.versions)?browserRows[0].versions:[];
