@@ -1,0 +1,251 @@
+name: CP12 importer batch-view guard production deploy
+
+on:
+  push:
+    branches: [fix/cp12-import-batch-view-guard-2026-09-14]
+    paths: ['.github/workflows/cp12-import-batch-view-guard-production-deploy.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-importer-guard-production
+  cancel-in-progress: false
+
+env:
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  LEGACY_WORKER: fpt-portal-v2-worker
+  ACTIVE_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  ROLLBACK_STUDENT_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  VALIDATED_SOURCE_COMMIT: c38b07c3fe73ed1806a616ed87e710a16df32dd8
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Revalidate exact candidate and Phase-23 protected wrapper
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$VALIDATED_SOURCE_COMMIT" HEAD
+          grep -Fq 'name = "fpt-portal-v2-worker"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.toml
+          grep -Fq '[[send_email]]' worker/wrangler.toml
+          grep -Fq 'name = "EMAIL"' worker/wrangler.toml
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          echo CP12_IMPORTER_DEPLOY_SOURCE_GATE_PASS
+
+      - name: Fresh pre-mutation topology bindings versions and rollback gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          echo "$ZONE_ID" >/tmp/zone-id
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes-before.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and any(.result[]; .pattern==$route and .script==$browser) and ([.result[]|select(.pattern==$route and .script!=$browser)]|length)==0' /tmp/routes-before.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser-before.json
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' /tmp/browser-before.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-deployments-before.json
+          STUDENT_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/student-deployments-before.json | head -n1)"
+          test "$STUDENT_ACTIVE" = "$ACTIVE_STUDENT_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions-before.json
+          jq -e --arg old "$ROLLBACK_STUDENT_VERSION" 'any(.result.items[]; .id==$old)' /tmp/student-versions-before.json >/dev/null
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/settings" "${AUTH[@]}" -o /tmp/legacy-before.json
+          jq -e '.success==true' /tmp/legacy-before.json >/dev/null
+          jq -e '([.result.bindings[].type]|all(.=="plain_text" or .=="secret_text" or .=="kv_namespace" or .=="d1" or .=="r2_bucket" or .=="send_email"))' /tmp/legacy-before.json >/dev/null
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB EMAIL REBUILD_SHADOW_KV REBUILD_SHADOW_DB; do
+            jq -e --arg n "$binding" 'any(.result.bindings[]; .name==$n)' /tmp/legacy-before.json >/dev/null
+          done
+          for secret in ADMIN_IMPORT_PASSWORD ADMIN_IMPORT_SESSION_SECRET; do
+            jq -e --arg n "$secret" 'any(.result.bindings[]; .name==$n and ((.type//"")|test("secret";"i")))' /tmp/legacy-before.json >/dev/null
+          done
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/deployments" "${AUTH[@]}" -o /tmp/legacy-deployments-before.json
+          LEGACY_BEFORE_VERSION="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/legacy-deployments-before.json | head -n1)"
+          test -n "$LEGACY_BEFORE_VERSION"
+          echo "$LEGACY_BEFORE_VERSION" >/tmp/legacy-before-version
+
+          jq '[.result.bindings[] | if ((.type//"")|test("secret";"i")) then {name,type} else . end] | sort_by(.name)' /tmp/legacy-before.json >/tmp/legacy-binding-signature-before.json
+          curl --fail --silent --show-error "${API}/d1/database?per_page=100" "${AUTH[@]}" -o /tmp/d1-list.json
+          jq -e '.success==true' /tmp/d1-list.json >/dev/null
+          echo CP12_IMPORTER_FRESH_PREMUTATION_GATE_PASS
+
+      - name: Generate exact all-binding-preserving production config and dry-run
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/fpt-navigation-package /tmp/cp12-importer-dry-run
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/fpt-navigation-package >/tmp/fpt-navigation-package.log
+          grep -Fq 'Generated from the immutable Phase 11 canonical catalogue.' worker/src/phase11-navigation-manifest.generated.js
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          settings=json.load(open('/tmp/legacy-before.json'))['result']
+          d1_payload=json.load(open('/tmp/d1-list.json'))
+          dbs=d1_payload.get('result') or []
+          if isinstance(dbs,dict):
+              dbs=dbs.get('items') or dbs.get('databases') or []
+          db_name={str(x.get('uuid') or x.get('id') or ''):str(x.get('name') or x.get('database_name') or '') for x in dbs}
+          bindings=settings.get('bindings') or []
+          lines=[
+              'name = "fpt-portal-v2-worker"',
+              'main = "src/index-phase23-protected-view-stability.js"',
+              'compatibility_date = "2026-08-20"',
+              'keep_vars = true',
+              'workers_dev = true',
+              ''
+          ]
+          plain=[b for b in bindings if b.get('type')=='plain_text']
+          if plain:
+              lines.append('[vars]')
+              for b in sorted(plain,key=lambda x:x['name']):
+                  lines.append(f"{b['name']} = {json.dumps(str(b.get('text') or ''))}")
+              lines.append('')
+          secrets=sorted(b['name'] for b in bindings if 'secret' in str(b.get('type','')).lower())
+          if secrets:
+              lines.append('[secrets]')
+              lines.append('required = ['+', '.join(json.dumps(x) for x in secrets)+']')
+              lines.append('')
+          for b in sorted((x for x in bindings if x.get('type')=='send_email'),key=lambda x:x['name']):
+              lines += ['[[send_email]]',f"name = {json.dumps(b['name'])}",'']
+          for b in sorted((x for x in bindings if x.get('type')=='kv_namespace'),key=lambda x:x['name']):
+              ident=b.get('namespace_id') or b.get('id')
+              if not ident: raise SystemExit(f"Missing KV id for {b['name']}")
+              lines += ['[[kv_namespaces]]',f"binding = {json.dumps(b['name'])}",f"id = {json.dumps(str(ident))}",'']
+          for b in sorted((x for x in bindings if x.get('type')=='r2_bucket'),key=lambda x:x['name']):
+              bucket=b.get('bucket_name') or b.get('bucket')
+              if not bucket: raise SystemExit(f"Missing R2 bucket for {b['name']}")
+              lines += ['[[r2_buckets]]',f"binding = {json.dumps(b['name'])}",f"bucket_name = {json.dumps(str(bucket))}",'']
+          for b in sorted((x for x in bindings if x.get('type')=='d1'),key=lambda x:x['name']):
+              ident=str(b.get('id') or b.get('database_id') or '')
+              name=db_name.get(ident,'')
+              if not ident or not name: raise SystemExit(f"Cannot resolve D1 name for {b['name']} id={ident}")
+              lines += ['[[d1_databases]]',f"binding = {json.dumps(b['name'])}",f"database_name = {json.dumps(name)}",f"database_id = {json.dumps(ident)}",'']
+          Path('worker/wrangler.cp12-runtime-preserve.toml').write_text('\n'.join(lines)+'\n')
+          print('Generated exact production config with',len(bindings),'observed bindings')
+          PY
+
+          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.cp12-runtime-preserve.toml
+          grep -Fq 'binding = "REBUILD_SHADOW_KV"' worker/wrangler.cp12-runtime-preserve.toml
+          grep -Fq 'binding = "REBUILD_SHADOW_DB"' worker/wrangler.cp12-runtime-preserve.toml
+          grep -Fq 'name = "EMAIL"' worker/wrangler.cp12-runtime-preserve.toml
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.cp12-runtime-preserve.toml --keep-vars --dry-run --outdir /tmp/cp12-importer-dry-run | tee /tmp/cp12-importer-dry-run.log
+          grep -Fq 'Total Upload' /tmp/cp12-importer-dry-run.log
+          echo CP12_IMPORTER_EXACT_CONFIG_DRY_RUN_PASS
+
+      - name: Deploy importer guard to legacy Operations Worker only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy \
+            --config worker/wrangler.cp12-runtime-preserve.toml \
+            --keep-vars \
+            --message 'CP12 importer ambiguous-batch view guard' | tee /tmp/cp12-importer-deploy.log
+          echo CP12_IMPORTER_PRODUCTION_DEPLOY_PASS
+
+      - name: Verify exact binding preservation and canonical topology after deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          ZONE_ID="$(cat /tmp/zone-id)"
+
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/settings" "${AUTH[@]}" -o /tmp/legacy-after.json
+          jq '[.result.bindings[] | if ((.type//"")|test("secret";"i")) then {name,type} else . end] | sort_by(.name)' /tmp/legacy-after.json >/tmp/legacy-binding-signature-after.json
+          cmp -s /tmp/legacy-binding-signature-before.json /tmp/legacy-binding-signature-after.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${LEGACY_WORKER}/deployments" "${AUTH[@]}" -o /tmp/legacy-deployments-after.json
+          LEGACY_AFTER_VERSION="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/legacy-deployments-after.json | head -n1)"
+          test -n "$LEGACY_AFTER_VERSION"
+          test "$LEGACY_AFTER_VERSION" != "$(cat /tmp/legacy-before-version)"
+          echo "$LEGACY_AFTER_VERSION" >/tmp/legacy-after-version
+
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes-after.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and any(.result[]; .pattern==$route and .script==$browser) and ([.result[]|select(.pattern==$route and .script!=$browser)]|length)==0' /tmp/routes-after.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser-after.json
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' /tmp/browser-after.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-deployments-after.json
+          STUDENT_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/student-deployments-after.json | head -n1)"
+          test "$STUDENT_ACTIVE" = "$ACTIVE_STUDENT_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions-after.json
+          jq -e --arg old "$ROLLBACK_STUDENT_VERSION" 'any(.result.items[]; .id==$old)' /tmp/student-versions-after.json >/dev/null
+          echo CP12_IMPORTER_POSTDEPLOY_TOPOLOGY_BINDINGS_PASS
+
+      - name: Verify live importer security boundary and protected-wrapper source marker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --output /tmp/import-login-wrong.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+            --request POST --data '{"password":"__cp12_deliberately_wrong__"}' \
+            "$BASE/api/v1/admin/lesson-releases/login")"
+          test "$code" = '401'
+          jq -e '.error=="UNAUTHORISED"' /tmp/import-login-wrong.json >/dev/null
+          code="$(curl --silent --show-error --output /tmp/import-preview-unauth.json --write-out '%{http_code}' \
+            --header "Origin: $ORIGIN" --header 'Content-Type: application/json' \
+            --request POST --data '{"rows":[]}' \
+            "$BASE/api/v1/admin/lesson-releases/preview")"
+          test "$code" = '401'
+          jq -e '.error=="UNAUTHORISED"' /tmp/import-preview-unauth.json >/dev/null
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          echo CP12_IMPORTER_LIVE_SECURITY_PASS
+
+      - name: Produce deployment evidence summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker CP12_IMPORTER_GUARD_PRODUCTION_DEPLOY_PASS \
+            --arg before "$(cat /tmp/legacy-before-version)" \
+            --arg after "$(cat /tmp/legacy-after-version)" \
+            --arg student "$ACTIVE_STUDENT_VERSION" \
+            --arg rollback "$ROLLBACK_STUDENT_VERSION" \
+            '{marker:$marker,status:"PASS",target:"fpt-portal-v2-worker",browserRedeployed:false,studentRedeployed:false,legacyVersionBefore:$before,legacyVersionAfter:$after,studentVersionUnchanged:$student,studentRollbackRetained:$rollback,allLegacyBindingsPreserved:true,emailPreserved:true,phase23ProtectedWrapperPreserved:true,publicImporterUnauthorisedBoundary:true,parentEmailSent:false}' | tee /tmp/cp12-importer-production-deploy-summary.json
+
+      - name: Upload safe deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-importer-batch-view-guard-production-deploy
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            /tmp/cp12-importer-production-deploy-summary.json
+            /tmp/cp12-importer-dry-run.log
+            /tmp/cp12-importer-deploy.log
+            /tmp/legacy-binding-signature-before.json
+            /tmp/legacy-binding-signature-after.json
