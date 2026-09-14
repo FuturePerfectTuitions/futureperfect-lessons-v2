@@ -39,6 +39,19 @@ jobs:
             node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
             node --check tests/rebuild-checkpoint11-vr-howto-runtime.mjs
           } 2>&1 | tee /tmp/cp11-validation-syntax.log
+      - name: Main reversible-cutover orchestration includes VR How-To gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          WORKFLOW=.github/workflows/rebuild-checkpoint11-reversible-cutover.yml
+          grep -F 'scripts/rebuild-checkpoint11-special-backfill.mjs' "$WORKFLOW" >/dev/null
+          grep -F 'tests/rebuild-checkpoint11-vr-howto-runtime.mjs' "$WORKFLOW" >/dev/null
+          test "$(grep -c -F 'scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs' "$WORKFLOW")" -ge 2
+          grep -F 'VR_HOWTO' "$WORKFLOW" >/dev/null
+          grep -F 'manualAccess.specialBuckets' "$WORKFLOW" >/dev/null
+          grep -F 'directGrantedCurrent==0' "$WORKFLOW" >/dev/null
+          grep -F 'manualGrantedCurrent==3' "$WORKFLOW" >/dev/null
+          echo REBUILD_CHECKPOINT11_MAIN_ORCHESTRATION_VR_HOWTO_PASS | tee /tmp/cp11-validation-orchestration.log
       - name: Scope compatibility
         run: |
           set -o pipefail
@@ -64,7 +77,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/cp11-validation-live-special.json
-          jq -e '.status=="PASS" and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/cp11-validation-live-special.json >/dev/null
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/cp11-validation-live-special.json >/dev/null
       - name: Upload validation logs
         if: always()
         uses: actions/upload-artifact@v4
