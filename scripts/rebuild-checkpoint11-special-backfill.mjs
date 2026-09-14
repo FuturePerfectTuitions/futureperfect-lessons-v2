@@ -105,6 +105,7 @@ const items = sourceItems.map((item, index) => {
 });
 const playable = items.filter(item => !item.separator && item.targetUrl);
 if (!playable.length) throw new Error('Live VR_HOWTO catalogue has no playable items.');
+if (items.length !== 11 || playable.length !== 11) throw new Error(`VR_HOWTO_CATALOGUE_DRIFT:${items.length}:${playable.length}`);
 
 const payload = {
   schemaVersion:1,
@@ -136,7 +137,8 @@ for (const key of (await kvKeys(studentsNs, 'user:')).sort()) {
   if (manual.has('VR_HOWTO')) manualGrantedCurrent += 1;
   if (direct.has('VR_HOWTO')) directGrantedCurrent += 1;
 }
-if (manualGrantedCurrent < 1) throw new Error('No current manual VR_HOWTO grants were found.');
+if (manualGrantedCurrent !== 3) throw new Error(`VR_HOWTO_MANUAL_GRANT_DRIFT:${manualGrantedCurrent}`);
+if (directGrantedCurrent !== 0) throw new Error(`VR_HOWTO_DIRECT_GRANT_FORBIDDEN:${directGrantedCurrent}`);
 const summary = {
   marker:'REBUILD_CHECKPOINT11_VR_HOWTO_BACKFILL_PASS',
   checkpoint:11,
