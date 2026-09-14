@@ -1,0 +1,53 @@
+name: CP12 sync UI promotion official SHA - source only
+
+on:
+  push:
+    branches: [fix/cp12-resource-collapsible-ui-2026-09-14]
+    paths: ['.github/workflows/cp12-sync-ui-promotion-official-sha.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/cp12-resource-collapsible-ui-2026-09-14
+      - name: Verify official head and replace only the stale guard SHA
+        shell: bash
+        env:
+          OLD_SHA: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+          NEW_SHA: b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2
+          TARGET: .github/workflows/cp12-resource-ui-production-promote-v2.yml
+        run: |
+          set -Eeuo pipefail
+          git fetch origin rebuild/checkpoint12-stabilisation-2026-09-14
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$NEW_SHA"
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path(os.environ['TARGET'])
+          s=p.read_text()
+          old=f"OFFICIAL_CP12_SHA: {os.environ['OLD_SHA']}"
+          new=f"OFFICIAL_CP12_SHA: {os.environ['NEW_SHA']}"
+          assert s.count(old)==1, f'expected exactly one stale guard SHA, found {s.count(old)}'
+          s2=s.replace(old,new)
+          assert s2.count(new)==1
+          p.write_text(s2)
+          PY
+          test "$(git diff --name-only)" = "$TARGET"
+          git diff --check
+          git diff -- "$TARGET"
+      - name: Commit source-only guard synchronisation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add .github/workflows/cp12-resource-ui-production-promote-v2.yml
+          git commit -m 'CP12: sync UI promotion guard to current official head'
+          git push origin HEAD:fix/cp12-resource-collapsible-ui-2026-09-14
