@@ -26,6 +26,10 @@ async function kvText(ns,key){const r=await fetch(`${cfBase}/accounts/${account}
 async function kvJson(ns,key){const t=await kvText(ns,key);if(t==null)return null;return JSON.parse(t);}
 async function kvKeys(ns,prefix){const out=[];let cursor='';do{const q=new URLSearchParams({limit:'1000',prefix});if(cursor)q.set('cursor',cursor);const b=await cf(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);out.push(...(b.result||[]).map(x=>x.name));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
 function isCurrent(id,u){const role=norm(u?.role||u?.accountType);if(id==='admin'||role.includes('admin')||u?.isAdmin===true||u?.superuser===true)return false;const status=norm(u?.accountStatus||u?.status||'active');const expires=clean(u?.expiresOn||u?.expires);return !['inactive','disabled','expired','withdrawn'].includes(status)&&(!expires||expires>asOf);}
+async function returnHome(page,id){
+  await page.goto(`${portalOrigin}/?cp12-population-home=${Date.now()}-${encodeURIComponent(id)}`,{waitUntil:'domcontentloaded',timeout:30000});
+  await page.getByRole('heading',{name:/Welcome/}).waitFor({state:'visible',timeout:15000});
+}
 
 const [opsSettings,studentSettings]=await Promise.all([settings(opsWorker),settings(studentWorker)]);
 const studentsNs=clean(binding(opsSettings,'STUDENTS_KV').namespace_id);
@@ -58,7 +62,8 @@ try{
     const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
     const page=await context.newPage();
     const apiErrors=[];
-    page.on('response',r=>{try{const p=new URL(r.url()).pathname;if(p.startsWith('/api/v2/')&&r.status()>=400)apiErrors.push(`${r.status()} ${p}`);}catch{}});
+    let authenticated=false;
+    page.on('response',r=>{try{const p=new URL(r.url()).pathname;if(authenticated&&p.startsWith('/api/v2/')&&r.status()>=400)apiErrors.push(`${r.status()} ${p}`);}catch{}});
     try{
       await page.goto(`${portalOrigin}/?cp12-population=${Date.now()}-${encodeURIComponent(id)}`,{waitUntil:'domcontentloaded',timeout:30000});
       if(!bundleEvidence){
@@ -66,37 +71,41 @@ try{
         const bundle=scriptSrc.find(u=>/\/assets\/portal-[^/]+\.js(?:\?|$)/.test(u))||scriptSrc[0]||'';
         if(bundle){const resp=await page.request.get(bundle,{headers:{'cache-control':'no-cache'}});bundleEvidence={path:new URL(bundle).pathname,status:resp.status(),cacheControl:resp.headers()['cache-control']||'',etag:resp.headers().etag||'',age:resp.headers().age||''};}
       }
-      await page.getByRole('heading',{name:'Student Login'}).waitFor({timeout:15000});
+      await page.getByRole('heading',{name:'Student Login'}).waitFor({state:'visible',timeout:15000});
       await page.getByLabel('Username').fill(id);
       await page.getByRole('textbox',{name:'Password',exact:true}).fill(password);
-      const loginResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v2/auth/login',{timeout:15000});
       await page.getByRole('button',{name:'Log in'}).click();
-      assert.equal((await loginResponse).status(),200,'login HTTP status');
-      await page.getByRole('heading',{name:/Welcome/}).waitFor({timeout:15000});
+      await page.getByRole('heading',{name:/Welcome/}).waitFor({state:'visible',timeout:15000});
+      authenticated=true;
 
       for(const subject of ['english','maths']){
         const subjectExpected=expected.filter(v=>norm(v.subject)===subject).map(v=>clean(v.viewId));
         if(!subjectExpected.length){row.subjects[subject]={expected:[],skipped:true};continue;}
+        await returnHome(page,id);
         const subjectButton=page.locator(`[data-subject="${subject}"]`);
         await subjectButton.waitFor({state:'visible',timeout:10000});
-        const responseP=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/v2/student/subjects/${subject}`,{timeout:15000});
         await subjectButton.click();
-        const response=await responseP;
-        assert.equal(response.status(),200,`${subject} API status`);
+        await page.getByRole('heading',{name:subject==='english'?'English':'Maths',exact:true}).waitFor({state:'visible',timeout:15000});
+        const firstExpected=page.locator(`[data-view="${subjectExpected[0]}"]`);
         const blank=page.getByText('No years or levels are currently available.');
+        await Promise.race([
+          firstExpected.waitFor({state:'visible',timeout:15000}).catch(()=>null),
+          blank.waitFor({state:'visible',timeout:15000}).catch(()=>null)
+        ]);
         const rendered=await page.locator('[data-view]').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('data-view')).filter(Boolean));
         const renderedSet=new Set(rendered);
         const missing=subjectExpected.filter(v=>!renderedSet.has(v));
+        const blankVisible=await blank.isVisible().catch(()=>false);
         row.renderedViews.push(...rendered);
-        row.subjects[subject]={expected:subjectExpected.sort(),rendered:[...renderedSet].sort(),missing,blankVisible:await blank.isVisible().catch(()=>false)};
-        if(missing.length||row.subjects[subject].blankVisible)row.errors.push(`${subject.toUpperCase()}_VIEW_RENDER_MISMATCH`);
+        row.subjects[subject]={expected:subjectExpected.sort(),rendered:[...renderedSet].sort(),missing,blankVisible};
+        if(missing.length||blankVisible)row.errors.push(`${subject.toUpperCase()}_VIEW_RENDER_MISMATCH`);
 
         if(id==='ayla0108'&&subject==='english'){
           const view=page.locator('[data-view="english-year4-11plus"]');
           const visible=await view.isVisible().catch(()=>false);
           if(visible){
             await view.click();
-            await page.getByLabel('Search lessons').waitFor({timeout:15000});
+            await page.getByLabel('Search lessons').waitFor({state:'visible',timeout:15000});
             const lesson=page.locator('[data-lesson="Y4E1"]').first();
             const lessonVisible=await lesson.isVisible().catch(()=>false);
             row.aylaY4E1={viewVisible:true,lessonVisible};
@@ -107,12 +116,6 @@ try{
             row.errors.push('AYLA_Y4_VIEW_NOT_RENDERED');
             await page.screenshot({path:path.join(evidenceDir,'ayla-english-blank.png'),fullPage:true});
           }
-        }
-
-        await page.goBack({waitUntil:'domcontentloaded'}).catch(()=>{});
-        if(!(await page.locator(`[data-subject="${subject==='english'?'maths':'english'}"]`).count())){
-          await page.goto(`${portalOrigin}/?cp12-population-home=${Date.now()}-${encodeURIComponent(id)}`,{waitUntil:'domcontentloaded'});
-          if(await page.getByRole('heading',{name:'Student Login'}).isVisible().catch(()=>false))throw new Error('Session unexpectedly lost during subject traversal');
         }
       }
       if(apiErrors.length)row.errors.push(...apiErrors.map(x=>`API_${x}`));
