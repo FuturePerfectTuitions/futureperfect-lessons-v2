@@ -1,0 +1,61 @@
+name: CP12 fresh topology gate before Reina repair
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-cp12-fresh-topology-pre-reina-repair.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  topology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HOST: lessons.futureperfect.education
+      BROWSER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT: fpt-portal-v2-rebuild-student-prod
+      LEGACY: fpt-portal-v2-worker
+    steps:
+      - name: Verify live topology read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; tok=os.environ['CLOUDFLARE_API_TOKEN']
+          host=os.environ['HOST']; browser=os.environ['BROWSER']; student=os.environ['STUDENT']; legacy=os.environ['LEGACY']
+          base='https://api.cloudflare.com/client/v4'
+          def get(path):
+            req=urllib.request.Request(base+path,headers={'Authorization':f'Bearer {tok}'})
+            with urllib.request.urlopen(req,timeout=30) as r: out=json.load(r)
+            if not out.get('success'): raise SystemExit('CF_READ_FAILED')
+            return out.get('result')
+          zones=get('/zones?'+urllib.parse.urlencode({'account.id':acct,'per_page':50})) or []
+          zone=next((z for z in zones if host==z.get('name') or host.endswith('.'+str(z.get('name')))),None)
+          if not zone: raise SystemExit('ZONE_NOT_FOUND')
+          routes=get(f"/zones/{zone['id']}/workers/routes") or []
+          host_routes=[r for r in routes if host in str(r.get('pattern','')).lower()]
+          if not any(r.get('pattern')==host+'/*' and r.get('script')==browser for r in host_routes): raise SystemExit('PUBLIC_ROUTE_NOT_BROWSER')
+          if any(r.get('script') not in (browser,None,'') for r in host_routes): raise SystemExit('UNEXPECTED_PUBLIC_ROUTE')
+          def settings(script): return get(f'/accounts/{acct}/workers/scripts/{urllib.parse.quote(script,safe="")}/settings') or {}
+          bs=settings(browser); ss=settings(student); ls=settings(legacy)
+          bb=bs.get('bindings') or []; sb=ss.get('bindings') or []; lb=ls.get('bindings') or []
+          services=[{'name':b.get('name'),'service':b.get('service')} for b in bb if b.get('type')=='service']
+          if not any(b.get('service')==student for b in bb if b.get('type')=='service'): raise SystemExit('BROWSER_NOT_BOUND_TO_STUDENT')
+          if any('admin' in str(b.get('service','')).lower() for b in bb if b.get('type')=='service'): raise SystemExit('BROWSER_ADMINOPS_BINDING_PRESENT')
+          if not any(b.get('name')=='ENVIRONMENT' and b.get('text')=='production' for b in sb): raise SystemExit('STUDENT_NOT_PRODUCTION')
+          if not any(b.get('name')=='ENVIRONMENT' and b.get('text')=='production' for b in lb): raise SystemExit('LEGACY_NOT_PRODUCTION')
+          def deployment(script):
+            rows=get(f'/accounts/{acct}/workers/scripts/{urllib.parse.quote(script,safe="")}/deployments') or []
+            if isinstance(rows,dict): rows=rows.get('deployments') or []
+            first=rows[0] if rows else {}
+            versions=first.get('versions') or []
+            live=next((v for v in versions if float(v.get('percentage') or 0)==100), versions[0] if versions else {})
+            return {'deploymentId':first.get('id'),'versionId':live.get('version_id')}
+          out={'route':host_routes,'browserServices':services,'browserDeployment':deployment(browser),'studentDeployment':deployment(student),'legacyDeployment':deployment(legacy)}
+          print('FRESH_TOPOLOGY_PASS='+json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY
