@@ -94,6 +94,12 @@ Observer authenticated timings:
 - Admin login `387.976 ms`; Home `362.309 ms`; combined `750.285 ms`;
 - representative student login `360.538 ms`; Home `87.584 ms`; combined `448.122 ms`.
 
+## CP12 VR resource repair follow-up
+
+The later CP12 VR prepared-resource defect was repaired without changing the Browser or Student Worker deployments. The canonical prepared-resource collector now includes the authoritative top-level VR PreLesson/Homework pairs while retaining VR scoping and protected-answer semantics.
+
+Production publication run `34859100378` — PASS. Exact public/access-boundary post-repair verification run `34859497661` — PASS. The latter confirmed the repaired Y4/Y5 VR rows on the public Admin path, retained VR access for the named affected Y5 accounts, representative Y4/Y5 11+ visibility, ordinary non-VR exclusion, and the Answer Pack password gate. This documentation update intentionally triggers the established full CP12 Admin post-repair observer again after the VR repair.
+
 ## Remaining CP12 gate
 
 No genuine normal post-cutover release/import operational cycle has yet been observed after the rebuild cutover. The post-repair read-only detector still reports zero qualifying full-release rows and zero qualifying online-PreLesson rows after cutover.
