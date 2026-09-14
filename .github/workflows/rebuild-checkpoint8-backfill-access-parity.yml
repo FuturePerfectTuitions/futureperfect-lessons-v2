@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/rebuild-checkpoint8-backfill-access-parity.yml'
       - 'scripts/rebuild-checkpoint8-live-audit.mjs'
+      - 'scripts/rebuild-checkpoint8-profile-mode-inventory.mjs'
   workflow_dispatch:
 
 permissions:
@@ -37,15 +38,21 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo 'Cloudflare credentials are present; values are not printed.'
-      - name: Syntax check population audit
-        run: node --check scripts/rebuild-checkpoint8-live-audit.mjs
+      - name: Syntax check population audits
+        run: |
+          node --check scripts/rebuild-checkpoint8-live-audit.mjs
+          node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
       - name: Audit every current student source entitlement against published access
         run: node scripts/rebuild-checkpoint8-live-audit.mjs
-      - name: Upload complete entitlement audit
+      - name: Audit every entitlement for a reachable presentation route
+        run: node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+      - name: Upload complete entitlement audits
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cp12-entitlement-population-audit
-          path: /tmp/cp12-entitlement-population-audit.json
+          path: |
+            /tmp/cp12-entitlement-population-audit.json
+            /tmp/cp12-entitlement-route-audit.json
           if-no-files-found: error
           retention-days: 30
