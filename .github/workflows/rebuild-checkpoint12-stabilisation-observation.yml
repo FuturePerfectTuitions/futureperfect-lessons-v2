@@ -76,7 +76,7 @@ jobs:
           if(hits.length) throw new Error(`Mutating command present in CP12 observer: ${hits.join(', ')}`);
           NODE
           test -f docs/rebuild/CHECKPOINT_12_STABILISATION.md
-          grep -F '**Status: OPEN — INITIAL OBSERVATION ONLY**' docs/rebuild/CHECKPOINT_12_STABILISATION.md >/dev/null
+          grep -F '**Status: OPEN — INITIAL OBSERVATION PASS; REPRESENTATIVE-CYCLE GATE NOT MET**' docs/rebuild/CHECKPOINT_12_STABILISATION.md >/dev/null
           echo REBUILD_CHECKPOINT12_READONLY_WORKFLOW_PASS
 
       - name: Verify retained compatibility, rollback and reconciliation source paths
