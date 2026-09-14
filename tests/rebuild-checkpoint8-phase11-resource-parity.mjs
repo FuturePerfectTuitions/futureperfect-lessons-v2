@@ -16,6 +16,20 @@ const lesson = {
       answerPack: { displayName: 'Answer Pack', r2Key: 'l3/m02/answer.pdf' }
     }
   ],
+  vr: {
+    preLesson: [
+      {
+        sheet: { displayName: 'VR PreLesson Sheet', r2Key: 'l3/m02/vr-pre.pdf' },
+        answerKey: { displayName: 'VR PreLesson Answer Pack', r2Key: 'l3/m02/vr-pre-answer.pdf' }
+      }
+    ],
+    homeworks: [
+      {
+        homework: { displayName: 'VR Homework', r2Key: 'l3/m02/vr-homework.pdf' },
+        answerPack: { displayName: 'VR Homework Answer Pack', r2Key: 'l3/m02/vr-homework-answer.pdf' }
+      }
+    ]
+  },
   phase11Resources: {
     core: {
       preLessonPairs: [
@@ -92,16 +106,37 @@ assert.deepEqual(vrAnswer.presentationScopes, ['vr']);
 assert.equal(resourceVisibleForView(vrAnswer, 'maths-level3', { vrAvailable: false }), false);
 assert.equal(resourceVisibleForView(vrAnswer, 'maths-level3', { vrAvailable: true }), true);
 
+const canonicalVrPre = collected.find(row => row.objectKey === 'l3/m02/vr-pre.pdf');
+const canonicalVrPreAnswer = collected.find(row => row.objectKey === 'l3/m02/vr-pre-answer.pdf');
+const canonicalVrHomework = collected.find(row => row.objectKey === 'l3/m02/vr-homework.pdf');
+const canonicalVrHomeworkAnswer = collected.find(row => row.objectKey === 'l3/m02/vr-homework-answer.pdf');
+assert.ok(canonicalVrPre && canonicalVrHomework);
+assert.deepEqual(canonicalVrPre.presentationScopes, ['vr']);
+assert.deepEqual(canonicalVrHomework.presentationScopes, ['vr']);
+assert.ok(canonicalVrPreAnswer?.protected && canonicalVrPreAnswer.type === 'answer-pack');
+assert.ok(canonicalVrHomeworkAnswer?.protected && canonicalVrHomeworkAnswer.type === 'answer-pack');
+assert.deepEqual(canonicalVrPreAnswer.presentationScopes, ['vr']);
+assert.deepEqual(canonicalVrHomeworkAnswer.presentationScopes, ['vr']);
+assert.equal(resourceVisibleForView(canonicalVrHomework, 'english-year4-11plus', { vrAvailable: false }), false);
+assert.equal(resourceVisibleForView(canonicalVrHomework, 'english-year4-11plus', { vrAvailable: true }), true);
+
 const compiled = await compileLessonDetail(lesson, { resourceExists: async () => true });
 assert.equal(compiled.resourceCount, collected.length);
 assert.ok(compiled.resources.some(row => row.objectKey === 'l3/m02/11plus-cumulative.pdf' && row.presentationScopes?.includes('elevenPlus')));
 assert.ok(compiled.resources.some(row => row.objectKey === 'l3/m02/11plus-cumulative-answer.pdf' && row.protected === true && row.presentationScopes?.includes('elevenPlus')));
 assert.ok(compiled.resources.some(row => row.objectKey === 'l3/m02/core-cumulative-answer.pdf' && row.protected === true && !row.presentationScopes));
+assert.ok(compiled.resources.some(row => row.objectKey === 'l3/m02/vr-pre.pdf' && row.presentationScopes?.includes('vr')));
+assert.ok(compiled.resources.some(row => row.objectKey === 'l3/m02/vr-homework-answer.pdf' && row.protected === true && row.presentationScopes?.includes('vr')));
 
 const tampered = collected.map(row => row.objectKey === 'l3/m02/11plus-homework.pdf'
   ? Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'presentationScopes'))
   : row);
 assert.equal(auditLegacyLessonResourceParity(lesson, tampered).pass, false, 'Independent oracle must detect accidental 11+ widening.');
+
+const vrTampered = collected.map(row => row.objectKey === 'l3/m02/vr-homework.pdf'
+  ? Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'presentationScopes'))
+  : row);
+assert.equal(auditLegacyLessonResourceParity(lesson, vrTampered).pass, false, 'Independent oracle must detect accidental VR widening.');
 
 const oracleSource = fs.readFileSync(new URL('../rebuild/adminops/src/lib/legacy-resource-oracle.mjs', import.meta.url), 'utf8');
 assert.equal(oracleSource.includes("from './compiler.mjs'"), false);
@@ -112,7 +147,9 @@ console.log(JSON.stringify({
   resourceCount: collected.length,
   phase11ExtensionEntries: inventory.extensionEntries,
   cumulativePairs: inventory.cumulativePairs,
+  canonicalVrPairs: true,
   independentTamperDetection: true,
   elevenPlusNormalViewBlocked: true,
+  vrVisibilityGated: true,
   protectedAnswersRetained: true
 }));
