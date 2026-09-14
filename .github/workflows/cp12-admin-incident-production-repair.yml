@@ -1,0 +1,244 @@
+name: CP12 Admin Incident Production Repair
+
+on:
+  push:
+    branches:
+      - incident/cp12-admin-principal-2026-09-14
+    paths:
+      - .github/workflows/cp12-admin-incident-production-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-admin-incident-production-repair
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  CP12_BASE_SHA: 7f9986f84a7e05d679499924a0e6026d21090507
+  EXPECTED_BROWSER: fpt-portal-v2-rebuild-browser-prod
+  EXPECTED_STUDENT: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_D1: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  WRANGLER_VERSION: 4.129.0
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Revalidate canonical incident implementation before Cloudflare access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF_NAME" = 'incident/cp12-admin-principal-2026-09-14'
+          git fetch origin rebuild/checkpoint12-stabilisation-2026-09-14
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$CP12_BASE_SHA"
+          git merge-base --is-ancestor "$CP12_BASE_SHA" "$GITHUB_SHA"
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node --check scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuild-cp12-admin-vr-decorator.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+          CHANGED_RUNTIME="$(git diff --name-only "$CP12_BASE_SHA"...HEAD -- rebuild/student rebuild/shared | sort)"
+          test "$CHANGED_RUNTIME" = $'rebuild/student/src/lib/runtime.mjs\nrebuild/student/src/lib/vr-howto-runtime.mjs'
+
+      - name: Fresh immediate production topology, bindings and rollback anchor gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$EXPECTED_BROWSER" '.success==true and any(.result[]; .pattern==$route and .script==$browser)' /tmp/routes.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_BROWSER}/settings" "${AUTH[@]}" -o /tmp/browser.json
+          jq -e --arg student "$EXPECTED_STUDENT" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student)' /tmp/browser.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/settings" "${AUTH[@]}" -o /tmp/student.json
+          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '
+            .success==true
+            and any(.result.bindings[]; .name=="READ_MODELS_KV" and .type=="kv_namespace" and (.namespace_id // .id)==$read)
+            and any(.result.bindings[]; .name=="STUDENTS_KV" and .type=="kv_namespace" and (.namespace_id // .id)==$students)
+            and any(.result.bindings[]; .name=="DB" and .type=="d1" and (.database_id // .id)==$d1)
+            and any(.result.bindings[]; .name=="MATERIALS_R2" and .type=="r2_bucket" and (.bucket_name // .bucket)==$r2)
+            and any(.result.bindings[]; .name=="AUTH_SIGNING_SECRET" and .type=="secret_text")
+            and any(.result.bindings[]; .name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")
+          ' /tmp/student.json >/dev/null
+          UNEXPECTED="$(jq -r '[.result.bindings[] | select((.type|IN("plain_text","secret_text","kv_namespace","d1","r2_bucket"))|not) | .name] | join(",")' /tmp/student.json)"
+          test -z "$UNEXPECTED"
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/deployments" "${AUTH[@]}" -o /tmp/deployments.json
+          OLD_VERSION="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/deployments.json | head -n1)"
+          OLD_DEPLOYMENT="$(jq -r '.result.deployments[0].id // ""' /tmp/deployments.json)"
+          test -n "$OLD_VERSION"
+          test -n "$OLD_DEPLOYMENT"
+          echo "OLD_VERSION=$OLD_VERSION" >> "$GITHUB_ENV"
+          echo "OLD_DEPLOYMENT=$OLD_DEPLOYMENT" >> "$GITHUB_ENV"
+          jq -n --arg marker 'CP12_ADMIN_INCIDENT_IMMEDIATE_PREMUTATION_PASS' --arg observedAt "$(date -u +%FT%TZ)" --arg browser "$EXPECTED_BROWSER" --arg student "$EXPECTED_STUDENT" --arg rollbackDeployment "$OLD_DEPLOYMENT" --arg rollbackVersion "$OLD_VERSION" '{marker:$marker,readOnly:true,observedAt:$observedAt,browser:$browser,student:$student,rollback:{deployment:$rollbackDeployment,version:$rollbackVersion},bindingsVerified:true,secretsPresent:true}' | tee /tmp/cp12-admin-immediate-premutation.json
+
+      - name: Reproduce incident and prove production is still on the failing Admin path immediately before mutation
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: immediate-premutation-baseline
+          EXPECT_ADMIN_STATUS: '503'
+          EXPECT_ADMIN_ERROR: READ_MODEL_POINTER_UNAVAILABLE
+          SMOKE_OUTPUT: /tmp/cp12-admin-baseline.json
+        run: node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+
+      - name: Resolve D1 name and create exact production version configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/d1/database?per_page=100" "${AUTH[@]}" -o /tmp/d1.json
+          D1_NAME="$(jq -r --arg id "$EXPECTED_D1" '.result[] | select((.uuid // .id // "")==$id) | .name' /tmp/d1.json | head -n1)"
+          test -n "$D1_NAME"
+          cat > rebuild/student/wrangler.cp12-admin-production.toml <<TOML
+          name = "${EXPECTED_STUDENT}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+          keep_vars = true
+
+          [secrets]
+          required = ["AUTH_SIGNING_SECRET", "ACCESS_SCOPE_SECRET"]
+
+          [[kv_namespaces]]
+          binding = "READ_MODELS_KV"
+          id = "${EXPECTED_READ_MODELS_KV}"
+
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "${EXPECTED_STUDENTS_KV}"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${D1_NAME}"
+          database_id = "${EXPECTED_D1}"
+
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "${EXPECTED_R2}"
+          TOML
+
+      - name: Upload repaired Student runtime as an undeployed Worker version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/versions?deployable=true" "${AUTH[@]}" -o /tmp/versions-before.json
+          BEFORE_LATEST="$(jq -r '.result.items[0].id // ""' /tmp/versions-before.json)"
+          test -n "$BEFORE_LATEST"
+          npx wrangler versions upload --config rebuild/student/wrangler.cp12-admin-production.toml --message "CP12 Admin principal incident repair ${GITHUB_SHA}" --tag cp12-admin-principal-repair
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/versions?deployable=true" "${AUTH[@]}" -o /tmp/versions-after.json
+          NEW_VERSION="$(jq -r '.result.items[0].id // ""' /tmp/versions-after.json)"
+          test -n "$NEW_VERSION"
+          test "$NEW_VERSION" != "$BEFORE_LATEST"
+          test "$OLD_VERSION" = "$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/deployments.json | head -n1)"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          jq -n --arg marker 'CP12_ADMIN_INCIDENT_VERSION_UPLOAD_PASS' --arg oldVersion "$OLD_VERSION" --arg newVersion "$NEW_VERSION" --arg sha "$GITHUB_SHA" '{marker:$marker,productionTrafficChanged:false,oldVersion:$oldVersion,newVersion:$newVersion,sha:$sha}' | tee /tmp/cp12-admin-version-upload.json
+
+      - name: Add repaired version at zero percent and smoke it through the real Browser service binding
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: zero-percent-version-override
+          EXPECT_ADMIN_STATUS: '200'
+          OVERRIDE_WORKER: ${{ env.EXPECTED_STUDENT }}
+          OVERRIDE_VERSION: ${{ env.NEW_VERSION }}
+          SMOKE_OUTPUT: /tmp/cp12-admin-zero-percent-smoke.json
+        run: |
+          set -Eeuo pipefail
+          rollback() {
+            npx wrangler versions deploy "${OLD_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin incident automatic rollback after candidate failure' || true
+          }
+          trap rollback ERR
+          npx wrangler versions deploy "${NEW_VERSION}@0%" "${OLD_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin incident zero-percent smoke'
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          trap - ERR
+
+      - name: Promote repaired version to 100 percent and run authenticated public Admin plus student smoke
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: post-production-promotion
+          EXPECT_ADMIN_STATUS: '200'
+          SMOKE_OUTPUT: /tmp/cp12-admin-production-smoke.json
+        run: |
+          set -Eeuo pipefail
+          rollback() {
+            npx wrangler versions deploy "${OLD_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin incident automatic rollback after production smoke failure' || true
+          }
+          trap rollback ERR
+          npx wrangler versions deploy "${NEW_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin principal incident repair'
+          sleep 2
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          trap - ERR
+
+      - name: Final topology, binding, active-version and security invariants verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/final-zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/final-zones.json | head -n1)"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/final-routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$EXPECTED_BROWSER" '.success==true and any(.result[]; .pattern==$route and .script==$browser)' /tmp/final-routes.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_BROWSER}/settings" "${AUTH[@]}" -o /tmp/final-browser.json
+          jq -e --arg student "$EXPECTED_STUDENT" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student)' /tmp/final-browser.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/settings" "${AUTH[@]}" -o /tmp/final-student.json
+          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '
+            .success==true
+            and any(.result.bindings[]; .name=="READ_MODELS_KV" and (.namespace_id // .id)==$read)
+            and any(.result.bindings[]; .name=="STUDENTS_KV" and (.namespace_id // .id)==$students)
+            and any(.result.bindings[]; .name=="DB" and (.database_id // .id)==$d1)
+            and any(.result.bindings[]; .name=="MATERIALS_R2" and (.bucket_name // .bucket)==$r2)
+            and any(.result.bindings[]; .name=="AUTH_SIGNING_SECRET" and .type=="secret_text")
+            and any(.result.bindings[]; .name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")
+          ' /tmp/final-student.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/deployments" "${AUTH[@]}" -o /tmp/final-deployments.json
+          ACTIVE_VERSION="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/final-deployments.json | head -n1)"
+          test "$ACTIVE_VERSION" = "$NEW_VERSION"
+          jq -n --arg marker 'CP12_ADMIN_INCIDENT_PRODUCTION_REPAIR_PASS' --arg observedAt "$(date -u +%FT%TZ)" --arg browser "$EXPECTED_BROWSER" --arg student "$EXPECTED_STUDENT" --arg oldVersion "$OLD_VERSION" --arg newVersion "$NEW_VERSION" '{marker:$marker,observedAt:$observedAt,production:{browser:$browser,student:$student,activeVersion:$newVersion},rollback:{retainedVersion:$oldVersion},browserUnchanged:true,bindingsUnchanged:true,secretsRetained:true,adminAuthenticatedSmoke:true,studentAuthenticatedSmoke:true,cp12StillOpen:true,cp13Started:false}' | tee /tmp/cp12-admin-production-repair-pass.json
+
+      - name: Upload CP12 Admin incident production repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-admin-incident-production-repair-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/cp12-admin-immediate-premutation.json
+            /tmp/cp12-admin-baseline.json
+            /tmp/cp12-admin-version-upload.json
+            /tmp/cp12-admin-zero-percent-smoke.json
+            /tmp/cp12-admin-production-smoke.json
+            /tmp/cp12-admin-production-repair-pass.json
