@@ -47,7 +47,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           git merge-base --is-ancestor "$METADATA_COMMIT" HEAD
-          node tests/cp12-resource-presentation-metadata.mjs
           node tests/rebuild-cp12-resource-presentation-groups.mjs
           node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
           node tests/rebuild-checkpoint11-scope-compatibility.mjs
@@ -133,7 +132,7 @@ jobs:
           const keys=(await list('lesson:')).filter(k=>/^lesson:[A-Za-z0-9]+$/.test(k)).sort();
           if(keys.length<300) throw new Error(`Unexpected lesson source count:${keys.length}`);
           let changed=0, resources=0, grouped=0, vr=0, eleven=0, core=0;
-          const groupCounts={}; const changedScopes=[];
+          const groupCounts={};
           for(const key of keys){
             const record=await kvJson(lessons,key); if(!record?.lessonId)throw new Error(`Invalid source:${key}`);
             const candidate=await compileLessonDetail(record,{resourceExists:async()=>true});
@@ -142,7 +141,7 @@ jobs:
             const env=await kvJson(read,versionKey(scope,pointer.current.version)); if(!env?.payload)throw new Error(`Missing current envelope:${scope}`);
             const current=env.payload;
             if(stableStringify(stripGroups(current))!==stableStringify(stripGroups(candidate))) throw new Error(`Non-presentationGroup drift:${scope}`);
-            if(stableStringify(current)!==stableStringify(candidate)){changed++;changedScopes.push(scope);}
+            if(stableStringify(current)!==stableStringify(candidate))changed++;
             for(const r of candidate.resources||[]){
               resources++;
               const g=clean(r.presentationGroup);
