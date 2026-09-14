@@ -48,6 +48,8 @@ const lessonsNs = clean(binding('LESSONS_KV').namespace_id);
 if (!studentsNs || !lessonsNs) throw new Error('Production student/lesson bindings were not resolved.');
 
 const counts = new Map();
+const manualCounts = new Map();
+const directCounts = new Map();
 let currentProfiles = 0;
 let profilesWithSpecialAreas = 0;
 for (const key of await kvKeys(studentsNs, 'user:')) {
@@ -60,12 +62,13 @@ for (const key of await kvKeys(studentsNs, 'user:')) {
   const expires = clean(user.expiresOn || user.expires);
   if (['inactive','disabled','expired','withdrawn'].includes(status) || (expires && expires <= asOf)) continue;
   currentProfiles += 1;
-  const tokens = [...new Set([
-    ...(Array.isArray(user.specialAccess) ? user.specialAccess : []),
-    ...(Array.isArray(user?.manualAccess?.specialBuckets) ? user.manualAccess.specialBuckets : [])
-  ].map(value => clean(value).toUpperCase()).filter(Boolean))];
+  const manual = [...new Set((Array.isArray(user?.manualAccess?.specialBuckets) ? user.manualAccess.specialBuckets : []).map(value => clean(value).toUpperCase()).filter(Boolean))];
+  const direct = [...new Set((Array.isArray(user.specialAccess) ? user.specialAccess : []).map(value => clean(value).toUpperCase()).filter(Boolean))];
+  const tokens = [...new Set([...manual, ...direct])];
   if (tokens.length) profilesWithSpecialAreas += 1;
   for (const special of tokens) counts.set(special, (counts.get(special) || 0) + 1);
+  for (const special of manual) manualCounts.set(special, (manualCounts.get(special) || 0) + 1);
+  for (const special of direct) directCounts.set(special, (directCounts.get(special) || 0) + 1);
 }
 
 const areas = [];
@@ -78,6 +81,8 @@ for (const [special, profileCount] of [...counts.entries()].sort()) {
   areas.push({
     bucketId: special,
     profileCount,
+    manualSpecialBucketProfileCount: manualCounts.get(special) || 0,
+    directSpecialAccessProfileCount: directCounts.get(special) || 0,
     cataloguePresent: Boolean(catalogue),
     active: catalogue?.active !== false,
     type: clean(catalogue?.type) || null,
