@@ -1,0 +1,51 @@
+name: CP12 Admin Topology Readonly
+
+on:
+  push:
+    branches:
+      - incident/cp12-admin-principal-2026-09-14
+    paths:
+      - .github/workflows/cp12-admin-topology-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read actual public route and service binding without mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          ACCOUNT_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          BROWSER="$(jq -r '.result[] | select(.pattern=="lessons.futureperfect.education/*") | .script' /tmp/routes.json | head -n1)"
+          test -n "$BROWSER"
+          curl --fail --silent --show-error "${ACCOUNT_API}/workers/scripts/${BROWSER}/settings" "${AUTH[@]}" -o /tmp/browser.json
+          STUDENT="$(jq -r '.result.bindings[] | select(.name=="STAGING_API" and .type=="service") | .service' /tmp/browser.json | head -n1)"
+          test -n "$STUDENT"
+          curl --fail --silent --show-error "${ACCOUNT_API}/workers/scripts/${STUDENT}/settings" "${AUTH[@]}" -o /tmp/student.json
+          jq -e '.success==true' /tmp/student.json >/dev/null
+          jq -n \
+            --arg marker 'CP12_ADMIN_TOPOLOGY_READONLY' \
+            --arg observedAt "$(date -u +%FT%TZ)" \
+            --arg route 'lessons.futureperfect.education/*' \
+            --arg browser "$BROWSER" \
+            --arg student "$STUDENT" \
+            --arg readKv "$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV") | (.namespace_id // .id // "")' /tmp/student.json | head -n1)" \
+            --arg studentsKv "$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | (.namespace_id // .id // "")' /tmp/student.json | head -n1)" \
+            --arg d1 "$(jq -r '.result.bindings[] | select(.name=="DB") | (.database_id // .id // "")' /tmp/student.json | head -n1)" \
+            --arg r2 "$(jq -r '.result.bindings[] | select(.name=="MATERIALS_R2") | (.bucket_name // .bucket // "")' /tmp/student.json | head -n1)" \
+            --argjson authSecret "$(jq '[.result.bindings[] | select(.name=="AUTH_SIGNING_SECRET" and .type=="secret_text")] | length>0' /tmp/student.json)" \
+            --argjson scopeSecret "$(jq '[.result.bindings[] | select(.name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")] | length>0' /tmp/student.json)" \
+            '{marker:$marker,readOnly:true,observedAt:$observedAt,route:$route,browser:$browser,student:$student,bindings:{readModelsKv:$readKv,studentsKv:$studentsKv,d1:$d1,r2:$r2,authSigningSecretBound:$authSecret,accessScopeSecretBound:$scopeSecret}}' \
+            | tee /tmp/cp12-admin-topology-readonly.json
