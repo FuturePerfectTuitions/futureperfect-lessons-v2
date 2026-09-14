@@ -22,9 +22,13 @@ jobs:
         run: |
           set -euo pipefail
           node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
           node --check tests/rebuild-cp12-admin-principal.mjs
+          node --check tests/rebuild-cp12-admin-vr-decorator.mjs
       - name: Admin principal incident validation
         run: node tests/rebuild-cp12-admin-principal.mjs
+      - name: Admin VR decorator isolation
+        run: node tests/rebuild-cp12-admin-vr-decorator.mjs
       - name: Ordinary student runtime regression
         run: node tests/rebuild-checkpoint6-new-student-worker.mjs
       - name: Auth capability regression
