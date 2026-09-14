@@ -1,0 +1,31 @@
+name: CP12 Admin Shadow POST Readonly Diagnostic
+
+on:
+  push:
+    branches:
+      - incident/cp12-admin-principal-2026-09-14
+    paths:
+      - .github/workflows/cp12-admin-shadow-post-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STUDENT_URL: https://rebuild-student-v2-cp12-admin-incident.futureperfectlessons.workers.dev
+      BROWSER_URL: https://fpt-lessons-v2-cp12-admin-incident.futureperfectlessons.workers.dev
+    steps:
+      - name: Compare safe invalid-login POST directly and through Browser service binding
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for TARGET in student browser; do
+            if [ "$TARGET" = student ]; then URL="$STUDENT_URL"; else URL="$BROWSER_URL"; fi
+            CODE="$(curl --silent --show-error -D "/tmp/${TARGET}.headers" -o "/tmp/${TARGET}.body" --write-out '%{http_code}' -X POST -H "Origin: ${BROWSER_URL}" -H 'Content-Type: application/json' --data '{"username":"cp12-invalid-smoke","password":"A1bc"}' "${URL}/api/v2/auth/login" || true)"
+            echo "${TARGET} status=${CODE}"
+            echo "${TARGET} body=$(cat "/tmp/${TARGET}.body" 2>/dev/null || true)"
+            grep -Ei '^(cf-error-type|cf-error-origin|content-type|cf-ray):' "/tmp/${TARGET}.headers" || true
+          done
