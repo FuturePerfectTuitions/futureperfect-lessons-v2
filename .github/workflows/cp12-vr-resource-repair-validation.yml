@@ -1,0 +1,46 @@
+name: CP12 VR resource repair validation
+
+on:
+  push:
+    branches:
+      - fix/cp12-vr-resource-repair-2026-09-14
+    paths:
+      - 'rebuild/shared/read-models/phase11-extension-resources.mjs'
+      - 'tests/cp12-vr-resource-collector-verification.mjs'
+      - 'tests/cp12-vr-resource-canonical-source-verification.mjs'
+      - '.github/workflows/cp12-vr-resource-repair-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify repair and protected boundaries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/shared/read-models/phase11-extension-resources.mjs
+          node --check tests/cp12-vr-resource-collector-verification.mjs
+          node --check tests/cp12-vr-resource-canonical-source-verification.mjs
+          node tests/cp12-vr-resource-collector-verification.mjs
+          node tests/cp12-vr-resource-canonical-source-verification.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+      - name: Verify repair stayed out of Browser and Student runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git diff --name-only a0f2bef3eb4c1560031cfa703029b54b298a2d0c...HEAD | tee /tmp/changed.txt
+          ! grep -E '^rebuild/browser|^rebuild/student/' /tmp/changed.txt
+          grep -Fx 'rebuild/shared/read-models/phase11-extension-resources.mjs' /tmp/changed.txt >/dev/null
+          echo 'CP12_VR_REPAIR_ISOLATED_VALIDATION_PASS'
