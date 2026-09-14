@@ -30,6 +30,10 @@ jobs:
       AYLA_PORTAL_ID: Ayla0108
       REINA_PORTAL_ID: Rei0710
       PORTAL_ORIGIN: https://lessons.futureperfect.education
+      # Confirmed by read-only run 34893083522: both IDs are absent from every
+      # authoritative current curriculum/view but retain historical source rows.
+      # This classification does not delete or mutate those rows.
+      NONCURRENT_HISTORICAL_LESSON_IDS: Y4M24,Y4M36
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
