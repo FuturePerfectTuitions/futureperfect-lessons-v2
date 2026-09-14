@@ -11,6 +11,7 @@ on:
       - 'scripts/rebuild-checkpoint8-live-audit.mjs'
       - 'scripts/rebuild-checkpoint8-profile-mode-inventory.mjs'
       - 'scripts/cp12-live-public-entitlement-route-audit.mjs'
+      - 'scripts/cp12-production-browser-population-audit.mjs'
   workflow_dispatch:
 
 permissions:
@@ -19,7 +20,7 @@ permissions:
 jobs:
   entitlement-population-audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -30,6 +31,7 @@ jobs:
       AYLA_PORTAL_ID: Ayla0108
       REINA_PORTAL_ID: Rei0710
       PORTAL_ORIGIN: https://lessons.futureperfect.education
+      PLAYWRIGHT_VERSION: 1.55.0
       # Confirmed by read-only run 34893083522: both IDs are absent from every
       # authoritative current curriculum/view but retain historical source rows.
       # This classification does not delete or mutate those rows.
@@ -51,12 +53,19 @@ jobs:
           node --check scripts/rebuild-checkpoint8-live-audit.mjs
           node --check scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
           node --check scripts/cp12-live-public-entitlement-route-audit.mjs
+          node --check scripts/cp12-production-browser-population-audit.mjs
       - name: Audit every current student source entitlement against published access
         run: node scripts/rebuild-checkpoint8-live-audit.mjs
       - name: Audit every current student through live public Browser→Student routes
         run: node scripts/cp12-live-public-entitlement-route-audit.mjs
       - name: Audit every entitlement for a reachable presentation route
         run: node scripts/rebuild-checkpoint8-profile-mode-inventory.mjs
+      - name: Install Chromium browser runner
+        run: |
+          npm install --no-save --no-package-lock "@playwright/test@${PLAYWRIGHT_VERSION}"
+          npx playwright install --with-deps chromium
+      - name: Audit all current students through the production browser UI
+        run: node scripts/cp12-production-browser-population-audit.mjs
       - name: Upload complete entitlement audits
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,5 +75,7 @@ jobs:
             /tmp/cp12-entitlement-population-audit.json
             /tmp/cp12-live-public-entitlement-route-audit.json
             /tmp/cp12-entitlement-route-audit.json
-          if-no-files-found: error
+            /tmp/cp12-production-browser-population-audit.json
+            /tmp/cp12-production-browser-population/*.png
+          if-no-files-found: warn
           retention-days: 30
