@@ -9,8 +9,17 @@ const evidenceDir='/tmp/cp12-resource-ui-browser-evidence';
 if(!base||!/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{4}$/.test(password))throw new Error('CP12 UI browser UAT inputs are incomplete.');
 fs.mkdirSync(evidenceDir,{recursive:true});
 
+async function assertCandidateFrontend(page){
+  const scripts=await page.locator('script[src]').evaluateAll(nodes=>nodes.map(node=>node.src));
+  assert(scripts.length>0,'No frontend script asset loaded.');
+  const bundleUrl=scripts.find(url=>/\/assets\/portal-[^/]+\.js(?:\?|$)/.test(url))||scripts[0];
+  const text=await (await page.request.get(bundleUrl,{headers:{'cache-control':'no-cache'}})).text();
+  assert(text.includes('Verbal Reasoning'),'Loaded browser asset is not the CP12 collapsible candidate.');
+  return {bundleUrl:new URL(bundleUrl).pathname,candidateMarker:true};
+}
 async function login(page,username){
-  await page.goto(base,{waitUntil:'domcontentloaded'});
+  await page.goto(`${base}/?cp12-resource-ui=${Date.now()}`,{waitUntil:'domcontentloaded'});
+  const frontend=await assertCandidateFrontend(page);
   await page.getByRole('heading',{name:'Student Login'}).waitFor({state:'visible',timeout:15000});
   await page.getByLabel('Username').fill(username);
   await page.getByRole('textbox',{name:'Password',exact:true}).fill(password);
@@ -19,6 +28,7 @@ async function login(page,username){
   const response=await responsePromise;
   assert.equal(response.status(),200,`${username} login failed`);
   await page.getByRole('heading',{name:/Welcome/}).waitFor({timeout:15000});
+  return frontend;
 }
 async function openY5E2(page,viewId){
   await page.locator('[data-subject="english"]').click();
@@ -50,14 +60,31 @@ async function toggleAndAssert(section){
   assert.equal((await button.textContent()).trim(),'Hide');
   return body;
 }
+async function requireSections(page,min=2){
+  const locator=page.locator('[data-resource-section]');
+  try{
+    await page.waitForFunction(expected=>document.querySelectorAll('[data-resource-section]').length>=expected,min,{timeout:7000});
+  }catch(error){
+    const diagnostic={
+      sectionCount:await locator.count(),
+      lessonHeading:await page.locator('.lesson-heading').count(),
+      resourceSectionsHtml:await page.locator('.resource-sections').count()?await page.locator('.resource-sections').first().innerHTML():'MISSING',
+      scripts:await page.locator('script[src]').evaluateAll(nodes=>nodes.map(node=>node.src))
+    };
+    fs.writeFileSync('/tmp/cp12-resource-ui-browser-diagnostic.json',JSON.stringify(diagnostic,null,2)+'\n');
+    await page.screenshot({path:path.join(evidenceDir,'section-diagnostic.png'),fullPage:true});
+    throw error;
+  }
+  return locator;
+}
 
 const browser=await chromium.launch({headless:true});
-const evidence={marker:'CP12_RESOURCE_UI_STAGING_BROWSER_UAT_PASS',baseHost:new URL(base).hostname,vr:{},ordinary:{},security:{},screenshots:[]};
+const evidence={marker:'CP12_RESOURCE_UI_STAGING_BROWSER_UAT_PASS',baseHost:new URL(base).hostname,frontend:{},vr:{},ordinary:{},security:{},screenshots:[]};
 try{
   {
     const context=await browser.newContext({viewport:{width:1440,height:1000}});
     const page=await context.newPage();
-    await login(page,'cp12vrui');
+    evidence.frontend=await login(page,'cp12vrui');
     const detail=await openY5E2(page,'english-year5-11plus');
     const vrRows=(detail.resources||[]).filter(row=>(row.presentationScopes||[]).includes('vr'));
     const coreRows=(detail.resources||[]).filter(row=>row.type!=='video'&&!(row.presentationScopes||[]).includes('vr'));
@@ -67,8 +94,7 @@ try{
     assert(vrRows.some(row=>row.presentationGroup==='vr-homework'&&row.type==='homework'));
     assert(vrRows.some(row=>row.presentationGroup==='vr-homework'&&row.type==='answer-pack'&&row.protected===true));
 
-    const allSections=page.locator('[data-resource-section]');
-    assert((await allSections.count())>=2,'Expected multiple resource sections');
+    const allSections=await requireSections(page,2);
     for(let i=0;i<await allSections.count();i++){
       const body=allSections.nth(i).locator('.resource-collapse-body').first();
       assert.equal(await body.isHidden(),true,'Every lesson resource section must start collapsed');
