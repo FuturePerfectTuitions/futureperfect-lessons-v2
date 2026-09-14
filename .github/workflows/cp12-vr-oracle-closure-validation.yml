@@ -1,0 +1,63 @@
+name: CP12 VR oracle closure validation
+
+on:
+  push:
+    branches: [fix/cp12-vr-oracle-closure-2026-09-14]
+    paths:
+      - 'rebuild/adminops/src/lib/legacy-resource-oracle.mjs'
+      - 'tests/rebuild-checkpoint8-phase11-resource-parity.mjs'
+      - '.github/workflows/cp12-vr-oracle-closure-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      PROD_WORKER: fpt-portal-v2-worker
+      CHECKPOINT8_AS_OF_DATE: '2026-09-14'
+      CHECKPOINT11_AS_OF_DATE: '2026-09-14'
+      PROD_SHADOW_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Canonical VR independent-oracle regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/adminops/src/lib/legacy-resource-oracle.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/cp12-vr-resource-collector-verification.mjs
+          node tests/cp12-vr-resource-canonical-source-verification.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          ! grep -Fq "from './compiler.mjs'" rebuild/adminops/src/lib/legacy-resource-oracle.mjs
+          ! grep -Fq 'phase11-extension-resources.mjs' rebuild/adminops/src/lib/legacy-resource-oracle.mjs
+      - name: Fresh live catalogue and access parity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint8-live-audit.mjs | tee /tmp/live-audit.log
+          jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/checkpoint8-live-summary.json >/dev/null
+      - name: Fresh VR How-To special-area parity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/special-area.json
+          jq -e '.status=="PASS" and .mismatchCount==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0' /tmp/special-area.json >/dev/null
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-vr-oracle-closure-validation
+          path: |
+            /tmp/checkpoint8-live-summary.json
+            /tmp/special-area.json
+          if-no-files-found: warn
+          retention-days: 30
