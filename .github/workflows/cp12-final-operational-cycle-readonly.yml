@@ -1,0 +1,55 @@
+name: CP12 final operational cycle read-only check
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - '.github/workflows/cp12-final-operational-cycle-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      CUTOVER_AT: '2026-09-14T08:42:00Z'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query aggregate normal-import evidence only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), database=clean(process.env.DATABASE_ID), cutover=clean(process.env.CUTOVER_AT);
+          if(!token||!account||!database||!cutover)throw new Error('Missing read-only detector inputs');
+          const endpoint=`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${database}/query`;
+          const read=async(sql,params=[])=>{
+            const normalized=sql.replace(/\/\*[\s\S]*?\*\//g,' ').replace(/--.*$/gm,' ').trim();
+            if(!/^SELECT\b/i.test(normalized)||/\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|VACUUM|ATTACH|DETACH|REINDEX)\b/i.test(normalized))throw new Error('Non-read-only SQL rejected');
+            const r=await fetch(endpoint,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({sql,params})});
+            const b=await r.json();if(!r.ok||b?.success!==true)throw new Error(`D1 read failed:${r.status}`);const first=b.result?.[0];if(first?.success===false)throw new Error('D1 SELECT failed');return first?.results||[];
+          };
+          const full=(await read(`SELECT COUNT(*) AS row_count,COUNT(DISTINCT lesson_id) AS lesson_count,MIN(last_confirmed_at) AS first_seen,MAX(last_confirmed_at) AS last_seen FROM lesson_entitlements WHERE source='excel' AND last_confirmed_at>=?`,[cutover]))[0]||{};
+          const pre=(await read(`SELECT COUNT(*) AS row_count,COUNT(DISTINCT lesson_id) AS lesson_count,MIN(last_confirmed_at) AS first_seen,MAX(last_confirmed_at) AS last_seen FROM online_prelesson_entitlements WHERE source_row_id LIKE 'csv-%' AND last_confirmed_at>=?`,[cutover]))[0]||{};
+          const fullMinutes=await read(`SELECT substr(last_confirmed_at,1,16)||':00Z' AS minute_utc,COUNT(*) AS row_count,COUNT(DISTINCT lesson_id) AS lesson_count FROM lesson_entitlements WHERE source='excel' AND last_confirmed_at>=? GROUP BY substr(last_confirmed_at,1,16) ORDER BY minute_utc`,[cutover]);
+          const preMinutes=await read(`SELECT substr(last_confirmed_at,1,16)||':00Z' AS minute_utc,COUNT(*) AS row_count,COUNT(DISTINCT lesson_id) AS lesson_count FROM online_prelesson_entitlements WHERE source_row_id LIKE 'csv-%' AND last_confirmed_at>=? GROUP BY substr(last_confirmed_at,1,16) ORDER BY minute_utc`,[cutover]);
+          const fullRows=Number(full.row_count||0),preRows=Number(pre.row_count||0);
+          const out={marker:'CP12_FINAL_OPERATIONAL_CYCLE_READONLY',status:'PASS',readOnly:true,cutoverAt:cutover,identityFieldsEmitted:false,evidenceSource:'production D1 aggregate timestamps written by normal CSV release/import paths',fullRelease:{rowCount:fullRows,lessonCount:Number(full.lesson_count||0),firstSeen:full.first_seen||null,lastSeen:full.last_seen||null,minuteBuckets:fullMinutes},onlinePrelesson:{rowCount:preRows,lessonCount:Number(pre.lesson_count||0),firstSeen:pre.first_seen||null,lastSeen:pre.last_seen||null,minuteBuckets:preMinutes},candidateActivityObserved:fullRows+preRows>0,representativeCycleGateMet:false,requiresGenuineActivityValidation:true,cp13Allowed:false};
+          fs.writeFileSync('/tmp/cp12-final-operational-cycle.json',JSON.stringify(out,null,2)+'\n');
+          console.log(JSON.stringify(out));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-final-operational-cycle-readonly
+          path: /tmp/cp12-final-operational-cycle.json
+          if-no-files-found: error
+          retention-days: 30
