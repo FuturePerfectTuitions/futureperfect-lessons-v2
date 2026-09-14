@@ -1,0 +1,73 @@
+name: CP12 complete batch-view registry repair v2
+
+on:
+  push:
+    branches:
+      - fix/cp12-complete-batch-view-registry-2026-09-14
+    paths:
+      - 'scripts/cp12-complete-batch-view-registry-repair-v2.mjs'
+      - '.github/workflows/cp12-complete-batch-view-registry-repair-v2.yml'
+      - '.github/cp12-batch-registry-v2-apply.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-batch-registry-v2-production-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OPS_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_R2: fpt-materials-dev
+      CP12_AS_OF_DATE: '2026-09-14'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: node --check scripts/cp12-complete-batch-view-registry-repair-v2.mjs
+      - name: Select mode
+        id: mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .github/cp12-batch-registry-v2-apply.trigger ]] && [[ "$(cat .github/cp12-batch-registry-v2-apply.trigger)" == 'APPLY_CP12_BATCH_REGISTRY_V2_2026-09-14' ]]; then
+            echo 'apply=1' >> "$GITHUB_OUTPUT"
+          else
+            echo 'apply=0' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Read-only preflight
+        if: steps.mode.outputs.apply != '1'
+        env:
+          CP12_BATCH_REGISTRY_APPLY: '0'
+        run: node scripts/cp12-complete-batch-view-registry-repair-v2.mjs
+      - name: Guarded production repair
+        if: steps.mode.outputs.apply == '1'
+        env:
+          CP12_BATCH_REGISTRY_APPLY: '1'
+        run: node scripts/cp12-complete-batch-view-registry-repair-v2.mjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-complete-batch-view-registry-repair-v2
+          path: |
+            /tmp/cp12-batch-registry-v2-before.json
+            /tmp/cp12-batch-registry-v2-after.json
+            /tmp/rebuild-checkpoint11-backfill.json
+          if-no-files-found: warn
+          retention-days: 30
