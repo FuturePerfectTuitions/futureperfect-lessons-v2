@@ -1,0 +1,28 @@
+name: CP12 production importer path trace
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-cp12-importer-path-trace.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+      - name: Trace importer owner chain read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo '=== direct imports/references ==='
+          grep -R -n --exclude='admin-lesson-release-import.js' -E "admin-lesson-release-import|handleAdminLessonReleaseImport|lesson-releases/(confirm|preview|login)" worker/src tests .github/workflows || true
+          echo '=== production wrapper imports ==='
+          for f in worker/src/index-phase23-protected-view-stability.js worker/src/index-phase20-change20-configured-upsell.js worker/src/index-phase20-change19-admin-fast.js worker/src/index-phase20-change18-admin-superuser.js; do
+            echo "--- $f"; grep -n '^import .* from ' "$f" | head -20 || true
+          done
