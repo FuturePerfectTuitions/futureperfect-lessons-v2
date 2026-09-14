@@ -30,6 +30,12 @@ function compileGlobalScope(input, options = {}) {
   };
 }
 
+function manualSpecialAreas(user) {
+  return [...new Set((Array.isArray(user?.manualAccess?.specialBuckets) ? user.manualAccess.specialBuckets : [])
+    .map(value => clean(value).toUpperCase())
+    .filter(Boolean))].sort();
+}
+
 function compileAccessScope(input, catalogue, options = {}) {
   const scopeId = clean(options.scopeId);
   if (!scopeId) throw new Error('An opaque access scopeId is required.');
@@ -48,6 +54,7 @@ function compileAccessScope(input, catalogue, options = {}) {
     schemaVersion: 1,
     kind: 'prepared-access-read-model',
     scopeId,
+    manualSpecialAreas: manualSpecialAreas(sourceUser),
     snapshot
   };
 }
