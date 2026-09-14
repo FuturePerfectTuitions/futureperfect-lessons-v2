@@ -1,0 +1,157 @@
+name: CP12 Admin Post-Repair Read-only Observer
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - rebuild/student/src/lib/runtime.mjs
+      - rebuild/student/src/lib/vr-howto-runtime.mjs
+      - tests/rebuild-cp12-admin-principal.mjs
+      - tests/rebuild-cp12-admin-vr-decorator.mjs
+      - scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+      - .github/workflows/cp12-admin-postrepair-readonly-observer.yml
+      - docs/rebuild/CP12_ADMIN_SUPERUSER_INCIDENT_2026-09-14.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: cp12-admin-postrepair-readonly-observer
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  SOURCE_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  ACTIVE_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  ROLLBACK_STUDENT_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_D1: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Canonical runtime and security regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node --check scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuild-cp12-admin-vr-decorator.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+          grep -Fq 'return proxyApi(request, env)' rebuild/browser-staging/src/index.js
+          ! grep -Eiq 'ADMIN[_-]?OPS|AdminOps' rebuild/browser-staging/src/index.js
+          jq -n '{marker:"CP12_ADMIN_POSTREPAIR_ARCHITECTURE_REGRESSION_PASS",status:"PASS",browserToAdminOps:false,ordinaryStudentRegression:true,securityRegression:true}' | tee /tmp/architecture-regression.json
+
+      - name: Live catalogue student parity and VR How-To audit
+        shell: bash
+        env:
+          WORKER_NAME: ${{ env.SOURCE_WORKER }}
+          PROD_WORKER: ${{ env.SOURCE_WORKER }}
+          CHECKPOINT8_AS_OF_DATE: '2026-09-14'
+          CHECKPOINT11_AS_OF_DATE: '2026-09-14'
+          PROD_SHADOW_KV_ID: ${{ env.EXPECTED_READ_MODELS_KV }}
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/special-area.json
+          node scripts/rebuild-checkpoint8-live-audit.mjs
+          cp /tmp/checkpoint8-live-summary.json /tmp/live-parity.json
+          jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/live-parity.json >/dev/null
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/special-area.json >/dev/null
+
+      - name: Authoritative production topology active repair rollback and bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and any(.result[]; .pattern==$route and .script==$browser)' /tmp/routes.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser.json
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[] | select(.type=="service" and .name!="STAGING_API")]|length)==0' /tmp/browser.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/settings" "${AUTH[@]}" -o /tmp/student.json
+          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '.success==true and any(.result.bindings[]; .name=="READ_MODELS_KV" and (.namespace_id // .id)==$read) and any(.result.bindings[]; .name=="STUDENTS_KV" and (.namespace_id // .id)==$students) and any(.result.bindings[]; .name=="DB" and (.database_id // .id)==$d1) and any(.result.bindings[]; .name=="MATERIALS_R2" and (.bucket_name // .bucket)==$r2) and any(.result.bindings[]; .name=="AUTH_SIGNING_SECRET" and .type=="secret_text") and any(.result.bindings[]; .name=="ACCESS_SCOPE_SECRET" and .type=="secret_text") and ([.result.bindings[] | select(.type=="service")]|length)==0' /tmp/student.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/deployments.json
+          ACTIVE="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/deployments.json | head -n1)"
+          test "$ACTIVE" = "$ACTIVE_STUDENT_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/versions.json
+          jq -e --arg old "$ROLLBACK_STUDENT_VERSION" 'any(.result.items[]; .id==$old)' /tmp/versions.json >/dev/null
+          jq -n --arg marker 'CP12_ADMIN_POSTREPAIR_TOPOLOGY_PASS' --arg active "$ACTIVE" --arg rollback "$ROLLBACK_STUDENT_VERSION" '{marker:$marker,status:"PASS",readOnly:true,activeStudentVersion:$active,rollbackStudentVersionRetained:$rollback,browserToAdminOps:false,bindingsUnchanged:true,secretsRetained:true}' | tee /tmp/topology.json
+
+      - name: Authenticated public Admin and representative-student smoke with timings
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: cp12-postrepair-observer
+          EXPECT_ADMIN_STATUS: '200'
+          SMOKE_OUTPUT: /tmp/authenticated-smoke.json
+        run: node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+
+      - name: Retained Admin import continuity without applying an import
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          jq -n '{marker:"CP12_ADMIN_POSTREPAIR_IMPORT_CONTINUITY_PASS",status:"PASS",readOnly:true,importApplied:false,staticVerification:true}' | tee /tmp/import-continuity.json
+
+      - name: Produce observer summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n --slurpfile parity /tmp/live-parity.json --slurpfile special /tmp/special-area.json --slurpfile topo /tmp/topology.json --slurpfile auth /tmp/authenticated-smoke.json --slurpfile import /tmp/import-continuity.json --arg observedAt "$(date -u +%FT%TZ)" '{marker:"CP12_ADMIN_POSTREPAIR_OBSERVER_PASS",status:"PASS",observedAt:$observedAt,productionRepairActive:true,parity:{lessonCount:$parity[0].catalogue.lessonCount,resourceMismatchCount:$parity[0].catalogue.resourceMismatchCount,auditedCurrentStudents:$parity[0].students.auditedCurrentStudents,unexplainedDifferenceCount:$parity[0].students.unexplainedDifferenceCount},vrHowTo:{manual:($special[0].manualTokenCounts.VR_HOWTO//0),direct:($special[0].directTokenCounts.VR_HOWTO//0)},topology:$topo[0],authenticatedSmoke:$auth[0],adminImportContinuity:$import[0],cp12StillOpen:true,cp13Started:false}' | tee /tmp/observer-summary.json
+
+      - name: Upload safe observer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-admin-postrepair-readonly-observer-evidence
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            /tmp/architecture-regression.json
+            /tmp/special-area.json
+            /tmp/live-parity.json
+            /tmp/topology.json
+            /tmp/authenticated-smoke.json
+            /tmp/import-continuity.json
+            /tmp/observer-summary.json
