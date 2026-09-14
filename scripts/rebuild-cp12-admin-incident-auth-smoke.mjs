@@ -17,7 +17,7 @@ const output = clean(process.env.SMOKE_OUTPUT || `/tmp/cp12-admin-auth-smoke-${p
 if (!base || !account || !token || !studentsKv) throw new Error('CP12 auth smoke requires base URL and protected Cloudflare read credentials.');
 if ((overrideWorker && !overrideVersion) || (!overrideWorker && overrideVersion)) throw new Error('Version override worker/version must be supplied together.');
 
-const origin = new URL(base).origin;
+const origin = clean(process.env.SMOKE_ORIGIN || new URL(base).origin);
 const cfBase = `https://api.cloudflare.com/client/v4/accounts/${account}`;
 const cfHeaders = { Authorization: `Bearer ${token}` };
 const timings = {};
