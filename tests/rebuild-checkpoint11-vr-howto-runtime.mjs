@@ -17,6 +17,7 @@ await publishScopeAtomic(store, {
     schemaVersion:1,
     kind:'prepared-access-read-model',
     scopeId,
+    manualSpecialAreas:['VR_HOWTO'],
     snapshot:{
       asOfDate:'2026-09-14',
       account:{ firstName:'CP11', status:'active', expiresOn:'2027-08-31' },
@@ -103,18 +104,29 @@ const noSpecialScopeId = await opaqueAccessScopeId('cp11-no-vr', ACCESS_SCOPE_SE
 await publishScopeAtomic(store, {
   scope:`access:${noSpecialScopeId}`,
   version:'cp11-no-vr-access',
-  payload:{ schemaVersion:1, kind:'prepared-access-read-model', scopeId:noSpecialScopeId, snapshot:{ asOfDate:'2026-09-14', account:{ firstName:'No VR', status:'active', expiresOn:'2027-08-31' }, views:[{ viewId:'english-year5-11plus', subject:'english', label:'Year 5 11+', current:true, group:'current', lockedPreview:false }], specialAreas:[], lessonAccess:{} } }
+  payload:{ schemaVersion:1, kind:'prepared-access-read-model', scopeId:noSpecialScopeId, manualSpecialAreas:[], snapshot:{ asOfDate:'2026-09-14', account:{ firstName:'No VR', status:'active', expiresOn:'2027-08-31' }, views:[{ viewId:'english-year5-11plus', subject:'english', label:'Year 5 11+', current:true, group:'current', lockedPreview:false }], specialAreas:[], lessonAccess:{} } }
 });
 const noSpecialSession = await createAuthenticatedSession({ secret:AUTH_SIGNING_SECRET, userId:'cp11-no-vr' });
 const noSpecialCookie = noSpecialSession.setCookie.split(';')[0];
 const noSpecialHome = await runtime.fetch(new Request('https://portal.example/api/v2/student/home', { headers:{ cookie:noSpecialCookie } }), env);
 assert.equal((await noSpecialHome.json()).views.some(view => view.viewId === VR_HOWTO_VIEW), false);
 
+const directOnlyScopeId = await opaqueAccessScopeId('cp11-vr-direct-only', ACCESS_SCOPE_SECRET);
+await publishScopeAtomic(store, {
+  scope:`access:${directOnlyScopeId}`,
+  version:'cp11-vr-direct-only-access',
+  payload:{ schemaVersion:1, kind:'prepared-access-read-model', scopeId:directOnlyScopeId, manualSpecialAreas:[], snapshot:{ asOfDate:'2026-09-14', account:{ firstName:'Direct', status:'active', expiresOn:'2027-08-31' }, views:[{ viewId:'english-year5-11plus', subject:'english', label:'Year 5 11+', current:true, group:'current', lockedPreview:false }], specialAreas:['VR_HOWTO'], lessonAccess:{} } }
+});
+const directOnlySession = await createAuthenticatedSession({ secret:AUTH_SIGNING_SECRET, userId:'cp11-vr-direct-only' });
+const directOnlyCookie = directOnlySession.setCookie.split(';')[0];
+const directOnlyHome = await runtime.fetch(new Request('https://portal.example/api/v2/student/home', { headers:{ cookie:directOnlyCookie } }), env);
+assert.equal((await directOnlyHome.json()).views.some(view => view.viewId === VR_HOWTO_VIEW), false, 'Direct-only specialAccess must not grant VR How-To.');
+
 const lockedScopeId = await opaqueAccessScopeId('cp11-vr-locked', ACCESS_SCOPE_SECRET);
 await publishScopeAtomic(store, {
   scope:`access:${lockedScopeId}`,
   version:'cp11-vr-locked-access',
-  payload:{ schemaVersion:1, kind:'prepared-access-read-model', scopeId:lockedScopeId, snapshot:{ asOfDate:'2026-09-14', account:{ firstName:'Locked', status:'active', expiresOn:'2027-08-31' }, views:[{ viewId:'english-year5-11plus', subject:'english', label:'Year 5 11+', current:true, group:'current', lockedPreview:true }], specialAreas:['VR_HOWTO'], lessonAccess:{} } }
+  payload:{ schemaVersion:1, kind:'prepared-access-read-model', scopeId:lockedScopeId, manualSpecialAreas:['VR_HOWTO'], snapshot:{ asOfDate:'2026-09-14', account:{ firstName:'Locked', status:'active', expiresOn:'2027-08-31' }, views:[{ viewId:'english-year5-11plus', subject:'english', label:'Year 5 11+', current:true, group:'current', lockedPreview:true }], specialAreas:['VR_HOWTO'], lessonAccess:{} } }
 });
 const lockedSession = await createAuthenticatedSession({ secret:AUTH_SIGNING_SECRET, userId:'cp11-vr-locked' });
 const lockedCookie = lockedSession.setCookie.split(';')[0];
