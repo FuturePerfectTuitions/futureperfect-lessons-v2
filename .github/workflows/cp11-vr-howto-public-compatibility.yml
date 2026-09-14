@@ -1,0 +1,74 @@
+name: CP11 VR How-To Public Compatibility
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint11-reversible-cutover-2026-09-13
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  EXPECTED_PROD_DEPLOYMENT: ce193be0-d018-403f-a417-999e9e6eea41
+  EXPECTED_PROD_VERSION: aed13a31-21fa-49c3-8830-c37fd8645c31
+  EXPECTED_FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  NEW_BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  CHECKPOINT11_AS_OF_DATE: '2026-09-14'
+  SMOKE_BASE_URL: https://lessons.futureperfect.education
+
+jobs:
+  vr-howto-public-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax-check compatibility guard
+        run: |
+          node --check scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs
+          node --check scripts/rebuild-checkpoint11-cutover.mjs
+      - name: Wait until the reversible CP11 public route is active
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for i in $(seq 1 300); do
+            CODE="$(curl --silent --show-error -D /tmp/cp11-vr-public.headers -o /tmp/cp11-vr-public.body --write-out '%{http_code}' "${SMOKE_BASE_URL}/api/v2/student/home" || true)"
+            if [ "$CODE" = 401 ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/cp11-vr-public.headers; then
+              jq -n --arg marker 'REBUILD_CHECKPOINT11_VR_PUBLIC_SWITCH_OBSERVED' --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{marker:$marker,observedAt:$observedAt,httpStatus:401,facade:true}' > /tmp/checkpoint11-vr-public-switch-observed.json
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'CP11 public candidate route was not observed within the compatibility-guard window.' >&2
+          exit 1
+      - name: Exercise real VR How-To path and rollback automatically on failure
+        shell: bash
+        run: |
+          set +e
+          node scripts/rebuild-checkpoint11-vr-howto-live-smoke.mjs
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo 'VR How-To live compatibility failed after public switch; invoking CP11 rollback.' >&2
+            node scripts/rebuild-checkpoint11-cutover.mjs rollback
+            exit "$RC"
+          fi
+          jq -e '.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_LIVE_SMOKE_PASS" and .providerContactedOnlyAfterView==true and .providerHost=="go.screenpal.com" and .credentialsDisclosed==false' /tmp/checkpoint11-vr-howto-live-smoke.json >/dev/null
+      - name: Upload VR How-To public compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp11-vr-howto-public-compatibility-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/checkpoint11-vr-public-switch-observed.json
+            /tmp/checkpoint11-vr-howto-live-smoke.json
+            /tmp/checkpoint11-emergency-rollback.json
