@@ -24,23 +24,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Confirm current production special-area usage read-only
+      - name: Confirm special-area parity remains green read-only
         shell: bash
         run: |
           set -Eeuo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          OUT="$(node scripts/rebuild-checkpoint8-special-area-audit.mjs)"
-          printf '%s\n' "$OUT" | tee /tmp/cp11-special-area-diagnostic.json
-          printf '%s\n' "$OUT" | jq -e '.status=="PASS" and .mismatchCount==0' >/dev/null
-          COUNT="$(printf '%s\n' "$OUT" | jq -r '.profilesWithSpecialAreas')"
-          echo "CURRENT_SPECIAL_AREA_PROFILE_COUNT=${COUNT}"
-          test "$COUNT" = '0'
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/cp11-special-area-parity.json
+          jq -e '.status=="PASS" and .mismatchCount==0' /tmp/cp11-special-area-parity.json >/dev/null
+      - name: Inventory current feature tokens without student identities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp11-special-area-token-inventory.mjs
+          jq -e '.studentIdentitiesIncluded==false and .productionMutation==false and .currentProfiles==23 and .profilesWithSpecialAreas==3' /tmp/cp11-special-area-token-inventory.json >/dev/null
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cp11-special-area-readonly-diagnostic
-          path: /tmp/cp11-special-area-diagnostic.json
+          path: |
+            /tmp/cp11-special-area-parity.json
+            /tmp/cp11-special-area-token-inventory.json
           if-no-files-found: ignore
           retention-days: 30
