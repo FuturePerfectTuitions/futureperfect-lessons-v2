@@ -20,8 +20,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      STUDENT_WORKER_NAME: rebuild-student-v2-production
-      BROWSER_WORKER_NAME: fpt-lessons-v2-browser-production
+      STUDENT_WORKER_NAME: fpt-portal-v2-rebuild-student-prod
+      BROWSER_WORKER_NAME: fpt-portal-v2-rebuild-browser-prod
       CHECKPOINT8_AS_OF_DATE: '2026-09-14'
       AYLA_PORTAL_ID: Ayla0108
       REINA_PORTAL_ID: Rei0710
