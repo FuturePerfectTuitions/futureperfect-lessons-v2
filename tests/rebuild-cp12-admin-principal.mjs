@@ -94,6 +94,7 @@ await publish('lesson:M1',{
 },'l-1');
 
 const studentScopeId=await opaqueAccessScopeId(STUDENT,SCOPE_SECRET);
+const studentAccessPointerKey=pointerKey(`access:${studentScopeId}`);
 await publish(`access:${studentScopeId}`,{
   schemaVersion:1,
   kind:'prepared-access-read-model',
@@ -176,7 +177,7 @@ assert.equal(body.superuser,true);
 assert.equal(body.views.length,3);
 assert.ok(body.views.every(view=>view.current===true&&view.lockedPreview===false));
 assert.ok(body.views.every(view=>view.openLessonCount===view.visibleLessonCount&&view.lockedLessonCount===0));
-assert.equal(kv.gets.some(key=>String(key).includes('access:')),false,'Admin Home must not read a pupil access scope.');
+assert.equal(kv.gets.includes(studentAccessPointerKey),false,'Admin Home must not read a pupil access scope.');
 
 res=await call('/api/v2/student/subjects/maths',{cookie:adminCookie});
 assert.equal(res.status,200);
@@ -215,7 +216,7 @@ res=await call('/api/v2/auth/login',{method:'POST',json:{username:STUDENT,passwo
 assert.equal(res.status,200);
 body=await res.json();
 assert.equal(body.modelVersion,'a-1');
-assert.ok(kv.gets.some(key=>String(key).includes('access:')),'Ordinary student login must retain prepared access-snapshot resolution.');
+assert.ok(kv.gets.includes(studentAccessPointerKey),'Ordinary student login must retain prepared access-snapshot resolution.');
 const studentCookie=cookieFrom(res);
 
 kv.gets.length=0;
@@ -225,7 +226,7 @@ body=await res.json();
 assert.equal(body.source,'prepared-access-read-model');
 assert.equal(body.views.length,1);
 assert.equal(body.views[0].viewId,'maths-year6');
-assert.ok(kv.gets.some(key=>String(key).includes('access:')),'Ordinary student Home must retain the existing access-snapshot path.');
+assert.ok(kv.gets.includes(studentAccessPointerKey),'Ordinary student Home must retain the existing access-snapshot path.');
 assert.equal(db.queries.length,0,'Admin/student navigation must not introduce D1 traffic.');
 
 console.log(JSON.stringify({
