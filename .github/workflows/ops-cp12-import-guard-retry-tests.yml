@@ -1,0 +1,49 @@
+name: CP12 retry importer guard tests
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-cp12-import-guard-retry-tests.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/cp12-import-batch-view-guard-2026-09-14
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reapply validated patch, correct test typo, run full regression set, push
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin ops/reina-entitlement
+          python3 - <<'PY'
+          import base64, re, subprocess
+          from pathlib import Path
+          text=subprocess.check_output(['git','show','origin/ops/reina-entitlement:.github/workflows/ops-cp12-implement-import-batch-view-guard.yml'],text=True)
+          m=re.search(r'^\s*PATCH_B64:\s*"([A-Za-z0-9+/=]+)"\s*$',text,re.M)
+          if not m: raise SystemExit('PATCH_B64 not found in source workflow')
+          Path('/tmp/patch.py').write_bytes(base64.b64decode(m.group(1)))
+          PY
+          python3 /tmp/patch.py
+          sed -i 's/BeforeGuaredConfirm/BeforeGuardedConfirm/g' tests/admin-lesson-release-import-verification.mjs
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          git diff --check
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/admin-lesson-release-import.js tests/admin-lesson-release-import-verification.mjs
+          git commit -m 'CP12: reject undefined batch for ambiguous lesson views'
+          git push origin HEAD:fix/cp12-import-batch-view-guard-2026-09-14
