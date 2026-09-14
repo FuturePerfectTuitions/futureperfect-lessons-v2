@@ -1,0 +1,228 @@
+name: CP12 collapsible resource integration UAT
+
+on:
+  push:
+    branches:
+      - fix/cp12-resource-collapsible-ui-2026-09-14
+    paths:
+      - .github/workflows/cp12-resource-ui-integration-staging.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-resource-ui-integration-staging
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  PROD_STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  PROD_BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STAGING_WORKER: fpt-portal-v2-rebuild-student-staging
+  STAGING_READ_MODELS_KV_TITLE: FPT_PORTAL_V2_REBUILD_READ_MODELS_STAGING
+  STAGING_STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
+  STAGING_R2: fpt-portal-v2-rebuild-materials-staging
+  STAGING_BASE_URL: https://fpt-portal-v2-rebuild-student-staging.futureperfectlessons.workers.dev
+  BROWSER_STAGING_WORKER: fpt-portal-v2-rebuild-browser-staging-cp9
+  CP12_BROWSER_BASE_URL: https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev
+  CANDIDATE_FRONTEND_SHA: 2337732822b82bb8b782b57aaa512b8b0c973f82
+  WRANGLER_VERSION: 4.129.0
+  PLAYWRIGHT_VERSION: 1.55.0
+  CHECKPOINT9_AS_OF_DATE: '2026-09-14'
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Assert isolated staging boundary and generate masked synthetic credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          [[ "$STAGING_WORKER" == *rebuild*staging* ]]
+          [[ "$BROWSER_STAGING_WORKER" == *rebuild*staging* ]]
+          [[ "$STAGING_READ_MODELS_KV_TITLE" == *REBUILD*STAGING* ]]
+          [[ "$STAGING_STUDENTS_KV_TITLE" == *REBUILD*STAGING* ]]
+          [[ "$STAGING_R2" == *rebuild*staging* ]]
+          [[ "$CP12_BROWSER_BASE_URL" == *rebuild-browser-staging* ]]
+          [[ "$CANDIDATE_FRONTEND_SHA" =~ ^[0-9a-f]{40}$ ]]
+          python - <<'PY' > /tmp/cp12-ui-secrets.env
+          import secrets,string
+          def four():
+              chars=[secrets.choice(string.ascii_uppercase),secrets.choice(string.ascii_lowercase),secrets.choice(string.digits),secrets.choice(string.ascii_letters+string.digits)]
+              secrets.SystemRandom().shuffle(chars)
+              return ''.join(chars)
+          print('UAT_LOGIN_PASSWORD='+four())
+          print('UAT_ANSWER_PASSWORD='+four())
+          print('AUTH_SIGNING_SECRET='+secrets.token_hex(32))
+          print('ACCESS_SCOPE_SECRET='+secrets.token_hex(32))
+          PY
+          while IFS='=' read -r key value; do
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done < /tmp/cp12-ui-secrets.env
+          rm -f /tmp/cp12-ui-secrets.env
+
+      - name: Install pinned staging tools
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}"
+
+      - name: Run source and security regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/rebuild-checkpoint9-seed-staging.mjs
+          node --check scripts/cp12-resource-ui-staging-seed.mjs
+          node --check scripts/cp12-resource-ui-browser-uat.mjs
+          node --check rebuild/student/src/lib/runtime.mjs
+          node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+
+      - name: Resolve staging IDs and freeze all production deployment anchors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv.json
+          READ_ID="$(jq -r --arg title "$STAGING_READ_MODELS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          STUDENT_ID="$(jq -r --arg title "$STAGING_STUDENTS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          test -n "$READ_ID"; test -n "$STUDENT_ID"
+          echo "STAGING_READ_MODELS_KV_ID=$READ_ID" >> "$GITHUB_ENV"
+          echo "STAGING_STUDENTS_KV_ID=$STUDENT_ID" >> "$GITHUB_ENV"
+          for worker in "$PROD_WORKER" "$PROD_STUDENT_WORKER" "$PROD_BROWSER_WORKER"; do
+            safe="$(echo "$worker" | tr -c 'A-Za-z0-9' '_')"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/prod-${safe}-before.json"
+          done
+
+      - name: Compile standard production-shaped staging global
+        run: node scripts/rebuild-checkpoint9-seed-staging.mjs
+
+      - name: Add Y5 11+ VR and same-lesson ordinary synthetic personas in staging only
+        run: node scripts/cp12-resource-ui-staging-seed.mjs
+
+      - name: Install isolated Student staging secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$AUTH_SIGNING_SECRET" | npx wrangler secret put AUTH_SIGNING_SECRET --env staging --config rebuild/student/wrangler.toml
+          printf '%s' "$ACCESS_SCOPE_SECRET" | npx wrangler secret put ACCESS_SCOPE_SECRET --env staging --config rebuild/student/wrangler.toml
+
+      - name: Deploy candidate Student to isolated staging only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUTPUT="$(npx wrangler deploy --env staging --config rebuild/student/wrangler.toml 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          echo "$OUTPUT" | grep -F "$STAGING_WORKER" >/dev/null
+          ! echo "$OUTPUT" | grep -F "$PROD_STUDENT_WORKER" >/dev/null
+          for i in $(seq 1 30); do
+            CODE="$(curl --silent --output /tmp/cp12-ui-health.json --write-out '%{http_code}' "$STAGING_BASE_URL/health" || true)"
+            if [ "$CODE" = 200 ] && jq -e '.ok==true and .environment=="staging" and .productionTarget==false and .preparedReadModels.kvBound==true' /tmp/cp12-ui-health.json >/dev/null; then break; fi
+            [ "$i" = 30 ] && { cat /tmp/cp12-ui-health.json 2>/dev/null || true; exit 1; }
+            sleep 2
+          done
+
+      - name: Checkout and build exact candidate fast frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.CANDIDATE_FRONTEND_SHA }}
+          path: candidate-frontend
+          persist-credentials: false
+      - name: Validate and stage candidate frontend assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C candidate-frontend rev-parse HEAD)" = "$CANDIDATE_FRONTEND_SHA"
+          cd candidate-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          npm run build
+          grep -R -F 'Verbal Reasoning' dist >/dev/null
+          grep -R -F 'data-resource-toggle' dist >/dev/null
+          ! grep -R -F 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a candidate-frontend/dist/. rebuild/browser-staging/public/
+
+      - name: Install Chromium and deploy candidate Browser to isolated staging only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx playwright install --with-deps chromium
+          OUTPUT="$(npx wrangler deploy --config rebuild/browser-staging/wrangler.toml 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          echo "$OUTPUT" | grep -F "$BROWSER_STAGING_WORKER" >/dev/null
+          ! echo "$OUTPUT" | grep -F "$PROD_BROWSER_WORKER" >/dev/null
+          for i in $(seq 1 30); do
+            ROOT_CODE="$(curl --silent --location --output /tmp/cp12-ui-index.html --write-out '%{http_code}' "$CP12_BROWSER_BASE_URL/" || true)"
+            API_CODE="$(curl --silent --show-error -D /tmp/cp12-ui-api.headers -o /tmp/cp12-ui-api.json --write-out '%{http_code}' "$CP12_BROWSER_BASE_URL/api/v2/student/home" || true)"
+            if [ "$ROOT_CODE" = 200 ] && [ "$API_CODE" = 401 ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/cp12-ui-api.headers; then break; fi
+            [ "$i" = 30 ] && exit 1
+            sleep 2
+          done
+
+      - name: Run real browser collapsible hierarchy UAT
+        run: node scripts/cp12-resource-ui-browser-uat.mjs
+
+      - name: Prove production deployments remained unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          for worker in "$PROD_WORKER" "$PROD_STUDENT_WORKER" "$PROD_BROWSER_WORKER"; do
+            safe="$(echo "$worker" | tr -c 'A-Za-z0-9' '_')"
+            before="/tmp/prod-${safe}-before.json"
+            test -s "$before"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/prod-${safe}-after.json"
+            jq -S '.result.deployments[0] // .result[0]' "$before" > "/tmp/${safe}-before-anchor.json"
+            jq -S '.result.deployments[0] // .result[0]' "/tmp/prod-${safe}-after.json" > "/tmp/${safe}-after-anchor.json"
+            cmp "/tmp/${safe}-before-anchor.json" "/tmp/${safe}-after-anchor.json"
+          done
+          jq -n '{marker:"CP12_RESOURCE_UI_PRODUCTION_UNCHANGED_PASS",productionChanged:false}' > /tmp/cp12-resource-ui-production-anchor.json
+
+      - name: Assemble integration evidence
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker 'CP12_RESOURCE_UI_INTEGRATION_STAGING_PASS' \
+            --arg backendSha "$GITHUB_SHA" \
+            --arg frontendSha "$CANDIDATE_FRONTEND_SHA" \
+            --slurpfile seed /tmp/cp12-resource-ui-staging-seed.json \
+            --slurpfile browser /tmp/cp12-resource-ui-browser-uat.json \
+            --slurpfile prod /tmp/cp12-resource-ui-production-anchor.json \
+            '{marker:$marker,status:"PASS",backendSha:$backendSha,frontendSha:$frontendSha,stagingOnly:true,seed:$seed[0],browser:$browser[0],production:$prod[0]}' \
+            > /tmp/cp12-resource-ui-integration.json
+
+      - name: Upload safe staging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-resource-ui-integration-staging
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            /tmp/cp12-resource-ui-staging-seed.json
+            /tmp/cp12-resource-ui-browser-uat.json
+            /tmp/cp12-resource-ui-production-anchor.json
+            /tmp/cp12-resource-ui-integration.json
+            /tmp/cp12-resource-ui-browser-evidence/*.png
