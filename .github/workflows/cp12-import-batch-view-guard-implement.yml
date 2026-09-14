@@ -1,0 +1,188 @@
+name: CP12 implement ambiguous batch import guard
+
+on:
+  push:
+    branches: [fix/cp12-import-batch-view-guard-2026-09-14]
+    paths: ['.github/workflows/cp12-import-batch-view-guard-implement.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/cp12-import-batch-view-guard-2026-09-14
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply smallest importer guard and regression coverage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/src/admin-lesson-release-import.js')
+          s=p.read_text()
+          imp="import { viewDefinition, viewIdForBatch } from '../../rebuild/shared/read-models/view-registry.mjs';\n\n"
+          if not s.startswith("import { viewDefinition"):
+              s=imp+s
+          anchor="function isBlocked(student, lessonId) {\n  return new Set(Array.isArray(student?.blockedLessons) ? student.blockedLessons.map(String) : []).has(lessonId);\n}\n\n"
+          helper="""function lessonPresentationViewIds(lesson) {
+  const ids = new Set();
+  for (const source of [lesson?.displayIds, lesson?.displayLessonIds, lesson?.presentation?.displayIds]) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    for (const key of Object.keys(source)) {
+      const viewId = clean(key).toLowerCase();
+      if (viewDefinition(viewId)) ids.add(viewId);
+    }
+  }
+  return [...ids].sort();
+}
+
+async function validateAmbiguousBatchView(env, item, lesson) {
+  const views = lessonPresentationViewIds(lesson);
+  if (views.length <= 1) return null;
+  const batchKey = clean(item?.batchKey);
+  if (!batchKey) {
+    return {
+      error:'BATCH_DEFINITION_REQUIRED',
+      message:'This lesson has more than one Portal presentation, so the CSV Mode must have a configured batch definition before release.'
+    };
+  }
+  const batch = await env.DB.prepare(
+    `SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to
+     FROM batch_definitions WHERE batch_key = ?`
+  ).bind(batchKey).first();
+  if (!batch) {
+    return {
+      error:'BATCH_DEFINITION_REQUIRED',
+      message:'This lesson has more than one Portal presentation and the CSV Mode is not configured in batch definitions.'
+    };
+  }
+  const viewId = viewIdForBatch(batch);
+  if (!viewId || !views.includes(viewId)) {
+    return {
+      error:'BATCH_VIEW_MISMATCH',
+      message:'The CSV Mode batch definition does not map to a Portal presentation for this lesson.'
+    };
+  }
+  return { viewId };
+}
+
+"""
+          if 'async function validateAmbiguousBatchView' not in s:
+              if anchor not in s: raise SystemExit('importer anchor missing')
+              s=s.replace(anchor,anchor+helper,1)
+          old="""  const subject = norm(lesson.subject);
+  if (!['maths','english'].includes(subject)) {
+    return { error:'INVALID_LESSON_SUBJECT', message:'Lesson subject is not a normal Maths/English entitlement subject.' };
+  }
+
+  if (isBlocked(student, item.lessonId)) {
+"""
+          new="""  const subject = norm(lesson.subject);
+  if (!['maths','english'].includes(subject)) {
+    return { error:'INVALID_LESSON_SUBJECT', message:'Lesson subject is not a normal Maths/English entitlement subject.' };
+  }
+
+  const batchView = await validateAmbiguousBatchView(env, item, lesson);
+  if (batchView?.error) return batchView;
+
+  if (isBlocked(student, item.lessonId)) {
+"""
+          if old not in s: raise SystemExit('validation anchor missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          t=Path('tests/admin-lesson-release-import-verification.mjs')
+          x=t.read_text()
+          x=x.replace("""  constructor() {
+    this.entitlements = new Map();
+    this.prelessons = new Map();
+  }
+""","""  constructor() {
+    this.entitlements = new Map();
+    this.prelessons = new Map();
+    this.batchDefinitions = new Map([
+      ['Y511OE', {
+        batch_key:'Y511OE', subject:'english', school_year:5,
+        stream:'11plus', maths_level:null, active_from:'2026-09-01', active_to:null
+      }]
+    ]);
+  }
+""",1)
+          x=x.replace("""      sql.includes('batch_definitions') ||
+      sql.includes('student_batch_assignments') ||
+""","""      sql.includes('student_batch_assignments') ||
+""",1)
+          oldfirst="""  async first(sql, args) {
+    this.rejectBatchRosterDependency(sql);
+    if (sql.includes('FROM lesson_entitlements')) {
+"""
+          newfirst="""  async first(sql, args) {
+    this.rejectBatchRosterDependency(sql);
+    if (sql.includes('FROM batch_definitions')) {
+      return this.batchDefinitions.get(args[0]) || null;
+    }
+    if (sql.includes('FROM lesson_entitlements')) {
+"""
+          if oldfirst not in x: raise SystemExit('test first anchor missing')
+          x=x.replace(oldfirst,newfirst,1)
+          x=x.replace("Mode:'Y511OE_NEW_NOT_IN_D1'","Mode:'Y511OE'",1)
+          tail="""const aliasPreview = await call(
+  '/api/v1/admin/lesson-releases/preview',
+  { rows:[elevenPlusDisplayAlias] },
+  token
+);
+assert.equal(aliasPreview.response.status, 200);
+assert.equal(aliasPreview.body.results[0].lessonId, 'Y5E2');
+assert.equal(aliasPreview.body.results[0].action, 'ALREADY_FULL');
+
+"""
+          guard="""// Ambiguous shared-curriculum lessons must not be released with an undefined
+// Mode/batch because the prepared access compiler could not derive a navigation view.
+const ambiguousUnknownBatch = { ...onlineReady, Mode:'Y511OE_NOT_CONFIGURED' };
+const guardedPreview = await call(
+  '/api/v1/admin/lesson-releases/preview',
+  { rows:[ambiguousUnknownBatch] },
+  token
+);
+assert.equal(guardedPreview.response.status, 200);
+assert.equal(guardedPreview.body.summary.errors, 1);
+assert.equal(guardedPreview.body.results[0].action, 'BATCH_DEFINITION_REQUIRED');
+const entitlementCountBeforeGuardedConfirm = db.entitlements.size;
+const prelessonCountBeforeGuardedConfirm = db.prelessons.size;
+const guardedConfirm = await call(
+  '/api/v1/admin/lesson-releases/confirm',
+  { rows:[ambiguousUnknownBatch] },
+  token
+);
+assert.equal(guardedConfirm.response.status, 409);
+assert.equal(guardedConfirm.body.error, 'VALIDATION_FAILED');
+assert.equal(db.entitlements.size, entitlementCountBeforeGuardedConfirm, 'Guarded confirm must not write full access');
+assert.equal(db.prelessons.size, prelessonCountBeforeGuardedConfirm, 'Guarded confirm must not write PreLesson access');
+
+// A single-presentation lesson may retain an unknown batch code as audit metadata;
+// the compiler has exactly one safe fallback view in that case.
+assert.equal(db.entitlements.get('full0202|Y3M1')?.source_batch_code, 'Y3FM_NEW_X');
+
+"""
+          if tail not in x: raise SystemExit('test tail anchor missing')
+          x=x.replace(tail,tail+guard,1)
+          x=x.replace('Lesson release importer ignores D1 batch roster and verifies display IDs + FULL/PRELESSON_ONLY + continuing FULL release: PASS','Lesson release importer validates ambiguous batch views and preserves safe single-view fallback + FULL/PRELESSON_ONLY + continuing FULL release: PASS')
+          t.write_text(x)
+          PY
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          git diff --check
+          git diff -- worker/src/admin-lesson-release-import.js tests/admin-lesson-release-import-verification.mjs
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/admin-lesson-release-import.js tests/admin-lesson-release-import-verification.mjs
+          git commit -m 'CP12: reject undefined batch for ambiguous lesson views'
+          git push origin HEAD:fix/cp12-import-batch-view-guard-2026-09-14
