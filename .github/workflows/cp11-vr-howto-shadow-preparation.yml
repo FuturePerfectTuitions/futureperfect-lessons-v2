@@ -1,0 +1,61 @@
+name: CP11 VR How-To Shadow Preparation
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint11-implementation-build-2026-09-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_WORKER: fpt-portal-v2-worker
+  PROD_SHADOW_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  CHECKPOINT8_AS_OF_DATE: '2026-09-14'
+  CHECKPOINT11_AS_OF_DATE: '2026-09-14'
+
+jobs:
+  prepare-vr-howto-shadow:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'CP11: publish prepared VR How-To shadow model'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify special-area production state read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check scripts/rebuild-checkpoint11-special-backfill.mjs
+          node --check scripts/rebuild-checkpoint8-special-area-audit.mjs
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/cp11-vr-preparation-before.json
+          jq -e '.status=="PASS" and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and ((.manualTokenCounts.VR_HOWTO // 0) >= 1)' /tmp/cp11-vr-preparation-before.json >/dev/null
+      - name: Atomically publish VR How-To prepared model to shadow KV only
+        run: node scripts/rebuild-checkpoint11-special-backfill.mjs
+      - name: Verify publication and unchanged legacy source state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -e '.marker=="REBUILD_CHECKPOINT11_VR_HOWTO_BACKFILL_PASS" and .catalogue.screenpalOnly==true and .catalogue.unsupportedItemCount==0 and (.access.manualGrantedCurrent >= 1) and .access.legacyGrantSource=="manualAccess.specialBuckets" and .sourceMutated==false' /tmp/checkpoint11-vr-howto-backfill.json >/dev/null
+          node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/cp11-vr-preparation-after.json
+          jq -e '.status=="PASS" and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0' /tmp/cp11-vr-preparation-after.json >/dev/null
+      - name: Upload CP11 VR How-To preparation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp11-vr-howto-shadow-preparation-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/cp11-vr-preparation-before.json
+            /tmp/checkpoint11-vr-howto-backfill.json
+            /tmp/cp11-vr-preparation-after.json
