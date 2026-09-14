@@ -1,0 +1,185 @@
+name: Rebuild Checkpoint 12 - Operational Cycle Read-only Detector
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - .github/workflows/rebuild-checkpoint12-operational-cycle-readonly.yml
+
+permissions:
+  contents: read
+
+env:
+  CP11_CUTOVER_AT: '2026-09-14T08:42:00Z'
+  EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+
+jobs:
+  detect-real-operational-cycles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert detector is production read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          WORKFLOW=.github/workflows/rebuild-checkpoint12-operational-cycle-readonly.yml
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const text=fs.readFileSync('.github/workflows/rebuild-checkpoint12-operational-cycle-readonly.yml','utf8');
+          const forbidden=[
+            ['wrangler','deploy'].join(' '),
+            ['wrangler','secret','put'].join(' '),
+            ['wrangler','kv'].join(' '),
+            ['wrangler','r2'].join(' '),
+            ['wrangler','d1','execute'].join(' '),
+            ['INSERT','INTO'].join(' '),
+            ['UPDATE','SET'].join(' '),
+            ['DELETE','FROM'].join(' '),
+            ['CREATE','TABLE'].join(' '),
+            ['DROP','TABLE'].join(' '),
+            ['ALTER','TABLE'].join(' '),
+            ['REPLACE','INTO'].join(' '),
+            ['PRAGMA','writable_schema'].join(' ')
+          ];
+          const hits=forbidden.filter(x=>text.toUpperCase().includes(x.toUpperCase()));
+          if(hits.length) throw new Error(`Mutating surface present in CP12 detector: ${hits.join(', ')}`);
+          NODE
+          echo REBUILD_CHECKPOINT12_OPERATIONAL_DETECTOR_READONLY_PASS
+
+      - name: Query aggregate real-import timestamps from production D1
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$EXPECTED_PROD_D1_ID"
+
+          cat > /tmp/cp12-operational-read.mjs <<'NODE'
+          import fs from 'node:fs';
+
+          const token=String(process.env.CLOUDFLARE_API_TOKEN||'').trim();
+          const account=String(process.env.CLOUDFLARE_ACCOUNT_ID||'').trim();
+          const database=String(process.env.EXPECTED_PROD_D1_ID||'').trim();
+          const cutover=String(process.env.CP11_CUTOVER_AT||'').trim();
+          if(!token||!account||!database||!cutover) throw new Error('Missing frozen CP12 read-only inputs.');
+
+          const endpoint=`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${database}/query`;
+          const assertSelect = sql => {
+            const normalized=sql.replace(/\/\*[\s\S]*?\*\//g,' ').replace(/--.*$/gm,' ').trim();
+            if(!/^SELECT\b/i.test(normalized)) throw new Error('Only SELECT is permitted.');
+            if(/\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|VACUUM|ATTACH|DETACH|REINDEX)\b/i.test(normalized)) {
+              throw new Error('Mutating SQL rejected.');
+            }
+          };
+          async function query(sql, params=[]){
+            assertSelect(sql);
+            const response=await fetch(endpoint,{
+              method:'POST',
+              headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
+              body:JSON.stringify({sql,params})
+            });
+            const body=await response.json().catch(()=>null);
+            if(!response.ok||body?.success!==true) throw new Error(`D1 read failed ${response.status}`);
+            const first=Array.isArray(body?.result)?body.result[0]:null;
+            if(first?.success===false) throw new Error('D1 SELECT failed.');
+            return Array.isArray(first?.results)?first.results:[];
+          }
+
+          const fullSummary=(await query(`
+            SELECT
+              COUNT(*) AS row_count,
+              COUNT(DISTINCT lesson_id) AS lesson_count,
+              MIN(last_confirmed_at) AS first_seen,
+              MAX(last_confirmed_at) AS last_seen
+            FROM lesson_entitlements
+            WHERE source = 'excel' AND last_confirmed_at >= ?
+          `,[cutover]))[0]||{};
+
+          const preSummary=(await query(`
+            SELECT
+              COUNT(*) AS row_count,
+              COUNT(DISTINCT lesson_id) AS lesson_count,
+              MIN(last_confirmed_at) AS first_seen,
+              MAX(last_confirmed_at) AS last_seen
+            FROM online_prelesson_entitlements
+            WHERE source_row_id LIKE 'csv-%' AND last_confirmed_at >= ?
+          `,[cutover]))[0]||{};
+
+          const fullMinutes=await query(`
+            SELECT
+              substr(last_confirmed_at,1,16) || ':00Z' AS minute_utc,
+              COUNT(*) AS row_count,
+              COUNT(DISTINCT lesson_id) AS lesson_count
+            FROM lesson_entitlements
+            WHERE source = 'excel' AND last_confirmed_at >= ?
+            GROUP BY substr(last_confirmed_at,1,16)
+            ORDER BY minute_utc ASC
+          `,[cutover]);
+
+          const preMinutes=await query(`
+            SELECT
+              substr(last_confirmed_at,1,16) || ':00Z' AS minute_utc,
+              COUNT(*) AS row_count,
+              COUNT(DISTINCT lesson_id) AS lesson_count
+            FROM online_prelesson_entitlements
+            WHERE source_row_id LIKE 'csv-%' AND last_confirmed_at >= ?
+            GROUP BY substr(last_confirmed_at,1,16)
+            ORDER BY minute_utc ASC
+          `,[cutover]);
+
+          const fullRows=Number(fullSummary.row_count||0);
+          const preRows=Number(preSummary.row_count||0);
+          const output={
+            marker:'REBUILD_CHECKPOINT12_OPERATIONAL_CYCLE_READONLY',
+            status:'PASS',
+            readOnly:true,
+            cutoverAt:cutover,
+            identityFieldsEmitted:false,
+            evidenceSource:'production D1 aggregate timestamps written by the normal CSV lesson-release importer',
+            fullRelease:{
+              rowCount:fullRows,
+              lessonCount:Number(fullSummary.lesson_count||0),
+              firstSeen:fullSummary.first_seen||null,
+              lastSeen:fullSummary.last_seen||null,
+              minuteBuckets:fullMinutes
+            },
+            onlinePrelesson:{
+              rowCount:preRows,
+              lessonCount:Number(preSummary.lesson_count||0),
+              firstSeen:preSummary.first_seen||null,
+              lastSeen:preSummary.last_seen||null,
+              minuteBuckets:preMinutes
+            },
+            candidateActivityObserved:(fullRows+preRows)>0,
+            candidateOnly:true,
+            representativeCycleGateMet:false,
+            cp13Allowed:false,
+            note:'Any non-zero candidate must still be manually validated as genuine normal operations and followed by the full CP12 observer. This detector can never close CP12.'
+          };
+          fs.writeFileSync('/tmp/checkpoint12-operational-cycle-readonly.json',JSON.stringify(output,null,2)+'\n');
+          console.log(JSON.stringify({
+            marker:output.marker,
+            fullReleaseRows:fullRows,
+            prelessonRows:preRows,
+            candidateActivityObserved:output.candidateActivityObserved,
+            representativeCycleGateMet:false,
+            cp13Allowed:false
+          }));
+          NODE
+
+          node /tmp/cp12-operational-read.mjs
+
+      - name: Upload identity-free operational evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint12-operational-cycle-readonly-evidence
+          path: /tmp/checkpoint12-operational-cycle-readonly.json
+          if-no-files-found: error
+          retention-days: 30
