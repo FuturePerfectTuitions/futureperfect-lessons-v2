@@ -1,0 +1,59 @@
+name: CP12 cache-safe collapsible browser UAT
+
+on:
+  push:
+    branches:
+      - fix/cp12-resource-collapsible-ui-2026-09-14
+    paths:
+      - .github/workflows/cp12-resource-ui-browser-cachecheck.yml
+
+permissions:
+  contents: read
+
+jobs:
+  browser-uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STAGING_STUDENTS_KV_TITLE: FPT_PORTAL_V2_REBUILD_STUDENTS_STAGING
+      CP12_BROWSER_BASE_URL: https://fpt-portal-v2-rebuild-browser-staging-cp9.futureperfectlessons.workers.dev
+      PLAYWRIGHT_VERSION: 1.55.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Recover masked synthetic staging password read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces?per_page=100" "${AUTH[@]}" -o /tmp/kv.json
+          NS="$(jq -r --arg title "$STAGING_STUDENTS_KV_TITLE" '.result[] | select(.title==$title) | .id' /tmp/kv.json | head -n1)"
+          test -n "$NS"
+          curl --fail --silent --show-error "${API}/storage/kv/namespaces/${NS}/values/user%3Acp12vrui" "${AUTH[@]}" -o /tmp/user.json
+          P="$(jq -r '.p // empty' /tmp/user.json)"
+          [[ "$P" =~ [A-Z] ]] && [[ "$P" =~ [a-z] ]] && [[ "$P" =~ [0-9] ]] && [ "${#P}" -eq 4 ]
+          echo "::add-mask::$P"
+          echo "UAT_LOGIN_PASSWORD=$P" >> "$GITHUB_ENV"
+          rm -f /tmp/user.json
+      - name: Install browser runner
+        run: |
+          npm install --no-save --no-package-lock "@playwright/test@${PLAYWRIGHT_VERSION}"
+          npx playwright install --with-deps chromium
+      - name: Run cache-safe real-browser hierarchy UAT
+        run: node scripts/cp12-resource-ui-browser-uat.mjs
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-resource-ui-browser-cachecheck
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            /tmp/cp12-resource-ui-browser-uat.json
+            /tmp/cp12-resource-ui-browser-diagnostic.json
+            /tmp/cp12-resource-ui-browser-evidence/*.png
