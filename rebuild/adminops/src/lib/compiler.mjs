@@ -99,6 +99,7 @@ function deduplicateResources(resources) {
     }
     const presentationScopes = mergePresentationScopes(existing, source);
     const protectedResource = existing.protected === true || source.protected === true;
+    const presentationGroup = clean(existing.presentationGroup || source.presentationGroup);
     const type = protectedResource && (existing.type === 'answer-pack' || source.type === 'answer-pack')
       ? 'answer-pack'
       : (existing.type || source.type);
@@ -106,6 +107,7 @@ function deduplicateResources(resources) {
       ...existing,
       type,
       ...(protectedResource ? { protected: true } : {}),
+      ...(presentationGroup ? { presentationGroup } : {}),
       ...(presentationScopes ? { presentationScopes } : {})
     });
     if (!presentationScopes) delete byObjectKey.get(objectKey).presentationScopes;
@@ -128,18 +130,18 @@ function collectLessonResources(record) {
   const resources = [];
   pre.forEach((item, index) => {
     const resource = namedResource(item, `PreLesson Sheet ${index + 1}`);
-    if (resource) resources.push({ type: 'prelesson', ...resource });
+    if (resource) resources.push({ type: 'prelesson', presentationGroup: 'core-prelesson', ...resource });
   });
   homeworks.forEach((pair, index) => {
     const homeworkSource = pair?.homework && typeof pair.homework === 'object' ? pair.homework : pair;
     const homework = namedResource(homeworkSource, `Homework ${index + 1}`);
-    if (homework) resources.push({ type: 'homework', ...homework });
+    if (homework) resources.push({ type: 'homework', presentationGroup: 'core-homework', ...homework });
     const answer = namedResource(pair?.answerPack, `Answer Pack ${index + 1}`);
-    if (answer) resources.push({ type: 'answer-pack', protected: true, ...answer });
+    if (answer) resources.push({ type: 'answer-pack', protected: true, presentationGroup: 'core-homework', ...answer });
   });
   other.forEach((item, index) => {
     const resource = namedResource(item, `Resource ${index + 1}`);
-    if (resource) resources.push({ type: 'other', ...resource });
+    if (resource) resources.push({ type: 'other', presentationGroup: 'core-other', ...resource });
   });
 
   resources.push(...collectPhase11ExtensionResources(record));
@@ -164,6 +166,7 @@ async function compileLessonDetail(record, options = {}) {
       displayName: resource.displayName,
       objectKey: resource.objectKey,
       ...(resource.protected ? { protected: true } : {}),
+      ...(clean(resource.presentationGroup) ? { presentationGroup: clean(resource.presentationGroup) } : {}),
       ...(scopes.length === 1 && scopes[0] === 'core' ? {} : { presentationScopes: scopes })
     });
   }

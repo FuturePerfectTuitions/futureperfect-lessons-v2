@@ -24,30 +24,33 @@ function pair(value, primaryKeys, primaryFallback, answerFallback) {
   };
 }
 
-function pushFile(rows, value, { type, fallbackName, scope, protectedResource = false }) {
+function pushFile(rows, value, { type, fallbackName, scope, group = '', protectedResource = false }) {
   const resource = file(value, fallbackName);
   if (!resource) return;
   rows.push({
     type,
     ...resource,
     ...(protectedResource ? { protected: true } : {}),
+    ...(group ? { presentationGroup: group } : {}),
     ...(scope === 'core' ? {} : { presentationScopes: [scope] })
   });
 }
 
-function pushPairs(rows, values, { primaryKeys, primaryType, primaryFallback, answerFallback, scope }) {
+function pushPairs(rows, values, { primaryKeys, primaryType, primaryFallback, answerFallback, scope, group }) {
   if (!Array.isArray(values)) return;
   values.forEach(value => {
     const normalized = pair(value, primaryKeys, primaryFallback, answerFallback);
     pushFile(rows, normalized.primary, {
       type: primaryType,
       fallbackName: primaryFallback,
-      scope
+      scope,
+      group
     });
     pushFile(rows, normalized.answer, {
       type: 'answer-pack',
       fallbackName: answerFallback,
       scope,
+      group,
       protectedResource: true
     });
   });
@@ -69,18 +72,20 @@ function collectPhase11ExtensionResources(record) {
     primaryType: 'prelesson',
     primaryFallback: 'PreLesson Sheet',
     answerFallback: 'PreLesson Answer Pack',
-    scope: 'core'
+    scope: 'core',
+    group: 'core-prelesson'
   });
   pushPairs(rows, core.cumulativeHomeworks, {
     primaryKeys: ['homework', 'primary'],
     primaryType: 'cumulative-homework',
     primaryFallback: 'Cumulative Homework',
     answerFallback: 'Cumulative Homework Answer Pack',
-    scope: 'core'
+    scope: 'core',
+    group: 'core-cumulative'
   });
   for (const answer of Array.isArray(core.supplementaryAnswers) ? core.supplementaryAnswers : []) {
     pushFile(rows, answer, {
-      type: 'answer-pack', fallbackName: 'Additional Answer Pack', scope: 'core', protectedResource: true
+      type: 'answer-pack', fallbackName: 'Additional Answer Pack', scope: 'core', group: 'core-answers', protectedResource: true
     });
   }
 
@@ -89,25 +94,28 @@ function collectPhase11ExtensionResources(record) {
     primaryType: 'prelesson',
     primaryFallback: '11+ PreLesson Sheet',
     answerFallback: '11+ PreLesson Answer Pack',
-    scope: 'elevenPlus'
+    scope: 'elevenPlus',
+    group: 'elevenplus-prelesson'
   });
   pushPairs(rows, elevenPlus.homeworks, {
     primaryKeys: ['homework', 'primary'],
     primaryType: 'homework',
     primaryFallback: '11+ Homework',
     answerFallback: '11+ Homework Answer Pack',
-    scope: 'elevenPlus'
+    scope: 'elevenPlus',
+    group: 'elevenplus-homework'
   });
   pushPairs(rows, elevenPlus.cumulativeHomeworks, {
     primaryKeys: ['homework', 'primary'],
     primaryType: 'cumulative-homework',
     primaryFallback: 'Cumulative Homework',
     answerFallback: 'Cumulative Homework Answer Pack',
-    scope: 'elevenPlus'
+    scope: 'elevenPlus',
+    group: 'elevenplus-cumulative'
   });
   for (const answer of Array.isArray(elevenPlus.supplementaryAnswers) ? elevenPlus.supplementaryAnswers : []) {
     pushFile(rows, answer, {
-      type: 'answer-pack', fallbackName: 'Additional 11+ Answer Pack', scope: 'elevenPlus', protectedResource: true
+      type: 'answer-pack', fallbackName: 'Additional 11+ Answer Pack', scope: 'elevenPlus', group: 'elevenplus-answers', protectedResource: true
     });
   }
 
@@ -116,18 +124,20 @@ function collectPhase11ExtensionResources(record) {
     primaryType: 'prelesson',
     primaryFallback: 'VR PreLesson Sheet',
     answerFallback: 'VR PreLesson Answer Pack',
-    scope: 'vr'
+    scope: 'vr',
+    group: 'vr-prelesson'
   });
   pushPairs(rows, canonicalVr.homeworks, {
     primaryKeys: ['homework'],
     primaryType: 'homework',
     primaryFallback: 'VR Homework',
     answerFallback: 'VR Homework Answer Pack',
-    scope: 'vr'
+    scope: 'vr',
+    group: 'vr-homework'
   });
   for (const answer of Array.isArray(vr.supplementaryAnswers) ? vr.supplementaryAnswers : []) {
     pushFile(rows, answer, {
-      type: 'answer-pack', fallbackName: 'Additional VR Answer Pack', scope: 'vr', protectedResource: true
+      type: 'answer-pack', fallbackName: 'Additional VR Answer Pack', scope: 'vr', group: 'vr-answers', protectedResource: true
     });
   }
 
