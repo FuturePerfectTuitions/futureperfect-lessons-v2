@@ -21,9 +21,10 @@ async function envelope(path,options={}){const out=await request(path,options);i
 async function kvText(ns,key){const out=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(out.response.status===404)return null;if(!out.response.ok)throw new Error(`KV read failed ${out.response.status}: ${key}`);return out.text;}
 async function kvJson(ns,key){const text=await kvText(ns,key);if(text==null)return null;try{return JSON.parse(text);}catch{throw new Error(`KV JSON invalid: ${key}`);}}
 async function kvKeys(ns,prefix){const keys=[];let cursor='';do{const q=new URLSearchParams({limit:'1000',prefix});if(cursor)q.set('cursor',cursor);const body=await envelope(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);keys.push(...(body.result||[]).map(x=>x.name).filter(Boolean));cursor=clean(body.result_info?.cursor);}while(cursor);return keys;}
-async function kvBulk(ns,items){for(let i=0;i<items.length;i+=500){const part=items.slice(i,i+500);const body=await envelope(`/accounts/${account}/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(part)});if((body.result?.unsuccessful_keys||[]).length)throw new Error(`KV bulk write incomplete: ${body.result.unsuccessful_keys.length}`);}}
+async function kvBulk(ns,items){for(let i=0;i<items.length;i+=500){const part=items.slice(i,i+500);if(!part.length)continue;const body=await envelope(`/accounts/${account}/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(part)});if((body.result?.unsuccessful_keys||[]).length)throw new Error(`KV bulk write incomplete: ${body.result.unsuccessful_keys.length}`);}}
 async function d1Query(db,sql){if(!/^\s*(SELECT|PRAGMA)\b/i.test(sql))throw new Error('CP11 backfill permits read-only D1 source statements only.');const body=await envelope(`/accounts/${account}/d1/database/${db}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql})});const first=Array.isArray(body.result)?body.result[0]:body.result;return Array.isArray(first?.results)?first.results:[];}
 async function mapLimit(values,limit,fn){const out=new Array(values.length);let next=0;async function runner(){while(true){const i=next++;if(i>=values.length)return;out[i]=await fn(values[i],i);}}await Promise.all(Array.from({length:Math.min(limit,values.length||1)},runner));return out;}
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function digest(value){return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0,16);}
 function valid4(value){const p=String(value||'');return p.length===4&&/[A-Z]/.test(p)&&/[a-z]/.test(p)&&/\d/.test(p);}
 
@@ -89,6 +90,30 @@ if(!smokeSecret)throw new Error('CP11 could not identify a masked positive-smoke
 const lessonDetails=await mapLimit(Object.keys(lessons).sort(),24,async id=>[id,await compileLessonDetail(lessons[id],{resourceExists:async()=>true})]);
 const nowIso=new Date().toISOString();
 async function candidate(scope,payload,version){const payloadText=stableStringify(payload),payloadSha256=await sha256Hex(payloadText);const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha256,payload};const envelopeText=stableStringify(envelope),envelopeSha256=await sha256Hex(envelopeText);return{scope,payload,version,payloadSha256,envelopeSha256,envelopeText,key:versionKey(scope,version)};}
+async function verifyStoredVersion(scope,ref){
+  const version=clean(ref?.version),expectedSha=clean(ref?.sha256),expectedEnvelopeSha=clean(ref?.envelopeSha256);
+  if(!version||!expectedSha)return false;
+  const actual=await kvText(shadowKv,versionKey(scope,version));
+  if(actual==null)return false;
+  let parsed;try{parsed=JSON.parse(actual);}catch{return false;}
+  if(parsed?.kind!=='prepared-read-model-envelope'||parsed?.scope!==scope||parsed?.version!==version)return false;
+  const payloadSha=await sha256Hex(stableStringify(parsed.payload));
+  if(payloadSha!==expectedSha||clean(parsed.sha256)!==expectedSha)return false;
+  if(expectedEnvelopeSha&&(await sha256Hex(actual))!==expectedEnvelopeSha)return false;
+  return true;
+}
+async function waitForExactPointer(scope,expected){
+  const started=Date.now(),deadline=started+90000;
+  let last=null;
+  while(Date.now()<=deadline){
+    last=await kvJson(shadowKv,pointerKey(scope));
+    if(last?.kind==='prepared-read-model-pointer'&&last?.scope===scope&&clean(last?.current?.version)===expected.version&&clean(last?.current?.sha256)===expected.payloadSha256){
+      if(await verifyStoredVersion(scope,last.current))return {pointer:last,waitMs:Date.now()-started};
+    }
+    await sleep(1500);
+  }
+  throw new Error(`Backfill current pointer did not converge to exact candidate within propagation window: ${scope}`);
+}
 const candidates=[];
 const globalSha=await sha256Hex(stableStringify(global));candidates.push(await candidate('global',global,`cp11-g-${globalSha.slice(0,20)}-${runTag}`));
 for(const [id,detail] of lessonDetails){const sha=await sha256Hex(stableStringify(detail));candidates.push(await candidate(`lesson:${id}`,detail,`cp11-l-${sha.slice(0,16)}-${runTag}`));}
@@ -97,15 +122,20 @@ for(const entry of accessEntries){const sha=await sha256Hex(stableStringify(entr
 const previous=new Map();
 const scopesWithPrevious=candidates.map(c=>c.scope);
 await mapLimit(scopesWithPrevious,16,async scope=>{previous.set(scope,await kvJson(shadowKv,pointerKey(scope)));});
-await kvBulk(shadowKv,candidates.map(c=>({key:c.key,value:c.envelopeText})));
-await mapLimit(candidates,16,async c=>{const actual=await kvText(shadowKv,c.key);if(actual==null)throw new Error(`Backfill candidate missing after write: ${c.scope}`);let parsed;try{parsed=JSON.parse(actual);}catch{throw new Error(`Backfill candidate malformed after write: ${c.scope}`);}const psha=await sha256Hex(stableStringify(parsed.payload));if(parsed.scope!==c.scope||parsed.version!==c.version||psha!==c.payloadSha256)throw new Error(`Backfill candidate failed verification: ${c.scope}`);});
+const reused=new Map(),toPublish=[];
+await mapLimit(candidates,16,async c=>{
+  const prior=previous.get(c.scope),current=prior?.current;
+  if(clean(current?.sha256)===c.payloadSha256&&await verifyStoredVersion(c.scope,current))reused.set(c.scope,current);
+  else toPublish.push(c);
+});
+await kvBulk(shadowKv,toPublish.map(c=>({key:c.key,value:c.envelopeText})));
+await mapLimit(toPublish,16,async c=>{const actual=await kvText(shadowKv,c.key);if(actual==null)throw new Error(`Backfill candidate missing after write: ${c.scope}`);let parsed;try{parsed=JSON.parse(actual);}catch{throw new Error(`Backfill candidate malformed after write: ${c.scope}`);}const psha=await sha256Hex(stableStringify(parsed.payload));if(parsed.scope!==c.scope||parsed.version!==c.version||psha!==c.payloadSha256)throw new Error(`Backfill candidate failed verification: ${c.scope}`);});
 const pointerItems=[];
-for(const c of candidates){const prior=previous.get(c.scope);const prev=prior?.current?.version?{version:clean(prior.current.version),sha256:clean(prior.current.sha256),envelopeSha256:clean(prior.current.envelopeSha256)}:null;const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope:c.scope,current:{version:c.version,sha256:c.payloadSha256,envelopeSha256:c.envelopeSha256},previous:prev,updatedAt:nowIso};pointerItems.push({key:pointerKey(c.scope),value:stableStringify(pointer)});}
+for(const c of toPublish){const prior=previous.get(c.scope);const prev=prior?.current?.version?{version:clean(prior.current.version),sha256:clean(prior.current.sha256),envelopeSha256:clean(prior.current.envelopeSha256)}:null;const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope:c.scope,current:{version:c.version,sha256:c.payloadSha256,envelopeSha256:c.envelopeSha256},previous:prev,updatedAt:nowIso};pointerItems.push({key:pointerKey(c.scope),value:stableStringify(pointer)});}
 await kvBulk(shadowKv,pointerItems);
-const verifyScopes=candidates.map(c=>c.scope);
-await mapLimit(verifyScopes,16,async scope=>{const pointer=await kvJson(shadowKv,pointerKey(scope));if(pointer?.kind!=='prepared-read-model-pointer'||pointer?.scope!==scope)throw new Error(`Backfill pointer verification failed: ${scope}`);const expected=candidates.find(c=>c.scope===scope);if(!expected||pointer.current?.version!==expected.version||pointer.current?.sha256!==expected.payloadSha256)throw new Error(`Backfill current pointer mismatch: ${scope}`);});
+const propagation=await mapLimit(toPublish,16,async c=>waitForExactPointer(c.scope,c));
 
 fs.writeFileSync('/tmp/checkpoint11-smoke-secret.json',JSON.stringify(smokeSecret));
-const summary={marker:'REBUILD_CHECKPOINT11_BACKFILL_PASS',checkpoint:11,asOfDate:asOf,sourceRevision,catalogue:{curriculumCount:curriculumCodes.length,presentationCount:Object.keys(global.catalogues||{}).length,lessonCount:Object.keys(lessons).length},students:{profileKeyCount:userKeys.length,auditedCurrentStudents:accessEntries.length,excludedAdmin,excludedInactive,unexplainedDifferenceCount:0},publication:{targetKv:shadowKv,globalScopes:1,lessonScopes:lessonDetails.length,accessScopes:accessEntries.length,totalScopes:candidates.length,candidateVersionsVerified:candidates.length,pointersWritten:pointerItems.length,resourceMetadataParityReliedOn:true},scopeCompatibility:{algorithm:'HMAC-SHA256',domain:'rebuild-shadow-scope-v1:<normalized-user>',prefix:'u-',hexCharacters:40},smokeStudentDigest:smokeSecret.studentDigest,credentialsDisclosed:false};
+const summary={marker:'REBUILD_CHECKPOINT11_BACKFILL_PASS',checkpoint:11,asOfDate:asOf,sourceRevision,catalogue:{curriculumCount:curriculumCodes.length,presentationCount:Object.keys(global.catalogues||{}).length,lessonCount:Object.keys(lessons).length},students:{profileKeyCount:userKeys.length,auditedCurrentStudents:accessEntries.length,excludedAdmin,excludedInactive,unexplainedDifferenceCount:0},publication:{targetKv:shadowKv,globalScopes:1,lessonScopes:lessonDetails.length,accessScopes:accessEntries.length,totalScopes:candidates.length,reusedVerifiedScopes:reused.size,candidateVersionsWritten:toPublish.length,candidateVersionsVerified:candidates.length,pointersWritten:pointerItems.length,strictPropagationVerification:true,maxPropagationWaitMs:propagation.length?Math.max(...propagation.map(x=>x.waitMs)):0,resourceMetadataParityReliedOn:true},scopeCompatibility:{algorithm:'HMAC-SHA256',domain:'rebuild-shadow-scope-v1:<normalized-user>',prefix:'u-',hexCharacters:40},smokeStudentDigest:smokeSecret.studentDigest,credentialsDisclosed:false};
 fs.writeFileSync('/tmp/checkpoint11-backfill.json',JSON.stringify(summary,null,2));
 console.log(JSON.stringify(summary,null,2));
