@@ -58,15 +58,16 @@ if(mode==='rehearse'){
     rehearsalRecord=(await envelope(`/zones/${zone.id}/dns_records`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type:'CNAME',name:rehearsalHost,content:publicBaseline.record.content,ttl:1,proxied:false})})).result;
     rehearsalRoute=await addRoute(zone.id,`${rehearsalHost}/*`,browser);
     rehearsalRecord=await patchDns(zone.id,rehearsalRecord,true);
-    const candidateRoot=await publicProbe(`https://${rehearsalHost}/`,{candidate:true});
-    const candidateApi=await apiProbe(`https://${rehearsalHost}/api/v2/student/home`,true);
+    const edge=await verifiedAuthoritativeEdge(zone,rehearsalHost);
+    const candidateRoot=edge.root;
+    const candidateApi=edge.api;
     rehearsalRecord=await patchDns(zone.id,rehearsalRecord,false);
     const rolledBackDns=(await dnsRecords(zone.id,rehearsalHost))[0];
     if(!rolledBackDns||rolledBackDns.proxied!==false)throw new Error('Rollback rehearsal failed to restore DNS-only state.');
     await cfDelete(`/zones/${zone.id}/workers/routes/${rehearsalRoute.id}`);rehearsalRoute=null;
     const publicAfter=(await dnsRecords(zone.id,host))[0];const publicRoutes=hostRoutes(await routes(zone.id),host);
     if(!publicAfter||publicAfter.id!==publicBaseline.record.id||publicAfter.proxied!==false||publicRoutes.length)throw new Error('Public host changed during rollback rehearsal.');
-    state.passed=true;state.publicHostUnchanged=true;state.candidate={rootStatus:candidateRoot.status,apiStatus:candidateApi.status,facade:true};state.rollback={dnsRestoredToDnsOnly:true,routeRemoved:true};state.legacyAnchor=legacy;
+    state.passed=true;state.publicHostUnchanged=true;state.candidate={rootStatus:candidateRoot.status,apiStatus:candidateApi.status,facade:true,authoritativeDns:true,authoritativeNameserver:edge.nameserver,authoritativeNameserverIp:edge.nameserverIp,edgeIp:edge.edgeIp,directEdgeRootStatus:edge.root.status,directEdgeApiStatus:edge.api.status,sameRunnerRecursiveDnsBypassed:true};state.rollback={dnsRestoredToDnsOnly:true,routeRemoved:true};state.legacyAnchor=legacy;
   }finally{
     if(rehearsalRecord){try{const current=(await dnsRecords(zone.id,rehearsalHost))[0];if(current?.proxied)await patchDns(zone.id,current,false);}catch{}}
     if(rehearsalRoute){try{await cfDelete(`/zones/${zone.id}/workers/routes/${rehearsalRoute.id}`);}catch{}}
