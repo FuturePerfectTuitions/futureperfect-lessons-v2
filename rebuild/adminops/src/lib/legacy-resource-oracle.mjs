@@ -69,6 +69,7 @@ function expectedLegacyResourceRows(record) {
   const p11Core = phase11.core && typeof phase11.core === 'object' ? phase11.core : {};
   const elevenPlus = phase11.elevenPlus && typeof phase11.elevenPlus === 'object' ? phase11.elevenPlus : {};
   const vr = phase11.vr && typeof phase11.vr === 'object' ? phase11.vr : {};
+  const canonicalVr = record?.vr && typeof record.vr === 'object' ? record.vr : {};
 
   for (const pair of Array.isArray(p11Core.preLessonPairs) ? p11Core.preLessonPairs : []) {
     addPair(rows, pair, { primaryKeys: ['sheet', 'primary'], primaryType: 'prelesson', scope: 'core' });
@@ -91,6 +92,16 @@ function expectedLegacyResourceRows(record) {
   }
   for (const answer of Array.isArray(elevenPlus.supplementaryAnswers) ? elevenPlus.supplementaryAnswers : []) {
     add(rows, answer, { type: 'answer-pack', scope: 'elevenPlus', protectedResource: true });
+  }
+
+  // Canonical legacy VR pairs are top-level lesson.vr, not phase11Resources.vr.
+  // Keep this oracle independent from the compiler/collector while matching the
+  // authoritative source shape proved during the CP12 incident investigation.
+  for (const pair of Array.isArray(canonicalVr.preLesson) ? canonicalVr.preLesson : []) {
+    addPair(rows, pair, { primaryKeys: ['sheet'], primaryType: 'prelesson', scope: 'vr' });
+  }
+  for (const pair of Array.isArray(canonicalVr.homeworks) ? canonicalVr.homeworks : []) {
+    addPair(rows, pair, { primaryKeys: ['homework'], primaryType: 'homework', scope: 'vr' });
   }
   for (const answer of Array.isArray(vr.supplementaryAnswers) ? vr.supplementaryAnswers : []) {
     add(rows, answer, { type: 'answer-pack', scope: 'vr', protectedResource: true });
