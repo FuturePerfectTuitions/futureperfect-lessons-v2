@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { publishScopeAtomic, resolveCurrentScope } from '../rebuild/adminops/src/lib/atomic-publisher.mjs';
+import { publishScopeAtomic, resolveCurrentScope, stableStringify, sha256Hex } from '../rebuild/adminops/src/lib/atomic-publisher.mjs';
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
@@ -118,13 +118,28 @@ const payload = {
   items
 };
 const store = restStore(shadowKv);
-const published = await publishScopeAtomic(store, {
-  scope:'special:VR_HOWTO',
-  payload,
-  version:`cp11-vr-${payload.sourceRevision.slice(0, 20)}-${runTag}`
-});
+let existing = null;
+try { existing = await resolveCurrentScope(store, 'special:VR_HOWTO'); } catch {}
+const exactExisting = existing?.payload?.kind === 'prepared-special-area' && stableStringify(existing.payload) === stableStringify(payload);
+let published;
+if (exactExisting) {
+  published = {
+    scope:'special:VR_HOWTO',
+    version:existing.version,
+    payloadSha256:existing.sha256 || await sha256Hex(stableStringify(payload)),
+    previousVersion:clean(existing.pointer?.previous?.version) || null,
+    reused:true
+  };
+} else {
+  published = await publishScopeAtomic(store, {
+    scope:'special:VR_HOWTO',
+    payload,
+    version:`cp11-vr-${payload.sourceRevision.slice(0, 20)}-${runTag}`
+  });
+  published.reused = false;
+}
 const resolved = await resolveCurrentScope(store, 'special:VR_HOWTO');
-if (resolved.version !== published.version || resolved.payload?.kind !== 'prepared-special-area') throw new Error('VR_HOWTO prepared model did not resolve after publication.');
+if (resolved.version !== published.version || resolved.payload?.kind !== 'prepared-special-area' || stableStringify(resolved.payload) !== stableStringify(payload)) throw new Error('VR_HOWTO prepared model did not resolve to the exact live catalogue after publication/reuse.');
 
 let manualGrantedCurrent = 0;
 let directGrantedCurrent = 0;
@@ -145,7 +160,7 @@ const summary = {
   sourceRevision:payload.sourceRevision,
   catalogue:{ itemCount:items.length, playableItemCount:playable.length, separatorCount:items.length-playable.length, type:payload.type, title:payload.title, screenpalOnly:true, unsupportedItemCount:0 },
   access:{ manualGrantedCurrent, directGrantedCurrent, legacyGrantSource:'manualAccess.specialBuckets' },
-  publication:{ scope:'special:VR_HOWTO', version:published.version, payloadSha256:published.payloadSha256, previousVersion:published.previousVersion },
+  publication:{ scope:'special:VR_HOWTO', version:published.version, payloadSha256:published.payloadSha256, previousVersion:published.previousVersion, reusedExactCurrent:published.reused === true },
   sourceMutated:false,
   studentIdentitiesIncluded:false
 };
