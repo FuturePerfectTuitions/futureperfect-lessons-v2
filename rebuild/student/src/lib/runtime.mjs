@@ -13,7 +13,7 @@ import { opaqueAccessScopeId } from './access-scope.mjs';
 import { kvReadStore, resolveCurrentScope, sha256Hex } from './read-model-resolver.mjs';
 import { environmentAdapters } from './runtime-adapters.mjs';
 import { videoForView } from '../../../shared/read-models/video.mjs';
-import { resourceVisibleForView } from '../../../shared/read-models/resource-visibility.mjs';
+import { resourcePresentationScopes, resourceVisibleForView } from '../../../shared/read-models/resource-visibility.mjs';
 
 export const CHECKPOINT = 6;
 const clean = value => String(value ?? '').trim();
@@ -295,7 +295,9 @@ async function resourceRows(detail, state, viewId) {
       resourceId: await resourceIdFor(detail.payload.lessonId, resource),
       type: clean(resource.type),
       displayName: clean(resource.displayName),
-      protected: resource.protected === true
+      protected: resource.protected === true,
+      presentationScopes: resourcePresentationScopes(resource),
+      ...(clean(resource.presentationGroup) ? { presentationGroup: clean(resource.presentationGroup) } : {})
     });
   }
   return rows;
