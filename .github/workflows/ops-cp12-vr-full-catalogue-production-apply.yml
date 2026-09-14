@@ -1,0 +1,127 @@
+name: CP12 VR full catalogue production apply
+
+on:
+  push:
+    branches: [ops/reina-entitlement]
+    paths: ['.github/workflows/ops-cp12-vr-full-catalogue-production-apply.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_HOST: lessons.futureperfect.education
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+      EXPECTED_STUDENT_ROLLBACK_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+      EXPECTED_CHANGED_LESSONS: '67'
+      EXPECTED_ADDED_RESOURCES: '301'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Re-run VR compiler security regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/cp12-vr-resource-collector-verification.mjs
+          node tests/cp12-vr-resource-canonical-source-verification.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+      - name: Guarded candidate build fresh topology and reversible publication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, sha256Hex, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase(), legacy=clean(process.env.LEGACY_WORKER), browser=clean(process.env.BROWSER_WORKER), student=clean(process.env.STUDENT_WORKER);
+          const lessonsNsExpected=clean(process.env.EXPECTED_LESSONS_KV_ID), rm=clean(process.env.EXPECTED_READ_MODELS_KV_ID);
+          const activeExpected=clean(process.env.EXPECTED_STUDENT_VERSION), rollbackExpected=clean(process.env.EXPECTED_STUDENT_ROLLBACK_VERSION);
+          const expectedChanged=Number(process.env.EXPECTED_CHANGED_LESSONS), expectedAdded=Number(process.env.EXPECTED_ADDED_RESOURCES);
+          const runTag=clean(process.env.GITHUB_RUN_ID||Date.now()).replace(/[^A-Za-z0-9._-]+/g,'-').slice(0,32);
+          const base='https://api.cloudflare.com/client/v4', auth={Authorization:`Bearer ${token}`}, sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          if(!token||!account)throw new Error('CLOUDFLARE_CREDENTIALS_MISSING');
+          async function request(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}return{r,text,body};}
+          async function cf(path,options={}){const o=await request(path,options);if(!o.r.ok||o.body?.success!==true)throw new Error(`CF_REQUEST_FAILED:${o.r.status}:${path}:${clean(o.body?.errors?.[0]?.message||o.text).slice(0,180)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV_READ_FAILED:${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          async function kvBulk(ns,items){for(let i=0;i<items.length;i+=500){const part=items.slice(i,i+500);if(!part.length)continue;const result=await cf(`/accounts/${account}/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(part)});if((result?.unsuccessful_keys||[]).length)throw new Error(`KV_BULK_WRITE_INCOMPLETE:${result.unsuccessful_keys.length}`);}}
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`), bindings=settings?.bindings||[];
+          const lessonsNs=clean(bindings.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==lessonsNsExpected)throw new Error(`LESSONS_KV_DRIFT:${lessonsNs}`);
+          if(!bindings.some(b=>clean(b.namespace_id)===rm))throw new Error('READ_MODELS_KV_NOT_RETAINED');
+
+          const curriculumCodes=['MATHS_Y2','MATHS_Y3','MATHS_L1','MATHS_L2','MATHS_L3','MATHS_Y6_EXTRA','ENGLISH_Y2','ENGLISH_Y3','ENGLISH_Y4','ENGLISH_Y5','ENGLISH_Y6'];
+          const ids=new Set();
+          for(const code of curriculumCodes){const raw=await kvJson(lessonsNs,`curriculum:${code}`);for(const item of (Array.isArray(raw)?raw:(raw?.lessonIds||raw?.lessons||raw?.items||[]))){const id=typeof item==='string'?clean(item):clean(item?.lessonId);if(id)ids.add(id);}}
+          if(ids.size!==372)throw new Error(`LESSON_COUNT_DRIFT:${ids.size}`);
+          const strip=p=>({schemaVersion:p?.schemaVersion,kind:p?.kind,lessonId:p?.lessonId,title:p?.title,description:p?.description,videoVariants:p?.videoVariants||null});
+          const changed=[];
+          for(const id of [...ids].sort()){
+            const source=await kvJson(lessonsNs,`lesson:${id}`);if(!source)throw new Error(`SOURCE_LESSON_MISSING:${id}`);
+            const candidate=await compileLessonDetail(source,{resourceExists:async()=>true});
+            const scope=`lesson:${id}`, pKey=pointerKey(scope), oldPointerRaw=await kvText(rm,pKey);if(!oldPointerRaw)throw new Error(`POINTER_MISSING:${id}`);
+            const oldPointer=JSON.parse(oldPointerRaw), oldVersion=clean(oldPointer?.current?.version);if(!oldVersion)throw new Error(`CURRENT_VERSION_MISSING:${id}`);
+            const oldEnvelopeRaw=await kvText(rm,versionKey(scope,oldVersion));if(!oldEnvelopeRaw)throw new Error(`CURRENT_ENVELOPE_MISSING:${id}`);
+            const oldEnvelope=JSON.parse(oldEnvelopeRaw), current=oldEnvelope?.payload;if(current?.kind!=='prepared-lesson-detail')throw new Error(`PREPARED_PAYLOAD_INVALID:${id}`);
+            if(stableStringify(current)===stableStringify(candidate))continue;
+            if(stableStringify(strip(current))!==stableStringify(strip(candidate)))throw new Error(`NON_RESOURCE_FIELD_DRIFT:${id}`);
+            const curBy=new Map((current.resources||[]).map(r=>[clean(r.objectKey),r])), canBy=new Map((candidate.resources||[]).map(r=>[clean(r.objectKey),r]));
+            const removed=[...curBy.keys()].filter(k=>!canBy.has(k));if(removed.length)throw new Error(`RESOURCE_REMOVAL_FORBIDDEN:${id}`);
+            for(const [key,row] of curBy)if(stableStringify(row)!==stableStringify(canBy.get(key)))throw new Error(`EXISTING_RESOURCE_MUTATION_FORBIDDEN:${id}:${key}`);
+            const added=[...canBy.entries()].filter(([k])=>!curBy.has(k)).map(([,r])=>r);if(!added.length)throw new Error(`UNCLASSIFIED_DIFF:${id}`);
+            for(const r of added){if(JSON.stringify(r.presentationScopes)!==JSON.stringify(['vr']))throw new Error(`NON_VR_ADDITION_FORBIDDEN:${id}:${r.objectKey}`);if(r.type==='answer-pack'&&r.protected!==true)throw new Error(`UNPROTECTED_VR_ANSWER:${id}:${r.objectKey}`);}
+            const payloadText=stableStringify(candidate), payloadSha=await sha256Hex(payloadText), version=`cp12-vr-all-${payloadSha.slice(0,16)}-${runTag}`;
+            const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha,payload:candidate};
+            const envelopeText=stableStringify(envelope), envelopeSha=await sha256Hex(envelopeText);
+            changed.push({id,scope,pointerKey:pKey,oldPointerRaw,oldVersion,version,payloadSha,envelopeSha,envelopeText,envelopeKey:versionKey(scope,version),added});
+          }
+          const totalAdded=changed.reduce((n,x)=>n+x.added.length,0);
+          if(changed.length!==expectedChanged||totalAdded!==expectedAdded)throw new Error(`PREVIEW_DRIFT:changed=${changed.length}/${expectedChanged};added=${totalAdded}/${expectedAdded}`);
+          if(changed.filter(x=>/^Y4E/.test(x.id)).length!==32||changed.filter(x=>/^Y5E/.test(x.id)).length!==35)throw new Error('YEAR_DISTRIBUTION_DRIFT');
+
+          // Fresh authoritative topology immediately before the first write.
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`), zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('ZONE_NOT_FOUND');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`), hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser)throw new Error('PUBLIC_ROUTE_DRIFT');
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`), bb=browserSettings?.bindings||[], services=bb.filter(b=>clean(b.type)==='service');
+          if(services.length!==1||clean(services[0].service)!==student)throw new Error('BROWSER_STUDENT_BINDING_DRIFT');
+          if(bb.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('FORBIDDEN_BROWSER_ADMIN_BINDING');
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`), sb=studentSettings?.bindings||[];
+          if(clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id)!==rm)throw new Error('STUDENT_READ_MODEL_BINDING_DRIFT');
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`), depRows=Array.isArray(deployments?.deployments)?deployments.deployments:(Array.isArray(deployments)?deployments:[]), av=depRows?.[0]?.versions||[];
+          const active=clean((av.find(v=>Number(v.percentage||0)===100)||av[0])?.version_id);if(active!==activeExpected)throw new Error(`STUDENT_VERSION_DRIFT:${active}`);
+          const versions=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/versions`), versionRows=Array.isArray(versions)?versions:(versions?.items||[]);
+          if(!versionRows.some(v=>clean(v.id||v.version_id)===rollbackExpected))throw new Error('ROLLBACK_VERSION_NOT_RETAINED');
+
+          let pointerPhaseStarted=false;
+          try{
+            await kvBulk(rm,changed.map(x=>({key:x.envelopeKey,value:x.envelopeText})));
+            for(const x of changed){const stored=await kvText(rm,x.envelopeKey);if(stored!==x.envelopeText)throw new Error(`CANDIDATE_VERIFY_FAILED:${x.id}`);}
+            const now=new Date().toISOString();
+            const pointerItems=changed.map(x=>({key:x.pointerKey,value:stableStringify({schemaVersion:1,kind:'prepared-read-model-pointer',scope:x.scope,current:{version:x.version,sha256:x.payloadSha,envelopeSha256:x.envelopeSha},previous:JSON.parse(x.oldPointerRaw).current||null,updatedAt:now})}));
+            pointerPhaseStarted=true;
+            await kvBulk(rm,pointerItems);
+            for(const x of changed){let ok=false;const deadline=Date.now()+90000;while(Date.now()<deadline){const p=await kvJson(rm,x.pointerKey);if(clean(p?.current?.version)===x.version&&clean(p?.current?.sha256)===x.payloadSha){ok=true;break;}await sleep(500);}if(!ok)throw new Error(`POINTER_CONVERGENCE_FAILED:${x.id}`);}
+            console.log(JSON.stringify({marker:'CP12_VR_FULL_CATALOGUE_PRODUCTION_APPLY_PASS',changedCount:changed.length,changedY4:32,changedY5:35,totalAddedResources:totalAdded,onlyVrAdditions:true,noResourceRemoval:true,noExistingResourceMutation:true,rollbackRetained:true,topology:{publicRoute:'Browser',browserService:'Student',studentVersion:active},lessonIds:changed.map(x=>x.id)}));
+          }catch(error){
+            if(pointerPhaseStarted){await kvBulk(rm,changed.map(x=>({key:x.pointerKey,value:x.oldPointerRaw})));for(const x of changed){const p=await kvJson(rm,x.pointerKey);if(clean(p?.current?.version)!==x.oldVersion)throw new Error(`ROLLBACK_FAILED:${x.id};original=${clean(error?.message||error)}`);}}
+            throw error;
+          }
+          NODE
