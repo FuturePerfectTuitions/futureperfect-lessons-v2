@@ -1,0 +1,58 @@
+name: Rebuild Checkpoint 12 - One-shot Observer Maintenance
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint12-stabilisation-2026-09-14
+    paths:
+      - .github/workflows/rebuild-checkpoint12-observer-maintenance.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-observer-status-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rebuild/checkpoint12-stabilisation-2026-09-14
+          fetch-depth: 0
+
+      - name: Patch only the stale CP12 status literal
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/rebuild-checkpoint12-stabilisation-observation.yml')
+          text = path.read_text()
+          old = "grep -F '**Status: OPEN — INITIAL OBSERVATION ONLY**' docs/rebuild/CHECKPOINT_12_STABILISATION.md >/dev/null"
+          new = "grep -F '**Status: OPEN — INITIAL OBSERVATION PASS; REPRESENTATIVE-CYCLE GATE NOT MET**' docs/rebuild/CHECKPOINT_12_STABILISATION.md >/dev/null"
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one stale status guard, found {text.count(old)}')
+          updated = text.replace(old, new)
+          if updated.count(new) != 1:
+              raise SystemExit('Updated status guard validation failed')
+          path.write_text(updated)
+          PY
+          git diff --check
+          git diff -- .github/workflows/rebuild-checkpoint12-stabilisation-observation.yml
+          if git diff --quiet -- .github/workflows/rebuild-checkpoint12-stabilisation-observation.yml; then
+            echo 'No observer change produced.' >&2
+            exit 1
+          fi
+
+      - name: Commit exact observer maintenance
+        shell: bash
+        env:
+          BRANCH: rebuild/checkpoint12-stabilisation-2026-09-14
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/rebuild-checkpoint12-stabilisation-observation.yml
+          test "$(git diff --cached --name-only)" = '.github/workflows/rebuild-checkpoint12-stabilisation-observation.yml'
+          git commit -m 'CP12: keep stabilisation observer runnable'
+          git push origin "HEAD:${BRANCH}"
