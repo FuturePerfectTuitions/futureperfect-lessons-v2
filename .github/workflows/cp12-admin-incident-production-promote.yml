@@ -1,0 +1,191 @@
+name: CP12 Admin Incident Production Promote
+
+on:
+  push:
+    branches:
+      - incident/cp12-admin-principal-2026-09-14
+    paths:
+      - .github/workflows/cp12-admin-incident-production-promote.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cp12-admin-incident-production-repair
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  CP12_BASE_SHA: 7f9986f84a7e05d679499924a0e6026d21090507
+  EXPECTED_BROWSER: fpt-portal-v2-rebuild-browser-prod
+  EXPECTED_STUDENT: fpt-portal-v2-rebuild-student-prod
+  OLD_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  CANDIDATE_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_D1: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  WRANGLER_VERSION: 4.129.0
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Revalidate incident code and exact candidate preview before mutation
+        shell: bash
+        env:
+          SMOKE_BASE_URL: https://bed8e660-fpt-portal-v2-rebuild-student-prod.futureperfectlessons.workers.dev
+          SMOKE_ORIGIN: https://lessons.futureperfect.education
+          SMOKE_PHASE: final-candidate-preview-premutation
+          EXPECT_ADMIN_STATUS: '200'
+          SMOKE_OUTPUT: /tmp/candidate-preview-premutation.json
+        run: |
+          set -Eeuo pipefail
+          git fetch origin rebuild/checkpoint12-stabilisation-2026-09-14
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$CP12_BASE_SHA"
+          git merge-base --is-ancestor "$CP12_BASE_SHA" "$GITHUB_SHA"
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuild-cp12-admin-vr-decorator.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+
+      - name: Fresh immediate topology bindings and active rollback version gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$EXPECTED_BROWSER" '.success==true and any(.result[]; .pattern==$route and .script==$browser)' /tmp/routes.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_BROWSER}/settings" "${AUTH[@]}" -o /tmp/browser.json
+          jq -e --arg student "$EXPECTED_STUDENT" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student)' /tmp/browser.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/settings" "${AUTH[@]}" -o /tmp/student.json
+          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '
+            .success==true
+            and any(.result.bindings[]; .name=="READ_MODELS_KV" and (.namespace_id // .id)==$read)
+            and any(.result.bindings[]; .name=="STUDENTS_KV" and (.namespace_id // .id)==$students)
+            and any(.result.bindings[]; .name=="DB" and (.database_id // .id)==$d1)
+            and any(.result.bindings[]; .name=="MATERIALS_R2" and (.bucket_name // .bucket)==$r2)
+            and any(.result.bindings[]; .name=="AUTH_SIGNING_SECRET" and .type=="secret_text")
+            and any(.result.bindings[]; .name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")
+          ' /tmp/student.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/deployments" "${AUTH[@]}" -o /tmp/deployments.json
+          ACTIVE="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/deployments.json | head -n1)"
+          test "$ACTIVE" = "$OLD_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/versions?deployable=true" "${AUTH[@]}" -o /tmp/versions.json
+          jq -e --arg candidate "$CANDIDATE_VERSION" 'any(.result.items[]; .id==$candidate)' /tmp/versions.json >/dev/null
+          jq -n --arg marker 'CP12_ADMIN_PROMOTION_PREMUTATION_PASS' --arg observedAt "$(date -u +%FT%TZ)" --arg old "$OLD_VERSION" --arg candidate "$CANDIDATE_VERSION" '{marker:$marker,readOnly:true,observedAt:$observedAt,activeVersion:$old,candidateVersion:$candidate,routeVerified:true,serviceBindingVerified:true,dataBindingsVerified:true,secretsVerified:true}' | tee /tmp/promotion-premutation.json
+
+      - name: Pin Wrangler
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+
+      - name: Add candidate at zero percent wait for global propagation and override-smoke through real Browser
+        shell: bash
+        env:
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: browser-service-binding-zero-percent-override
+          EXPECT_ADMIN_STATUS: '200'
+          OVERRIDE_WORKER: ${{ env.EXPECTED_STUDENT }}
+          OVERRIDE_VERSION: ${{ env.CANDIDATE_VERSION }}
+          SMOKE_OUTPUT: /tmp/zero-percent-override-smoke.json
+        run: |
+          set -Eeuo pipefail
+          rollback() {
+            npx wrangler versions deploy "${OLD_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin incident rollback after zero-percent smoke failure' || true
+          }
+          trap rollback ERR
+          npx wrangler versions deploy "${CANDIDATE_VERSION}@0%" "${OLD_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin incident delayed zero-percent smoke'
+          sleep 15
+          PASS=0
+          for attempt in 1 2 3 4 5; do
+            echo "candidate override attempt ${attempt}/5"
+            if node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs; then PASS=1; break; fi
+            sleep 5
+          done
+          test "$PASS" = 1
+          trap - ERR
+
+      - name: Promote exact candidate to 100 percent and authenticate Admin plus representative student publicly
+        shell: bash
+        env:
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: production-post-promotion
+          EXPECT_ADMIN_STATUS: '200'
+          SMOKE_OUTPUT: /tmp/production-post-promotion-smoke.json
+        run: |
+          set -Eeuo pipefail
+          rollback() {
+            npx wrangler versions deploy "${OLD_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin incident automatic rollback after production smoke failure' || true
+          }
+          trap rollback ERR
+          npx wrangler versions deploy "${CANDIDATE_VERSION}@100%" --name "$EXPECTED_STUDENT" -y --message 'CP12 Admin principal incident repair promoted after shadow and zero-percent smoke'
+          sleep 5
+          PASS=0
+          for attempt in 1 2 3; do
+            if node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs; then PASS=1; break; fi
+            sleep 3
+          done
+          test "$PASS" = 1
+          trap - ERR
+
+      - name: Final authoritative topology bindings and rollback retention verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/final-zones.json
+          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/final-zones.json | head -n1)"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/final-routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$EXPECTED_BROWSER" '.success==true and any(.result[]; .pattern==$route and .script==$browser)' /tmp/final-routes.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_BROWSER}/settings" "${AUTH[@]}" -o /tmp/final-browser.json
+          jq -e --arg student "$EXPECTED_STUDENT" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student)' /tmp/final-browser.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/settings" "${AUTH[@]}" -o /tmp/final-student.json
+          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '
+            .success==true
+            and any(.result.bindings[]; .name=="READ_MODELS_KV" and (.namespace_id // .id)==$read)
+            and any(.result.bindings[]; .name=="STUDENTS_KV" and (.namespace_id // .id)==$students)
+            and any(.result.bindings[]; .name=="DB" and (.database_id // .id)==$d1)
+            and any(.result.bindings[]; .name=="MATERIALS_R2" and (.bucket_name // .bucket)==$r2)
+            and any(.result.bindings[]; .name=="AUTH_SIGNING_SECRET" and .type=="secret_text")
+            and any(.result.bindings[]; .name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")
+          ' /tmp/final-student.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/deployments" "${AUTH[@]}" -o /tmp/final-deployments.json
+          ACTIVE="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/final-deployments.json | head -n1)"
+          test "$ACTIVE" = "$CANDIDATE_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${EXPECTED_STUDENT}/versions?deployable=true" "${AUTH[@]}" -o /tmp/final-versions.json
+          jq -e --arg old "$OLD_VERSION" 'any(.result.items[]; .id==$old)' /tmp/final-versions.json >/dev/null
+          jq -n --arg marker 'CP12_ADMIN_INCIDENT_PRODUCTION_PROMOTION_PASS' --arg observedAt "$(date -u +%FT%TZ)" --arg browser "$EXPECTED_BROWSER" --arg student "$EXPECTED_STUDENT" --arg active "$ACTIVE" --arg rollback "$OLD_VERSION" '{marker:$marker,observedAt:$observedAt,production:{browser:$browser,student:$student,activeVersion:$active},rollback:{retainedVersion:$rollback},browserUnchanged:true,dataBindingsUnchanged:true,secretsRetained:true,authenticatedAdminSmoke:true,authenticatedStudentSmoke:true,cp12StillOpen:true,cp13Started:false}' | tee /tmp/production-promotion-pass.json
+
+      - name: Upload safe promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-admin-incident-production-promotion-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/candidate-preview-premutation.json
+            /tmp/promotion-premutation.json
+            /tmp/zero-percent-override-smoke.json
+            /tmp/production-post-promotion-smoke.json
+            /tmp/production-promotion-pass.json
