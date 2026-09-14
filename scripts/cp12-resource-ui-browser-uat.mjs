@@ -4,9 +4,17 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 
 const base=String(process.env.CP12_BROWSER_BASE_URL||'').replace(/\/$/,'');
-const password=String(process.env.UAT_LOGIN_PASSWORD||'');
+const sharedPassword=String(process.env.UAT_LOGIN_PASSWORD||'');
+const vrUsername=String(process.env.VR_UAT_USERNAME||'cp12vrui');
+const coreUsername=String(process.env.CORE_UAT_USERNAME||'cp12coreui');
+const vrPassword=String(process.env.VR_UAT_PASSWORD||sharedPassword);
+const corePassword=String(process.env.CORE_UAT_PASSWORD||sharedPassword);
+const marker=String(process.env.CP12_UAT_MARKER||'CP12_RESOURCE_UI_STAGING_BROWSER_UAT_PASS');
+const pupilDataSynthetic=String(process.env.CP12_UAT_PUPIL_DATA_SYNTHETIC||'true').toLowerCase()!=='false';
+const productionMutation=String(process.env.CP12_UAT_PRODUCTION_MUTATION||'false').toLowerCase()==='true';
 const evidenceDir='/tmp/cp12-resource-ui-browser-evidence';
-if(!base||!/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{4}$/.test(password))throw new Error('CP12 UI browser UAT inputs are incomplete.');
+const validPassword=value=>/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{4}$/.test(String(value||''));
+if(!base||!vrUsername||!coreUsername||!validPassword(vrPassword)||!validPassword(corePassword))throw new Error('CP12 UI browser UAT inputs are incomplete.');
 fs.mkdirSync(evidenceDir,{recursive:true});
 
 async function assertCandidateFrontend(page){
@@ -17,7 +25,7 @@ async function assertCandidateFrontend(page){
   assert(text.includes('Verbal Reasoning'),'Loaded browser asset is not the CP12 collapsible candidate.');
   return {bundleUrl:new URL(bundleUrl).pathname,candidateMarker:true};
 }
-async function login(page,username){
+async function login(page,username,password){
   await page.goto(`${base}/?cp12-resource-ui=${Date.now()}`,{waitUntil:'domcontentloaded'});
   const frontend=await assertCandidateFrontend(page);
   await page.getByRole('heading',{name:'Student Login'}).waitFor({state:'visible',timeout:15000});
@@ -79,12 +87,12 @@ async function requireSections(page,min=2){
 }
 
 const browser=await chromium.launch({headless:true});
-const evidence={marker:'CP12_RESOURCE_UI_STAGING_BROWSER_UAT_PASS',baseHost:new URL(base).hostname,frontend:{},vr:{},ordinary:{},security:{},screenshots:[]};
+const evidence={marker,baseHost:new URL(base).hostname,frontend:{},vr:{},ordinary:{},security:{},screenshots:[]};
 try{
   {
     const context=await browser.newContext({viewport:{width:1440,height:1000}});
     const page=await context.newPage();
-    evidence.frontend=await login(page,'cp12vrui');
+    evidence.frontend=await login(page,vrUsername,vrPassword);
     const detail=await openY5E2(page,'english-year5-11plus');
     const vrRows=(detail.resources||[]).filter(row=>(row.presentationScopes||[]).includes('vr'));
     const coreRows=(detail.resources||[]).filter(row=>row.type!=='video'&&!(row.presentationScopes||[]).includes('vr'));
@@ -123,13 +131,13 @@ try{
 
     const shot=path.join(evidenceDir,'vr-y5e2-collapsible.png');
     await page.screenshot({path:shot,fullPage:true}); evidence.screenshots.push(path.basename(shot));
-    evidence.vr={resourceCount:vrRows.length,coreHomeworkRows:homeworkIds.size,outerSection:true,preLessonSubgroup:true,homeworkSubgroup:true,collapsedByDefault:true,viewHideToggle:true,protectedAnswers:protectedVr.length};
+    evidence.vr={resourceCount:vrRows.length,coreHomeworkRows:homeworkIds.size,outerSection:true,preLessonSubgroup:true,homeworkSubgroup:true,collapsedByDefault:true,viewHideToggle:true,protectedAnswers:protectedVr.length,usernameDisclosed:false};
     await context.close();
   }
   {
     const context=await browser.newContext({viewport:{width:1280,height:900}});
     const page=await context.newPage();
-    await login(page,'cp12coreui');
+    await login(page,coreUsername,corePassword);
     const detail=await openY5E2(page,'english-year5');
     assert.equal((detail.resources||[]).some(row=>(row.presentationScopes||[]).includes('vr')),false,'Ordinary API response exposed VR rows');
     assert.equal(await page.locator('[data-resource-section="verbal-reasoning"]').count(),0,'Ordinary UI rendered Verbal Reasoning section');
@@ -137,10 +145,10 @@ try{
     assert.equal(await homeworkSection.count(),1,'Ordinary Homework section missing');
     const body=await toggleAndAssert(homeworkSection);
     assert((await body.locator('.resource-row').count())>0,'Ordinary Homework section empty');
-    evidence.ordinary={sameLessonControl:true,vrRowsHidden:true,vrSectionAbsent:true,homeworkCollapsible:true};
+    evidence.ordinary={sameLessonControl:true,vrRowsHidden:true,vrSectionAbsent:true,homeworkCollapsible:true,usernameDisclosed:false};
     await context.close();
   }
-  evidence.security={pupilDataSynthetic:true,productionMutation:false,answerControlsRemainPasswordGated:true,accessNotWidened:true};
+  evidence.security={pupilDataSynthetic,productionMutation,answerControlsRemainPasswordGated:true,accessNotWidened:true,credentialsLogged:false};
   fs.writeFileSync('/tmp/cp12-resource-ui-browser-uat.json',JSON.stringify(evidence,null,2)+'\n');
   console.log(JSON.stringify(evidence));
 } finally {
