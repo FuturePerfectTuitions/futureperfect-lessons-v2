@@ -1,0 +1,42 @@
+name: CP12 importer batch-view guard dry-run
+
+on:
+  push:
+    branches: [fix/cp12-import-batch-view-guard-2026-09-14]
+    paths: ['.github/workflows/cp12-import-batch-view-guard-dry-run.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Re-run importer and wrapper regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/admin-superuser-static-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+      - name: Generate canonical navigation and dry-run exact Phase 23 bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/fpt-navigation-package /tmp/fpt-dry-run
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/fpt-navigation-package >/tmp/fpt-navigation-package.log
+          grep -Fq 'Generated from the immutable Phase 11 canonical catalogue.' worker/src/phase11-navigation-manifest.generated.js
+          npx --yes wrangler@4.125.0 deploy --config worker/wrangler.toml --dry-run --outdir /tmp/fpt-dry-run | tee /tmp/wrangler-dry-run.log
+          test -s /tmp/wrangler-dry-run.log
+          grep -Fq 'Total Upload' /tmp/wrangler-dry-run.log
+          echo CP12_IMPORT_BATCH_VIEW_GUARD_DRY_RUN_PASS
