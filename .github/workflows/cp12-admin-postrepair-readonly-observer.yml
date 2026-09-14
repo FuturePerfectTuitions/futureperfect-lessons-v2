@@ -1,5 +1,6 @@
 name: CP12 Admin Post-Repair Read-only Observer
 
+# Rerun after guarded batch-definition route repair on 2026-09-14.
 on:
   push:
     branches:
