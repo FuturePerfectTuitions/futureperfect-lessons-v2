@@ -1,0 +1,73 @@
+name: Incident - Importer Recurrence Patch Validation
+
+on:
+  push:
+    branches:
+      - incident/entitlement-audit-2026-09-15
+    paths:
+      - 'docs/rebuild/INCIDENT_IMPORTER_RECURRENCE_PATCH_TRIGGER.md'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: incident-importer-recurrence-patch-2026-09-15
+  cancel-in-progress: false
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: incident/entitlement-audit-2026-09-15
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate exact recurrence patch
+        run: |
+          set -Eeuo pipefail
+          node scripts/incident-patch-importer-recurrence.mjs
+          node --check worker/src/admin-lesson-release-import.js
+          node --check tests/admin-lesson-release-import-verification.mjs
+
+      - name: Run importer and related regression suite
+        run: |
+          set -Eeuo pipefail
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+
+      - name: Assert exact semantic diff only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git diff --check
+          git diff --exit-code -- scripts/incident-patch-importer-recurrence.mjs .github/workflows/incident-importer-recurrence-patch.yml docs/rebuild/INCIDENT_IMPORTER_RECURRENCE_PATCH_TRIGGER.md || true
+          changed="$(git diff --name-only | sort)"
+          expected=$'tests/admin-lesson-release-import-verification.mjs\nworker/src/admin-lesson-release-import.js'
+          test "$changed" = "$expected"
+          grep -Fq "clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0" worker/src/admin-lesson-release-import.js
+          grep -Fq 'WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1' worker/src/admin-lesson-release-import.js
+          ! grep -Fq 'validation.student?.vrEligible === true ? 1 : 0' worker/src/admin-lesson-release-import.js
+
+      - name: Commit verified recurrence fix to incident branch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/admin-lesson-release-import.js tests/admin-lesson-release-import-verification.mjs
+          git commit -m 'Incident: make English 11+ VR release authoritative and monotonic'
+          git push origin HEAD:incident/entitlement-audit-2026-09-15
+          echo "PATCH_COMMIT=$(git rev-parse HEAD)"
