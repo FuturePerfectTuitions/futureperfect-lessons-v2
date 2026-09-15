@@ -1,0 +1,325 @@
+name: CP12 corrected live-contract security and performance closure
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-postpromotion-security-performance-v3.yml']
+
+permissions:
+  contents: read
+
+env:
+  PROD_BASE: https://lessons.futureperfect.education
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_DB: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  EXPECTED_STUDENT_VERSION: 32467053-f348-449c-a2ae-1dae9688b446
+  EXPECTED_BROWSER_VERSION: 67880177-1328-46dd-a228-47ba245e33ae
+  EXPECTED_LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+  RETAIN_STUDENT_ROLLBACK_1: bed8e660-facb-47f3-afad-7a9996d95c5a
+  RETAIN_STUDENT_ROLLBACK_2: 0751feed-5aa3-40fb-854f-5847c8603872
+  RETAIN_BROWSER_ROLLBACK: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+
+jobs:
+  corrected-security-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Current security core and canonical Student-runtime regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/student/src/lib/runtime-adapters.mjs
+          echo CP12_SECURITY_CORE_CURRENT_SOURCE_PASS
+
+      - name: Fresh pre-write production topology version and binding guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json|head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
+          for w in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "${API}/workers/scripts/${w}/settings" "${AUTH[@]}" -o "/tmp/${w}-settings.json"
+            curl --fail --silent --show-error "${API}/workers/scripts/${w}/deployments" "${AUTH[@]}" -o "/tmp/${w}-deployments.json"
+          done
+          jq -e --arg student "$STUDENT_WORKER" '([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV" 'any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_STUDENTS_KV" 'any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_DB" 'any(.result.bindings[];.name=="DB" and (.database_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg bucket "$EXPECTED_R2" 'any(.result.bindings[];.name=="MATERIALS_R2" and (.bucket_name//.bucket)==$bucket)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments.json"|head -n1)" = "$EXPECTED_STUDENT_VERSION"
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments.json"|head -n1)" = "$EXPECTED_BROWSER_VERSION"
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments.json"|head -n1)" = "$EXPECTED_LEGACY_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/browser-versions.json
+          jq -e --arg v "$RETAIN_STUDENT_ROLLBACK_1" 'any(.result.items[];.id==$v)' /tmp/student-versions.json >/dev/null
+          jq -e --arg v "$RETAIN_STUDENT_ROLLBACK_2" 'any(.result.items[];.id==$v)' /tmp/student-versions.json >/dev/null
+          jq -e --arg v "$RETAIN_BROWSER_ROLLBACK" 'any(.result.items[];.id==$v)' /tmp/browser-versions.json >/dev/null
+          echo CP12_SECURITY_PERF_PREWRITE_TOPOLOGY_PASS
+
+      - name: Resolve privacy-safe real production personas
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-production-real-persona-prereq.mjs
+          jq -e '.status=="PASS" and .productionMutation==false and .ordinary.lessonOpen==true and .ordinary.year5ElevenPlusAbsent==true and .vr.vrHowToVisible==true and .vr.accessProven==true and .vr.preparedCoreAccess==true and .vr.preparedVrAccess==true and .vr.canonicalVrRows==true and .vr.canonicalVrResourceCount>=4 and .distinctPrincipals==true and .secretMaterialLogged==false' /tmp/cp12-production-real-persona-prereq.json >/dev/null
+          echo CP12_SECURITY_PERF_REAL_PERSONAS_PASS
+
+      - name: Correct live Answer Pack matrix and p95 performance thresholds
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trap 'rm -f /tmp/cp12-production-real-persona-secrets.json' EXIT
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { performance } from 'node:perf_hooks';
+
+          const base=String(process.env.PROD_BASE).replace(/\/$/,'');
+          const origin=new URL(base).origin;
+          const p=JSON.parse(fs.readFileSync('/tmp/cp12-production-real-persona-secrets.json','utf8'));
+          const p95=a=>{const s=[...a].sort((x,y)=>x-y);return s[Math.max(0,Math.ceil(.95*s.length)-1)]};
+          const round=n=>Number(Number(n).toFixed(3));
+
+          async function login(x){
+            const t=performance.now();
+            const r=await fetch(`${base}/api/v2/auth/login`,{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/json'},body:JSON.stringify({username:x.username,password:x.password})});
+            const elapsed=performance.now()-t;
+            let b=null;try{b=await r.json()}catch{}
+            if(r.status!==200||b?.ok!==true)throw new Error(`login:${r.status}`);
+            const cookie=(r.headers.get('set-cookie')||'').split(';')[0];
+            if(!/^fpt_session=/.test(cookie))throw new Error('session cookie missing');
+            return{cookie,elapsed};
+          }
+          async function get(path,cookie=''){
+            const t=performance.now();
+            const r=await fetch(new URL(path,base),{redirect:'manual',headers:{...(cookie?{cookie}:{})}});
+            return{r,elapsed:performance.now()-t};
+          }
+          async function js(path,cookie=''){
+            const x=await get(path,cookie);let b=null;try{b=await x.r.json()}catch{};return{...x,b};
+          }
+          async function answerOpen(path,cookie,password,{sendPassword=true}={}){
+            const body=sendPassword?JSON.stringify({password}):JSON.stringify({});
+            const t=performance.now();
+            const r=await fetch(new URL(path,base),{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/json',...(cookie?{cookie}:{})},body});
+            const elapsed=performance.now()-t;
+            let b=null;try{b=await r.json()}catch{}
+            return{r,b,elapsed};
+          }
+          async function cancelBody(r){try{if(r?.body)await r.body.cancel()}catch{}}
+          function mutateToken(url){
+            const u=new URL(url,base),token=u.searchParams.get('cap')||'';
+            if(!token)throw new Error('capability token missing');
+            const last=token.slice(-1),next=last==='A'?'B':'A';
+            u.searchParams.set('cap',token.slice(0,-1)+next);
+            return u.pathname+u.search;
+          }
+
+          const ordinary=await login(p.ordinary);
+          const vr=await login(p.vr);
+          const [home,subject,ordinaryView,ordinaryLesson,vrView,vrLesson]=await Promise.all([
+            js('/api/v2/student/home',ordinary.cookie),
+            js('/api/v2/student/subjects/english',ordinary.cookie),
+            js(`/api/v2/student/views/${encodeURIComponent(p.ordinary.viewId)}/lessons`,ordinary.cookie),
+            js(`/api/v2/student/lessons/${encodeURIComponent(p.ordinary.lessonId)}?viewId=${encodeURIComponent(p.ordinary.viewId)}`,ordinary.cookie),
+            js(`/api/v2/student/views/${encodeURIComponent(p.vr.viewId)}/lessons`,vr.cookie),
+            js(`/api/v2/student/lessons/${encodeURIComponent(p.vr.lessonId)}?viewId=${encodeURIComponent(p.vr.viewId)}`,vr.cookie)
+          ]);
+          for(const [label,x] of Object.entries({home,subject,ordinaryView,ordinaryLesson,vrView,vrLesson}))if(x.r.status!==200||x.b?.ok!==true)throw new Error(`${label}:${x.r.status}`);
+          if((ordinaryLesson.b.resources||[]).some(r=>(r.presentationScopes||[]).includes('vr')))throw new Error('ordinary VR leak');
+
+          const protectedRows=(vrLesson.b.resources||[]).filter(r=>r.type==='answer-pack'&&r.protected===true&&(r.presentationScopes||[]).includes('vr'));
+          if(protectedRows.length<2)throw new Error(`protected VR answer rows:${protectedRows.length}`);
+          if(!protectedRows.every(r=>typeof r.resourceId==='string'&&r.resourceId))throw new Error('live resourceId contract missing');
+          const row=protectedRows[0],second=protectedRows[1];
+          const openPath=`/api/v2/student/lessons/${encodeURIComponent(p.vr.lessonId)}/resources/${encodeURIComponent(row.resourceId)}/open?viewId=${encodeURIComponent(p.vr.viewId)}`;
+
+          const noSession=await answerOpen(openPath,'',p.vr.answerPassword);
+          if(noSession.r.status!==401||noSession.b?.error!=='AUTH_REQUIRED')throw new Error(`no-session:${noSession.r.status}:${noSession.b?.error}`);
+          const getOpen=await js(openPath,vr.cookie);
+          if(getOpen.r.status!==405||getOpen.b?.error!=='ANSWER_PASSWORD_REQUIRED')throw new Error(`password-every-open-get:${getOpen.r.status}:${getOpen.b?.error}`);
+          const missingPassword=await answerOpen(openPath,vr.cookie,'',{sendPassword:false});
+          if(missingPassword.r.status!==400||missingPassword.b?.error!=='ANSWER_PASSWORD_REQUIRED'||missingPassword.b?.viewerUrl)throw new Error(`missing-password:${missingPassword.r.status}:${missingPassword.b?.error}`);
+          const wrongPassword=await answerOpen(openPath,vr.cookie,'Zz9!');
+          if(wrongPassword.r.status!==401||wrongPassword.b?.error!=='answer_password_invalid'||wrongPassword.b?.viewerUrl)throw new Error(`wrong-password:${wrongPassword.r.status}:${wrongPassword.b?.error}`);
+          const valid1=await answerOpen(openPath,vr.cookie,p.vr.answerPassword);
+          if(valid1.r.status!==200||valid1.b?.ok!==true||valid1.b?.kind!=='answer-view'||!valid1.b?.viewerUrl)throw new Error(`valid-open-1:${valid1.r.status}`);
+          const valid2=await answerOpen(openPath,vr.cookie,p.vr.answerPassword);
+          if(valid2.r.status!==200||valid2.b?.ok!==true||!valid2.b?.viewerUrl)throw new Error(`valid-open-2:${valid2.r.status}`);
+          if(valid1.b.viewerUrl===valid2.b.viewerUrl)throw new Error('answer-view capability unexpectedly reused');
+          const nowSeconds=Math.floor(Date.now()/1000);
+          if(!(Number(valid1.b.expiresAt)>nowSeconds&&Number(valid1.b.expiresAt)<=nowSeconds+301))throw new Error('answer-view expiry outside approved short-lived window');
+
+          const deliveryUrl=new URL(valid1.b.viewerUrl,base);
+          const delivery=await get(deliveryUrl.pathname+deliveryUrl.search,vr.cookie);
+          if(delivery.r.status!==200)throw new Error(`answer delivery:${delivery.r.status}`);
+          const requiredHeaders={
+            'cache-control':/private.*no-store|no-store.*private/i,
+            'x-content-type-options':/^nosniff$/i,
+            'content-disposition':/^inline;/i,
+            'content-security-policy':/default-src 'none'.*frame-ancestors 'self'|frame-ancestors 'self'.*default-src 'none'/i
+          };
+          for(const [name,re] of Object.entries(requiredHeaders)){const value=delivery.r.headers.get(name)||'';if(!re.test(value))throw new Error(`answer header ${name}:${value}`)}
+          await cancelBody(delivery.r);
+
+          const tampered=await get(mutateToken(valid1.b.viewerUrl),vr.cookie);
+          if(tampered.r.status===200)throw new Error('modified capability accepted');
+          await cancelBody(tampered.r);
+          const wrongUser=await get(deliveryUrl.pathname+deliveryUrl.search,ordinary.cookie);
+          if(wrongUser.r.status===200)throw new Error('wrong-user capability accepted');
+          await cancelBody(wrongUser.r);
+          const wrongResourceUrl=new URL(valid1.b.viewerUrl,base);
+          wrongResourceUrl.searchParams.set('resourceId',second.resourceId);
+          const wrongResource=await get(wrongResourceUrl.pathname+wrongResourceUrl.search,vr.cookie);
+          if(wrongResource.r.status===200)throw new Error('wrong-resource capability accepted');
+          await cancelBody(wrongResource.r);
+          const wrongViewUrl=new URL(valid1.b.viewerUrl,base);
+          wrongViewUrl.searchParams.set('viewId',p.vr.viewId==='english-year4'?'english-year5':'english-year4');
+          const wrongView=await get(wrongViewUrl.pathname+wrongViewUrl.search,vr.cookie);
+          if(wrongView.r.status===200)throw new Error('wrong-view capability accepted');
+          await cancelBody(wrongView.r);
+
+          const warmHome=[],warmSubject=[],warmView=[],warmLesson=[];
+          for(let i=0;i<20;i++){
+            warmHome.push((await js('/api/v2/student/home',ordinary.cookie)).elapsed);
+            warmSubject.push((await js('/api/v2/student/subjects/english',ordinary.cookie)).elapsed);
+            warmView.push((await js(`/api/v2/student/views/${encodeURIComponent(p.ordinary.viewId)}/lessons`,ordinary.cookie)).elapsed);
+            warmLesson.push((await js(`/api/v2/student/lessons/${encodeURIComponent(p.ordinary.lessonId)}?viewId=${encodeURIComponent(p.ordinary.viewId)}`,ordinary.cookie)).elapsed);
+          }
+          const protectedWarm=[];
+          for(let i=0;i<10;i++){
+            const t=performance.now();
+            const opened=await answerOpen(openPath,vr.cookie,p.vr.answerPassword);
+            if(opened.r.status!==200||!opened.b?.viewerUrl)throw new Error(`protected warm open:${opened.r.status}`);
+            const u=new URL(opened.b.viewerUrl,base),served=await get(u.pathname+u.search,vr.cookie);
+            if(served.r.status!==200)throw new Error(`protected warm delivery:${served.r.status}`);
+            protectedWarm.push(performance.now()-t);
+            await cancelBody(served.r);
+          }
+          const coldView=[],coldLesson=[],loginBootstrap=[];
+          for(let i=0;i<10;i++){
+            const l=await login(p.ordinary);
+            const x=await js(`/api/v2/student/views/${encodeURIComponent(p.ordinary.viewId)}/lessons`,l.cookie);
+            if(x.r.status!==200||x.b?.ok!==true)throw new Error('cold view sample failed');
+            coldView.push(x.elapsed);
+          }
+          for(let i=0;i<10;i++){
+            const l=await login(p.ordinary);
+            const x=await js(`/api/v2/student/lessons/${encodeURIComponent(p.ordinary.lessonId)}?viewId=${encodeURIComponent(p.ordinary.viewId)}`,l.cookie);
+            if(x.r.status!==200||x.b?.ok!==true)throw new Error('cold lesson sample failed');
+            coldLesson.push(x.elapsed);
+          }
+          for(let i=0;i<10;i++){
+            const t=performance.now(),l=await login(p.ordinary),h=await js('/api/v2/student/home',l.cookie);
+            if(h.r.status!==200||h.b?.ok!==true)throw new Error('login/bootstrap sample failed');
+            loginBootstrap.push(performance.now()-t);
+          }
+
+          const metrics={
+            loginBootstrapP95Ms:round(p95(loginBootstrap)),
+            warmHomeP95Ms:round(p95(warmHome)),
+            warmSubjectP95Ms:round(p95(warmSubject)),
+            warmViewP95Ms:round(p95(warmView)),
+            coldViewP95Ms:round(p95(coldView)),
+            warmLessonP95Ms:round(p95(warmLesson)),
+            coldLessonP95Ms:round(p95(coldLesson)),
+            protectedWarmOpenP95Ms:round(p95(protectedWarm))
+          };
+          const thresholds={
+            loginBootstrapP95Ms:1500,
+            warmHomeP95Ms:300,
+            warmSubjectP95Ms:300,
+            warmViewP95Ms:300,
+            coldViewP95Ms:800,
+            warmLessonP95Ms:300,
+            coldLessonP95Ms:800,
+            protectedWarmOpenP95Ms:1500
+          };
+          for(const[k,max]of Object.entries(thresholds))if(!(metrics[k]<max))throw new Error(`Performance SLOW ${k}=${metrics[k]} threshold<${max}`);
+
+          const report={
+            marker:'CP12_POSTPROMOTION_SECURITY_PERFORMANCE_V3_PASS',status:'PASS',
+            productionAccessMutation:false,productionContentMutation:false,productionConfigMutation:false,transientAnswerRateStateExercised:true,
+            answerPack:{
+              protectedVrAnswers:protectedRows.length,
+              noSessionStatus:noSession.r.status,
+              getWithoutPasswordStatus:getOpen.r.status,
+              missingPasswordStatus:missingPassword.r.status,
+              wrongPasswordStatus:wrongPassword.r.status,
+              firstValidOpenStatus:valid1.r.status,
+              secondValidOpenStatus:valid2.r.status,
+              deliveryStatus:delivery.r.status,
+              modifiedCapabilityStatus:tampered.r.status,
+              wrongUserCapabilityStatus:wrongUser.r.status,
+              wrongResourceCapabilityStatus:wrongResource.r.status,
+              wrongViewCapabilityStatus:wrongView.r.status,
+              liveShortExpiryBound:true,securityHeaders:true,viewerCapabilityAbsentBeforeValidPassword:true,passwordValidatedEveryOpen:true
+            },
+            capabilityCore:{modified:true,expired:true,wrongUser:true,wrongSession:true,wrongResource:true,wrongView:true,wrongLesson:true,wrongType:true,wrongAccessVersion:true},
+            performance:{classification:'FAST',metrics,thresholds,samples:{warmHome:20,warmSubject:20,warmView:20,coldView:10,warmLesson:20,coldLesson:10,loginBootstrap:10,protectedWarmOpen:10}}
+          };
+          fs.writeFileSync('/tmp/cp12-security-performance-v3.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report));
+          NODE
+
+      - name: Canonical Admin runtime and representative student smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-production-admin-view-prereq.mjs
+          jq -e '.status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
+          export SMOKE_BASE_URL="$PROD_BASE" SMOKE_PHASE='cp12-postpromotion-security-v3' EXPECT_ADMIN_STATUS='200' SMOKE_OUTPUT='/tmp/cp12-admin-smoke-v3.json'
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          jq -e '.expectedAdminFailure==false and .admin.login==true and .admin.home==true and .admin.mathsSubject==true and .admin.yearOrLevel==true and .admin.lesson==true and .student.credentialDisclosed==false and .security.passwordsLogged==false and .security.cookiesLogged==false' /tmp/cp12-admin-smoke-v3.json >/dev/null
+          echo CP12_POSTPROMOTION_ADMIN_RUNTIME_V3_PASS
+
+      - name: Assemble closure evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg marker CP12_POSTPROMOTION_SECURITY_PERFORMANCE_ADMIN_V3_PASS \
+            --slurpfile persona /tmp/cp12-production-real-persona-prereq.json \
+            --slurpfile security /tmp/cp12-security-performance-v3.json \
+            --slurpfile admin /tmp/cp12-production-admin-view-prereq.json \
+            --slurpfile adminSmoke /tmp/cp12-admin-smoke-v3.json \
+            '{marker:$marker,status:"PASS",productionAccessMutation:false,productionContentMutation:false,productionConfigMutation:false,transientAnswerRateStateExercised:true,topologyGuard:true,realPersonas:$persona[0],securityPerformance:$security[0],admin:$admin[0],adminSmoke:$adminSmoke[0]}' \
+            >/tmp/cp12-security-performance-admin-v3.json
+          cat /tmp/cp12-security-performance-admin-v3.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-security-performance-admin-v3
+          path: |
+            /tmp/cp12-security-performance-admin-v3.json
+            /tmp/cp12-security-performance-v3.json
+            /tmp/cp12-production-real-persona-prereq.json
+            /tmp/cp12-production-admin-view-prereq.json
+            /tmp/cp12-admin-smoke-v3.json
+          if-no-files-found: error
+          retention-days: 30
