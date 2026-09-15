@@ -1,0 +1,189 @@
+name: Incident - Guarded Importer Recurrence Production Deploy
+
+on:
+  push:
+    branches:
+      - incident/entitlement-audit-2026-09-15
+    paths:
+      - 'docs/rebuild/INCIDENT_IMPORTER_PRODUCTION_DEPLOY_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-importer-production-deploy-2026-09-15
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      PROD_HOST: lessons.futureperfect.education
+      WRANGLER_VERSION: 4.125.0
+      PATCH_COMMIT: 9b60be6e8d5f586a1abf16fefc56e2f5f9aec774
+      AS_OF_DATE: '2026-09-15'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: incident/entitlement-audit-2026-09-15
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Source and regression gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$PATCH_COMMIT" HEAD
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.toml
+          grep -Fq "clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0" worker/src/admin-lesson-release-import.js
+          grep -Fq 'WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1' worker/src/admin-lesson-release-import.js
+          ! grep -Fq 'validation.student?.vrEligible === true ? 1 : 0' worker/src/admin-lesson-release-import.js
+
+      - name: Fresh preflight and construct exact live-binding-preserving config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const legacy=process.env.LEGACY_WORKER, browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, host=process.env.PROD_HOST;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          async function topology(){
+            const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];if(!zone)throw new Error('Production zone unresolved');
+            const routes=await cf(`/zones/${zone.id}/workers/routes`);const hr=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+            if(hr.length!==1||String(hr[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hr[0].script!==browser)throw new Error(`Public route drift ${JSON.stringify(hr)}`);
+            const bs=await settings(browser), svc=(bs.bindings||[]).filter(b=>b.type==='service');if(svc.length!==1||svc[0].service!==student)throw new Error(`Browser service drift ${JSON.stringify(svc)}`);if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Forbidden Browser Admin binding');
+            return {route:{pattern:hr[0].pattern,script:hr[0].script},browserVersion:await active(browser),studentVersion:await active(student),service:{name:svc[0].name,service:svc[0].service}};
+          }
+          const beforeTopology=await topology(), legacySettings=await settings(legacy), oldVersion=await active(legacy);if(!oldVersion)throw new Error('Legacy active version unresolved');
+          const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const unsupported=(legacySettings.bindings||[]).filter(b=>!/secret/i.test(b.type)&&!supported.has(b.type));if(unsupported.length)throw new Error(`Unsupported live binding types: ${JSON.stringify(unsupported.map(b=>({name:b.name,type:b.type})))}`);
+          const secretNames=(legacySettings.bindings||[]).filter(b=>/secret/i.test(b.type)).map(b=>b.name).sort();
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const nonSecret=(legacySettings.bindings||[]).filter(b=>!/secret/i.test(b.type)).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+          fs.writeFileSync('/tmp/incident-bindings-before.json',JSON.stringify({nonSecret,secretNames},null,2)+'\n',{mode:0o600});
+          fs.writeFileSync('/tmp/incident-topology-before.json',JSON.stringify(beforeTopology,null,2)+'\n');
+          fs.writeFileSync('/tmp/incident-old-version.txt',oldVersion+'\n');
+          const q=s=>JSON.stringify(String(s??''));
+          let toml=`name = ${q(legacy)}\nmain = \"src/index-phase23-protected-view-stability.js\"\ncompatibility_date = \"2026-08-20\"\nkeep_vars = true\nworkers_dev = true\n`;
+          const plains=nonSecret.filter(b=>b.type==='plain_text');if(plains.length){toml+='\n[vars]\n';for(const b of plains)toml+=`${b.name} = ${q(b.text)}\n`;}
+          for(const b of nonSecret.filter(b=>b.type==='kv_namespace'))toml+=`\n[[kv_namespaces]]\nbinding = ${q(b.name)}\nid = ${q(b.namespace_id)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='r2_bucket'))toml+=`\n[[r2_buckets]]\nbinding = ${q(b.name)}\nbucket_name = ${q(b.bucket_name)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='d1')){const db=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(b.id)}`);toml+=`\n[[d1_databases]]\nbinding = ${q(b.name)}\ndatabase_name = ${q(db.name)}\ndatabase_id = ${q(b.id)}\n`;}
+          for(const b of nonSecret.filter(b=>b.type==='send_email'))toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
+          fs.writeFileSync('worker/wrangler.incident-entitlement.toml',toml);
+          const safe={marker:'INCIDENT_IMPORTER_PRODUCTION_DEPLOY_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,patchCommit:process.env.PATCH_COMMIT,beforeTopology,legacyOldVersion:oldVersion,nonSecretBindingNames:nonSecret.map(b=>`${b.name}:${b.type}`),secretNames};
+          fs.writeFileSync('/tmp/incident-importer-deploy-safe.json',JSON.stringify(safe,null,2)+'\n');
+          console.log(JSON.stringify(safe,null,2));
+          NODE
+          test -s worker/wrangler.incident-entitlement.toml
+          grep -Fq 'binding = "REBUILD_SHADOW_KV"' worker/wrangler.incident-entitlement.toml
+          grep -Fq 'binding = "REBUILD_SHADOW_DB"' worker/wrangler.incident-entitlement.toml
+          grep -Fq 'CHECKPOINT4_SHADOW_MODE' worker/wrangler.incident-entitlement.toml
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/incident-importer-dryrun --config worker/wrangler.incident-entitlement.toml >/tmp/incident-importer-dryrun.log
+          grep -R -Fq '/api/v1/admin/lesson-releases/' /tmp/incident-importer-dryrun || { echo 'Bundled admin importer endpoint marker missing'; exit 1; }
+
+      - name: Deploy operational Worker with automatic rollback on any verification failure
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_VERSION="$(tr -d '\r\n' </tmp/incident-old-version.txt)"
+          DEPLOYED=0
+          rollback(){
+            rc=$?
+            if [ "$DEPLOYED" = '1' ]; then
+              echo "Post-deploy gate failed; rolling $LEGACY_WORKER back to $OLD_VERSION" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" rollback "$OLD_VERSION" --name "$LEGACY_WORKER" --message 'Automatic rollback: 2026-09-15 entitlement importer incident gate failure' || echo 'ROLLBACK_COMMAND_FAILED' >&2
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.incident-entitlement.toml --keep-vars --message 'Incident fix: English 11+ VR authoritative and monotonic'
+          DEPLOYED=1
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, legacy=process.env.LEGACY_WORKER, browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, host=process.env.PROD_HOST;
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}`);return j.result;}
+          async function settings(n){return await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(n)}/settings`);}
+          async function active(n){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(n)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const beforeTopo=JSON.parse(fs.readFileSync('/tmp/incident-topology-before.json','utf8')), oldVersion=fs.readFileSync('/tmp/incident-old-version.txt','utf8').trim(), baseline=JSON.parse(fs.readFileSync('/tmp/incident-bindings-before.json','utf8'));
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`), zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0], routes=await cf(`/zones/${zone.id}/workers/routes`),hr=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          const bs=await settings(browser),svc=(bs.bindings||[]).filter(b=>b.type==='service');
+          const afterTopo={route:{pattern:hr[0]?.pattern,script:hr[0]?.script},browserVersion:await active(browser),studentVersion:await active(student),service:{name:svc[0]?.name,service:svc[0]?.service}};
+          if(JSON.stringify(afterTopo)!==JSON.stringify(beforeTopo))throw new Error(`Public rebuilt topology/version changed: before=${JSON.stringify(beforeTopo)} after=${JSON.stringify(afterTopo)}`);
+          const ls=await settings(legacy),normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const now={nonSecret:(ls.bindings||[]).filter(b=>!/secret/i.test(b.type)).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(ls.bindings||[]).filter(b=>/secret/i.test(b.type)).map(b=>b.name).sort()};
+          if(JSON.stringify(now)!==JSON.stringify(baseline))throw new Error('Operational Worker binding set/values changed unexpectedly.');
+          const newVersion=await active(legacy);if(!newVersion||newVersion===oldVersion)throw new Error(`Operational Worker version did not advance: ${newVersion}`);
+          const safe=JSON.parse(fs.readFileSync('/tmp/incident-importer-deploy-safe.json','utf8'));safe.legacyNewVersion=newVersion;safe.afterTopology=afterTopo;safe.bindingParity=true;fs.writeFileSync('/tmp/incident-importer-deploy-safe.json',JSON.stringify(safe,null,2)+'\n');
+          console.log(JSON.stringify({marker:'INCIDENT_IMPORTER_DEPLOY_VERSION_AND_BINDING_PASS',legacyOldVersion:oldVersion,legacyNewVersion:newVersion,afterTopology:afterTopo,bindingParity:true},null,2));
+          NODE
+
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --output /tmp/incident-login-negative.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"password":"__deliberately_wrong__"}' "$BASE/api/v1/admin/lesson-releases/login")"
+          test "$code" = '401'
+          jq -e '.error == "UNAUTHORISED"' /tmp/incident-login-negative.json >/dev/null
+          code="$(curl --silent --show-error --output /tmp/incident-preview-negative.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"rows":[]}' "$BASE/api/v1/admin/lesson-releases/preview")"
+          test "$code" = '401'
+          jq -e '.error == "UNAUTHORISED"' /tmp/incident-preview-negative.json >/dev/null
+
+          node scripts/incident-entitlement-semantic-audit-v2.mjs >/tmp/incident-semantic-postdeploy.log
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('/tmp/entitlement-semantic-audit.json','utf8'));if(r.status!=='PASS'||Number(r?.semanticUnderEntitlements?.currentRows||0)!==0)throw new Error(`Semantic postdeploy failed: ${r.status}`);if(r?.target?.storedEntitlement?.vr!==true||r?.target?.profileVrEligible!==true||Number(r?.target?.lesson?.preLessonCount||0)!==0||Number(r?.target?.lesson?.vrHomeworkCount||0)<1)throw new Error('Dha/Y4E1 postdeploy invariant failed');
+          NODE
+          set +e
+          node scripts/incident-roster-entitlement-audit.mjs >/tmp/incident-roster-postdeploy.log
+          roster_code=$?
+          set -e
+          if [ "$roster_code" -ne 0 ] && [ "$roster_code" -ne 2 ]; then false; fi
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('/tmp/roster-entitlement-audit.json','utf8')),d=r.defects||{};if((d.configProblems||[]).length||(d.entitlementRows||[]).length||(d.profileProblems||[]).length||(d.sourceBatchVrProblems||[]).length)throw new Error('Roster-backed entitlement defects remain after deploy');console.log(JSON.stringify({marker:'INCIDENT_IMPORTER_POSTDEPLOY_ENTITLEMENT_PASS',assignmentProblemsDeferred:(d.assignmentProblems||[]).length},null,2));
+          NODE
+
+          trap - ERR
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const p='/tmp/incident-importer-deploy-safe.json',r=JSON.parse(fs.readFileSync(p,'utf8'));r.semanticAudit='PASS';r.rosterEntitlementAudit='PASS_WITH_ASSIGNMENT_DRIFT_DEFERRED';r.success=true;r.completedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n');console.log('INCIDENT_IMPORTER_PRODUCTION_DEPLOY_PASS');
+          NODE
+
+      - name: Upload safe deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-importer-production-deploy-2026-09-15
+          path: |
+            /tmp/incident-importer-deploy-safe.json
+            /tmp/entitlement-semantic-audit.json
+            /tmp/dha2806-trace.json
+            /tmp/roster-entitlement-audit.json
+            /tmp/incident-semantic-postdeploy.log
+            /tmp/incident-roster-postdeploy.log
+            /tmp/incident-login-negative.json
+            /tmp/incident-preview-negative.json
+            /tmp/incident-importer-dryrun.log
+          if-no-files-found: warn
+          retention-days: 30
