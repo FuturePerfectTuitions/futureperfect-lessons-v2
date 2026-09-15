@@ -1,0 +1,56 @@
+name: CP12 prepare fail-closed second promotion source
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-prepare-promotion-v3-source.yml']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PREFLIGHT_RUN_ID: '34934456421'
+      PREFLIGHT_HEAD_SHA: 5eb1e5f87d895adfe3855e78e8143904cd496873
+      METADATA_HELPER_BLOB: 4cda45292706942a0e9f6b3c701a71c2a55c7d91
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require completed successful v3 preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}" -o /tmp/preflight.json
+          jq -e --arg sha "$PREFLIGHT_HEAD_SHA" '.status=="completed" and .conclusion=="success" and .head_sha==$sha and .path==".github/workflows/cp12-approved-v2-ui-production-preflight-v3.yml"' /tmp/preflight.json >/dev/null
+      - name: Patch and validate second-cutover workflow locally
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git hash-object scripts/cp12-resource-ui-production-metadata.mjs)" = "$METADATA_HELPER_BLOB"
+          python scripts/cp12-patch-approved-v2-ui-promotion-v3.py
+          grep -F "PREFLIGHT_RUN_ID: '34934456421'" .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F 'PREFLIGHT_HEAD_SHA: 5eb1e5f87d895adfe3855e78e8143904cd496873' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F 'METADATA_HELPER_BLOB: 4cda45292706942a0e9f6b3c701a71c2a55c7d91' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F '.github/workflows/cp12-approved-v2-ui-production-preflight-v3.yml' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F 'CP12_RESOURCE_UI_AUTOMATIC_FULL_ROLLBACK_FAIL' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F "CP12_KV_VERIFY_TIMEOUT_MS: '120000'" .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          ! grep -F '.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git diff --check
+          echo CP12_APPROVED_V2_UI_PROMOTION_V3_SOURCE_VALIDATED_PASS
+      - name: Commit validated workflow locally
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git commit -m 'CP12: harden second approved V2 UI production promotion'
+          git rev-parse HEAD
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
