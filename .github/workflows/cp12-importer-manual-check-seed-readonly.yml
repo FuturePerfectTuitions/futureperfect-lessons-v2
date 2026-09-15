@@ -17,21 +17,23 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
     steps:
-      - name: Resolve known existing entitlement row without mutation
+      - name: Resolve an already-full single-presentation entitlement without mutation
         shell: bash
         run: |
           set -Eeuo pipefail
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
+          import crypto from 'node:crypto';
           const account=String(process.env.CLOUDFLARE_ACCOUNT_ID||'').trim(),token=String(process.env.CLOUDFLARE_API_TOKEN||'').trim(),db=String(process.env.DATABASE_ID||'').trim();
           if(!account||!token||!db)throw new Error('Missing read credentials');
-          const sql=`SELECT portal_user_id_norm,lesson_id,source_batch_code,granted_from_date,last_confirmed_at FROM lesson_entitlements WHERE lower(portal_user_id_norm)=lower(?) AND lesson_id=? AND source='excel' ORDER BY last_confirmed_at DESC LIMIT 1`;
-          const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${db}/query`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({sql,params:['Ayla0108','Y4E1']})});
-          const b=await r.json();if(!r.ok||b?.success!==true||b?.result?.[0]?.success===false)throw new Error(`D1 read failed ${r.status}`);
-          const row=b.result?.[0]?.results?.[0];if(!row?.portal_user_id_norm||!row?.lesson_id||!row?.source_batch_code||!row?.granted_from_date)throw new Error('Known Ayla Y4E1 imported row not available with required audit fields');
-          const out={marker:'CP12_IMPORTER_MANUAL_CHECK_SEED_PASS',status:'PASS',readOnly:true,student:'Ayla0108',lessonId:String(row.lesson_id),batchKey:String(row.source_batch_code),lessonDate:String(row.granted_from_date),expectedIdempotentAction:'ALREADY_FULL',invalidAmbiguous:{student:'Ayla0108',lessonId:'Y5E2',batchKey:'Y511OE_NOT_CONFIGURED',lessonDate:String(row.granted_from_date),lessonStatus:'Ready',expectedAction:'BATCH_DEFINITION_REQUIRED'}};
+          const sql=`SELECT portal_user_id_norm,lesson_id FROM lesson_entitlements WHERE core_access=1 AND lesson_id LIKE 'Y3M%' ORDER BY last_confirmed_at DESC,lesson_id ASC LIMIT 1`;
+          const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${db}/query`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({sql,params:[]})});
+          const b=await r.json();if(!r.ok||b?.success!==true||b?.result?.[0]?.success===false)throw new Error(`D1 read failed ${r.status}: ${JSON.stringify(b?.errors||[])}`);
+          const row=b.result?.[0]?.results?.[0];if(!row?.portal_user_id_norm||!row?.lesson_id)throw new Error('No already-full Year 3 Maths entitlement available for owner check');
+          const hash=v=>crypto.createHash('sha256').update(String(v)).digest('hex').slice(0,16);
+          const out={marker:'CP12_IMPORTER_MANUAL_CHECK_SEED_PASS',status:'PASS',readOnly:true,idempotent:{student:String(row.portal_user_id_norm),lessonId:String(row.lesson_id),batchKey:'Y3FM_CP12CHECK',lessonDate:'2026-09-14',lessonStatus:'Completed',expectedAction:'ALREADY_FULL'},invalidAmbiguous:{student:String(row.portal_user_id_norm),lessonId:'Y5E2',batchKey:'Y511OE_NOT_CONFIGURED',lessonDate:'2026-09-14',lessonStatus:'Ready',expectedAction:'BATCH_DEFINITION_REQUIRED'},identityDigest:hash(row.portal_user_id_norm)};
           fs.writeFileSync('/tmp/cp12-importer-manual-seed.json',JSON.stringify(out,null,2)+'\n');
-          console.log(JSON.stringify({marker:out.marker,status:out.status,readOnly:true,lessonId:out.lessonId,batchKey:out.batchKey,lessonDate:out.lessonDate,expectedIdempotentAction:out.expectedIdempotentAction,invalidExpectedAction:out.invalidAmbiguous.expectedAction}));
+          console.log(JSON.stringify({marker:out.marker,status:out.status,readOnly:true,lessonId:out.idempotent.lessonId,identityDigest:out.identityDigest,expectedIdempotentAction:out.idempotent.expectedAction,invalidExpectedAction:out.invalidAmbiguous.expectedAction}));
           NODE
       - uses: actions/upload-artifact@v4
         with:
