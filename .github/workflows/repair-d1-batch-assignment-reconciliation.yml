@@ -1,0 +1,108 @@
+name: Repair - D1 Batch Assignment Reconciliation
+
+on:
+  push:
+    branches:
+      - repair/d1-batch-assignment-reconciliation-2026-09-15
+    paths:
+      - 'docs/rebuild/D1_ASSIGNMENT_PRODUCTION_REPAIR_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-d1-batch-assignment-reconciliation-2026-09-15
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  PROD_HOST: lessons.futureperfect.education
+  AS_OF_DATE: '2026-09-15'
+  CLEAN_BASELINE_SHA: 4559416ca66c39b2523a2f41405533f2857356b8
+  AUDIT_CLOSURE_SHA: 09149b47afdda15541977cfa3c68b7ee20632564
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/d1-batch-assignment-reconciliation-2026-09-15
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Static guards before production mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --abbrev-ref HEAD)" = 'repair/d1-batch-assignment-reconciliation-2026-09-15'
+          git merge-base --is-ancestor "$CLEAN_BASELINE_SHA" HEAD
+          git merge-base --is-ancestor "$AUDIT_CLOSURE_SHA" HEAD
+          node --check scripts/repair-d1-batch-assignment-reconciliation.mjs
+          node --check scripts/audit-d1-assignment-reconciliation.mjs
+          changed="$(git diff --name-only "$AUDIT_CLOSURE_SHA"...HEAD)"
+          printf '%s\n' "$changed"
+          bad="$(printf '%s\n' "$changed" | grep -Ev '^(scripts/repair-d1-batch-assignment-reconciliation\.mjs|\.github/workflows/repair-d1-batch-assignment-reconciliation\.yml|docs/rebuild/D1_ASSIGNMENT_PRODUCTION_REPAIR_TRIGGER\.md)$' || true)"
+          test -z "$bad"
+          ! printf '%s\n' "$changed" | grep -Eq '^(worker/|rebuild/browser|rebuild/student|rebuild/adminops|admin-import\.html$)'
+
+      - name: Apply exact guarded 21-row INSERT-only repair
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/repair-d1-batch-assignment-reconciliation.mjs
+          jq -e '.marker == "D1_BATCH_ASSIGNMENT_PRODUCTION_REPAIR" and .status == "PASS" and .insertedCount == 21 and .afterAssignmentRows == 25 and .rollbackPerformed == false' /tmp/d1-assignment-production-repair.json >/dev/null
+
+      - name: Re-run independent D1 roster reconciliation read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/audit-d1-assignment-reconciliation.mjs >/tmp/d1-postrepair-audit-console.log
+          jq -e '.readOnly == true and .counts.rosterMemberships == 25 and .counts.exactMatches == 25 and .counts.missingAssignments == 0 and .counts.dateOrWindowMismatches == 0 and .counts.extraD1Assignments == 0 and .counts.safeToAdd == 0 and .counts.rebuiltStudentAssignmentReferences == 0' /tmp/d1-assignment-reconciliation.json >/dev/null
+          jq '{marker:"D1_POSTREPAIR_RECONCILIATION_PASS",readOnly:true,counts:.counts}' /tmp/d1-assignment-reconciliation.json > /tmp/d1-postrepair-reconciliation-summary.json
+
+      - name: Re-run independent historical entitlement audits read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin incident/entitlement-audit-2026-09-15
+          git worktree add --detach /tmp/incident-entitlement-audit origin/incident/entitlement-audit-2026-09-15
+          (
+            cd /tmp/incident-entitlement-audit
+            node scripts/incident-roster-entitlement-audit.mjs >/tmp/postrepair-roster-audit-console.log
+          )
+          jq -e '.readOnly == true and .status == "PASS" and (.defects.configProblems|length) == 0 and (.defects.entitlementRows|length) == 0 and (.defects.profileProblems|length) == 0 and (.defects.assignmentProblems|length) == 0 and (.defects.sourceBatchVrProblems|length) == 0' /tmp/roster-entitlement-audit.json >/dev/null
+          (
+            cd /tmp/incident-entitlement-audit
+            node scripts/incident-entitlement-semantic-audit-v2.mjs >/tmp/postrepair-semantic-audit-console.log
+          )
+          jq -e '.readOnly == true and .status == "PASS" and .semanticUnderEntitlements.currentRows == 0 and (.profileGate.currentEnglish11WithoutVrEligible|length) == 0' /tmp/entitlement-semantic-audit.json >/dev/null
+          jq -n \
+            --arg rosterStatus "$(jq -r '.status' /tmp/roster-entitlement-audit.json)" \
+            --arg semanticStatus "$(jq -r '.status' /tmp/entitlement-semantic-audit.json)" \
+            --argjson assignmentProblems "$(jq '.defects.assignmentProblems|length' /tmp/roster-entitlement-audit.json)" \
+            --argjson entitlementProblems "$(jq '.defects.entitlementRows|length' /tmp/roster-entitlement-audit.json)" \
+            --argjson semanticCurrentRows "$(jq '.semanticUnderEntitlements.currentRows' /tmp/entitlement-semantic-audit.json)" \
+            '{marker:"D1_POSTREPAIR_INDEPENDENT_ENTITLEMENT_AUDITS_PASS",readOnly:true,rosterStatus:$rosterStatus,semanticStatus:$semanticStatus,assignmentProblems:$assignmentProblems,entitlementProblems:$entitlementProblems,semanticCurrentRows:$semanticCurrentRows}' \
+            > /tmp/d1-postrepair-independent-audits-summary.json
+
+      - name: Upload safe production-repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-batch-assignment-production-repair-2026-09-15
+          path: |
+            /tmp/d1-assignment-production-repair.json
+            /tmp/d1-assignment-production-repair-rollback.sql
+            /tmp/d1-postrepair-reconciliation-summary.json
+            /tmp/d1-postrepair-independent-audits-summary.json
+          if-no-files-found: warn
+          retention-days: 30
