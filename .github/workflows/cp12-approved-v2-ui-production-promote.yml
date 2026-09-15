@@ -341,27 +341,12 @@ jobs:
           EXPECTED_JS="$(basename "$(find candidate-frontend/dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*protected-viewer*' | head -n1)")"
           curl --fail --silent --show-error -H 'cache-control: no-cache' "$PROD_BASE/?cp12-approved-v2-ui=${GITHUB_RUN_ID}" -o /tmp/cp12-approved-v2-ui-public-index.html
           grep -F "/assets/${EXPECTED_JS}" /tmp/cp12-approved-v2-ui-public-index.html >/dev/null
-          cp scripts/cp12-approved-v2-ui-browser-uat.mjs scripts/.cp12-production-approved-v2-ui-uat.mjs
-          python - <<'PYUAT'
-          from pathlib import Path
-          p=Path('scripts/.cp12-production-approved-v2-ui-uat.mjs')
-          s=p.read_text()
-          old_fetch="""  const response=await page.request.get(bundleUrl,{headers:{'cache-control':'no-cache'}});\n  assert.equal(response.status(),200,'Candidate frontend bundle could not be fetched.');\n  const text=await response.text();\n  for(const marker of ['Verbal Reasoning','VR PreLesson','VR Homework','subject-maths','lesson-description-toggle']){\n    assert(text.includes(marker),`Loaded browser asset is missing approved candidate marker: ${marker}`);\n  }\n"""
-          new_fetch="""  const loaded=await page.evaluate(url=>performance.getEntriesByType('resource').some(entry=>entry.name===url),bundleUrl);\n  assert.equal(loaded,true,'Candidate frontend bundle was not loaded by the browser page.');\n"""
-          if old_fetch not in s: raise SystemExit('UAT duplicate-fetch patch point missing')
-          s=s.replace(old_fetch,new_fetch,1)
-          old_border="  assert.equal(chrome.borderTopWidth,'6px','Approved desktop airmail border thickness changed.');"
-          new_border="  const expectedBorder=(page.viewportSize()?.width||0)<=720?'5px':'6px';\n  assert.equal(chrome.borderTopWidth,expectedBorder,`Approved responsive airmail border thickness changed: ${chrome.borderTopWidth} at ${page.viewportSize()?.width}px.`);"
-          if old_border not in s: raise SystemExit('UAT responsive border patch point missing')
-          s=s.replace(old_border,new_border,1)
-          s=s.replace("login(page,'cp12vrui')","login(page,'admin')").replace("login(page,'cp12coreui')","login(page,'admin')")
-          s=s.replace("assert.equal(greeting,"CP12's Portal",'Personalised portal wording is not using first name.');","assert.equal(greeting,`${String(process.env.UAT_EXPECTED_FIRST_NAME||'').trim()}'s Portal`,'Personalised portal wording is not using first name.');")
-          s=s.replace('CP12_APPROVED_V2_UI_STAGING_BROWSER_UAT_PASS','CP12_APPROVED_V2_UI_PRODUCTION_BROWSER_UAT_PASS')
-          s=s.replace('pupilDataSynthetic:true,productionMutation:false','pupilDataSynthetic:false,productionMutation:true')
-          p.write_text(s)
-          PYUAT
-          node --check scripts/.cp12-production-approved-v2-ui-uat.mjs
-          node scripts/.cp12-production-approved-v2-ui-uat.mjs
+          export UAT_EXPECTED_JS="$EXPECTED_JS" UAT_USERNAME="admin"
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          node scripts/cp12-approved-v2-ui-production-uat.mjs
+          cp /tmp/cp12-approved-v2-ui-production-uat.json /tmp/cp12-resource-ui-browser-uat.json
+          rm -rf /tmp/cp12-resource-ui-browser-evidence
+          cp -a /tmp/cp12-approved-v2-ui-production-evidence /tmp/cp12-resource-ui-browser-evidence
           jq -e '.marker=="CP12_APPROVED_V2_UI_PRODUCTION_BROWSER_UAT_PASS" and .visual.personalisedPortal!=null and .visual.back.position=="fixed" and .visual.answerPassword.eyeIcon==true and .vr.outerSection==true and .vr.preLessonSubgroup==true and .vr.homeworkSubgroup==true and .vr.protectedAnswers>=2 and .ordinary.vrSectionAbsent==true and .security.answerControlsRemainPasswordGated==true' /tmp/cp12-approved-v2-ui-browser-uat.json >/dev/null
           trap - ERR
           echo CP12_RESOURCE_UI_PUBLIC_BROWSER_UAT_PASS
