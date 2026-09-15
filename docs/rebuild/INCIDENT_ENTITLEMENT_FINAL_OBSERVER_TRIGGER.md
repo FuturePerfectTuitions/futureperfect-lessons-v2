@@ -1,0 +1,3 @@
+# Incident entitlement repair final observer trigger
+
+Run the independent read-only closure observer after the guarded V2 activation succeeded. It must verify the recurrence-fix source, repaired entitlement/resource semantics, roster-backed critical defect count, unchanged 21-item deferred assignment drift, all 372 prepared lesson models against current source, exact production Browser/Student/operational Worker topology and versions, rollback retention, authenticated Admin + representative-student portal navigation, and the admin importer authentication boundary. No production mutation is authorized by this observer.
