@@ -1,0 +1,36 @@
+name: CP12 attempt3 promotion source validation
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate attempt3 workflow and direct production harness source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml')"
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          node --check scripts/cp12-resource-ui-production-metadata.mjs
+          node --check scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          node --check scripts/cp12-production-admin-view-prereq.mjs
+          grep -F 'STUDENT_CANDIDATE: 32467053-f348-449c-a2ae-1dae9688b446' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
+          grep -F 'BROWSER_CANDIDATE: 67880177-1328-46dd-a228-47ba245e33ae' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
+          grep -F 'node scripts/cp12-approved-v2-ui-production-uat.mjs' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
+          ! grep -F 'PYUAT' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml
+          ! grep -F 'scripts/.cp12-production-approved-v2-ui-uat.mjs' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml
+          git diff --check HEAD^
+          echo CP12_ATTEMPT3_PROMOTION_SOURCE_VALIDATION_PASS
