@@ -85,7 +85,7 @@ extra = '''          node --check scripts/cp12-production-real-persona-prereq.mj
           node --check scripts/cp12-run-real-persona-production-uat.mjs
           grep -F 'UAT_VR_USERNAME' scripts/cp12-approved-v2-ui-production-uat.mjs >/dev/null
           grep -F 'UAT_ORDINARY_USERNAME' scripts/cp12-approved-v2-ui-production-uat.mjs >/dev/null
-          ! grep -F 'UAT_USERNAME="admin"' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          ! grep -F 'export UAT_EXPECTED_JS="$EXPECTED_JS" UAT_USERNAME=' .github/workflows/cp12-approved-v2-ui-production-promote.yml
 '''
 s = s.replace(check_anchor, check_anchor + extra, 1)
 
@@ -98,7 +98,7 @@ required = [
 for token in required:
     if token not in s:
         raise SystemExit(f'Missing post-patch token: {token}')
-if 'UAT_USERNAME="admin"' in s:
+if 'export UAT_EXPECTED_JS="$EXPECTED_JS" UAT_USERNAME=' in s:
     raise SystemExit('Stale admin-as-ordinary UAT wiring remains.')
 if '/tmp/cp12-production-real-persona-secrets.json\n' in s[s.index('path: |', s.index(evidence_anchor)):]:
     raise SystemExit('Secret persona file must never be uploaded as evidence.')
