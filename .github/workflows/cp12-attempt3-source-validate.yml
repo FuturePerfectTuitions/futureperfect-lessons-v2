@@ -27,6 +27,7 @@ jobs:
           node --check scripts/cp12-resource-ui-production-metadata.mjs
           node --check scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
           node --check scripts/cp12-production-admin-view-prereq.mjs
+          node --check scripts/cp12-production-real-persona-prereq.mjs
           grep -F 'STUDENT_CANDIDATE: 32467053-f348-449c-a2ae-1dae9688b446' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
           grep -F 'BROWSER_CANDIDATE: 67880177-1328-46dd-a228-47ba245e33ae' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
           grep -F 'node scripts/cp12-approved-v2-ui-production-uat.mjs' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
