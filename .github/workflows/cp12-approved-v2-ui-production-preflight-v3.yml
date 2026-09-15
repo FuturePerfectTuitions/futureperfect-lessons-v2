@@ -1,0 +1,177 @@
+name: CP12 approved V2 UI production preflight v3
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-approved-v2-ui-production-preflight-v3.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: cp12-approved-v2-ui-production-preflight-v3
+  cancel-in-progress: false
+
+env:
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_DB: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  EXPECTED_STUDENT_ROLLBACK: 0751feed-5aa3-40fb-854f-5847c8603872
+  EXPECTED_BROWSER_VERSION: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+  EXPECTED_LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+  OFFICIAL_CP12_SHA: b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2
+  METADATA_COMMIT: 9793028e34b16972defa64d3e465db907868e645
+  CANDIDATE_FRONTEND_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97
+  METADATA_HELPER_BLOB: 4cda45292706942a0e9f6b3c701a71c2a55c7d91
+  STAGING_UAT_RUN_ID: '34931616127'
+  STAGING_UAT_HEAD_SHA: 54ad981cbc2ce049d4703df0a369f75b8860b7e2
+  ISOLATED_VERIFY_RUN_ID: '34934090090'
+  ISOLATED_VERIFY_HEAD_SHA: baa6106e5532bb4c31d294b185a93669ef03d642
+  ROLLBACK_AUDIT_RUN_ID: '34933937628'
+  ROLLBACK_AUDIT_HEAD_SHA: 232a2872440a7e8a18b064a93cf3ae489baed08a
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      CP12_METADATA_ACTION: preview
+      CP12_METADATA_BACKUP: /tmp/cp12-v3-preview-backup.json
+      CP12_METADATA_REPORT: /tmp/cp12-v3-preview-report.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Freeze exact source and proof authorities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin rebuild/checkpoint12-stabilisation-2026-09-14
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$OFFICIAL_CP12_SHA"
+          git merge-base --is-ancestor "$OFFICIAL_CP12_SHA" HEAD
+          for path in rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs tests/rebuild-cp12-resource-presentation-groups.mjs; do
+            test "$(git rev-parse "${METADATA_COMMIT}:${path}")" = "$(git hash-object "$path")"
+          done
+          test "$(git hash-object scripts/cp12-resource-ui-production-metadata.mjs)" = "$METADATA_HELPER_BLOB"
+          RUNTIME_DIFF="$(git diff --name-only "$OFFICIAL_CP12_SHA"...HEAD -- rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs | sort)"
+          test "$RUNTIME_DIFF" = $'rebuild/adminops/src/lib/compiler.mjs\nrebuild/shared/read-models/phase11-extension-resources.mjs\nrebuild/student/src/lib/runtime.mjs'
+          node --check scripts/cp12-resource-ui-production-metadata.mjs
+          node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          echo CP12_APPROVED_V2_UI_V3_SOURCE_AUTHORITY_PASS
+
+      - name: Require successful staging UI isolated metadata and rollback-convergence proofs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          check_run(){
+            local id="$1" sha="$2" path="$3" out="$4"
+            curl --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${id}" -o "$out"
+            jq -e --arg sha "$sha" --arg path "$path" '.status=="completed" and .conclusion=="success" and .head_sha==$sha and .path==$path' "$out" >/dev/null
+          }
+          check_run "$STAGING_UAT_RUN_ID" "$STAGING_UAT_HEAD_SHA" '.github/workflows/cp12-approved-v2-ui-browser-uat-retry.yml' /tmp/staging-uat.json
+          check_run "$ISOLATED_VERIFY_RUN_ID" "$ISOLATED_VERIFY_HEAD_SHA" '.github/workflows/cp12-metadata-convergence-isolated-kv-test.yml' /tmp/isolated-verify.json
+          check_run "$ROLLBACK_AUDIT_RUN_ID" "$ROLLBACK_AUDIT_HEAD_SHA" '.github/workflows/cp12-postfailure-rollback-convergence-readonly.yml' /tmp/rollback-audit.json
+          echo CP12_APPROVED_V2_UI_V3_PRIOR_PROOFS_PASS
+
+      - name: Checkout and build exact frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.CANDIDATE_FRONTEND_SHA }}
+          path: candidate-frontend
+          persist-credentials: false
+
+      - name: Re-run exact frontend source gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C candidate-frontend rev-parse HEAD)" = "$CANDIDATE_FRONTEND_SHA"
+          cd candidate-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          npm run build
+          grep -R -F 'Verbal Reasoning' dist >/dev/null
+          grep -R -F 'data-resource-toggle' dist >/dev/null
+          ! grep -R -F 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' dist
+          echo CP12_APPROVED_V2_UI_V3_FRONTEND_PASS
+
+      - name: Fresh production topology versions bindings rollback and admin credential gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json | head -n1)"; test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
+          for worker in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/settings" "${AUTH[@]}" -o "/tmp/${worker}-settings.json"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/${worker}-deployments.json"
+          done
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and ([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV" 'any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_STUDENTS_KV" 'any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_DB" 'any(.result.bindings[];.name=="DB" and (.database_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg bucket "$EXPECTED_R2" 'any(.result.bindings[];.name=="MATERIALS_R2" and (.bucket_name//.bucket)==$bucket)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e 'any(.result.bindings[];.name=="AUTH_SIGNING_SECRET" and .type=="secret_text") and any(.result.bindings[];.name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          STUDENT_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments.json" | head -n1)"
+          BROWSER_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments.json" | head -n1)"
+          LEGACY_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments.json" | head -n1)"
+          test "$STUDENT_ACTIVE" = "$EXPECTED_STUDENT_VERSION"; test "$BROWSER_ACTIVE" = "$EXPECTED_BROWSER_VERSION"; test "$LEGACY_ACTIVE" = "$EXPECTED_LEGACY_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/browser-versions.json
+          jq -e --arg v "$EXPECTED_STUDENT_ROLLBACK" 'any(.result.items[];.id==$v)' /tmp/student-versions.json >/dev/null
+          jq -e --arg v "$EXPECTED_STUDENT_VERSION" 'any(.result.items[];.id==$v)' /tmp/student-versions.json >/dev/null
+          jq -e --arg v "$EXPECTED_BROWSER_VERSION" 'any(.result.items[];.id==$v)' /tmp/browser-versions.json >/dev/null
+          ADMIN_JSON="$(curl --fail --silent --show-error "${API}/storage/kv/namespaces/${EXPECTED_STUDENTS_KV}/values/user%3Aadmin" "${AUTH[@]}")"
+          LOGIN="$(printf '%s' "$ADMIN_JSON"|jq -r '.p//empty')"; ANSWER="$(printf '%s' "$ADMIN_JSON"|jq -r '.answerPassword//.answer_password//.answerPackPassword//.answer_pack_password//.ap//empty')"; FIRST="$(printf '%s' "$ADMIN_JSON"|jq -r '.firstName//.name//empty')"
+          echo "::add-mask::$LOGIN"; echo "::add-mask::$ANSWER"; echo "::add-mask::$FIRST"
+          valid4(){ local value="$1"; [ "${#value}" -eq 4 ] && [[ "$value" =~ [A-Z] ]] && [[ "$value" =~ [a-z] ]] && [[ "$value" =~ [0-9] ]]; }
+          valid4 "$LOGIN"; valid4 "$ANSWER"; test -n "$FIRST"
+          unset ADMIN_JSON LOGIN ANSWER FIRST
+          echo CP12_APPROVED_V2_UI_V3_PRODUCTION_BASELINE_PASS
+
+      - name: Recompute exact production metadata migration preview without writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-resource-ui-production-metadata.mjs
+          jq -e '.marker=="CP12_RESOURCE_UI_METADATA_PREVIEW_PASS" and .status=="PASS" and .writes==false and .publishedLessonScopes>300 and .changedLessonScopes>300 and .nonPresentationGroupDiffs==0 and .coreResources>0 and .elevenPlusResources>0 and .vrResources>0' "$CP12_METADATA_REPORT" >/dev/null
+          echo CP12_APPROVED_V2_UI_V3_METADATA_PREVIEW_PASS
+
+      - name: Assemble and upload preflight evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n --arg marker CP12_APPROVED_V2_UI_PRODUCTION_PREFLIGHT_V3_PASS --arg official "$OFFICIAL_CP12_SHA" --arg frontend "$CANDIDATE_FRONTEND_SHA" --arg helper "$METADATA_HELPER_BLOB" --slurpfile preview "$CP12_METADATA_REPORT" '{marker:$marker,status:"PASS",officialCp12:$official,frontend:$frontend,metadataHelperBlob:$helper,topologyFresh:true,rollbackRetained:true,adminCredentialShapeValid:true,productionMutation:false,metadataPreview:$preview[0]}' | tee /tmp/cp12-approved-v2-ui-production-preflight-v3.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-approved-v2-ui-production-preflight-v3
+          path: |
+            /tmp/cp12-approved-v2-ui-production-preflight-v3.json
+            /tmp/cp12-v3-preview-report.json
+          if-no-files-found: error
+          retention-days: 30
