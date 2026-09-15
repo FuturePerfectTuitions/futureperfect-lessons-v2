@@ -1,0 +1,203 @@
+name: Incident - Guarded Exact Importer Version Reactivation V2
+
+on:
+  push:
+    branches:
+      - incident/entitlement-audit-2026-09-15
+    paths:
+      - 'docs/rebuild/INCIDENT_IMPORTER_VERSION_REACTIVATION_V2_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-importer-version-reactivation-v2-2026-09-15
+  cancel-in-progress: false
+
+jobs:
+  reactivate-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      PROD_HOST: lessons.futureperfect.education
+      TARGET_VERSION: 2eec1f4d-daec-4d40-be55-b779852ddfb2
+      PATCH_COMMIT: 9b60be6e8d5f586a1abf16fefc56e2f5f9aec774
+      WRANGLER_VERSION: 4.125.0
+      AS_OF_DATE: '2026-09-15'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: incident/entitlement-audit-2026-09-15
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Source and regression gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$PATCH_COMMIT" HEAD
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          grep -Fq "clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0" worker/src/admin-lesson-release-import.js
+          grep -Fq 'WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1' worker/src/admin-lesson-release-import.js
+          ! grep -Fq 'validation.student?.vrEligible === true ? 1 : 0' worker/src/admin-lesson-release-import.js
+
+      - name: Read-only production preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const legacy=process.env.LEGACY_WORKER, browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, host=process.env.PROD_HOST, target=process.env.TARGET_VERSION;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`), zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`), hr=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hr.length!==1||String(hr[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hr[0].script!==browser) throw new Error(`Public route drift: ${JSON.stringify(hr)}`);
+          const bs=await settings(browser), svc=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(svc.length!==1||svc[0].service!==student) throw new Error(`Browser service drift: ${JSON.stringify(svc)}`);
+          if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`))) throw new Error('Forbidden Browser Admin binding');
+          const topology={route:{pattern:hr[0].pattern,script:hr[0].script},browserVersion:await active(browser),studentVersion:await active(student),service:{name:svc[0].name,service:svc[0].service}};
+          const legacySettings=await settings(legacy), oldVersion=await active(legacy);
+          if(!oldVersion) throw new Error('Operational Worker active version unresolved');
+          const versionList=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/versions`), versions=Array.isArray(versionList?.items)?versionList.items:Array.isArray(versionList)?versionList:[];
+          if(!versions.some(v=>String(v.id||v.version_id||'')===target)) throw new Error(`Target Worker version ${target} is not retained`);
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const bindings={nonSecret:(legacySettings.bindings||[]).filter(b=>!/secret/i.test(b.type)).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(legacySettings.bindings||[]).filter(b=>/secret/i.test(b.type)).map(b=>b.name).sort()};
+          fs.writeFileSync('/tmp/v2-topology-before.json',JSON.stringify(topology,null,2)+'\n');
+          fs.writeFileSync('/tmp/v2-bindings-before.json',JSON.stringify(bindings,null,2)+'\n',{mode:0o600});
+          fs.writeFileSync('/tmp/v2-old-version.txt',oldVersion+'\n');
+          fs.writeFileSync('/tmp/v2-safe.json',JSON.stringify({marker:'INCIDENT_IMPORTER_REACTIVATION_V2_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,patchCommit:process.env.PATCH_COMMIT,targetVersion:target,oldVersion,topology,bindingNames:bindings.nonSecret.map(b=>`${b.name}:${b.type}`),secretNames:bindings.secretNames},null,2)+'\n');
+          NODE
+
+          roster_rc=0
+          node scripts/incident-roster-entitlement-audit.mjs >/tmp/v2-roster-preflight.log || roster_rc=$?
+          test -s /tmp/roster-entitlement-audit.json
+          cp /tmp/roster-entitlement-audit.json /tmp/v2-roster-before.json
+          ROSTER_RC="$roster_rc" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const r=JSON.parse(fs.readFileSync('/tmp/v2-roster-before.json','utf8')), d=r.defects||{};
+          for(const k of ['configProblems','entitlementRows','profileProblems','sourceBatchVrProblems']) if((d[k]||[]).length) throw new Error(`Preflight critical roster defect in ${k}`);
+          const safe=JSON.parse(fs.readFileSync('/tmp/v2-safe.json','utf8'));
+          safe.preflightRosterExitCode=Number(process.env.ROSTER_RC||0);safe.preflightAssignmentProblems=(d.assignmentProblems||[]).length;
+          fs.writeFileSync('/tmp/v2-safe.json',JSON.stringify(safe,null,2)+'\n');
+          console.log(JSON.stringify({marker:'INCIDENT_IMPORTER_REACTIVATION_V2_ROSTER_PREFLIGHT_PASS',rosterExitCode:Number(process.env.ROSTER_RC||0),assignmentProblemsDeferred:(d.assignmentProblems||[]).length},null,2));
+          NODE
+
+      - name: Reactivate exact Worker version and verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_VERSION="$(tr -d '\r\n' </tmp/v2-old-version.txt)"
+          MUTATED=0
+          rollback(){
+            rc=$?
+            if [ "$MUTATED" = '1' ] && [ "$OLD_VERSION" != "$TARGET_VERSION" ]; then
+              echo "Verification failed; restoring $LEGACY_WORKER to $OLD_VERSION" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" rollback "$OLD_VERSION" --name "$LEGACY_WORKER" --message 'Automatic rollback: importer exact-version V2 gate failure' || echo 'ROLLBACK_COMMAND_FAILED' >&2
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          if [ "$OLD_VERSION" != "$TARGET_VERSION" ]; then
+            npx --yes wrangler@"$WRANGLER_VERSION" rollback "$TARGET_VERSION" --name "$LEGACY_WORKER" --message 'Reactivate verified importer recurrence fix V2'
+            MUTATED=1
+          fi
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const legacy=process.env.LEGACY_WORKER, browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, host=process.env.PROD_HOST, target=process.env.TARGET_VERSION;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const before=JSON.parse(fs.readFileSync('/tmp/v2-topology-before.json','utf8'));
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`), zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          const routes=await cf(`/zones/${zone.id}/workers/routes`), hr=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          const bs=await settings(browser), svc=(bs.bindings||[]).filter(b=>b.type==='service');
+          const after={route:{pattern:hr[0]?.pattern,script:hr[0]?.script},browserVersion:await active(browser),studentVersion:await active(student),service:{name:svc[0]?.name,service:svc[0]?.service}};
+          if(JSON.stringify(after)!==JSON.stringify(before)) throw new Error(`Public rebuilt topology/version changed: before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+          const activeLegacy=await active(legacy);if(activeLegacy!==target) throw new Error(`Target operational Worker not active: ${activeLegacy}`);
+          const baseline=JSON.parse(fs.readFileSync('/tmp/v2-bindings-before.json','utf8')), ls=await settings(legacy);
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const now={nonSecret:(ls.bindings||[]).filter(b=>!/secret/i.test(b.type)).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(ls.bindings||[]).filter(b=>/secret/i.test(b.type)).map(b=>b.name).sort()};
+          if(JSON.stringify(now)!==JSON.stringify(baseline)) throw new Error('Operational Worker binding set/values changed unexpectedly');
+          const safe=JSON.parse(fs.readFileSync('/tmp/v2-safe.json','utf8'));safe.activeLegacyVersion=activeLegacy;safe.afterTopology=after;safe.bindingParity=true;fs.writeFileSync('/tmp/v2-safe.json',JSON.stringify(safe,null,2)+'\n');
+          NODE
+
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --output /tmp/v2-login-negative.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"password":"__deliberately_wrong__"}' "$BASE/api/v1/admin/lesson-releases/login")"
+          test "$code" = '401'; jq -e '.error == "UNAUTHORISED"' /tmp/v2-login-negative.json >/dev/null
+          code="$(curl --silent --show-error --output /tmp/v2-preview-negative.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"rows":[]}' "$BASE/api/v1/admin/lesson-releases/preview")"
+          test "$code" = '401'; jq -e '.error == "UNAUTHORISED"' /tmp/v2-preview-negative.json >/dev/null
+
+          node scripts/incident-entitlement-semantic-audit-v2.mjs >/tmp/v2-semantic-post.log
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('/tmp/entitlement-semantic-audit.json','utf8'));
+          if(r.status!=='PASS'||Number(r?.semanticUnderEntitlements?.currentRows||0)!==0) throw new Error(`Semantic audit failed: ${r.status}`);
+          if(r?.target?.storedEntitlement?.vr!==true||r?.target?.profileVrEligible!==true||Number(r?.target?.lesson?.preLessonCount||0)!==0||Number(r?.target?.lesson?.vrHomeworkCount||0)<1) throw new Error('Dha/Y4E1 invariant failed');
+          NODE
+
+          post_roster_rc=0
+          node scripts/incident-roster-entitlement-audit.mjs >/tmp/v2-roster-post.log || post_roster_rc=$?
+          test -s /tmp/roster-entitlement-audit.json
+          cp /tmp/roster-entitlement-audit.json /tmp/v2-roster-after.json
+          POST_ROSTER_RC="$post_roster_rc" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const before=JSON.parse(fs.readFileSync('/tmp/v2-roster-before.json','utf8')), after=JSON.parse(fs.readFileSync('/tmp/v2-roster-after.json','utf8'));
+          const bd=before.defects||{}, ad=after.defects||{};
+          for(const k of ['configProblems','entitlementRows','profileProblems','sourceBatchVrProblems']) if((ad[k]||[]).length) throw new Error(`Post-reactivation critical roster defect in ${k}`);
+          const canon=x=>JSON.stringify(x,Object.keys(x||{}).sort());
+          const beforeAssignments=(bd.assignmentProblems||[]).map(canon).sort();
+          const afterAssignments=(ad.assignmentProblems||[]).map(canon).sort();
+          if(JSON.stringify(afterAssignments)!==JSON.stringify(beforeAssignments)) throw new Error('D1 assignment drift changed during Worker reactivation');
+          const safe=JSON.parse(fs.readFileSync('/tmp/v2-safe.json','utf8'));
+          safe.postRosterExitCode=Number(process.env.POST_ROSTER_RC||0);safe.postAssignmentProblems=afterAssignments.length;safe.semanticAudit='PASS';safe.rosterEntitlementAudit='PASS_WITH_UNCHANGED_ASSIGNMENT_DRIFT_DEFERRED';safe.success=true;safe.completedAt=new Date().toISOString();
+          fs.writeFileSync('/tmp/v2-safe.json',JSON.stringify(safe,null,2)+'\n');
+          console.log(JSON.stringify({marker:'INCIDENT_IMPORTER_EXACT_VERSION_REACTIVATION_V2_PASS',activeVersion:process.env.TARGET_VERSION,postRosterExitCode:Number(process.env.POST_ROSTER_RC||0),assignmentProblemsDeferred:afterAssignments.length},null,2));
+          NODE
+
+          trap - ERR
+
+      - name: Upload safe reactivation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-importer-version-reactivation-v2-2026-09-15
+          path: |
+            /tmp/v2-safe.json
+            /tmp/v2-topology-before.json
+            /tmp/v2-roster-before.json
+            /tmp/v2-roster-after.json
+            /tmp/entitlement-semantic-audit.json
+            /tmp/dha2806-trace.json
+            /tmp/v2-roster-preflight.log
+            /tmp/v2-roster-post.log
+            /tmp/v2-semantic-post.log
+            /tmp/v2-login-negative.json
+            /tmp/v2-preview-negative.json
+          if-no-files-found: warn
+          retention-days: 30
