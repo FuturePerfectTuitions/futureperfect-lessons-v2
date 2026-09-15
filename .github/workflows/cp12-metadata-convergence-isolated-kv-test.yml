@@ -1,0 +1,130 @@
+name: CP12 metadata convergence helper isolated KV test
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-metadata-convergence-isolated-kv-test.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SOURCE_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+      CP12_METADATA_BACKUP: /tmp/cp12-isolated-metadata-backup.json
+      CP12_METADATA_REPORT: /tmp/cp12-isolated-metadata-report.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Assert convergence-safe helper source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/cp12-resource-ui-production-metadata.mjs
+          grep -F 'verifyKvRowsEventually' scripts/cp12-resource-ui-production-metadata.mjs >/dev/null
+          grep -F 'CP12_KV_VERIFY_TIMEOUT_MS' scripts/cp12-resource-ui-production-metadata.mjs >/dev/null
+          echo CP12_METADATA_CONVERGENCE_HELPER_SOURCE_PASS
+
+      - name: Create isolated temporary KV namespace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          TITLE="CP12_METADATA_CONVERGENCE_TEST_${GITHUB_RUN_ID}"
+          jq -n --arg title "$TITLE" '{title:$title}' >/tmp/create-kv.json
+          curl --fail --silent --show-error -X POST "${API}/storage/kv/namespaces" "${AUTH[@]}" -H 'content-type: application/json' --data-binary @/tmp/create-kv.json -o /tmp/create-kv-response.json
+          jq -e '.success==true and (.result.id|length)>0' /tmp/create-kv-response.json >/dev/null
+          TEST_KV_ID="$(jq -r '.result.id' /tmp/create-kv-response.json)"
+          test -n "$TEST_KV_ID"; test "$TEST_KV_ID" != "$SOURCE_READ_MODELS_KV"
+          echo "TEST_KV_ID=$TEST_KV_ID" >> "$GITHUB_ENV"
+          echo CP12_METADATA_ISOLATED_KV_CREATED_PASS
+
+      - name: Clone current production lesson pointers and current envelopes read-only into isolated KV
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/clone-current.mjs <<'NODE'
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const source=process.env.SOURCE_READ_MODELS_KV, target=process.env.TEST_KV_ID;
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}`;
+          const headers={Authorization:`Bearer ${token}`};
+          async function req(path,opt={}){const r=await fetch(api+path,{...opt,headers:{...headers,...(opt.headers||{})}}); const t=await r.text(); let j=null; try{j=JSON.parse(t)}catch{}; if(!r.ok) throw new Error(`${r.status} ${path}`); return {r,t,j};}
+          async function list(prefix){let cursor='',out=[]; do{const q=new URLSearchParams({prefix,limit:'1000'}); if(cursor)q.set('cursor',cursor); const x=await req(`/storage/kv/namespaces/${source}/keys?${q}`); if(x.j?.success!==true) throw new Error('list failed'); out.push(...(x.j.result||[]).map(v=>v.name)); cursor=String(x.j.result_info?.cursor||'');}while(cursor); return out;}
+          async function text(ns,key){return (await req(`/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`)).t;}
+          async function bulk(items){for(let i=0;i<items.length;i+=40){const x=await req(`/storage/kv/namespaces/${target}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(items.slice(i,i+40))}); if(x.j?.success!==true||(x.j?.result?.unsuccessful_keys||[]).length) throw new Error(`bulk failed ${i}`);}}
+          const keys=(await list('rm:v1:scope:lesson_3A')).filter(k=>k.endsWith(':current')).sort();
+          if(keys.length<250) throw new Error(`unexpected source pointer count ${keys.length}`);
+          const items=[]; let idx=0;
+          async function worker(){while(true){const i=idx++; if(i>=keys.length)return; const key=keys[i]; const raw=await text(source,key); const p=JSON.parse(raw); const scope=String(p.scope||''); const version=String(p.current?.version||''); if(!scope.startsWith('lesson:')||!version)throw new Error(`bad pointer ${key}`); const versionKey=`rm:v1:scope:${encodeURIComponent(scope).replace(/%/g,'_')}:version:${encodeURIComponent(version).replace(/%/g,'_')}`; const envRaw=await text(source,versionKey); items.push({key,value:raw},{key:versionKey,value:envRaw});}}
+          await Promise.all(Array.from({length:12},()=>worker()));
+          await bulk(items);
+          console.log(JSON.stringify({marker:'CP12_METADATA_ISOLATED_CLONE_PASS',pointers:keys.length,values:items.length}));
+          NODE
+          node /tmp/clone-current.mjs | tee /tmp/cp12-isolated-clone.json
+          jq -e '.marker=="CP12_METADATA_ISOLATED_CLONE_PASS" and .pointers>300 and .values>600' /tmp/cp12-isolated-clone.json >/dev/null
+
+      - name: Run full metadata apply in isolated KV with convergence-safe verifier
+        shell: bash
+        env:
+          EXPECTED_READ_MODELS_KV: ${{ env.TEST_KV_ID }}
+          CP12_METADATA_ACTION: apply
+          CP12_KV_VERIFY_TIMEOUT_MS: '120000'
+          CP12_KV_VERIFY_POLL_MS: '1000'
+          CP12_KV_VERIFY_CONCURRENCY: '12'
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-resource-ui-production-metadata.mjs
+          cp "$CP12_METADATA_REPORT" /tmp/cp12-isolated-apply-report.json
+          jq -e '.marker=="CP12_RESOURCE_UI_METADATA_APPLY_PASS" and .status=="PASS" and .onlyPresentationGroupChanged==true and .sourceLessonWrites==0 and .changedLessonScopes>300 and .verification.envelope.verified>300 and .verification.pointer.verified>300' /tmp/cp12-isolated-apply-report.json >/dev/null
+          echo CP12_METADATA_ISOLATED_APPLY_PASS
+
+      - name: Run full metadata rollback in isolated KV with convergence-safe verifier
+        shell: bash
+        env:
+          EXPECTED_READ_MODELS_KV: ${{ env.TEST_KV_ID }}
+          CP12_METADATA_ACTION: rollback
+          CP12_ROLLBACK_REASON: isolated convergence test
+          CP12_KV_VERIFY_TIMEOUT_MS: '120000'
+          CP12_KV_VERIFY_POLL_MS: '1000'
+          CP12_KV_VERIFY_CONCURRENCY: '12'
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-resource-ui-production-metadata.mjs
+          cp "$CP12_METADATA_REPORT" /tmp/cp12-isolated-rollback-report.json
+          jq -e '.marker=="CP12_RESOURCE_UI_METADATA_ROLLBACK_PASS" and .status=="PASS" and .restoredPointers>300 and .verification.verified>300' /tmp/cp12-isolated-rollback-report.json >/dev/null
+          echo CP12_METADATA_ISOLATED_ROLLBACK_PASS
+
+      - name: Upload isolated verifier evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-metadata-convergence-isolated-kv-test
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            /tmp/cp12-isolated-clone.json
+            /tmp/cp12-isolated-apply-report.json
+            /tmp/cp12-isolated-rollback-report.json
+
+      - name: Delete isolated temporary KV namespace
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${TEST_KV_ID:-}" ]; then
+            AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+            API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+            curl --fail --silent --show-error -X DELETE "${API}/storage/kv/namespaces/${TEST_KV_ID}" "${AUTH[@]}" -o /tmp/delete-kv-response.json
+            jq -e '.success==true' /tmp/delete-kv-response.json >/dev/null
+          fi
+          echo CP12_METADATA_ISOLATED_KV_CLEANUP_PASS
