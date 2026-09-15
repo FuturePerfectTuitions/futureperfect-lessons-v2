@@ -47,8 +47,8 @@ jobs:
           node --check rebuild/student/src/index.js
           node --check rebuild/student/src/lib/runtime.mjs
           node --check rebuild/adminops/src/index.js
-          grep -F 'd1SessionLookup: false' rebuild/student/src/lib/runtime.mjs >/dev/null
-          grep -F 'activityWrites: false' rebuild/student/src/lib/runtime.mjs >/dev/null
+          grep -F 'd1SessionLookup:false' rebuild/student/src/lib/runtime.mjs >/dev/null
+          grep -F 'activityWrites:false' rebuild/student/src/lib/runtime.mjs >/dev/null
           ! grep -R -F 'ADMINOPS' rebuild/browser-staging/src rebuild/browser-staging/wrangler.toml
           grep -F "service = \"fpt-portal-v2-rebuild-student-staging\"" rebuild/browser-staging/wrangler.toml >/dev/null
 
