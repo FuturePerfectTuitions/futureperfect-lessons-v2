@@ -1,0 +1,1 @@
+CP12 source-only note: the promotion branch must use the previously validated `scripts/cp12-resource-ui-production-metadata.mjs` blob SHA `c30146fb3674449ba3b972f41ef52c04554d74e1`. No production mutation is authorized by this note.
