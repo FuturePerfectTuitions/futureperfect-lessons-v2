@@ -1,0 +1,157 @@
+name: Post-CP13 Entitlement Fix - Canonicalisation Validation
+
+on:
+  push:
+    branches:
+      - rebuild/post-cp13-entitlement-fix-2026-09-15
+    paths:
+      - 'docs/rebuild/POST_CP13_ENTITLEMENT_CANONICALISATION_TRIGGER.md'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  CP13_ANCHOR: c05ebcc3cf9d856da4c42fe3b5472974e6d582d3
+  EXPECTED_WORKER_BLOB: 8ee4f2fd151221bab6a6fb2c2ad9daa7c0cbb77d
+  EXPECTED_TEST_BLOB: 4b8499ed8756dba72a68aeb01da5d8a48af49114
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_LEGACY_VERSION: 2eec1f4d-daec-4d40-be55-b779852ddfb2
+  EXPECTED_BROWSER_VERSION: 67880177-1328-46dd-a228-47ba245e33ae
+  EXPECTED_STUDENT_VERSION: 32467053-f348-449c-a2ae-1dae9688b446
+  AS_OF_DATE: '2026-09-15'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rebuild/post-cp13-entitlement-fix-2026-09-15
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove clean source integration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$CP13_ANCHOR" HEAD
+          test "$(git rev-parse HEAD:worker/src/admin-lesson-release-import.js)" = "$EXPECTED_WORKER_BLOB"
+          test "$(git rev-parse HEAD:tests/admin-lesson-release-import-verification.mjs)" = "$EXPECTED_TEST_BLOB"
+          mapfile -t changed < <(git diff --name-only "$CP13_ANCHOR"...HEAD | sort)
+          printf '%s\n' "${changed[@]}" | tee /tmp/post-cp13-changed-files.txt
+          allowed=(
+            '.github/workflows/post-cp13-entitlement-canonicalisation-validation.yml'
+            'docs/rebuild/POST_CP13_ENTITLEMENT_CANONICALISATION_TRIGGER.md'
+            'tests/admin-lesson-release-import-verification.mjs'
+            'worker/src/admin-lesson-release-import.js'
+          )
+          for path in "${changed[@]}"; do
+            ok=0
+            for candidate in "${allowed[@]}"; do [ "$path" = "$candidate" ] && ok=1; done
+            [ "$ok" = 1 ] || { echo "Unexpected path in canonicalisation diff: $path" >&2; exit 1; }
+          done
+          node --check worker/src/admin-lesson-release-import.js
+          grep -Fq "clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0" worker/src/admin-lesson-release-import.js
+          grep -Fq 'WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1' worker/src/admin-lesson-release-import.js
+          ! grep -Fq 'validation.student?.vrEligible === true ? 1 : 0' worker/src/admin-lesson-release-import.js
+
+      - name: Run importer regression suite
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+
+      - name: Run independent live entitlement audits read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags origin incident/entitlement-audit-2026-09-15 --depth=1
+          git show FETCH_HEAD:scripts/incident-entitlement-semantic-audit-v2.mjs > scripts/.post-cp13-semantic-audit.mjs
+          git show FETCH_HEAD:scripts/incident-roster-entitlement-audit.mjs > scripts/.post-cp13-roster-audit.mjs
+          mkdir -p incident
+          git show FETCH_HEAD:incident/roster-authority-2026-09-11.json > incident/roster-authority-2026-09-11.json
+          trap 'rm -f scripts/.post-cp13-semantic-audit.mjs scripts/.post-cp13-roster-audit.mjs incident/roster-authority-2026-09-11.json; rmdir incident 2>/dev/null || true' EXIT
+
+          node scripts/.post-cp13-semantic-audit.mjs >/tmp/post-cp13-semantic.log
+          cp /tmp/entitlement-semantic-audit.json /tmp/post-cp13-semantic.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const r=JSON.parse(fs.readFileSync('/tmp/post-cp13-semantic.json','utf8'));
+          if(r.status!=='PASS'||Number(r?.semanticUnderEntitlements?.currentRows||0)!==0) throw new Error(`Semantic entitlement audit failed: ${r.status}`);
+          if(r?.target?.portalUserId!=='dha2806'||r?.target?.storedEntitlement?.vr!==true||r?.target?.profileVrEligible!==true) throw new Error('Dha2806 entitlement invariant failed');
+          if(Number(r?.target?.lesson?.preLessonCount||0)!==0||Number(r?.target?.lesson?.vrHomeworkCount||0)<1) throw new Error('Y4E1 resource invariant failed');
+          NODE
+
+          roster_rc=0
+          node scripts/.post-cp13-roster-audit.mjs >/tmp/post-cp13-roster.log || roster_rc=$?
+          cp /tmp/roster-entitlement-audit.json /tmp/post-cp13-roster.json
+          ROSTER_RC="$roster_rc" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const r=JSON.parse(fs.readFileSync('/tmp/post-cp13-roster.json','utf8')),d=r.defects||{};
+          for(const k of ['configProblems','entitlementRows','profileProblems','sourceBatchVrProblems']) if((d[k]||[]).length) throw new Error(`Critical roster defect remains in ${k}`);
+          if((d.assignmentProblems||[]).length!==21) throw new Error(`Deferred assignment drift count changed: ${(d.assignmentProblems||[]).length}`);
+          const out={marker:'POST_CP13_ROSTER_AUDIT_PASS',status:'PASS_WITH_ASSIGNMENT_DRIFT_DEFERRED',rosterExitCode:Number(process.env.ROSTER_RC||0),criticalDefects:0,assignmentProblemsDeferred:(d.assignmentProblems||[]).length};
+          fs.writeFileSync('/tmp/post-cp13-roster-gate.json',JSON.stringify(out,null,2)+'\n');
+          console.log(JSON.stringify(out));
+          NODE
+
+      - name: Verify live production topology remained unchanged
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN,host=process.env.PROD_HOST,browser=process.env.BROWSER_WORKER,student=process.env.STUDENT_WORKER,legacy=process.env.LEGACY_WORKER;
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`),ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[],vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`),zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];if(!zone)throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`),hr=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));if(hr.length!==1||String(hr[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hr[0].script!==browser)throw new Error(`Public route drift: ${JSON.stringify(hr)}`);
+          const bs=await settings(browser),svc=(bs.bindings||[]).filter(b=>b.type==='service');if(svc.length!==1||svc[0].service!==student)throw new Error(`Browser service drift: ${JSON.stringify(svc)}`);if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Forbidden Browser Admin binding');
+          const browserVersion=await active(browser),studentVersion=await active(student),legacyVersion=await active(legacy);
+          if(browserVersion!==process.env.EXPECTED_BROWSER_VERSION)throw new Error(`Browser version drift ${browserVersion}`);
+          if(studentVersion!==process.env.EXPECTED_STUDENT_VERSION)throw new Error(`Student version drift ${studentVersion}`);
+          if(legacyVersion!==process.env.EXPECTED_LEGACY_VERSION)throw new Error(`Importer Worker version drift ${legacyVersion}`);
+          const report={marker:'POST_CP13_CANONICALISATION_TOPOLOGY_PASS',status:'PASS',readOnly:true,route:{pattern:hr[0].pattern,script:hr[0].script},browserVersion,studentVersion,legacyVersion,browserToAdminOps:false};
+          fs.writeFileSync('/tmp/post-cp13-topology.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
+          NODE
+
+      - name: Produce validation summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n --slurpfile semantic /tmp/post-cp13-semantic.json --slurpfile roster /tmp/post-cp13-roster-gate.json --slurpfile topo /tmp/post-cp13-topology.json --arg sha "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg observedAt "$(date -u +%FT%TZ)" '{marker:"POST_CP13_ENTITLEMENT_CANONICALISATION_PASS",status:"PASS",readOnly:true,sha:$sha,runId:$runId,observedAt:$observedAt,permanentSourceFiles:2,incidentMachineryMerged:false,semantic:{status:$semantic[0].status,currentUnderEntitlements:$semantic[0].semanticUnderEntitlements.currentRows,target:$semantic[0].target},roster:$roster[0],topology:$topo[0]}' | tee /tmp/post-cp13-canonicalisation-summary.json
+
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-cp13-entitlement-canonicalisation-validation
+          path: |
+            /tmp/post-cp13-canonicalisation-summary.json
+            /tmp/post-cp13-changed-files.txt
+            /tmp/post-cp13-semantic.json
+            /tmp/post-cp13-roster.json
+            /tmp/post-cp13-roster-gate.json
+            /tmp/post-cp13-topology.json
+            /tmp/post-cp13-semantic.log
+            /tmp/post-cp13-roster.log
+          if-no-files-found: error
+          retention-days: 30
