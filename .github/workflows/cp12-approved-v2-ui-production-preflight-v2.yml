@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  PREFLIGHT_REVISION: lessons-kv-fix-2026-09-15
   PROD_BASE: https://lessons.futureperfect.education
   PROD_HOST: lessons.futureperfect.education
   LEGACY_WORKER: fpt-portal-v2-worker
