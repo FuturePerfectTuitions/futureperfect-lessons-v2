@@ -1,0 +1,46 @@
+name: CP12 fast current-source oracle
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-fast-current-oracle.yml']
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compare all 372 prepared lessons to current compiler with bounded concurrency
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN),lessons=clean(process.env.EXPECTED_LESSONS_KV),read=clean(process.env.EXPECTED_READ_MODELS_KV);const api=`https://api.cloudflare.com/client/v4/accounts/${account}`,headers={Authorization:`Bearer ${token}`};
+          async function text(ns,key){const r=await fetch(`${api}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV ${r.status}:${key}`);return r.text()}async function json(ns,key){const t=await text(ns,key);return t==null?null:JSON.parse(t)}async function list(prefix){let cursor='',out=[];do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const r=await fetch(`${api}/storage/kv/namespaces/${read}/keys?${q}`,{headers}),b=await r.json();if(!r.ok||b?.success!==true)throw new Error('KV list failed');out.push(...(b.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(b?.result_info?.cursor)}while(cursor);return out}
+          const keys=(await list('rm:v1:scope:lesson_3A')).filter(k=>k.endsWith(':current')).sort();if(keys.length!==372)throw new Error(`Expected 372, got ${keys.length}`);const allowed=new Set(['core-prelesson','core-homework','core-other','core-cumulative','core-answers','elevenplus-prelesson','elevenplus-homework','elevenplus-cumulative','elevenplus-answers','vr-prelesson','vr-homework','vr-answers']);let next=0,resources=0,core=0,eleven=0,vr=0;
+          async function worker(){while(true){const i=next++;if(i>=keys.length)return;const key=keys[i],p=await json(read,key),scope=clean(p?.scope),ver=clean(p?.current?.version);if(!scope.startsWith('lesson:')||!ver)throw new Error(`Bad pointer:${key}`);const id=scope.slice(7);const [record,env]=await Promise.all([json(lessons,`lesson:${id}`),json(read,versionKey(scope,ver))]);if(!record?.lessonId||!env?.payload)throw new Error(`Missing source/prepared:${scope}`);const candidate=await compileLessonDetail(record,{resourceExists:async()=>true});if(stableStringify(env.payload)!==stableStringify(candidate))throw new Error(`Mismatch:${scope}`);for(const r of candidate.resources||[]){resources++;const g=clean(r.presentationGroup);if(!allowed.has(g))throw new Error(`Bad group:${scope}:${g}`);if(g.startsWith('vr-'))vr++;else if(g.startsWith('elevenplus-'))eleven++;else if(g.startsWith('core-'))core++;}}}
+          await Promise.all(Array.from({length:20},()=>worker()));if(!resources||!core||!eleven||!vr)throw new Error(`Coverage core=${core} eleven=${eleven} vr=${vr}`);const report={marker:'CP12_FAST_CURRENT_SOURCE_372_ORACLE_PASS',status:'PASS',readOnly:true,productionMutation:false,lessonScopes:keys.length,mismatches:0,totalResources:resources,coreResources:core,elevenPlusResources:eleven,vrResources:vr,concurrency:20};fs.writeFileSync('/tmp/cp12-fast-current-oracle.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-fast-current-oracle
+          path: /tmp/cp12-fast-current-oracle.json
+          if-no-files-found: error
+          retention-days: 30
