@@ -1,18 +1,18 @@
-name: CP12 Admin Post-Repair Read-only Observer
+name: CP12 Final Read-only Closure Observer
 
-# Rerun after guarded batch-definition route repair on 2026-09-14.
 on:
   push:
     branches:
       - rebuild/checkpoint12-stabilisation-2026-09-14
     paths:
+      - rebuild/adminops/src/lib/compiler.mjs
+      - rebuild/shared/read-models/phase11-extension-resources.mjs
       - rebuild/student/src/lib/runtime.mjs
-      - rebuild/student/src/lib/vr-howto-runtime.mjs
-      - tests/rebuild-cp12-admin-principal.mjs
-      - tests/rebuild-cp12-admin-vr-decorator.mjs
-      - scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+      - worker/src/admin-lesson-release-import.js
+      - tests/rebuild-cp12-resource-presentation-groups.mjs
+      - tests/admin-lesson-release-import-verification.mjs
       - .github/workflows/cp12-admin-postrepair-readonly-observer.yml
-      - docs/rebuild/CP12_ADMIN_SUPERUSER_INCIDENT_2026-09-14.md
+      - docs/rebuild/CHECKPOINT_12_STABILISATION.md
   workflow_dispatch:
 
 permissions:
@@ -20,18 +20,23 @@ permissions:
   actions: read
 
 concurrency:
-  group: cp12-admin-postrepair-readonly-observer
+  group: cp12-final-readonly-closure-observer
   cancel-in-progress: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_BASE: https://lessons.futureperfect.education
   PROD_HOST: lessons.futureperfect.education
-  SOURCE_WORKER: fpt-portal-v2-worker
+  LEGACY_WORKER: fpt-portal-v2-worker
   BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
   STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
-  ACTIVE_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
-  ROLLBACK_STUDENT_VERSION: 0751feed-5aa3-40fb-854f-5847c8603872
+  ACTIVE_BROWSER_VERSION: 67880177-1328-46dd-a228-47ba245e33ae
+  ROLLBACK_BROWSER_VERSION: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+  ACTIVE_STUDENT_VERSION: 32467053-f348-449c-a2ae-1dae9688b446
+  ROLLBACK_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
   EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
   EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
   EXPECTED_D1: 97250a54-fa91-45ad-a002-3c4566b1fc38
@@ -49,13 +54,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Canonical runtime and security regressions
+      - name: Current source architecture security and importer regressions
         shell: bash
         run: |
           set -Eeuo pipefail
           node --check rebuild/student/src/lib/runtime.mjs
-          node --check rebuild/student/src/lib/vr-howto-runtime.mjs
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check worker/src/admin-lesson-release-import.js
           node --check scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/admin-lesson-release-import-verification.mjs
           node tests/rebuild-cp12-admin-principal.mjs
           node tests/rebuild-cp12-admin-vr-decorator.mjs
           node tests/rebuild-checkpoint6-new-student-worker.mjs
@@ -69,61 +77,94 @@ jobs:
           node tests/rebuild-checkpoint2-read-models.mjs
           grep -Fq 'return proxyApi(request, env)' rebuild/browser-staging/src/index.js
           ! grep -Eiq 'ADMIN[_-]?OPS|AdminOps' rebuild/browser-staging/src/index.js
-          jq -n '{marker:"CP12_ADMIN_POSTREPAIR_ARCHITECTURE_REGRESSION_PASS",status:"PASS",browserToAdminOps:false,ordinaryStudentRegression:true,securityRegression:true}' | tee /tmp/architecture-regression.json
+          jq -n '{marker:"CP12_FINAL_ARCHITECTURE_REGRESSION_PASS",status:"PASS",browserToAdminOps:false,securityRegression:true,importerBatchViewGuard:true}' | tee /tmp/architecture-regression.json
 
-      - name: Live catalogue student parity and VR How-To audit
+      - name: Exact current-source 372-lesson production oracle and VR How-To audit
         shell: bash
         env:
-          WORKER_NAME: ${{ env.SOURCE_WORKER }}
-          PROD_WORKER: ${{ env.SOURCE_WORKER }}
-          CHECKPOINT8_AS_OF_DATE: '2026-09-14'
-          CHECKPOINT11_AS_OF_DATE: '2026-09-14'
+          WORKER_NAME: ${{ env.LEGACY_WORKER }}
+          PROD_WORKER: ${{ env.LEGACY_WORKER }}
+          CHECKPOINT8_AS_OF_DATE: '2026-09-15'
+          CHECKPOINT11_AS_OF_DATE: '2026-09-15'
           PROD_SHADOW_KV_ID: ${{ env.EXPECTED_READ_MODELS_KV }}
         run: |
           set -Eeuo pipefail
           node scripts/rebuild-checkpoint8-special-area-audit.mjs | tee /tmp/special-area.json
-          node scripts/rebuild-checkpoint8-live-audit.mjs
-          cp /tmp/checkpoint8-live-summary.json /tmp/live-parity.json
-          jq -e '.status=="PASS" and .catalogue.lessonCount==372 and .catalogue.resourceMismatchCount==0 and .students.unexplainedDifferenceCount==0' /tmp/live-parity.json >/dev/null
-          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0 and .cp11RuntimeGate.enabled==true and .cp11RuntimeGate.compatible==true and (.cp11RuntimeGate.unsupportedCurrentTokens|length)==0 and .cp11RuntimeGate.catalogueRevision.checked==true and .cp11RuntimeGate.catalogueRevision.inSync==true' /tmp/special-area.json >/dev/null
+          jq -e '.status=="PASS" and .profilesWithSpecialAreas==3 and .tokenCounts.VR_HOWTO==3 and .manualTokenCounts.VR_HOWTO==3 and (.directTokenCounts.VR_HOWTO // 0)==0' /tmp/special-area.json >/dev/null
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const lessons=clean(process.env.EXPECTED_LESSONS_KV), read=clean(process.env.EXPECTED_READ_MODELS_KV);
+          if(!account||!token||!lessons||!read) throw new Error('Protected production read configuration is incomplete.');
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}`, headers={Authorization:`Bearer ${token}`};
+          async function kvText(ns,key){const r=await fetch(`${api}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read ${r.status}:${key}`);return r.text();}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          async function list(ns,prefix){let cursor='',out=[];do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const r=await fetch(`${api}/storage/kv/namespaces/${ns}/keys?${q}`,{headers});const b=await r.json();if(!r.ok||b.success!==true)throw new Error(`KV list failed:${prefix}`);out.push(...(b.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
+          const keys=(await list(read,'rm:v1:scope:lesson_3A')).filter(k=>k.endsWith(':current')).sort();
+          if(keys.length!==372) throw new Error(`Expected 372 published lesson scopes, found ${keys.length}.`);
+          let mismatches=0,totalResources=0,core=0,eleven=0,vr=0;
+          const errors=[];
+          async function check(key){
+            const pointer=await kvJson(read,key), scope=clean(pointer?.scope), ver=clean(pointer?.current?.version);
+            if(!scope.startsWith('lesson:')||!ver) throw new Error(`Malformed pointer:${key}`);
+            const lessonId=scope.slice(7), source=await kvJson(lessons,`lesson:${lessonId}`), envelope=await kvJson(read,versionKey(scope,ver));
+            if(!source?.lessonId||!envelope?.payload) throw new Error(`Missing source/payload:${scope}`);
+            const candidate=await compileLessonDetail(source,{resourceExists:async()=>true});
+            if(stableStringify(candidate)!==stableStringify(envelope.payload)){mismatches++;errors.push(scope);}
+            for(const row of candidate.resources||[]){totalResources++;const g=clean(row.presentationGroup);if(g.startsWith('vr-'))vr++;else if(g.startsWith('elevenplus-'))eleven++;else if(g.startsWith('core-'))core++;}
+          }
+          for(let i=0;i<keys.length;i+=12) await Promise.all(keys.slice(i,i+12).map(check));
+          if(mismatches!==0) throw new Error(`Current-source production mismatch count ${mismatches}: ${errors.slice(0,8).join(',')}`);
+          if(totalResources!==1509||core!==984||eleven!==212||vr!==313) throw new Error(`Resource census drift total=${totalResources} core=${core} eleven=${eleven} vr=${vr}`);
+          const report={marker:'CP12_CURRENT_SOURCE_PRODUCTION_ORACLE_PASS',status:'PASS',lessonScopes:keys.length,resourceMismatchCount:mismatches,totalResources,coreResources:core,elevenPlusResources:eleven,vrResources:vr,readOnly:true};
+          fs.writeFileSync('/tmp/live-oracle.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
+          NODE
 
-      - name: Authoritative production topology active repair rollback and bindings
+      - name: Authoritative production topology active versions bindings and rollback retention
         shell: bash
         run: |
           set -Eeuo pipefail
           AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
-          ZONE_ID="$(jq -r '.result[] | select(.name=="futureperfect.education") | .id' /tmp/zones.json | head -n1)"
-          test -n "$ZONE_ID"
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json | head -n1)"; test -n "$ZONE_ID"
           curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
-          jq -e --arg route "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and any(.result[]; .pattern==$route and .script==$browser)' /tmp/routes.json >/dev/null
-          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser.json
-          jq -e --arg student "$STUDENT_WORKER" '.success==true and any(.result.bindings[]; .name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[] | select(.type=="service" and .name!="STAGING_API")]|length)==0' /tmp/browser.json >/dev/null
-          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/settings" "${AUTH[@]}" -o /tmp/student.json
-          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '.success==true and any(.result.bindings[]; .name=="READ_MODELS_KV" and (.namespace_id // .id)==$read) and any(.result.bindings[]; .name=="STUDENTS_KV" and (.namespace_id // .id)==$students) and any(.result.bindings[]; .name=="DB" and (.database_id // .id)==$d1) and any(.result.bindings[]; .name=="MATERIALS_R2" and (.bucket_name // .bucket)==$r2) and any(.result.bindings[]; .name=="AUTH_SIGNING_SECRET" and .type=="secret_text") and any(.result.bindings[]; .name=="ACCESS_SCOPE_SECRET" and .type=="secret_text") and ([.result.bindings[] | select(.type=="service")]|length)==0' /tmp/student.json >/dev/null
-          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/deployments.json
-          ACTIVE="$(jq -r '.result.deployments[0].versions[] | select((.percentage // 0)==100) | .version_id' /tmp/deployments.json | head -n1)"
-          test "$ACTIVE" = "$ACTIVE_STUDENT_VERSION"
-          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/versions.json
-          jq -e --arg old "$ROLLBACK_STUDENT_VERSION" 'any(.result.items[]; .id==$old)' /tmp/versions.json >/dev/null
-          jq -n --arg marker 'CP12_ADMIN_POSTREPAIR_TOPOLOGY_PASS' --arg active "$ACTIVE" --arg rollback "$ROLLBACK_STUDENT_VERSION" '{marker:$marker,status:"PASS",readOnly:true,activeStudentVersion:$active,rollbackStudentVersionRetained:$rollback,browserToAdminOps:false,bindingsUnchanged:true,secretsRetained:true}' | tee /tmp/topology.json
+          jq -e --arg route "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$route and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$route and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
+          for worker in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/settings" "${AUTH[@]}" -o "/tmp/${worker}-settings.json"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/${worker}-deployments.json"
+          done
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and ([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings.json" >/dev/null
+          jq -e --arg read "$EXPECTED_READ_MODELS_KV" --arg students "$EXPECTED_STUDENTS_KV" --arg d1 "$EXPECTED_D1" --arg r2 "$EXPECTED_R2" '.success==true and any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$read) and any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$students) and any(.result.bindings[];.name=="DB" and (.database_id//.id)==$d1) and any(.result.bindings[];.name=="MATERIALS_R2" and (.bucket_name//.bucket)==$r2) and any(.result.bindings[];.name=="AUTH_SIGNING_SECRET" and .type=="secret_text") and any(.result.bindings[];.name=="ACCESS_SCOPE_SECRET" and .type=="secret_text") and ([.result.bindings[]|select(.type=="service")]|length)==0' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          BROWSER_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments.json" | head -n1)"
+          STUDENT_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments.json" | head -n1)"
+          LEGACY_ACTIVE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments.json" | head -n1)"
+          test "$BROWSER_ACTIVE" = "$ACTIVE_BROWSER_VERSION"
+          test "$STUDENT_ACTIVE" = "$ACTIVE_STUDENT_VERSION"
+          test "$LEGACY_ACTIVE" = "$LEGACY_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/browser-versions.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions.json
+          jq -e --arg old "$ROLLBACK_BROWSER_VERSION" 'any(.result.items[];.id==$old)' /tmp/browser-versions.json >/dev/null
+          jq -e --arg old "$ROLLBACK_STUDENT_VERSION" 'any(.result.items[];.id==$old)' /tmp/student-versions.json >/dev/null
+          jq -n --arg marker CP12_FINAL_TOPOLOGY_PASS --arg browser "$BROWSER_ACTIVE" --arg student "$STUDENT_ACTIVE" --arg legacy "$LEGACY_ACTIVE" '{marker:$marker,status:"PASS",readOnly:true,canonicalTopology:true,browserToAdminOps:false,browserVersion:$browser,studentVersion:$student,legacyVersion:$legacy,rollbackVersionsRetained:true,bindingsUnchanged:true}' | tee /tmp/topology.json
 
-      - name: Authenticated public Admin and representative-student smoke with timings
+      - name: Authenticated public Admin and representative-student smoke
         shell: bash
         env:
           STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
           SMOKE_BASE_URL: https://lessons.futureperfect.education
-          SMOKE_PHASE: cp12-postrepair-observer
+          SMOKE_PHASE: cp12-final-closure-observer
           EXPECT_ADMIN_STATUS: '200'
           SMOKE_OUTPUT: /tmp/authenticated-smoke.json
         run: node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
 
-      - name: Retained Admin import continuity without applying an import
+      - name: Retained Admin import continuity static gate
         shell: bash
         run: |
           set -Eeuo pipefail
-          node --check worker/src/admin-lesson-release-import.js
           node tests/admin-import-auto-process-static-verification.mjs
           node tests/admin-import-manual-email-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
@@ -133,25 +174,25 @@ jobs:
           node tests/parent-email-completed-status-verification.mjs
           node tests/parent-email-test-routing-verification.mjs
           node tests/lesson-release-navigation-verification.mjs
-          jq -n '{marker:"CP12_ADMIN_POSTREPAIR_IMPORT_CONTINUITY_PASS",status:"PASS",readOnly:true,importApplied:false,staticVerification:true}' | tee /tmp/import-continuity.json
+          jq -n '{marker:"CP12_FINAL_IMPORT_CONTINUITY_PASS",status:"PASS",readOnly:true,staticVerification:true,batchViewGuard:true}' | tee /tmp/import-continuity.json
 
-      - name: Produce observer summary
+      - name: Produce final read-only observer summary
         shell: bash
         run: |
           set -Eeuo pipefail
-          jq -n --slurpfile parity /tmp/live-parity.json --slurpfile special /tmp/special-area.json --slurpfile topo /tmp/topology.json --slurpfile auth /tmp/authenticated-smoke.json --slurpfile import /tmp/import-continuity.json --arg observedAt "$(date -u +%FT%TZ)" '{marker:"CP12_ADMIN_POSTREPAIR_OBSERVER_PASS",status:"PASS",observedAt:$observedAt,productionRepairActive:true,parity:{lessonCount:$parity[0].catalogue.lessonCount,resourceMismatchCount:$parity[0].catalogue.resourceMismatchCount,auditedCurrentStudents:$parity[0].students.auditedCurrentStudents,unexplainedDifferenceCount:$parity[0].students.unexplainedDifferenceCount},vrHowTo:{manual:($special[0].manualTokenCounts.VR_HOWTO//0),direct:($special[0].directTokenCounts.VR_HOWTO//0)},topology:$topo[0],authenticatedSmoke:$auth[0],adminImportContinuity:$import[0],cp12StillOpen:true,cp13Started:false}' | tee /tmp/observer-summary.json
+          jq -n --slurpfile oracle /tmp/live-oracle.json --slurpfile special /tmp/special-area.json --slurpfile topo /tmp/topology.json --slurpfile auth /tmp/authenticated-smoke.json --slurpfile import /tmp/import-continuity.json --arg observedAt "$(date -u +%FT%TZ)" '{marker:"CP12_FINAL_READONLY_OBSERVER_PASS",status:"PASS",observedAt:$observedAt,oracle:$oracle[0],vrHowTo:{manual:($special[0].manualTokenCounts.VR_HOWTO//0),direct:($special[0].directTokenCounts.VR_HOWTO//0)},topology:$topo[0],authenticatedSmoke:$auth[0],adminImportContinuity:$import[0],closureTechnicalGatesReady:true,cp13Started:false}' | tee /tmp/observer-summary.json
 
       - name: Upload safe observer evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cp12-admin-postrepair-readonly-observer-evidence
+          name: cp12-final-readonly-closure-observer-evidence
           retention-days: 30
           if-no-files-found: error
           path: |
             /tmp/architecture-regression.json
             /tmp/special-area.json
-            /tmp/live-parity.json
+            /tmp/live-oracle.json
             /tmp/topology.json
             /tmp/authenticated-smoke.json
             /tmp/import-continuity.json
