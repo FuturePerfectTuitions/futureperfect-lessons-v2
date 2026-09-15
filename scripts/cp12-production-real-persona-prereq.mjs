@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { opaqueAccessScopeId } from '../rebuild/student/src/lib/access-scope.mjs';
 import { pointerKey, versionKey } from '../rebuild/adminops/src/lib/atomic-publisher.mjs';
+import { compileLessonDetail } from '../rebuild/adminops/src/lib/compiler.mjs';
 
 const clean=v=>String(v??'').trim();
 const norm=v=>clean(v).toLowerCase();
@@ -11,9 +12,10 @@ const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
 const token=clean(process.env.CLOUDFLARE_API_TOKEN);
 const studentsKv=clean(process.env.STUDENTS_KV_ID);
 const readModelsKv=clean(process.env.READ_MODELS_KV_ID||process.env.EXPECTED_READ_MODELS_KV);
+const lessonsKv=clean(process.env.LESSONS_KV_ID||process.env.EXPECTED_LESSONS_KV);
 const summaryPath=clean(process.env.CP12_PERSONA_SUMMARY||'/tmp/cp12-production-real-persona-prereq.json');
 const secretPath=clean(process.env.CP12_PERSONA_SECRETS||'/tmp/cp12-production-real-persona-secrets.json');
-if(!account||!token||!studentsKv||!readModelsKv)throw new Error('CP12 real-persona prerequisite requires protected Cloudflare read credentials and exact production KV bindings.');
+if(!account||!token||!studentsKv||!readModelsKv||!lessonsKv)throw new Error('CP12 real-persona prerequisite requires protected Cloudflare read credentials and exact production KV bindings.');
 const cfBase=`https://api.cloudflare.com/client/v4/accounts/${account}`;
 const cfHeaders={Authorization:`Bearer ${token}`};
 const digest=v=>crypto.createHash('sha256').update(String(v)).digest('hex').slice(0,16);
@@ -45,6 +47,25 @@ async function publishedAccessSnapshot(id){
   return payload.snapshot;
 }
 
+const sourceVrCache=new Map();
+async function sourceCanonicalVrShape(lessonId){
+  if(sourceVrCache.has(lessonId))return sourceVrCache.get(lessonId);
+  const record=await kvJson(lessonsKv,`lesson:${lessonId}`);
+  if(!record?.lessonId)return null;
+  const detail=await compileLessonDetail(record,{resourceExists:async()=>true});
+  const rows=(detail.resources||[]).filter(row=>(row.presentationScopes||[]).includes('vr'));
+  const shape={
+    resourceCount:rows.length,
+    preSheet:rows.some(row=>row.presentationGroup==='vr-prelesson'&&row.type==='prelesson'),
+    preAnswer:rows.some(row=>row.presentationGroup==='vr-prelesson'&&row.type==='answer-pack'&&row.protected===true),
+    homework:rows.some(row=>row.presentationGroup==='vr-homework'&&row.type==='homework'),
+    homeAnswer:rows.some(row=>row.presentationGroup==='vr-homework'&&row.type==='answer-pack'&&row.protected===true)
+  };
+  shape.canonical=shape.preSheet&&shape.preAnswer&&shape.homework&&shape.homeAnswer;
+  sourceVrCache.set(lessonId,shape);
+  return shape;
+}
+
 async function inspectUser(id,user){
   if(!user||!active(user)||!valid4(user.p)||!valid4(answerPassword(user)))return null;
   const snapshot=await publishedAccessSnapshot(id);if(!snapshot)return null;
@@ -65,7 +86,9 @@ async function inspectUser(id,user){
         const lessonId=clean(row?.lessonId);if(!lessonId)continue;
         const state=snapshot?.lessonAccess?.[lessonId];
         if(!state||state.blocked===true||state.core!==true||state.vr!==true)continue;
-        out.vrTarget={viewId:view.viewId,lessonId,accessProven:true,core:true,vr:true};break;
+        let shape=null;try{shape=await sourceCanonicalVrShape(lessonId);}catch{continue;}
+        if(!shape?.canonical)continue;
+        out.vrTarget={viewId:view.viewId,lessonId,accessProven:true,core:true,vr:true,canonicalVrRows:true,canonicalVrResourceCount:shape.resourceCount};break;
       }
       if(out.vrTarget)break;
     }
@@ -80,10 +103,10 @@ for(const key of await userKeys()){
   if(!ordinary&&inspected.ordinaryY5E2===true&&!inspected.openIds.has('english-year5-11plus'))ordinary=inspected;
   if(inspected.vrHowTo)vrHowToCandidates++;
   if(!vr&&inspected.vrHowTo&&inspected.vrTarget)vr=inspected;
-  if(ordinary&&vr)break;
+  if(ordinary&&vr&&ordinary.id!==vr.id)break;
 }
 assert(ordinary,'No active real production ordinary Year-5 English Y5E2 persona was found without the Year-5 11+ view.');
-assert(vr,'No active real production VR-entitled student with VR How-To and authoritative prepared VR lesson access was found.');
+assert(vr,'No active real production VR-entitled student with VR How-To, authoritative prepared VR access and source-canonical VR rows was found.');
 assert.notEqual(vr.id,ordinary.id,'VR and ordinary production UAT principals must be distinct.');
 for(const row of [ordinary,vr])assert(row.firstName&&valid4(row.user.p)&&valid4(answerPassword(row.user)),'Selected real persona is missing required credential/name shape.');
 const secrets={
@@ -91,6 +114,6 @@ const secrets={
   vr:{username:vr.id,password:String(vr.user.p),answerPassword:String(answerPassword(vr.user)),firstName:vr.firstName,viewId:vr.vrTarget.viewId,lessonId:vr.vrTarget.lessonId}
 };
 fs.writeFileSync(secretPath,JSON.stringify(secrets));fs.chmodSync(secretPath,0o600);
-const summary={marker:'CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS',status:'PASS',productionMutation:false,eligibleScanned:eligible,vrHowToCandidatesScanned:vrHowToCandidates,ordinary:{digest:digest(ordinary.id),viewId:'english-year5',lessonId:'Y5E2',lessonOpen:true,year5ElevenPlusAbsent:true,credentialDisclosed:false},vr:{digest:digest(vr.id),vrHowToVisible:true,viewId:vr.vrTarget.viewId,lessonId:vr.vrTarget.lessonId,lessonOpen:true,accessProven:true,preparedCoreAccess:true,preparedVrAccess:true,credentialDisclosed:false},distinctPrincipals:true,secretMaterialLogged:false};
+const summary={marker:'CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS',status:'PASS',productionMutation:false,eligibleScanned:eligible,vrHowToCandidatesScanned:vrHowToCandidates,ordinary:{digest:digest(ordinary.id),viewId:'english-year5',lessonId:'Y5E2',lessonOpen:true,year5ElevenPlusAbsent:true,credentialDisclosed:false},vr:{digest:digest(vr.id),vrHowToVisible:true,viewId:vr.vrTarget.viewId,lessonId:vr.vrTarget.lessonId,lessonOpen:true,accessProven:true,preparedCoreAccess:true,preparedVrAccess:true,canonicalVrRows:true,canonicalVrResourceCount:vr.vrTarget.canonicalVrResourceCount,credentialDisclosed:false},distinctPrincipals:true,secretMaterialLogged:false};
 fs.writeFileSync(summaryPath,JSON.stringify(summary,null,2)+'\n');
 console.log(JSON.stringify(summary));
