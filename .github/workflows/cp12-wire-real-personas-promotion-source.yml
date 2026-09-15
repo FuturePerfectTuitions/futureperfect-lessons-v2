@@ -5,7 +5,7 @@ on:
     branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
     paths:
       - '.github/workflows/cp12-wire-real-personas-promotion-source.yml'
-      - 'scripts/cp12-wire-real-personas-promotion-source.mjs'
+      - 'scripts/cp12-wire-real-personas-promotion-source.py'
 
 permissions:
   contents: write
@@ -24,8 +24,8 @@ jobs:
       - name: Patch and verify guarded promotion source only
         run: |
           set -Eeuo pipefail
-          node --check scripts/cp12-wire-real-personas-promotion-source.mjs
-          node scripts/cp12-wire-real-personas-promotion-source.mjs
+          python -m py_compile scripts/cp12-wire-real-personas-promotion-source.py
+          python scripts/cp12-wire-real-personas-promotion-source.py
           node --check scripts/cp12-production-real-persona-prereq.mjs
           node --check scripts/cp12-approved-v2-ui-production-uat.mjs
           git diff --check
