@@ -9,20 +9,23 @@ const expectedJs=String(process.env.UAT_EXPECTED_JS||'').trim();
 const evidenceDir='/tmp/cp12-approved-v2-ui-production-evidence';
 const output='/tmp/cp12-approved-v2-ui-production-uat.json';
 const credentialShape=/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{4}$/;
-function persona(prefix,{answerRequired=false}={}){
+function persona(prefix,{answerRequired=false,targetRequired=false}={}){
   const row={
     username:String(process.env[`UAT_${prefix}_USERNAME`]||'').trim(),
     password:String(process.env[`UAT_${prefix}_LOGIN_PASSWORD`]||''),
     answerPassword:String(process.env[`UAT_${prefix}_ANSWER_PASSWORD`]||''),
-    expectedFirstName:String(process.env[`UAT_${prefix}_EXPECTED_FIRST_NAME`]||'').trim().split(/\s+/)[0]||''
+    expectedFirstName:String(process.env[`UAT_${prefix}_EXPECTED_FIRST_NAME`]||'').trim().split(/\s+/)[0]||'',
+    viewId:String(process.env[`UAT_${prefix}_VIEW_ID`]||'').trim(),
+    lessonId:String(process.env[`UAT_${prefix}_LESSON_ID`]||'').trim()
   };
   if(!row.username||!row.expectedFirstName)throw new Error(`${prefix} production UAT identity inputs are incomplete.`);
   if(!credentialShape.test(row.password))throw new Error(`${prefix} production login credential shape is invalid.`);
   if(answerRequired&&!credentialShape.test(row.answerPassword))throw new Error(`${prefix} production Answer Pack credential shape is invalid.`);
+  if(targetRequired&&(!row.viewId||!row.lessonId))throw new Error(`${prefix} production UAT target view/lesson inputs are incomplete.`);
   return row;
 }
 function populateRealStudentPersonasIfNeeded(){
-  if(String(process.env.UAT_VR_USERNAME||'').trim()&&String(process.env.UAT_ORDINARY_USERNAME||'').trim())return;
+  if(String(process.env.UAT_VR_USERNAME||'').trim()&&String(process.env.UAT_VR_VIEW_ID||'').trim()&&String(process.env.UAT_VR_LESSON_ID||'').trim()&&String(process.env.UAT_ORDINARY_USERNAME||'').trim())return;
   const studentsKv=String(process.env.STUDENTS_KV_ID||process.env.EXPECTED_STUDENTS_KV||'').trim();
   const account=String(process.env.CLOUDFLARE_ACCOUNT_ID||'').trim();
   const token=String(process.env.CLOUDFLARE_API_TOKEN||'').trim();
@@ -32,7 +35,7 @@ function populateRealStudentPersonasIfNeeded(){
   fs.rmSync(secretPath,{force:true});
   const run=spawnSync(process.execPath,['scripts/cp12-production-real-persona-prereq.mjs'],{
     cwd:process.cwd(),
-    env:{...process.env,STUDENTS_KV_ID:studentsKv,CP12_PERSONA_SECRETS:secretPath,CP12_PERSONA_SUMMARY:summaryPath},
+    env:{...process.env,STUDENTS_KV_ID:studentsKv,READ_MODELS_KV_ID:String(process.env.READ_MODELS_KV_ID||process.env.EXPECTED_READ_MODELS_KV||''),CP12_PERSONA_SECRETS:secretPath,CP12_PERSONA_SUMMARY:summaryPath},
     encoding:'utf8',
     stdio:['ignore','pipe','pipe']
   });
@@ -45,15 +48,17 @@ function populateRealStudentPersonasIfNeeded(){
     process.env[`UAT_${prefix}_LOGIN_PASSWORD`]=String(row.password||'');
     process.env[`UAT_${prefix}_ANSWER_PASSWORD`]=String(row.answerPassword||'');
     process.env[`UAT_${prefix}_EXPECTED_FIRST_NAME`]=String(row.firstName||'');
+    process.env[`UAT_${prefix}_VIEW_ID`]=String(row.viewId||'');
+    process.env[`UAT_${prefix}_LESSON_ID`]=String(row.lessonId||'');
   }
   fs.rmSync(secretPath,{force:true});
   const summary=JSON.parse(fs.readFileSync(summaryPath,'utf8'));
-  if(summary.marker!=='CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS'||summary.productionMutation!==false)throw new Error('Real production UAT persona discovery did not prove the read-only prerequisite.');
+  if(summary.marker!=='CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS'||summary.productionMutation!==false||summary.vr?.accessProven!==true||summary.vr?.lessonOpen!==true)throw new Error('Real production UAT persona discovery did not prove the authoritative read-only prerequisite.');
   console.log('CP12_PRODUCTION_UAT_REAL_PERSONA_AUTODISCOVERY_PASS');
 }
 if(!base||!expectedJs)throw new Error('Production UI UAT base/bundle inputs are incomplete.');
 populateRealStudentPersonasIfNeeded();
-const vrPersona=persona('VR',{answerRequired:true});
+const vrPersona=persona('VR',{answerRequired:true,targetRequired:true});
 const ordinaryPersona=persona('ORDINARY');
 if(vrPersona.username.toLowerCase()==='admin'||ordinaryPersona.username.toLowerCase()==='admin')throw new Error('Production UI UAT must use real non-admin student principals.');
 if(vrPersona.username.toLowerCase()===ordinaryPersona.username.toLowerCase())throw new Error('VR and ordinary production UAT principals must be distinct.');
@@ -129,7 +134,7 @@ async function assertFloatingBack(page,label){
   assert.equal(style.color,'rgb(255, 255, 255)','Back control is not white-on-navy.');
   return style;
 }
-async function openY5E2(page,viewId){
+async function openLesson(page,viewId,lessonId){
   const calls=[]; const handler=request=>{try{calls.push(new URL(request.url()).pathname);}catch{}}; page.on('request',handler);
   const before=calls.length;
   await page.locator('[data-subject="english"]').click();
@@ -139,12 +144,13 @@ async function openY5E2(page,viewId){
   assert.equal(await view.count(),1,`Production student is missing required view ${viewId}.`);
   await view.click();
   await page.getByLabel('Search lessons').waitFor({timeout:15000});
-  const lesson=page.locator('[data-lesson="Y5E2"]').first();
+  const lesson=page.locator(`[data-lesson="${lessonId}"]`).first();
   await lesson.waitFor({state:'visible',timeout:10000});
-  const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v2/student/lessons/Y5E2',{timeout:15000});
+  const expectedPath=`/api/v2/student/lessons/${encodeURIComponent(lessonId)}`;
+  const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname===expectedPath,{timeout:15000});
   await lesson.click();
   const response=await responsePromise;
-  assert.equal(response.status(),200,'Y5E2 lesson request failed.');
+  assert.equal(response.status(),200,`${lessonId} lesson request failed.`);
   const body=await response.json();
   await page.locator('.lesson-heading').waitFor({timeout:15000});
   page.off('request',handler);
@@ -199,10 +205,10 @@ try{
     const context=await browser.newContext({viewport:{width:1440,height:1000}}); const page=await context.newPage();
     const loginEvidence=await login(page,vrPersona); evidence.frontend=loginEvidence.frontend; evidence.visual.login=loginEvidence.loginPresentation; evidence.visual.personalisedPortal=loginEvidence.greeting; evidence.visual.topbarPosition=loginEvidence.topbarPosition; evidence.visual.logoutBg=loginEvidence.logoutBg;
     evidence.visual.subjects=await assertSubjectPresentation(page);
-    const detail=await openY5E2(page,'english-year5-11plus'); evidence.visual.back=await assertFloatingBack(page,'Lessons'); evidence.visual.lesson=await assertLessonPresentation(page);
+    const detail=await openLesson(page,vrPersona.viewId,vrPersona.lessonId); evidence.visual.back=await assertFloatingBack(page,'Lessons'); evidence.visual.lesson=await assertLessonPresentation(page);
     const vrRows=(detail.resources||[]).filter(row=>(row.presentationScopes||[]).includes('vr'));
     const coreRows=(detail.resources||[]).filter(row=>row.type!=='video'&&!(row.presentationScopes||[]).includes('vr'));
-    assert(vrRows.length>=4,'Expected canonical VR rows on Y5E2.');
+    assert(vrRows.length>=4,`Expected canonical VR rows on selected lesson ${vrPersona.lessonId}.`);
     assert(vrRows.some(row=>row.presentationGroup==='vr-prelesson'&&row.type==='prelesson'),'VR PreLesson worksheet grouping missing.');
     assert(vrRows.some(row=>row.presentationGroup==='vr-prelesson'&&row.type==='answer-pack'&&row.protected===true),'VR PreLesson answer grouping missing.');
     assert(vrRows.some(row=>row.presentationGroup==='vr-homework'&&row.type==='homework'),'VR Homework grouping missing.');
@@ -217,11 +223,11 @@ try{
     const protectedVr=vrRows.filter(row=>row.type==='answer-pack'&&row.protected===true); assert(protectedVr.length>=2,'Expected protected VR answers.'); for(const row of protectedVr)assert.equal(await vrBody.locator(`[data-answer="${row.resourceId}"]`).count(),1,'Protected VR answer lacks password-gated control.');
     evidence.visual.answerPassword=await assertAnswerEye(page,vrBody,vrPersona.answerPassword);
     const shot=path.join(evidenceDir,'desktop-vr-approved-v2-ui.png'); await page.screenshot({path:shot,fullPage:true}); evidence.screenshots.push(path.basename(shot));
-    evidence.vr={realStudentPrincipal:true,resourceCount:vrRows.length,coreHomeworkRows:homeworkIds.size,outerSection:true,preLessonSubgroup:true,homeworkSubgroup:true,collapsedByDefault:true,viewHideToggle:true,protectedAnswers:protectedVr.length}; await context.close();
+    evidence.vr={realStudentPrincipal:true,viewId:vrPersona.viewId,lessonId:vrPersona.lessonId,resourceCount:vrRows.length,coreHomeworkRows:homeworkIds.size,outerSection:true,preLessonSubgroup:true,homeworkSubgroup:true,collapsedByDefault:true,viewHideToggle:true,protectedAnswers:protectedVr.length}; await context.close();
   }
   {
     const context=await browser.newContext({viewport:{width:1280,height:900}}); const page=await context.newPage(); await login(page,ordinaryPersona); await assertSubjectPresentation(page);
-    const detail=await openY5E2(page,'english-year5'); assert.equal((detail.resources||[]).some(row=>(row.presentationScopes||[]).includes('vr')),false,'Ordinary real-student API response exposed VR rows.'); assert.equal(await page.locator('[data-resource-section="verbal-reasoning"]').count(),0,'Ordinary real-student UI rendered Verbal Reasoning section.');
+    const detail=await openLesson(page,'english-year5','Y5E2'); assert.equal((detail.resources||[]).some(row=>(row.presentationScopes||[]).includes('vr')),false,'Ordinary real-student API response exposed VR rows.'); assert.equal(await page.locator('[data-resource-section="verbal-reasoning"]').count(),0,'Ordinary real-student UI rendered Verbal Reasoning section.');
     const homeworkSection=page.locator('[data-resource-section="core-homework"]'); assert.equal(await homeworkSection.count(),1,'Ordinary Homework section missing.'); const body=await toggleAndAssert(homeworkSection); assert((await body.locator('.resource-row').count())>0,'Ordinary Homework section empty.');
     const shot=path.join(evidenceDir,'desktop-ordinary-no-vr.png'); await page.screenshot({path:shot,fullPage:true}); evidence.screenshots.push(path.basename(shot)); evidence.ordinary={realStudentPrincipal:true,sameLessonControl:true,vrRowsHidden:true,vrSectionAbsent:true,homeworkCollapsible:true}; await context.close();
   }
