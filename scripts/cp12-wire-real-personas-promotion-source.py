@@ -85,7 +85,7 @@ extra = '''          node --check scripts/cp12-production-real-persona-prereq.mj
           node --check scripts/cp12-run-real-persona-production-uat.mjs
           grep -F 'UAT_VR_USERNAME' scripts/cp12-approved-v2-ui-production-uat.mjs >/dev/null
           grep -F 'UAT_ORDINARY_USERNAME' scripts/cp12-approved-v2-ui-production-uat.mjs >/dev/null
-          ! grep -F 'export UAT_EXPECTED_JS="$EXPECTED_JS" UAT_USERNAME=' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          grep -F 'cp12-run-real-persona-production-uat.mjs' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
 '''
 s = s.replace(check_anchor, check_anchor + extra, 1)
 
