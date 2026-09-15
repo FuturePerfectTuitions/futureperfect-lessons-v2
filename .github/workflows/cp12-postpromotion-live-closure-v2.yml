@@ -1,0 +1,138 @@
+name: CP12 post-promotion live closure v2
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-postpromotion-live-closure-v2.yml']
+
+permissions:
+  contents: read
+
+env:
+  PROD_BASE: https://lessons.futureperfect.education
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_DB: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  EXPECTED_STUDENT_VERSION: 32467053-f348-449c-a2ae-1dae9688b446
+  EXPECTED_BROWSER_VERSION: 67880177-1328-46dd-a228-47ba245e33ae
+  EXPECTED_LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+  RETAIN_STUDENT_ROLLBACK_1: bed8e660-facb-47f3-afad-7a9996d95c5a
+  RETAIN_STUDENT_ROLLBACK_2: 0751feed-5aa3-40fb-854f-5847c8603872
+  RETAIN_BROWSER_ROLLBACK: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+
+jobs:
+  live-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Exact current-source 372-lesson oracle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), lessons=clean(process.env.EXPECTED_LESSONS_KV), read=clean(process.env.EXPECTED_READ_MODELS_KV);
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}`,headers={Authorization:`Bearer ${token}`};
+          async function kvText(ns,key){const r=await fetch(`${api}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read ${r.status}:${key}`);return r.text();}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          async function list(ns,prefix){let cursor='',out=[];do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const r=await fetch(`${api}/storage/kv/namespaces/${ns}/keys?${q}`,{headers});const b=await r.json();if(!r.ok||b?.success!==true)throw new Error(`KV list failed:${prefix}`);out.push(...(b.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(b?.result_info?.cursor);}while(cursor);return out;}
+          const allowed=new Set(['core-prelesson','core-homework','core-other','core-cumulative','core-answers','elevenplus-prelesson','elevenplus-homework','elevenplus-cumulative','elevenplus-answers','vr-prelesson','vr-homework','vr-answers']);
+          const keys=(await list(read,'rm:v1:scope:lesson_3A')).filter(k=>k.endsWith(':current')).sort();if(keys.length!==372)throw new Error(`Expected 372 scopes; observed ${keys.length}`);
+          let resources=0,core=0,eleven=0,vr=0;
+          for(const key of keys){const p=await kvJson(read,key),scope=clean(p?.scope),ver=clean(p?.current?.version);if(!scope.startsWith('lesson:')||!ver)throw new Error(`Bad pointer:${key}`);const id=scope.slice(7),record=await kvJson(lessons,`lesson:${id}`);if(!record?.lessonId)throw new Error(`Missing source:${id}`);const candidate=await compileLessonDetail(record,{resourceExists:async()=>true});const env=await kvJson(read,versionKey(scope,ver));if(!env?.payload)throw new Error(`Missing prepared:${scope}`);if(stableStringify(env.payload)!==stableStringify(candidate))throw new Error(`Current-source mismatch:${scope}`);for(const r of candidate.resources||[]){resources++;const g=clean(r.presentationGroup);if(!allowed.has(g))throw new Error(`Bad group:${scope}:${g}`);if(g.startsWith('vr-'))vr++;else if(g.startsWith('elevenplus-'))eleven++;else if(g.startsWith('core-'))core++;}}
+          if(!resources||!core||!eleven||!vr)throw new Error(`Coverage incomplete core=${core} eleven=${eleven} vr=${vr}`);
+          const report={marker:'CP12_POSTPROMOTION_CURRENT_SOURCE_372_ORACLE_PASS',status:'PASS',readOnly:true,productionMutation:false,lessonScopes:keys.length,totalResources:resources,coreResources:core,elevenPlusResources:eleven,vrResources:vr,mismatches:0};fs.writeFileSync('/tmp/cp12-current-oracle.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
+          NODE
+
+      - name: Real personas and live topology invariants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-production-real-persona-prereq.mjs
+          jq -e '.status=="PASS" and .productionMutation==false and .ordinary.lessonOpen==true and .ordinary.year5ElevenPlusAbsent==true and .vr.vrHowToVisible==true and .vr.accessProven==true and .vr.preparedCoreAccess==true and .vr.preparedVrAccess==true and .vr.canonicalVrRows==true and .vr.canonicalVrResourceCount>=4 and .distinctPrincipals==true and .secretMaterialLogged==false' /tmp/cp12-production-real-persona-prereq.json >/dev/null
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"); API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json|head -n1)";test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
+          for w in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER";do curl --fail --silent --show-error "${API}/workers/scripts/${w}/settings" "${AUTH[@]}" -o "/tmp/${w}-settings.json";curl --fail --silent --show-error "${API}/workers/scripts/${w}/deployments" "${AUTH[@]}" -o "/tmp/${w}-deployments.json";done
+          jq -e --arg student "$STUDENT_WORKER" '([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV" 'any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_STUDENTS_KV" 'any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg id "$EXPECTED_DB" 'any(.result.bindings[];.name=="DB" and (.database_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          jq -e --arg bucket "$EXPECTED_R2" 'any(.result.bindings[];.name=="MATERIALS_R2" and (.bucket_name//.bucket)==$bucket)' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments.json"|head -n1)" = "$EXPECTED_STUDENT_VERSION"
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments.json"|head -n1)" = "$EXPECTED_BROWSER_VERSION"
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments.json"|head -n1)" = "$EXPECTED_LEGACY_VERSION"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions.json;curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/browser-versions.json
+          jq -e --arg v "$RETAIN_STUDENT_ROLLBACK_1" 'any(.result.items[];.id==$v)' /tmp/student-versions.json >/dev/null;jq -e --arg v "$RETAIN_STUDENT_ROLLBACK_2" 'any(.result.items[];.id==$v)' /tmp/student-versions.json >/dev/null;jq -e --arg v "$RETAIN_BROWSER_ROLLBACK" 'any(.result.items[];.id==$v)' /tmp/browser-versions.json >/dev/null
+          echo CP12_POSTPROMOTION_LIVE_TOPOLOGY_PASS
+
+      - name: Answer Pack matrix routes and performance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';import{performance}from'node:perf_hooks';
+          const base=String(process.env.PROD_BASE).replace(/\/$/,''),origin=new URL(base).origin,p=JSON.parse(fs.readFileSync('/tmp/cp12-production-real-persona-secrets.json','utf8'));const p95=a=>{const s=[...a].sort((x,y)=>x-y);return s[Math.max(0,Math.ceil(.95*s.length)-1)]};
+          async function login(x){const t=performance.now(),r=await fetch(`${base}/api/v2/auth/login`,{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/json'},body:JSON.stringify({username:x.username,password:x.password})});const e=performance.now()-t;let b=null;try{b=await r.json()}catch{};if(r.status!==200||b?.ok!==true)throw new Error(`login:${r.status}`);const c=(r.headers.get('set-cookie')||'').split(';')[0];if(!/^fpt_session=/.test(c))throw new Error('cookie missing');return{cookie:c,elapsed:e}}
+          async function get(path,c,redirect='manual'){const t=performance.now(),r=await fetch(`${base}${path}`,{headers:{cookie:c},redirect});return{r,elapsed:performance.now()-t}}
+          async function js(path,c){const x=await get(path,c);let b=null;try{b=await x.r.json()}catch{};return{...x,b}}
+          async function post(path,c,h={}){const t=performance.now(),r=await fetch(`${base}${path}`,{method:'POST',redirect:'manual',headers:{...(c?{cookie:c}:{}),...h}});let b=null;try{b=await r.json()}catch{};return{r,b,elapsed:performance.now()-t}}
+          const o=await login(p.ordinary),v=await login(p.vr);const home=await js('/api/v2/student/home',o.cookie),ov=await js(`/api/v2/student/views/${encodeURIComponent(p.ordinary.viewId)}/lessons`,o.cookie),ol=await js(`/api/v2/student/lessons/${encodeURIComponent(p.ordinary.lessonId)}`,o.cookie),vv=await js(`/api/v2/student/views/${encodeURIComponent(p.vr.viewId)}/lessons`,v.cookie),vl=await js(`/api/v2/student/lessons/${encodeURIComponent(p.vr.lessonId)}`,v.cookie);for(const x of [home,ov,ol,vv,vl])if(x.r.status!==200||x.b?.ok!==true)throw new Error('authenticated route failure');if((ol.b.resources||[]).some(r=>(r.presentationScopes||[]).includes('vr')))throw new Error('ordinary VR leak');
+          const rows=(vl.b.resources||[]).filter(r=>r.type==='answer-pack'&&r.protected===true&&(r.presentationScopes||[]).includes('vr'));if(rows.length<2)throw new Error(`protected VR rows:${rows.length}`);const path=`/api/v2/student/lessons/${encodeURIComponent(p.vr.lessonId)}/resources/${rows[0].index}/open`;
+          const no=await post(path,'',{'x-fpt-answer-password':p.vr.answerPassword});if(no.r.status!==401)throw new Error(`no-session:${no.r.status}`);const bad=await post(path,v.cookie,{'x-fpt-answer-password':'Zz9!'});if(bad.r.status!==403||bad.b?.error!=='ANSWER_PASSWORD_INVALID')throw new Error(`wrong-password:${bad.r.status}`);const ok=await post(path,v.cookie,{'x-fpt-answer-password':p.vr.answerPassword});if(ok.r.status!==200||ok.b?.ok!==true||!ok.b?.capabilityUrl)throw new Error(`correct-open:${ok.r.status}`);const u=new URL(ok.b.capabilityUrl),cap=u.pathname+u.search,serve=await get(cap,v.cookie);if(serve.r.status!==302)throw new Error(`serve:${serve.r.status}`);for(const [h,re] of Object.entries({'cache-control':/private.*no-store|no-store.*private/i,'x-content-type-options':/^nosniff$/i,'x-frame-options':/^DENY$/i,'referrer-policy':/^no-referrer$/i,'cross-origin-resource-policy':/^same-origin$/i,'cross-origin-opener-policy':/^same-origin$/i})){const z=serve.r.headers.get(h)||'';if(!re.test(z))throw new Error(`header ${h}:${z}`)}const loc=serve.r.headers.get('location');if(!loc)throw new Error('viewer location missing');const wu=await get(cap,o.cookie);if(![401,403].includes(wu.r.status)||wu.r.headers.get('location'))throw new Error(`wrong-user capability:${wu.r.status}`);const viewer=await fetch(new URL(loc,base),{headers:{cookie:v.cookie},redirect:'manual'});if(viewer.status>=400)throw new Error(`viewer:${viewer.status}`);
+          const loginBootstrap=[];for(let i=0;i<10;i++){const t=performance.now(),l=await login(p.ordinary),h=await js('/api/v2/student/home',l.cookie);if(h.r.status!==200)throw new Error('bootstrap sample');loginBootstrap.push(performance.now()-t)}const warmView=[];for(let i=0;i<20;i++){const x=await js(`/api/v2/student/views/${encodeURIComponent(p.ordinary.viewId)}/lessons`,o.cookie);warmView.push(x.elapsed)}const coldView=[];for(let i=0;i<10;i++){const l=await login(p.ordinary),x=await js(`/api/v2/student/views/${encodeURIComponent(p.ordinary.viewId)}/lessons`,l.cookie);coldView.push(x.elapsed)}const warmLesson=[];for(let i=0;i<20;i++){const x=await js(`/api/v2/student/lessons/${encodeURIComponent(p.ordinary.lessonId)}`,o.cookie);warmLesson.push(x.elapsed)}const coldLesson=[];for(let i=0;i<10;i++){const l=await login(p.ordinary),x=await js(`/api/v2/student/lessons/${encodeURIComponent(p.ordinary.lessonId)}`,l.cookie);coldLesson.push(x.elapsed)}const protectedWarm=[];for(let i=0;i<10;i++){const t=performance.now(),a=await post(path,v.cookie,{'x-fpt-answer-password':p.vr.answerPassword});if(a.r.status!==200||!a.b?.capabilityUrl)throw new Error('protected sample open');const q=new URL(a.b.capabilityUrl),s=await get(q.pathname+q.search,v.cookie);if(s.r.status!==302)throw new Error('protected sample serve');protectedWarm.push(performance.now()-t)}
+          const metrics={loginBootstrapP95Ms:p95(loginBootstrap),warmViewP95Ms:p95(warmView),coldViewP95Ms:p95(coldView),warmLessonP95Ms:p95(warmLesson),coldLessonP95Ms:p95(coldLesson),protectedWarmOpenP95Ms:p95(protectedWarm)},thresholds={loginBootstrapP95Ms:1500,warmViewP95Ms:300,coldViewP95Ms:800,warmLessonP95Ms:300,coldLessonP95Ms:800,protectedWarmOpenP95Ms:1500};for(const[k,max]of Object.entries(thresholds))if(!(metrics[k]<max))throw new Error(`Performance SLOW ${k}=${metrics[k].toFixed(1)} threshold<${max}`);
+          const report={marker:'CP12_POSTPROMOTION_SECURITY_PERFORMANCE_PASS',status:'PASS',readOnly:true,productionMutation:false,answerPack:{protectedVrAnswers:rows.length,noSessionStatus:no.r.status,wrongPasswordStatus:bad.r.status,correctOpenStatus:ok.r.status,serveStatus:serve.r.status,wrongUserReuseStatus:wu.r.status,viewerStatus:viewer.status,securityHeaders:true},performance:{classification:'FAST',metrics,thresholds,samples:{loginBootstrap:10,warmView:20,coldView:10,warmLesson:20,coldLesson:10,protectedWarmOpen:10}}};fs.writeFileSync('/tmp/cp12-security-performance.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
+          NODE
+          rm -f /tmp/cp12-production-real-persona-secrets.json
+
+      - name: Canonical Admin runtime smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-production-admin-view-prereq.mjs
+          jq -e '.status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
+          export SMOKE_BASE_URL="$PROD_BASE" SMOKE_PHASE='cp12-postpromotion-closure-v2' EXPECT_ADMIN_STATUS='200' SMOKE_OUTPUT='/tmp/cp12-admin-smoke.json'
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          echo CP12_POSTPROMOTION_ADMIN_RUNTIME_PASS
+
+      - name: Assemble and upload evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          jq -n --arg marker CP12_POSTPROMOTION_LIVE_CLOSURE_V2_PASS --slurpfile oracle /tmp/cp12-current-oracle.json --slurpfile persona /tmp/cp12-production-real-persona-prereq.json --slurpfile sec /tmp/cp12-security-performance.json --slurpfile admin /tmp/cp12-production-admin-view-prereq.json '{marker:$marker,status:"PASS",readOnly:true,productionMutation:false,canonicalTopology:true,browserToAdminOps:false,oracle:$oracle[0],realPersonas:$persona[0],securityPerformance:$sec[0],admin:$admin[0]}' >/tmp/cp12-postpromotion-live-closure-v2.json
+          cat /tmp/cp12-postpromotion-live-closure-v2.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-postpromotion-live-closure-v2
+          path: |
+            /tmp/cp12-postpromotion-live-closure-v2.json
+            /tmp/cp12-current-oracle.json
+            /tmp/cp12-production-real-persona-prereq.json
+            /tmp/cp12-security-performance.json
+            /tmp/cp12-production-admin-view-prereq.json
+            /tmp/cp12-admin-smoke.json
+          if-no-files-found: error
+          retention-days: 30
