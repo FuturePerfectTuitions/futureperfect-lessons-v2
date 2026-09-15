@@ -1,0 +1,81 @@
+name: Incident - Read-only Semantic Entitlement Audit
+
+on:
+  push:
+    branches:
+      - incident/entitlement-audit-2026-09-15
+    paths:
+      - scripts/incident-entitlement-semantic-audit.mjs
+      - .github/workflows/incident-entitlement-semantic-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-entitlement-semantic-audit-2026-09-15
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER: fpt-portal-v2-worker
+  AS_OF_DATE: '2026-09-15'
+  TARGET_USER: dha2806
+  TARGET_LESSON: Y4T1EE01
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax and mutation guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/incident-entitlement-semantic-audit.mjs
+          ! grep -Eiq '\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b' scripts/incident-entitlement-semantic-audit.mjs || {
+            # SQL keywords can appear only in the script's explicit rejection regex; reject actual statement literals.
+            ! grep -Eiq "d1\([^,]+,[[:space:]]*['\"](INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)" scripts/incident-entitlement-semantic-audit.mjs
+          }
+
+      - name: Existing consistency/parity audit baseline
+        shell: bash
+        env:
+          WORKER_NAME: fpt-portal-v2-worker
+          CHECKPOINT8_AS_OF_DATE: '2026-09-15'
+        run: |
+          set -Eeuo pipefail
+          node scripts/rebuild-checkpoint8-live-audit.mjs | tee /tmp/existing-parity-audit.log
+          cp /tmp/checkpoint8-live-summary.json /tmp/existing-parity-audit.json
+
+      - name: Independent semantic all-user entitlement audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +e
+          node scripts/incident-entitlement-semantic-audit.mjs | tee /tmp/semantic-audit-console.log
+          code=${PIPESTATUS[0]}
+          set -e
+          # Exit 2 means the audit successfully found semantic entitlement defects.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
+          test -s /tmp/entitlement-semantic-audit.json
+          test -s /tmp/dha2806-trace.json
+
+      - name: Upload safe read-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: entitlement-semantic-audit-2026-09-15
+          path: |
+            /tmp/existing-parity-audit.json
+            /tmp/entitlement-semantic-audit.json
+            /tmp/dha2806-trace.json
+            /tmp/semantic-audit-console.log
+          if-no-files-found: error
+          retention-days: 30
