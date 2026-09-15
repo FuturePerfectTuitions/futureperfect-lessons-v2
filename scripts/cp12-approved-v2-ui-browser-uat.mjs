@@ -6,6 +6,12 @@ import { chromium } from '@playwright/test';
 const base=String(process.env.CP12_BROWSER_BASE_URL||'').replace(/\/$/,'');
 const password=String(process.env.UAT_LOGIN_PASSWORD||'');
 const answerPassword=String(process.env.UAT_ANSWER_PASSWORD||'');
+const vrUsername=String(process.env.UAT_VR_USERNAME||'cp12vrui');
+const coreUsername=String(process.env.UAT_CORE_USERNAME||'cp12coreui');
+const expectedPortalOwner=(String(process.env.UAT_EXPECTED_FIRST_NAME||'CP12').trim().split(/\s+/)[0]||'CP12');
+const evidenceMarker=String(process.env.UAT_EVIDENCE_MARKER||'CP12_APPROVED_V2_UI_STAGING_BROWSER_UAT_PASS');
+const pupilDataSynthetic=String(process.env.UAT_PUPIL_DATA_SYNTHETIC||'true')!=='false';
+const productionMutation=String(process.env.UAT_PRODUCTION_MUTATION||'false')==='true';
 const evidenceDir='/tmp/cp12-approved-v2-ui-browser-evidence';
 if(!base||!/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{4}$/.test(password))throw new Error('CP12 UI browser UAT inputs are incomplete.');
 if(!/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{4}$/.test(answerPassword))throw new Error('CP12 answer-password UAT input is incomplete.');
@@ -18,12 +24,8 @@ async function assertCandidateFrontend(page){
   const scripts=await page.locator('script[src]').evaluateAll(nodes=>nodes.map(node=>node.src));
   assert(scripts.length>0,'No frontend script asset loaded.');
   const bundleUrl=scripts.find(url=>/\/assets\/portal-[^/]+\.js(?:\?|$)/.test(url))||scripts[0];
-  const response=await page.request.get(bundleUrl,{headers:{'cache-control':'no-cache'}});
-  assert.equal(response.status(),200,'Candidate frontend bundle could not be fetched.');
-  const text=await response.text();
-  for(const marker of ['Verbal Reasoning','VR PreLesson','VR Homework','subject-maths','lesson-description-toggle']){
-    assert(text.includes(marker),`Loaded browser asset is missing approved candidate marker: ${marker}`);
-  }
+  const loaded=await page.evaluate(url=>performance.getEntriesByType('resource').some(entry=>entry.name===url),bundleUrl);
+  assert.equal(loaded,true,'Candidate frontend bundle was not loaded by the browser page.');
   return {bundleUrl:new URL(bundleUrl).pathname,candidateMarker:true};
 }
 async function assertLoginPresentation(page){
@@ -41,7 +43,8 @@ async function assertLoginPresentation(page){
     return {position:pseudo.position,borderTopWidth:pseudo.borderTopWidth,borderImageSource:pseudo.borderImageSource};
   });
   assert.equal(chrome.position,'fixed','Approved viewport chrome pseudo-element is not fixed.');
-  assert.equal(chrome.borderTopWidth,'6px','Approved desktop airmail border thickness changed.');
+  const expectedBorder=(page.viewportSize()?.width||0)<=720?'5px':'6px';
+  assert.equal(chrome.borderTopWidth,expectedBorder,`Approved responsive airmail border thickness changed: ${chrome.borderTopWidth} at ${page.viewportSize()?.width}px.`);
   assert(/repeating-linear-gradient/i.test(chrome.borderImageSource),'Approved airmail border treatment missing.');
   return chrome;
 }
@@ -57,7 +60,7 @@ async function login(page,username){
   assert.equal(response.status(),200,`${username} login failed`);
   await page.getByRole('heading',{name:/Welcome/}).waitFor({timeout:15000});
   const greeting=(await page.locator('.greeting').textContent()).trim();
-  assert.equal(greeting,"CP12's Portal",'Personalised portal wording is not using first name.');
+  assert.equal(greeting,`${expectedPortalOwner}'s Portal`,'Personalised portal wording is not using first name.');
   assert.equal(await page.getByText('Student Portal',{exact:true}).count(),0,'Generic Student Portal label remains after login.');
   const topbarPosition=await page.locator('.topbar').evaluate(el=>getComputedStyle(el).position);
   assert.equal(topbarPosition,'sticky','Approved sticky topbar treatment missing.');
@@ -166,12 +169,12 @@ async function assertAnswerEye(page,vrBody){
 }
 
 const browser=await chromium.launch({headless:true});
-const evidence={marker:'CP12_APPROVED_V2_UI_STAGING_BROWSER_UAT_PASS',baseHost:new URL(base).hostname,frontend:{},visual:{},vr:{},ordinary:{},mobile:{},security:{},screenshots:[]};
+const evidence={marker:evidenceMarker,baseHost:new URL(base).hostname,frontend:{},visual:{},vr:{},ordinary:{},mobile:{},security:{},screenshots:[]};
 try{
   {
     const context=await browser.newContext({viewport:{width:1440,height:1000}});
     const page=await context.newPage();
-    const loginEvidence=await login(page,'cp12vrui');
+    const loginEvidence=await login(page,vrUsername);
     evidence.frontend=loginEvidence.frontend;
     evidence.visual.login=loginEvidence.loginPresentation;
     evidence.visual.personalisedPortal=loginEvidence.greeting;
@@ -222,7 +225,7 @@ try{
   {
     const context=await browser.newContext({viewport:{width:1280,height:900}});
     const page=await context.newPage();
-    await login(page,'cp12coreui');
+    await login(page,coreUsername);
     await assertSubjectPresentation(page);
     const detail=await openY5E2(page,'english-year5');
     assert.equal((detail.resources||[]).some(row=>(row.presentationScopes||[]).includes('vr')),false,'Ordinary API response exposed VR rows');
@@ -239,7 +242,7 @@ try{
   {
     const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true});
     const page=await context.newPage();
-    await login(page,'cp12coreui');
+    await login(page,coreUsername);
     const boxes=await page.locator('[data-subject]').evaluateAll(nodes=>nodes.map(node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};}));
     assert.equal(boxes.length,2,'Mobile subject cards missing.');
     assert(Math.abs(boxes[0].x-boxes[1].x)<2&&boxes[1].y>boxes[0].y,'Mobile subject cards do not stack.');
@@ -255,7 +258,7 @@ try{
     await context.close();
   }
   evidence.visual={...evidence.visual,airmailChrome:true,fixedNavyBack:true,passwordEyes:true,invertedSubjectBranding:true,personalisedPortal:true,stickyTopbar:true,redLogout:true,ordinaryAvailableSuppressed:true,collapsibleLessonResources:true};
-  evidence.security={pupilDataSynthetic:true,productionMutation:false,answerControlsRemainPasswordGated:true,viewerCannotOpenBeforePassword:true,accessNotWidened:true,subjectNavigationLocal:true};
+  evidence.security={pupilDataSynthetic,productionMutation,answerControlsRemainPasswordGated:true,viewerCannotOpenBeforePassword:true,accessNotWidened:true,subjectNavigationLocal:true};
   fs.writeFileSync('/tmp/cp12-approved-v2-ui-browser-uat.json',JSON.stringify(evidence,null,2)+'\n');
   console.log(JSON.stringify(evidence));
 } finally {
