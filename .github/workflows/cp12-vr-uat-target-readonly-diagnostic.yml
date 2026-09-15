@@ -1,0 +1,79 @@
+name: CP12 VR UAT target read-only diagnostic
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-vr-uat-target-readonly-diagnostic.yml']
+
+permissions:
+  contents: read
+
+env:
+  PROD_BASE: https://lessons.futureperfect.education
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Discover real VR persona and authoritative canonical-row target
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export CP12_PERSONA_SECRETS=/tmp/cp12-vr-diag-secrets.json
+          export CP12_PERSONA_SUMMARY=/tmp/cp12-vr-diag-summary.json
+          node scripts/cp12-production-real-persona-prereq.mjs >/dev/null
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          const clean=v=>String(v??'').trim();
+          const base=clean(process.env.PROD_BASE).replace(/\/$/,'');
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), lessonsKv=clean(process.env.EXPECTED_LESSONS_KV);
+          const persona=JSON.parse(fs.readFileSync('/tmp/cp12-vr-diag-secrets.json','utf8')).vr;
+          const digest=v=>crypto.createHash('sha256').update(String(v)).digest('hex').slice(0,16);
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}`;
+          async function kvJson(key){const r=await fetch(`${api}/storage/kv/namespaces/${lessonsKv}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`LESSONS_KV read ${r.status}:${key}`);return r.json();}
+          async function compiled(id){const record=await kvJson(`lesson:${id}`);return compileLessonDetail(record,{resourceExists:async()=>true});}
+          function vrShape(detail){const rows=(detail.resources||[]).filter(r=>(r.presentationScopes||[]).includes('vr'));return {count:rows.length,groups:[...new Set(rows.map(r=>r.presentationGroup).filter(Boolean))].sort(),preSheet:rows.some(r=>r.presentationGroup==='vr-prelesson'&&r.type==='prelesson'),preAnswer:rows.some(r=>r.presentationGroup==='vr-prelesson'&&r.type==='answer-pack'&&r.protected===true),homework:rows.some(r=>r.presentationGroup==='vr-homework'&&r.type==='homework'),homeAnswer:rows.some(r=>r.presentationGroup==='vr-homework'&&r.type==='answer-pack'&&r.protected===true)};}
+          const selectedShape=vrShape(await compiled(persona.lessonId));
+          const login=await fetch(`${base}/api/v2/auth/login`,{method:'POST',redirect:'manual',headers:{origin:new URL(base).origin,'content-type':'application/json'},body:JSON.stringify({username:persona.username,password:persona.password})});
+          if(login.status!==200)throw new Error(`VR diagnostic login failed:${login.status}`);
+          const cookie=(login.headers.get('set-cookie')||'').split(';')[0]; if(!/^fpt_session=/.test(cookie))throw new Error('VR diagnostic session cookie missing.');
+          const home=await fetch(`${base}/api/v2/student/home`,{headers:{cookie}});const hb=await home.json();if(!home.ok||hb?.ok!==true)throw new Error('VR diagnostic home failed.');
+          const views=(hb.views||[]).filter(v=>v?.lockedPreview!==true&&String(v.subject||'').toLowerCase()==='english'&&v.viewId!=='special-vr-howto');
+          const candidates=[];
+          for(const view of views){
+            const lr=await fetch(`${base}/api/v2/student/views/${encodeURIComponent(view.viewId)}/lessons`,{headers:{cookie}});const lb=await lr.json();if(!lr.ok||lb?.ok!==true)continue;
+            for(const row of (lb.lessons||[]).filter(x=>x?.locked===false&&x?.open===true)){
+              const lessonId=clean(row.lessonId);if(!lessonId)continue;
+              let shape;try{shape=vrShape(await compiled(lessonId));}catch{continue;}
+              if(shape.preSheet&&shape.preAnswer&&shape.homework&&shape.homeAnswer)candidates.push({viewId:view.viewId,lessonId,...shape});
+            }
+          }
+          candidates.sort((a,b)=>a.viewId.localeCompare(b.viewId)||a.lessonId.localeCompare(b.lessonId));
+          const report={marker:'CP12_VR_UAT_TARGET_READONLY_DIAGNOSTIC_PASS',productionMutation:false,principalDigest:digest(persona.username),selectorTarget:{viewId:persona.viewId,lessonId:persona.lessonId,...selectedShape},canonicalCandidates:candidates.slice(0,20),canonicalCandidateCount:candidates.length,secretMaterialLogged:false};
+          if(candidates.length===0)throw new Error('No authorised canonical VR-row lesson exists for selected real VR persona.');
+          fs.writeFileSync('/tmp/cp12-vr-uat-target-diagnostic.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report));
+          NODE
+          rm -f /tmp/cp12-vr-diag-secrets.json
+          echo CP12_VR_UAT_TARGET_READONLY_DIAGNOSTIC_PASS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-vr-uat-target-readonly-diagnostic
+          path: /tmp/cp12-vr-uat-target-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
