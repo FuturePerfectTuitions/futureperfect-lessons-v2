@@ -1,0 +1,47 @@
+name: CP12 generalize browser UAT source
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-generalize-browser-uat-source.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generalize exact browser UAT and validate syntax/contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/cp12-generalize-browser-uat.py
+          node --check scripts/cp12-approved-v2-ui-browser-uat.mjs
+          grep -F "const vrUsername=String(process.env.UAT_VR_USERNAME||'cp12vrui');" scripts/cp12-approved-v2-ui-browser-uat.mjs >/dev/null
+          grep -F "const coreUsername=String(process.env.UAT_CORE_USERNAME||'cp12coreui');" scripts/cp12-approved-v2-ui-browser-uat.mjs >/dev/null
+          grep -F 'UAT_EXPECTED_FIRST_NAME' scripts/cp12-approved-v2-ui-browser-uat.mjs >/dev/null
+          grep -F 'UAT_EVIDENCE_MARKER' scripts/cp12-approved-v2-ui-browser-uat.mjs >/dev/null
+          grep -F "expectedBorder=(page.viewportSize()?.width||0)<=720?'5px':'6px'" scripts/cp12-approved-v2-ui-browser-uat.mjs >/dev/null
+          grep -F "performance.getEntriesByType('resource')" scripts/cp12-approved-v2-ui-browser-uat.mjs >/dev/null
+          ! grep -F 'page.request.get(bundleUrl' scripts/cp12-approved-v2-ui-browser-uat.mjs
+          ! grep -F "login(page,'cp12vrui')" scripts/cp12-approved-v2-ui-browser-uat.mjs
+          ! grep -F "login(page,'cp12coreui')" scripts/cp12-approved-v2-ui-browser-uat.mjs
+          git diff --check
+          echo CP12_GENERALIZED_BROWSER_UAT_SOURCE_PASS
+      - name: Commit generalized browser UAT source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add scripts/cp12-approved-v2-ui-browser-uat.mjs
+          git commit -m 'CP12: make approved V2 UI browser UAT environment-driven'
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
