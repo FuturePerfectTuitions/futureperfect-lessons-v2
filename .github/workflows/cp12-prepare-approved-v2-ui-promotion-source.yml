@@ -1,0 +1,69 @@
+name: CP12 prepare approved V2 UI promotion source
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-prepare-approved-v2-ui-promotion-source.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build production workflow from previously validated promotion machinery
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin fix/cp12-resource-collapsible-ui-2026-09-14
+          git show origin/fix/cp12-resource-collapsible-ui-2026-09-14:.github/workflows/cp12-resource-ui-production-promote-v2.yml > .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/cp12-approved-v2-ui-production-promote.yml')
+          s=p.read_text()
+          replacements={
+            'name: CP12 resource UI guarded production promotion v2':'name: CP12 approved V2 UI guarded production promotion',
+            'branches: [fix/cp12-resource-collapsible-ui-2026-09-14]':'branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]',
+            "paths: ['docs/rebuild/CP12_RESOURCE_UI_PRODUCTION_TRIGGER_V2.md']":"paths: ['docs/rebuild/CP12_APPROVED_V2_UI_PRODUCTION_TRIGGER.md']",
+            'group: cp12-resource-ui-production-v2':'group: cp12-approved-v2-ui-production',
+            'OFFICIAL_CP12_SHA: 766e9dd099edfc4bfed429ca7de1aa97ac7e4509':'OFFICIAL_CP12_SHA: b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2',
+            'CANDIDATE_FRONTEND_SHA: 2337732822b82bb8b782b57aaa512b8b0c973f82':'CANDIDATE_FRONTEND_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97',
+            "PREFLIGHT_RUN_ID: '34880780031'":"PREFLIGHT_RUN_ID: '34931964265'",
+            'PREFLIGHT_HEAD_SHA: 5879d9672e41ee089601f70fcec82e2944a546bd':'PREFLIGHT_HEAD_SHA: 82b3db54047529e26e6e165f55bad7cf3dd4298a',
+            '.path==".github/workflows/cp12-resource-ui-production-preflight-v3.yml"':'.path==".github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml"',
+            'git merge-base --is-ancestor "$METADATA_COMMIT" HEAD':'git merge-base --is-ancestor "$OFFICIAL_CP12_SHA" HEAD',
+          }
+          for old,new in replacements.items():
+            if old not in s: raise SystemExit(f'missing expected promotion token: {old}')
+            s=s.replace(old,new,1)
+          old='''          node tests/cp12-collapsible-resource-sections-static.mjs\n          npm run build'''
+          new='''          node tests/cp12-collapsible-resource-sections-static.mjs\n          node tests/cp12-approved-v2-ui-parity-static.mjs\n          npm run build'''
+          if old not in s: raise SystemExit('frontend parity insertion point missing')
+          s=s.replace(old,new,1)
+          old='''          sed -e "s/'cp12vrui'/'admin'/g" -e "s/'cp12coreui'/'admin'/g" -e 's/CP12_RESOURCE_UI_STAGING_BROWSER_UAT_PASS/CP12_RESOURCE_UI_PRODUCTION_BROWSER_UAT_PASS/g' -e 's/pupilDataSynthetic:true,productionMutation:false/pupilDataSynthetic:false,productionMutation:true/g' scripts/cp12-resource-ui-browser-uat.mjs >/tmp/cp12-resource-ui-production-browser-uat.mjs\n          node /tmp/cp12-resource-ui-production-browser-uat.mjs\n          jq -e '.marker=="CP12_RESOURCE_UI_PRODUCTION_BROWSER_UAT_PASS" and .vr.outerSection==true and .vr.preLessonSubgroup==true and .vr.homeworkSubgroup==true and .vr.collapsedByDefault==true and .vr.protectedAnswers>=2 and .ordinary.vrSectionAbsent==true and .ordinary.homeworkCollapsible==true and .security.answerControlsRemainPasswordGated==true' /tmp/cp12-resource-ui-browser-uat.json >/dev/null'''
+          new='''          ADMIN_ANSWER_PASSWORD="$(printf '%s' "$ADMIN_JSON" | jq -r '.answerPassword // .answer_password // empty')"\n          ADMIN_FIRST_NAME="$(printf '%s' "$ADMIN_JSON" | jq -r '.firstName // .name // "Admin"')"\n          [[ "$ADMIN_ANSWER_PASSWORD" =~ [A-Z] ]] && [[ "$ADMIN_ANSWER_PASSWORD" =~ [a-z] ]] && [[ "$ADMIN_ANSWER_PASSWORD" =~ [0-9] ]] && [ "${#ADMIN_ANSWER_PASSWORD}" -eq 4 ]\n          echo "::add-mask::$ADMIN_ANSWER_PASSWORD"\n          export UAT_ANSWER_PASSWORD="$ADMIN_ANSWER_PASSWORD" UAT_EXPECTED_FIRST_NAME="$ADMIN_FIRST_NAME"\n          EXPECTED_JS="$(basename "$(find candidate-frontend/dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*protected-viewer*' | head -n1)")"\n          curl --fail --silent --show-error -H 'cache-control: no-cache' "$PROD_BASE/?cp12-approved-v2-ui=${GITHUB_RUN_ID}" -o /tmp/cp12-approved-v2-ui-public-index.html\n          grep -F "/assets/${EXPECTED_JS}" /tmp/cp12-approved-v2-ui-public-index.html >/dev/null\n          cp scripts/cp12-approved-v2-ui-browser-uat.mjs scripts/.cp12-production-approved-v2-ui-uat.mjs\n          python - <<'PYUAT'\n          from pathlib import Path\n          p=Path('scripts/.cp12-production-approved-v2-ui-uat.mjs')\n          s=p.read_text()\n          old_fetch="""  const response=await page.request.get(bundleUrl,{headers:{'cache-control':'no-cache'}});\\n  assert.equal(response.status(),200,'Candidate frontend bundle could not be fetched.');\\n  const text=await response.text();\\n  for(const marker of ['Verbal Reasoning','VR PreLesson','VR Homework','subject-maths','lesson-description-toggle']){\\n    assert(text.includes(marker),`Loaded browser asset is missing approved candidate marker: ${marker}`);\\n  }\\n"""\n          new_fetch="""  const loaded=await page.evaluate(url=>performance.getEntriesByType('resource').some(entry=>entry.name===url),bundleUrl);\\n  assert.equal(loaded,true,'Candidate frontend bundle was not loaded by the browser page.');\\n"""\n          if old_fetch not in s: raise SystemExit('UAT duplicate-fetch patch point missing')\n          s=s.replace(old_fetch,new_fetch,1)\n          old_border="  assert.equal(chrome.borderTopWidth,'6px','Approved desktop airmail border thickness changed.');"\n          new_border="  const expectedBorder=(page.viewportSize()?.width||0)<=720?'5px':'6px';\\n  assert.equal(chrome.borderTopWidth,expectedBorder,`Approved responsive airmail border thickness changed: ${chrome.borderTopWidth} at ${page.viewportSize()?.width}px.`);"\n          if old_border not in s: raise SystemExit('UAT responsive border patch point missing')\n          s=s.replace(old_border,new_border,1)\n          s=s.replace("login(page,'cp12vrui')","login(page,'admin')").replace("login(page,'cp12coreui')","login(page,'admin')")\n          s=s.replace("assert.equal(greeting,\"CP12's Portal\",'Personalised portal wording is not using first name.');","assert.equal(greeting,`${String(process.env.UAT_EXPECTED_FIRST_NAME||'').trim()}'s Portal`,'Personalised portal wording is not using first name.');")\n          s=s.replace('CP12_APPROVED_V2_UI_STAGING_BROWSER_UAT_PASS','CP12_APPROVED_V2_UI_PRODUCTION_BROWSER_UAT_PASS')\n          s=s.replace('pupilDataSynthetic:true,productionMutation:false','pupilDataSynthetic:false,productionMutation:true')\n          p.write_text(s)\n          PYUAT\n          node --check scripts/.cp12-production-approved-v2-ui-uat.mjs\n          node scripts/.cp12-production-approved-v2-ui-uat.mjs\n          jq -e '.marker=="CP12_APPROVED_V2_UI_PRODUCTION_BROWSER_UAT_PASS" and .visual.personalisedPortal!=null and .visual.back.position=="fixed" and .visual.answerPassword.eyeIcon==true and .vr.outerSection==true and .vr.preLessonSubgroup==true and .vr.homeworkSubgroup==true and .vr.protectedAnswers>=2 and .ordinary.vrSectionAbsent==true and .security.answerControlsRemainPasswordGated==true' /tmp/cp12-approved-v2-ui-browser-uat.json >/dev/null'''
+          if old not in s: raise SystemExit('old production browser UAT block missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          test "$(git hash-object scripts/cp12-resource-ui-production-metadata.mjs)" = c30146fb3674449ba3b972f41ef52c04554d74e1
+          test "$(git hash-object scripts/rebuild-cp12-admin-incident-auth-smoke.mjs)" = f153d85176e813d8507d03c9c59b6a5ebccfcf62
+          grep -F '598ec347ffddb126889f95d6a7753539e0ed3c97' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F "PREFLIGHT_RUN_ID: '34931964265'" .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          ! grep -F '2337732822b82bb8b782b57aaa512b8b0c973f82' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          ! grep -F '766e9dd099edfc4bfed429ca7de1aa97ac7e4509' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git diff --check
+      - name: Commit source-only promotion workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git commit -m 'CP12: prepare guarded approved V2 UI production promotion'
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
