@@ -31,8 +31,9 @@ env:
   OFFICIAL_CP12_SHA: b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2
   METADATA_COMMIT: 9793028e34b16972defa64d3e465db907868e645
   CANDIDATE_FRONTEND_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97
-  PREFLIGHT_RUN_ID: '34931964265'
-  PREFLIGHT_HEAD_SHA: 82b3db54047529e26e6e165f55bad7cf3dd4298a
+  PREFLIGHT_RUN_ID: '34934456421'
+  PREFLIGHT_HEAD_SHA: 5eb1e5f87d895adfe3855e78e8143904cd496873
+  METADATA_HELPER_BLOB: 4cda45292706942a0e9f6b3c701a71c2a55c7d91
   WRANGLER_VERSION: 4.129.0
   PLAYWRIGHT_VERSION: 1.55.0
   CP12_METADATA_BACKUP: /tmp/cp12-resource-ui-pointer-backup.json
@@ -62,6 +63,7 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$OFFICIAL_CP12_SHA"
           git merge-base --is-ancestor "$OFFICIAL_CP12_SHA" HEAD
+          test "$(git hash-object scripts/cp12-resource-ui-production-metadata.mjs)" = "$METADATA_HELPER_BLOB"
           for path in rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs; do
             test "$(git rev-parse "${METADATA_COMMIT}:${path}")" = "$(git hash-object "${path}")"
           done
@@ -74,7 +76,7 @@ jobs:
           node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
           node tests/rebuild-checkpoint6-new-student-worker.mjs
           curl --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}" -o /tmp/preflight-run.json
-          jq -e --arg sha "$PREFLIGHT_HEAD_SHA" '.status=="completed" and .conclusion=="success" and .head_sha==$sha and .path==".github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml"' /tmp/preflight-run.json >/dev/null
+          jq -e --arg sha "$PREFLIGHT_HEAD_SHA" '.status=="completed" and .conclusion=="success" and .head_sha==$sha and .path==".github/workflows/cp12-approved-v2-ui-production-preflight-v3.yml"' /tmp/preflight-run.json >/dev/null
           echo CP12_RESOURCE_UI_EXACT_SOURCE_AND_PREFLIGHT_PASS
 
       - name: Install pinned deployment and browser tools
@@ -249,6 +251,9 @@ jobs:
         shell: bash
         env:
           CP12_METADATA_ACTION: apply
+          CP12_KV_VERIFY_TIMEOUT_MS: '120000'
+          CP12_KV_VERIFY_POLL_MS: '1500'
+          CP12_KV_VERIFY_CONCURRENCY: '12'
         run: |
           set -Eeuo pipefail
           node scripts/cp12-resource-ui-production-metadata.mjs
@@ -397,32 +402,53 @@ jobs:
         env:
           CP12_METADATA_ACTION: rollback
           CP12_ROLLBACK_REASON: automatic after production promotion failure
+          CP12_KV_VERIFY_TIMEOUT_MS: '120000'
+          CP12_KV_VERIFY_POLL_MS: '1500'
+          CP12_KV_VERIFY_CONCURRENCY: '12'
         run: |
           set +e
+          OVERALL_RC=0
           echo 'CP12 approved V2 UI failure detected; restoring any changed Browser, Student and prepared pointers.'
-          if [ -n "${BROWSER_BEFORE:-}" ]; then npx wrangler@"$WRANGLER_VERSION" versions deploy "${BROWSER_BEFORE}@100%" --name "$BROWSER_WORKER" -y --message 'CP12 approved V2 UI full automatic Browser rollback'; fi
-          if [ -n "${STUDENT_BEFORE:-}" ]; then npx wrangler@"$WRANGLER_VERSION" versions deploy "${STUDENT_BEFORE}@100%" --name "$STUDENT_WORKER" -y --message 'CP12 approved V2 UI full automatic Student rollback'; fi
-          ROLLBACK_RC=0
+          if [ -n "${BROWSER_BEFORE:-}" ]; then
+            npx wrangler@"$WRANGLER_VERSION" versions deploy "${BROWSER_BEFORE}@100%" --name "$BROWSER_WORKER" -y --message 'CP12 approved V2 UI full automatic Browser rollback' || OVERALL_RC=1
+          fi
+          if [ -n "${STUDENT_BEFORE:-}" ]; then
+            npx wrangler@"$WRANGLER_VERSION" versions deploy "${STUDENT_BEFORE}@100%" --name "$STUDENT_WORKER" -y --message 'CP12 approved V2 UI full automatic Student rollback' || OVERALL_RC=1
+          fi
           if [ -s "$CP12_METADATA_BACKUP" ]; then
-            node scripts/cp12-resource-ui-production-metadata.mjs
-            ROLLBACK_RC=$?
+            node scripts/cp12-resource-ui-production-metadata.mjs || OVERALL_RC=1
           else
             echo 'No prepared-pointer backup exists; metadata publication had not started.'
           fi
           AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-rollback-deployments.json
-          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/browser-rollback-deployments.json
-          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/student-rollback-deployments.json | head -n1)" = "$STUDENT_BEFORE"
-          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/browser-rollback-deployments.json | head -n1)" = "$BROWSER_BEFORE"
-          test "$ROLLBACK_RC" = '0'
+          if [ -n "${STUDENT_BEFORE:-}" ]; then
+            curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-rollback-deployments.json || OVERALL_RC=1
+            if [ -s /tmp/student-rollback-deployments.json ]; then
+              test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/student-rollback-deployments.json | head -n1)" = "$STUDENT_BEFORE" || OVERALL_RC=1
+            else
+              OVERALL_RC=1
+            fi
+          fi
+          if [ -n "${BROWSER_BEFORE:-}" ]; then
+            curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/browser-rollback-deployments.json || OVERALL_RC=1
+            if [ -s /tmp/browser-rollback-deployments.json ]; then
+              test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/browser-rollback-deployments.json | head -n1)" = "$BROWSER_BEFORE" || OVERALL_RC=1
+            else
+              OVERALL_RC=1
+            fi
+          fi
+          if [ "$OVERALL_RC" -ne 0 ]; then
+            echo CP12_RESOURCE_UI_AUTOMATIC_FULL_ROLLBACK_FAIL >&2
+            exit 1
+          fi
           echo CP12_RESOURCE_UI_AUTOMATIC_FULL_ROLLBACK_PASS
 
       - name: Upload production promotion evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cp12-resource-ui-production-promotion-v2
+          name: cp12-approved-v2-ui-production-promotion-v3
           path: |
             /tmp/cp12-resource-ui-candidate-upload.json
             /tmp/cp12-resource-ui-pointer-backup.json
