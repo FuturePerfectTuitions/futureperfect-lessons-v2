@@ -1,0 +1,338 @@
+name: CP12 approved V2 UI guarded production promotion attempt 3
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['docs/rebuild/CP12_APPROVED_V2_UI_PRODUCTION_TRIGGER_ATTEMPT3.md']
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: cp12-approved-v2-ui-production
+  cancel-in-progress: false
+
+env:
+  PROD_BASE: https://lessons.futureperfect.education
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_DB: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_R2: fpt-materials-dev
+  EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+  EXPECTED_STUDENT_ROLLBACK: 0751feed-5aa3-40fb-854f-5847c8603872
+  EXPECTED_BROWSER_VERSION: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+  EXPECTED_LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+  STUDENT_CANDIDATE: 32467053-f348-449c-a2ae-1dae9688b446
+  BROWSER_CANDIDATE: 67880177-1328-46dd-a228-47ba245e33ae
+  OFFICIAL_CP12_SHA: b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2
+  METADATA_COMMIT: 9793028e34b16972defa64d3e465db907868e645
+  CANDIDATE_FRONTEND_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97
+  METADATA_HELPER_BLOB: 4cda45292706942a0e9f6b3c701a71c2a55c7d91
+  AUTH_SMOKE_BLOB: f153d85176e813d8507d03c9c59b6a5ebccfcf62
+  PRODUCTION_UAT_BLOB: e1780160f4635006d804f0ebd072ad73aa45fb36
+  ADMIN_PREREQ_BLOB: 932ffe5c7dbc9b1ccbfaf527b051a388d5580cee
+  WRANGLER_VERSION: 4.129.0
+  PLAYWRIGHT_VERSION: 1.55.0
+  CP12_METADATA_BACKUP: /tmp/cp12-resource-ui-pointer-backup.json
+  CP12_METADATA_REPORT: /tmp/cp12-resource-ui-metadata-report.json
+
+jobs:
+  promote:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Freeze exact source authority and parse every production harness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$OFFICIAL_CP12_SHA"
+          git merge-base --is-ancestor "$OFFICIAL_CP12_SHA" HEAD
+          test "$(git hash-object scripts/cp12-resource-ui-production-metadata.mjs)" = "$METADATA_HELPER_BLOB"
+          test "$(git hash-object scripts/rebuild-cp12-admin-incident-auth-smoke.mjs)" = "$AUTH_SMOKE_BLOB"
+          test "$(git hash-object scripts/cp12-approved-v2-ui-production-uat.mjs)" = "$PRODUCTION_UAT_BLOB"
+          test "$(git hash-object scripts/cp12-production-admin-view-prereq.mjs)" = "$ADMIN_PREREQ_BLOB"
+          for path in rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs; do
+            test "$(git rev-parse "${METADATA_COMMIT}:${path}")" = "$(git hash-object "$path")"
+          done
+          RUNTIME_DIFF="$(git diff --name-only "$OFFICIAL_CP12_SHA"...HEAD -- rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs | sort)"
+          test "$RUNTIME_DIFF" = $'rebuild/adminops/src/lib/compiler.mjs\nrebuild/shared/read-models/phase11-extension-resources.mjs\nrebuild/student/src/lib/runtime.mjs'
+          node --check scripts/cp12-resource-ui-production-metadata.mjs
+          node --check scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          node --check scripts/cp12-production-admin-view-prereq.mjs
+          node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          echo CP12_ATTEMPT3_EXACT_SOURCE_PASS
+
+      - name: Install all deployment and browser tooling before any production write
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}"
+          npx playwright install --with-deps chromium
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          echo CP12_ATTEMPT3_TOOLING_READY_PASS
+
+      - name: Checkout and rebuild exact staging-proven frontend only for asset identity
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.CANDIDATE_FRONTEND_SHA }}
+          path: candidate-frontend
+          persist-credentials: false
+
+      - name: Validate exact frontend and freeze expected bundle identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C candidate-frontend rev-parse HEAD)" = "$CANDIDATE_FRONTEND_SHA"
+          cd candidate-frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          npm run build
+          EXPECTED_JS="$(basename "$(find dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*protected-viewer*' | head -n1)")"
+          test -n "$EXPECTED_JS"
+          grep -R -F 'Verbal Reasoning' dist >/dev/null
+          grep -R -F 'data-resource-toggle' dist >/dev/null
+          echo "UAT_EXPECTED_JS=$EXPECTED_JS" >> "$GITHUB_ENV"
+          echo CP12_ATTEMPT3_FRONTEND_IDENTITY_PASS
+
+      - name: Immediate read-only production topology version binding candidate and Admin gate
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"; test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json | head -n1)"; test -n "$ZONE_ID"
+          echo "ZONE_ID=$ZONE_ID" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes-before.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes-before.json >/dev/null
+          for worker in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/settings" "${AUTH[@]}" -o "/tmp/${worker}-settings-before.json"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/${worker}-deployments-before.json"
+          done
+          jq -e --arg student "$STUDENT_WORKER" '.success==true and ([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .type=="service" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV" 'any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg id "$EXPECTED_STUDENTS_KV" 'any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg id "$EXPECTED_DB" 'any(.result.bindings[];.name=="DB" and (.database_id//.id)==$id)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e --arg bucket "$EXPECTED_R2" 'any(.result.bindings[];.name=="MATERIALS_R2" and (.bucket_name//.bucket)==$bucket)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          jq -e 'any(.result.bindings[];.name=="AUTH_SIGNING_SECRET" and .type=="secret_text") and any(.result.bindings[];.name=="ACCESS_SCOPE_SECRET" and .type=="secret_text")' "/tmp/${STUDENT_WORKER}-settings-before.json" >/dev/null
+          STUDENT_BEFORE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments-before.json" | head -n1)"
+          BROWSER_BEFORE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments-before.json" | head -n1)"
+          LEGACY_BEFORE="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments-before.json" | head -n1)"
+          test "$STUDENT_BEFORE" = "$EXPECTED_STUDENT_VERSION"
+          test "$BROWSER_BEFORE" = "$EXPECTED_BROWSER_VERSION"
+          test "$LEGACY_BEFORE" = "$EXPECTED_LEGACY_VERSION"
+          echo "STUDENT_BEFORE=$STUDENT_BEFORE" >> "$GITHUB_ENV"
+          echo "BROWSER_BEFORE=$BROWSER_BEFORE" >> "$GITHUB_ENV"
+          echo "LEGACY_BEFORE=$LEGACY_BEFORE" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions-before.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/browser-versions-before.json
+          jq -e --arg v "$EXPECTED_STUDENT_ROLLBACK" 'any(.result.items[];.id==$v)' /tmp/student-versions-before.json >/dev/null
+          jq -e --arg v "$STUDENT_BEFORE" 'any(.result.items[];.id==$v)' /tmp/student-versions-before.json >/dev/null
+          jq -e --arg v "$STUDENT_CANDIDATE" 'any(.result.items[];.id==$v)' /tmp/student-versions-before.json >/dev/null
+          jq -e --arg v "$BROWSER_BEFORE" 'any(.result.items[];.id==$v)' /tmp/browser-versions-before.json >/dev/null
+          jq -e --arg v "$BROWSER_CANDIDATE" 'any(.result.items[];.id==$v)' /tmp/browser-versions-before.json >/dev/null
+          jq '[.result.bindings[]|if ((.type//"")|test("secret";"i")) then {name,type} else . end]|sort_by(.name)' "/tmp/${STUDENT_WORKER}-settings-before.json" >/tmp/student-bindings-before.json
+          jq '[.result.bindings[]|if .type=="assets" then {name,type} else . end]|sort_by(.name)' "/tmp/${BROWSER_WORKER}-settings-before.json" >/tmp/browser-bindings-before.json
+          node scripts/cp12-production-admin-view-prereq.mjs
+          jq -e '.marker=="CP12_PRODUCTION_ADMIN_VIEW_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .ordinary.vrCount==0 and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
+          echo CP12_ATTEMPT3_IMMEDIATE_PREWRITE_GATE_PASS
+
+      - name: Begin bounded mutation and publish presentation metadata
+        shell: bash
+        env:
+          CP12_METADATA_ACTION: apply
+          CP12_KV_VERIFY_TIMEOUT_MS: '120000'
+          CP12_KV_VERIFY_POLL_MS: '1500'
+          CP12_KV_VERIFY_CONCURRENCY: '12'
+        run: |
+          set -Eeuo pipefail
+          echo 'MUTATION_STARTED=true' >> "$GITHUB_ENV"
+          node scripts/cp12-resource-ui-production-metadata.mjs
+          jq -e '.marker=="CP12_RESOURCE_UI_METADATA_APPLY_PASS" and .status=="PASS" and .onlyPresentationGroupChanged==true and .accessScopesChanged==false and .sourceLessonWrites==0 and .changedLessonScopes>300' "$CP12_METADATA_REPORT" >/dev/null
+          echo CP12_ATTEMPT3_METADATA_PASS
+
+      - name: Student zero-percent candidate smoke through real Browser
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: cp12-attempt3-student-zero-percent
+          EXPECT_ADMIN_STATUS: '200'
+          OVERRIDE_WORKER: ${{ env.STUDENT_WORKER }}
+          OVERRIDE_VERSION: ${{ env.STUDENT_CANDIDATE }}
+          SMOKE_OUTPUT: /tmp/cp12-attempt3-student-zero-smoke.json
+        run: |
+          set -Eeuo pipefail
+          npx wrangler@"$WRANGLER_VERSION" versions deploy "${STUDENT_CANDIDATE}@0%" "${STUDENT_BEFORE}@100%" --name "$STUDENT_WORKER" -y --message 'CP12 attempt3 Student zero-percent smoke'
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          echo CP12_ATTEMPT3_STUDENT_ZERO_PASS
+
+      - name: Promote Student candidate and public smoke
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: cp12-attempt3-student-promoted
+          EXPECT_ADMIN_STATUS: '200'
+          SMOKE_OUTPUT: /tmp/cp12-attempt3-student-production-smoke.json
+        run: |
+          set -Eeuo pipefail
+          npx wrangler@"$WRANGLER_VERSION" versions deploy "${STUDENT_CANDIDATE}@100%" --name "$STUDENT_WORKER" -y --message 'CP12 attempt3 presentation metadata runtime'
+          sleep 2
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          echo CP12_ATTEMPT3_STUDENT_PROMOTION_PASS
+
+      - name: Browser zero-percent candidate smoke
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+          SMOKE_BASE_URL: https://lessons.futureperfect.education
+          SMOKE_PHASE: cp12-attempt3-browser-zero-percent
+          EXPECT_ADMIN_STATUS: '200'
+          OVERRIDE_WORKER: ${{ env.BROWSER_WORKER }}
+          OVERRIDE_VERSION: ${{ env.BROWSER_CANDIDATE }}
+          SMOKE_OUTPUT: /tmp/cp12-attempt3-browser-zero-smoke.json
+        run: |
+          set -Eeuo pipefail
+          npx wrangler@"$WRANGLER_VERSION" versions deploy "${BROWSER_CANDIDATE}@0%" "${BROWSER_BEFORE}@100%" --name "$BROWSER_WORKER" -y --message 'CP12 attempt3 Browser zero-percent smoke'
+          node scripts/rebuild-cp12-admin-incident-auth-smoke.mjs
+          echo CP12_ATTEMPT3_BROWSER_ZERO_PASS
+
+      - name: Promote Browser candidate and run direct real production browser UAT
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler@"$WRANGLER_VERSION" versions deploy "${BROWSER_CANDIDATE}@100%" --name "$BROWSER_WORKER" -y --message 'CP12 attempt3 approved V2 UI'
+          sleep 2
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          ADMIN_JSON="$(curl --fail --silent --show-error "${API}/storage/kv/namespaces/${EXPECTED_STUDENTS_KV}/values/user%3Aadmin" "${AUTH[@]}")"
+          UAT_LOGIN_PASSWORD="$(printf '%s' "$ADMIN_JSON" | jq -r '.p // empty')"
+          UAT_ANSWER_PASSWORD="$(printf '%s' "$ADMIN_JSON" | jq -r '.answerPassword // .answer_password // .answerPackPassword // .answer_pack_password // .ap // empty')"
+          UAT_EXPECTED_FIRST_NAME="$(printf '%s' "$ADMIN_JSON" | jq -r '.firstName // .name // empty')"
+          valid4(){ local value="$1"; [ "${#value}" -eq 4 ] && [[ "$value" =~ [A-Z] ]] && [[ "$value" =~ [a-z] ]] && [[ "$value" =~ [0-9] ]]; }
+          valid4 "$UAT_LOGIN_PASSWORD"; valid4 "$UAT_ANSWER_PASSWORD"; test -n "$UAT_EXPECTED_FIRST_NAME"
+          echo "::add-mask::$UAT_LOGIN_PASSWORD"; echo "::add-mask::$UAT_ANSWER_PASSWORD"; echo "::add-mask::$UAT_EXPECTED_FIRST_NAME"
+          export UAT_LOGIN_PASSWORD UAT_ANSWER_PASSWORD UAT_EXPECTED_FIRST_NAME UAT_USERNAME=admin CP12_BROWSER_BASE_URL="$PROD_BASE" UAT_EXPECTED_JS
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          node scripts/cp12-approved-v2-ui-production-uat.mjs
+          jq -e '.marker=="CP12_APPROVED_V2_UI_PRODUCTION_BROWSER_UAT_PASS" and .frontend.candidateMarker==true and .visual.personalisedPortal!=null and .visual.back.position=="fixed" and .visual.answerPassword.eyeIcon==true and .vr.outerSection==true and .vr.preLessonSubgroup==true and .vr.homeworkSubgroup==true and .vr.protectedAnswers>=2 and .ordinary.vrSectionAbsent==true and .mobile.noHorizontalOverflow==true and .security.answerControlsRemainPasswordGated==true' /tmp/cp12-approved-v2-ui-production-uat.json >/dev/null
+          echo CP12_ATTEMPT3_PUBLIC_BROWSER_UAT_PASS
+
+      - name: Final topology bindings versions rollback-retention and public health gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes-after.json
+          jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes-after.json >/dev/null
+          for worker in "$LEGACY_WORKER" "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/settings" "${AUTH[@]}" -o "/tmp/${worker}-settings-after.json"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/${worker}-deployments-after.json"
+          done
+          jq '[.result.bindings[]|if ((.type//"")|test("secret";"i")) then {name,type} else . end]|sort_by(.name)' "/tmp/${STUDENT_WORKER}-settings-after.json" >/tmp/student-bindings-after.json
+          jq '[.result.bindings[]|if .type=="assets" then {name,type} else . end]|sort_by(.name)' "/tmp/${BROWSER_WORKER}-settings-after.json" >/tmp/browser-bindings-after.json
+          cmp /tmp/student-bindings-before.json /tmp/student-bindings-after.json
+          cmp /tmp/browser-bindings-before.json /tmp/browser-bindings-after.json
+          jq -e --arg student "$STUDENT_WORKER" '([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' "/tmp/${BROWSER_WORKER}-settings-after.json" >/dev/null
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${STUDENT_WORKER}-deployments-after.json" | head -n1)" = "$STUDENT_CANDIDATE"
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${BROWSER_WORKER}-deployments-after.json" | head -n1)" = "$BROWSER_CANDIDATE"
+          test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${LEGACY_WORKER}-deployments-after.json" | head -n1)" = "$LEGACY_BEFORE"
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/student-versions-after.json
+          curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/versions?deployable=true" "${AUTH[@]}" -o /tmp/browser-versions-after.json
+          jq -e --arg old "$STUDENT_BEFORE" 'any(.result.items[];.id==$old)' /tmp/student-versions-after.json >/dev/null
+          jq -e --arg old "$EXPECTED_STUDENT_ROLLBACK" 'any(.result.items[];.id==$old)' /tmp/student-versions-after.json >/dev/null
+          jq -e --arg old "$BROWSER_BEFORE" 'any(.result.items[];.id==$old)' /tmp/browser-versions-after.json >/dev/null
+          curl --fail --silent --show-error -H 'cache-control: no-cache' "$PROD_BASE/?cp12-attempt3-health=${GITHUB_RUN_ID}" -o /tmp/public-index.html
+          grep -F "/assets/${UAT_EXPECTED_JS}" /tmp/public-index.html >/dev/null
+          jq -n --arg marker CP12_APPROVED_V2_UI_PRODUCTION_PROMOTION_ATTEMPT3_PASS --arg studentBefore "$STUDENT_BEFORE" --arg studentAfter "$STUDENT_CANDIDATE" --arg browserBefore "$BROWSER_BEFORE" --arg browserAfter "$BROWSER_CANDIDATE" --arg legacy "$LEGACY_BEFORE" --slurpfile metadata "$CP12_METADATA_REPORT" --slurpfile uat /tmp/cp12-approved-v2-ui-production-uat.json '{marker:$marker,status:"PASS",canonicalTopology:true,browserToAdminOps:false,student:{before:$studentBefore,after:$studentAfter,bindingsPreserved:true},browser:{before:$browserBefore,after:$browserAfter,bindingsPreserved:true},legacy:{version:$legacy,unchanged:true},metadata:$metadata[0],browserUat:$uat[0],rollbackVersionsRetained:true}' | tee /tmp/cp12-attempt3-promotion.json
+          echo CP12_ATTEMPT3_FINAL_INVARIANTS_PASS
+
+      - name: Automatic full rollback on any attempt-3 failure
+        if: failure()
+        shell: bash
+        env:
+          CP12_METADATA_ACTION: rollback
+          CP12_ROLLBACK_REASON: automatic after CP12 production promotion attempt 3 failure
+          CP12_KV_VERIFY_TIMEOUT_MS: '120000'
+          CP12_KV_VERIFY_POLL_MS: '1500'
+          CP12_KV_VERIFY_CONCURRENCY: '12'
+        run: |
+          set +e
+          OVERALL_RC=0
+          echo 'CP12 attempt 3 failure detected; restoring Browser, Student and exact prepared pointers when changed.'
+          if [ -n "${BROWSER_BEFORE:-}" ]; then
+            npx wrangler@"$WRANGLER_VERSION" versions deploy "${BROWSER_BEFORE}@100%" --name "$BROWSER_WORKER" -y --message 'CP12 attempt3 automatic Browser rollback' || OVERALL_RC=1
+          fi
+          if [ -n "${STUDENT_BEFORE:-}" ]; then
+            npx wrangler@"$WRANGLER_VERSION" versions deploy "${STUDENT_BEFORE}@100%" --name "$STUDENT_WORKER" -y --message 'CP12 attempt3 automatic Student rollback' || OVERALL_RC=1
+          fi
+          if [ -s "$CP12_METADATA_BACKUP" ]; then
+            node scripts/cp12-resource-ui-production-metadata.mjs || OVERALL_RC=1
+          fi
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          if [ -n "${STUDENT_BEFORE:-}" ]; then
+            curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/deployments" "${AUTH[@]}" -o /tmp/student-rollback-deployments.json || OVERALL_RC=1
+            test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/student-rollback-deployments.json | head -n1)" = "$STUDENT_BEFORE" || OVERALL_RC=1
+          fi
+          if [ -n "${BROWSER_BEFORE:-}" ]; then
+            curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/browser-rollback-deployments.json || OVERALL_RC=1
+            test "$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' /tmp/browser-rollback-deployments.json | head -n1)" = "$BROWSER_BEFORE" || OVERALL_RC=1
+          fi
+          if [ "$OVERALL_RC" -ne 0 ]; then
+            echo CP12_ATTEMPT3_AUTOMATIC_FULL_ROLLBACK_FAIL >&2
+            exit 1
+          fi
+          echo CP12_ATTEMPT3_AUTOMATIC_FULL_ROLLBACK_PASS
+
+      - name: Upload attempt-3 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-approved-v2-ui-production-attempt3
+          path: |
+            /tmp/cp12-production-admin-view-prereq.json
+            /tmp/cp12-resource-ui-pointer-backup.json
+            /tmp/cp12-resource-ui-metadata-report.json
+            /tmp/cp12-attempt3-student-zero-smoke.json
+            /tmp/cp12-attempt3-student-production-smoke.json
+            /tmp/cp12-attempt3-browser-zero-smoke.json
+            /tmp/cp12-approved-v2-ui-production-uat.json
+            /tmp/cp12-approved-v2-ui-production-evidence
+            /tmp/cp12-attempt3-promotion.json
+            /tmp/student-bindings-before.json
+            /tmp/student-bindings-after.json
+            /tmp/browser-bindings-before.json
+            /tmp/browser-bindings-after.json
+          if-no-files-found: warn
+          retention-days: 30
