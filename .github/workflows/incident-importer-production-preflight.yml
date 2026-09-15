@@ -1,0 +1,87 @@
+name: Incident - Importer Production Deploy Preflight
+
+on:
+  push:
+    branches:
+      - incident/entitlement-audit-2026-09-15
+    paths:
+      - 'docs/rebuild/INCIDENT_IMPORTER_DEPLOY_PREFLIGHT_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      PROD_HOST: lessons.futureperfect.education
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: incident/entitlement-audit-2026-09-15
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Re-run recurrence regression suite
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = '9b60be6e8d5f586a1abf16fefc56e2f5f9aec774' || git merge-base --is-ancestor 9b60be6e8d5f586a1abf16fefc56e2f5f9aec774 HEAD
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          grep -Fq "clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0" worker/src/admin-lesson-release-import.js
+          grep -Fq 'WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1' worker/src/admin-lesson-release-import.js
+          ! grep -Fq 'validation.student?.vrEligible === true ? 1 : 0' worker/src/admin-lesson-release-import.js
+
+      - name: Capture sanitized live topology, versions and operational bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const legacy=process.env.LEGACY_WORKER;
+          const browser=process.env.BROWSER_WORKER;
+          const student=process.env.STUDENT_WORKER;
+          const host=process.env.PROD_HOST;
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}`);return j.result;}
+          async function settings(name){return await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hr=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hr.length!==1||String(hr[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hr[0].script!==browser)throw new Error(`Public route drift ${JSON.stringify(hr)}`);
+          const bs=await settings(browser);
+          const svc=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(svc.length!==1||svc[0].service!==student)throw new Error(`Browser service drift ${JSON.stringify(svc)}`);
+          if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Forbidden Browser Admin binding');
+          const ls=await settings(legacy);
+          const bindings=(ls.bindings||[]).map(b=>({name:b.name,type:b.type,...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='service'?{service:b.service}:{}),...(b.type==='send_email'?{}:{})}));
+          const secrets=bindings.filter(b=>/secret/i.test(b.type)).map(b=>b.name).sort();
+          const publicBindings=bindings.filter(b=>!/secret/i.test(b.type)).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+          const report={marker:'INCIDENT_IMPORTER_DEPLOY_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,topology:{route:{pattern:hr[0].pattern,script:hr[0].script},browserVersion:await active(browser),studentVersion:await active(student),browserService:{name:svc[0].name,service:svc[0].service}},legacy:{worker:legacy,activeVersion:await active(legacy),nonSecretBindings:publicBindings,secretNames:secrets}};
+          if(!report.legacy.activeVersion)throw new Error('Legacy active version unresolved');
+          fs.writeFileSync('/tmp/incident-importer-deploy-preflight.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          NODE
+
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-importer-deploy-preflight
+          path: /tmp/incident-importer-deploy-preflight.json
+          if-no-files-found: error
+          retention-days: 30
