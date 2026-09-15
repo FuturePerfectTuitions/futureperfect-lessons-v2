@@ -1,0 +1,52 @@
+name: CP12 build clean integration branch
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-build-clean-integration-branch.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build-clean-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build clean CP12 integration from immutable official head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OFFICIAL=b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2
+          PRODUCT_UI=9793028e34b16972defa64d3e465db907868e645
+          IMPORTER=c38b07c3fe73ed1806a616ed87e710a16df32dd8
+          TARGET=integration/cp12-closure-2026-09-15
+          git fetch origin rebuild/checkpoint12-stabilisation-2026-09-14 fix/cp12-import-batch-view-guard-2026-09-14
+          test "$(git rev-parse origin/rebuild/checkpoint12-stabilisation-2026-09-14)" = "$OFFICIAL"
+          test "$(git show -s --format=%s "$PRODUCT_UI")" = 'CP12: preserve canonical resource presentation groups'
+          test "$(git show -s --format=%s "$IMPORTER")" = 'CP12: reject undefined batch for ambiguous lesson views'
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git checkout -B "$TARGET" "$OFFICIAL"
+          git cherry-pick "$PRODUCT_UI"
+          git cherry-pick "$IMPORTER"
+          test "$(git diff --name-only "$OFFICIAL"...HEAD | sort)" = $'rebuild/adminops/src/lib/compiler.mjs\nrebuild/shared/read-models/phase11-extension-resources.mjs\nrebuild/student/src/lib/runtime.mjs\ntests/admin-lesson-release-import-verification.mjs\nworker/src/admin-lesson-release-import.js'
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check rebuild/shared/read-models/phase11-extension-resources.mjs
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          git diff --check "$OFFICIAL"...HEAD
+          git push --force-with-lease origin HEAD:"$TARGET"
+          echo "CP12_CLEAN_INTEGRATION_BRANCH_PASS $(git rev-parse HEAD)"
