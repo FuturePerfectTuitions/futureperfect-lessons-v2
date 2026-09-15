@@ -1,0 +1,57 @@
+name: CP12 production real-student VR lesson-shape read-only
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths:
+      - '.github/workflows/cp12-production-vr-lesson-shape-readonly.yml'
+      - 'scripts/cp12-production-vr-lesson-shape-diagnostic.mjs'
+
+permissions:
+  contents: read
+
+env:
+  PROD_BASE: https://lessons.futureperfect.education
+  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+      CP12_PERSONA_SUMMARY: /tmp/cp12-vr-shape-persona-summary.json
+      CP12_PERSONA_SECRETS: /tmp/cp12-vr-shape-persona-secrets.json
+      CP12_VR_SHAPE_OUTPUT: /tmp/cp12-production-vr-lesson-shape.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify diagnostic sources
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/cp12-production-real-persona-prereq.mjs
+          node --check scripts/cp12-production-vr-lesson-shape-diagnostic.mjs
+          echo CP12_VR_SHAPE_SOURCE_PASS
+      - name: Select real production personas read-only and inspect accessible VR lesson shapes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/cp12-production-real-persona-prereq.mjs >/tmp/persona.log
+          jq -e '.marker=="CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS" and .productionMutation==false' "$CP12_PERSONA_SUMMARY" >/dev/null
+          node scripts/cp12-production-vr-lesson-shape-diagnostic.mjs
+          jq -e '.marker=="CP12_PRODUCTION_VR_LESSON_SHAPE_DIAGNOSTIC_PASS" and .status=="PASS" and .productionMutation==false and .credentialsLogged==false and .cookiesLogged==false and .protectedReadsOnly==true' "$CP12_VR_SHAPE_OUTPUT" >/dev/null
+          rm -f "$CP12_PERSONA_SECRETS" /tmp/persona.log
+          echo CP12_PRODUCTION_VR_LESSON_SHAPE_READONLY_PASS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-production-vr-lesson-shape-readonly
+          path: |
+            /tmp/cp12-vr-shape-persona-summary.json
+            /tmp/cp12-production-vr-lesson-shape.json
+          if-no-files-found: error
+          retention-days: 30
