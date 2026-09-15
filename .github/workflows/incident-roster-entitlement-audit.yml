@@ -1,0 +1,46 @@
+name: Incident - Roster-backed All-user Entitlement Audit
+on:
+  push:
+    branches: [incident/entitlement-audit-2026-09-15]
+    paths:
+      - incident/roster-authority-2026-09-11.json
+      - scripts/incident-roster-entitlement-audit.mjs
+      - .github/workflows/incident-roster-entitlement-audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER: fpt-portal-v2-worker
+  AS_OF_DATE: '2026-09-15'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Roster-backed read-only audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/incident-roster-entitlement-audit.mjs
+          set +e
+          node scripts/incident-roster-entitlement-audit.mjs | tee /tmp/roster-entitlement-audit-console.log
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
+          test -s /tmp/roster-entitlement-audit.json
+          echo "audit_exit_code=$code"
+      - name: Upload safe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roster-backed-entitlement-audit
+          path: |
+            /tmp/roster-entitlement-audit.json
+            /tmp/roster-entitlement-audit-console.log
+          if-no-files-found: error
+          retention-days: 30
