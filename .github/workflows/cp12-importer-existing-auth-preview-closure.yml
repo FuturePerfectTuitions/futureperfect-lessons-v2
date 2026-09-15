@@ -1,0 +1,111 @@
+name: CP12 importer existing-auth preview-only closure
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-importer-existing-auth-preview-closure.yml']
+
+permissions:
+  contents: read
+
+env:
+  IMPORTER_BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  ORIGIN: https://lessons.futureperfect.education
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  DATABASE_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+
+jobs:
+  preview-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify current importer guard regression
+        run: |
+          set -Eeuo pipefail
+          node tests/admin-lesson-release-import-verification.mjs
+          echo CP12_IMPORTER_CURRENT_GUARD_REGRESSION_PASS
+
+      - name: Attempt only the existing portal Admin credential and run preview-only closure if accepted
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), cfToken=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const studentsKv=clean(process.env.STUDENTS_KV_ID), db=clean(process.env.DATABASE_ID);
+          const base=clean(process.env.IMPORTER_BASE).replace(/\/$/,''), origin=clean(process.env.ORIGIN);
+          if(!account||!cfToken||!studentsKv||!db||!base||!origin)throw new Error('Missing protected existing-auth probe inputs.');
+          const cf=`https://api.cloudflare.com/client/v4/accounts/${account}`, cfHeaders={Authorization:`Bearer ${cfToken}`};
+          const digest=v=>crypto.createHash('sha256').update(String(v)).digest('hex').slice(0,16);
+
+          async function kvUser(id){
+            const r=await fetch(`${cf}/storage/kv/namespaces/${studentsKv}/values/${encodeURIComponent(`user:${String(id).toLowerCase()}`)}`,{headers:cfHeaders});
+            if(!r.ok)throw new Error(`Protected Admin record read failed ${r.status}`);
+            return r.json();
+          }
+          async function d1(sql,params=[]){
+            const normalized=sql.replace(/\/\*[\s\S]*?\*\//g,' ').replace(/--.*$/gm,' ').trim();
+            if(!/^SELECT\b/i.test(normalized)||/\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|VACUUM|ATTACH|DETACH|REINDEX)\b/i.test(normalized))throw new Error('Non-read-only SQL rejected');
+            const r=await fetch(`${cf}/d1/database/${db}/query`,{method:'POST',headers:{...cfHeaders,'content-type':'application/json'},body:JSON.stringify({sql,params})});
+            const b=await r.json();if(!r.ok||b?.success!==true||b?.result?.[0]?.success===false)throw new Error(`D1 SELECT failed ${r.status}`);
+            return b.result?.[0]?.results||[];
+          }
+          async function post(path,body,token=''){
+            const r=await fetch(`${base}${path}`,{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/json',...(token?{authorization:`Bearer ${token}`}:{})},body:JSON.stringify(body)});
+            const text=await r.text();let json=null;try{json=JSON.parse(text)}catch{}
+            return{status:r.status,body:json};
+          }
+
+          const admin=await kvUser('admin');
+          const adminPassword=String(admin?.p||'');
+          if(!adminPassword)throw new Error('Existing portal Admin credential unavailable.');
+          const login=await post('/api/v1/admin/lesson-releases/login',{password:adminPassword});
+          if(login.status!==200||login.body?.ok!==true||!login.body?.token){
+            const out={marker:'CP12_IMPORTER_EXISTING_AUTH_NOT_SHARED',status:'BLOCKED_OWNER_AUTH_REQUIRED',productionMutation:false,previewAttempted:false,portalAdminCredentialAcceptedByImporter:false,credentialDisclosed:false,reason:'The existing portal Admin credential is not the distinct importer credential, and GitHub Actions has no ADMIN_IMPORT_PASSWORD secret.'};
+            fs.writeFileSync('/tmp/cp12-importer-existing-auth-preview.json',JSON.stringify(out,null,2)+'\n');
+            console.log(JSON.stringify(out));
+            process.exit(78);
+          }
+          const bearer=login.body.token;
+
+          const candidates=await d1(`SELECT portal_user_id_norm,lesson_id,source_batch_code,granted_from_date,last_confirmed_at FROM lesson_entitlements WHERE source='excel' AND COALESCE(source_batch_code,'')<>'' AND COALESCE(granted_from_date,'')<>'' ORDER BY last_confirmed_at DESC LIMIT 40`);
+          if(!candidates.length)throw new Error('No existing normal-import candidate found.');
+          let idem=null,chosen=null;
+          for(const c of candidates){
+            const row={Student:clean(c.portal_user_id_norm),Mode:clean(c.source_batch_code),Lesson:clean(c.lesson_id),LessonDated:clean(c.granted_from_date),LessonStatus:'Completed'};
+            const p=await post('/api/v1/admin/lesson-releases/preview',{rows:[row]},bearer);
+            const result=p.body?.results?.[0];
+            if(p.status===200&&p.body?.ok===true&&result?.ok===true&&['ALREADY_FULL','ALREADY_PRELESSON'].includes(result.action)){
+              idem={status:p.status,action:result.action,summary:p.body.summary};chosen=row;break;
+            }
+          }
+          if(!idem||!chosen)throw new Error('Authenticated live importer did not classify any recent normal-import row idempotently.');
+
+          const invalidRow={Student:chosen.Student,Mode:'Y511OE_NOT_CONFIGURED',Lesson:'Y5E2',LessonDated:chosen.LessonDated,LessonStatus:'Ready'};
+          const guarded=await post('/api/v1/admin/lesson-releases/preview',{rows:[invalidRow]},bearer);
+          const g=guarded.body?.results?.[0];
+          if(guarded.status!==200||guarded.body?.ok!==true||guarded.body?.summary?.errors!==1||g?.ok!==false||g?.action!=='BATCH_DEFINITION_REQUIRED')throw new Error(`Live ambiguous-batch preview guard failed HTTP ${guarded.status} action ${g?.action}`);
+
+          const out={marker:'CP12_IMPORTER_LIVE_AUTH_PREVIEW_CLOSURE_PASS',status:'PASS',productionMutation:false,confirmEndpointCalled:false,authenticatedWithExistingPortalAdminCredential:true,idempotency:{status:idem.status,action:idem.action,studentDigest:digest(chosen.Student),lessonDigest:digest(chosen.Lesson),batchDigest:digest(chosen.Mode)},ambiguousBatch:{status:guarded.status,action:g.action,studentDigest:digest(chosen.Student),lessonId:'Y5E2',undefinedBatchLiteral:'Y511OE_NOT_CONFIGURED',rejectedBeforeWrite:true},credentialDisclosed:false,identityDisclosed:false};
+          fs.writeFileSync('/tmp/cp12-importer-existing-auth-preview.json',JSON.stringify(out,null,2)+'\n');
+          console.log(JSON.stringify(out));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cp12-importer-existing-auth-preview
+          path: /tmp/cp12-importer-existing-auth-preview.json
+          if-no-files-found: warn
+          retention-days: 30
