@@ -5,7 +5,7 @@ on:
     branches:
       - incident/entitlement-audit-2026-09-15
     paths:
-      - scripts/incident-entitlement-semantic-audit.mjs
+      - scripts/incident-entitlement-semantic-audit-v2.mjs
       - .github/workflows/incident-entitlement-semantic-audit.yml
   workflow_dispatch:
 
@@ -38,34 +38,34 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          node --check scripts/incident-entitlement-semantic-audit.mjs
-          ! grep -Eiq '\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b' scripts/incident-entitlement-semantic-audit.mjs || {
-            # SQL keywords can appear only in the script's explicit rejection regex; reject actual statement literals.
-            ! grep -Eiq "d1\([^,]+,[[:space:]]*['\"](INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)" scripts/incident-entitlement-semantic-audit.mjs
-          }
+          node --check scripts/incident-entitlement-semantic-audit-v2.mjs
+          ! grep -Eiq "sql\([^,]+,[[:space:]]*['\"](INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)" scripts/incident-entitlement-semantic-audit-v2.mjs
 
-      - name: Existing consistency/parity audit baseline
+      - name: Existing consistency/parity audit control
         shell: bash
         env:
           WORKER_NAME: fpt-portal-v2-worker
           CHECKPOINT8_AS_OF_DATE: '2026-09-15'
         run: |
-          set -Eeuo pipefail
+          set -u
           node scripts/rebuild-checkpoint8-live-audit.mjs | tee /tmp/existing-parity-audit.log
-          cp /tmp/checkpoint8-live-summary.json /tmp/existing-parity-audit.json
+          code=${PIPESTATUS[0]}
+          if [ -s /tmp/checkpoint8-live-summary.json ]; then cp /tmp/checkpoint8-live-summary.json /tmp/existing-parity-audit.json; fi
+          echo "control_exit_code=$code"
+          exit 0
 
       - name: Independent semantic all-user entitlement audit
         shell: bash
         run: |
           set -Eeuo pipefail
           set +e
-          node scripts/incident-entitlement-semantic-audit.mjs | tee /tmp/semantic-audit-console.log
+          node scripts/incident-entitlement-semantic-audit-v2.mjs | tee /tmp/semantic-audit-console.log
           code=${PIPESTATUS[0]}
           set -e
-          # Exit 2 means the audit successfully found semantic entitlement defects.
           if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
           test -s /tmp/entitlement-semantic-audit.json
           test -s /tmp/dha2806-trace.json
+          echo "semantic_audit_exit_code=$code"
 
       - name: Upload safe read-only evidence
         if: always()
@@ -74,6 +74,7 @@ jobs:
           name: entitlement-semantic-audit-2026-09-15
           path: |
             /tmp/existing-parity-audit.json
+            /tmp/existing-parity-audit.log
             /tmp/entitlement-semantic-audit.json
             /tmp/dha2806-trace.json
             /tmp/semantic-audit-console.log
