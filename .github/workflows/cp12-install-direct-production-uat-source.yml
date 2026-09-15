@@ -1,0 +1,44 @@
+name: CP12 install direct production UAT source
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths:
+      - 'scripts/cp12-install-direct-production-uat.py'
+      - '.github/workflows/cp12-install-direct-production-uat-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and validate direct production UAT workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/cp12-install-direct-production-uat.py
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          grep -F 'node scripts/cp12-approved-v2-ui-production-uat.mjs' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          grep -F 'UAT_EXPECTED_JS="$EXPECTED_JS"' .github/workflows/cp12-approved-v2-ui-production-promote.yml >/dev/null
+          ! grep -F 'scripts/.cp12-production-approved-v2-ui-uat.mjs' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          ! grep -F 'PYUAT' .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git diff --check
+          echo CP12_DIRECT_PRODUCTION_UAT_WORKFLOW_SOURCE_PASS
+      - name: Commit validated workflow locally
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git commit -m 'CP12: run production browser UAT directly'
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
