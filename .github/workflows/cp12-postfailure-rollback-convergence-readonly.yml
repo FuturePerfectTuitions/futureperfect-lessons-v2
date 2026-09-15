@@ -1,0 +1,124 @@
+name: CP12 post-failure rollback convergence read-only
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-postfailure-rollback-convergence-readonly.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_STUDENT_VERSION: bed8e660-facb-47f3-afad-7a9996d95c5a
+      EXPECTED_BROWSER_VERSION: 412d5dd1-8f36-4e84-b5b6-eba39c670820
+      EXPECTED_LEGACY_VERSION: b1c8326e-a9cc-4150-b43b-cc572a4404c1
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      LEGACY_WORKER: fpt-portal-v2-worker
+      PROD_HOST: lessons.futureperfect.education
+      FAILED_RUN_ID: '34932834264'
+      FAILED_ARTIFACT_ID: '10382865325'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Recover exact failed-run pointer backup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${FAILED_ARTIFACT_ID}/zip" \
+            -o /tmp/failed-promotion.zip
+          mkdir -p /tmp/failed-artifact
+          unzip -q /tmp/failed-promotion.zip -d /tmp/failed-artifact
+          test -s /tmp/failed-artifact/cp12-resource-ui-pointer-backup.json
+          jq -e --arg run "$FAILED_RUN_ID" --arg kv "$EXPECTED_READ_MODELS_KV" '.marker=="CP12_RESOURCE_UI_POINTER_BACKUP" and .runId==$run and .readModelsKv==$kv and .changedScopes==369 and (.pointers|length)==369' /tmp/failed-artifact/cp12-resource-ui-pointer-backup.json >/dev/null
+          echo CP12_FAILED_RUN_BACKUP_AUTHORITY_PASS
+
+      - name: Audit all 369 live prepared pointers against exact backup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/audit-pointers.mjs <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const kv=process.env.EXPECTED_READ_MODELS_KV;
+          if(!account||!token||!kv) throw new Error('Missing Cloudflare audit environment.');
+          const backup=JSON.parse(fs.readFileSync('/tmp/failed-artifact/cp12-resource-ui-pointer-backup.json','utf8'));
+          const rows=backup.pointers;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${kv}/values/`;
+          const results=[];
+          let next=0;
+          async function worker(){
+            while(true){
+              const i=next++;
+              if(i>=rows.length) return;
+              const row=rows[i];
+              let last=''; let status=0; let err='';
+              for(let attempt=1;attempt<=3;attempt++){
+                try{
+                  const r=await fetch(base+encodeURIComponent(row.pointerKey),{headers:{Authorization:`Bearer ${token}`,'cache-control':'no-cache'}});
+                  status=r.status;
+                  last=await r.text();
+                  if(r.ok) break;
+                  err=`HTTP ${r.status}`;
+                }catch(e){err=String(e?.message||e)}
+                await new Promise(resolve=>setTimeout(resolve,1000*attempt));
+              }
+              results.push({scope:row.scope,pointerKey:row.pointerKey,status,match:last===row.pointerRaw,error:err||null,observedLength:last.length,expectedLength:row.pointerRaw.length});
+            }
+          }
+          await Promise.all(Array.from({length:16},()=>worker()));
+          results.sort((a,b)=>a.scope.localeCompare(b.scope));
+          const mismatches=results.filter(x=>!x.match);
+          const report={marker:'CP12_POSTFAILURE_POINTER_CONVERGENCE_AUDIT',status:mismatches.length?'FAIL':'PASS',total:results.length,matches:results.length-mismatches.length,mismatches:mismatches.length,firstMismatches:mismatches.slice(0,25)};
+          fs.writeFileSync('/tmp/cp12-postfailure-pointer-audit.json',JSON.stringify(report,null,2));
+          console.log(JSON.stringify(report,null,2));
+          if(mismatches.length) process.exit(2);
+          NODE
+          node /tmp/audit-pointers.mjs
+          jq -e '.marker=="CP12_POSTFAILURE_POINTER_CONVERGENCE_AUDIT" and .status=="PASS" and .total==369 and .matches==369 and .mismatches==0' /tmp/cp12-postfailure-pointer-audit.json >/dev/null
+          echo CP12_POSTFAILURE_ALL_369_POINTERS_RESTORED_PASS
+
+      - name: Audit production routes and active Worker versions read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          AUTH=(--header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json | head -n1)"; test -n "$ZONE_ID"
+          curl --fail --silent --show-error "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg pattern "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$pattern and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$pattern and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
+          for pair in "$STUDENT_WORKER:$EXPECTED_STUDENT_VERSION" "$BROWSER_WORKER:$EXPECTED_BROWSER_VERSION" "$LEGACY_WORKER:$EXPECTED_LEGACY_VERSION"; do
+            worker="${pair%%:*}"; expected="${pair#*:}"
+            curl --fail --silent --show-error "${API}/workers/scripts/${worker}/deployments" "${AUTH[@]}" -o "/tmp/${worker}-deployments.json"
+            active="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${worker}-deployments.json" | head -n1)"
+            test "$active" = "$expected"
+          done
+          jq -n --arg marker CP12_POSTFAILURE_PRODUCTION_RUNTIME_RESTORED_PASS --arg student "$EXPECTED_STUDENT_VERSION" --arg browser "$EXPECTED_BROWSER_VERSION" --arg legacy "$EXPECTED_LEGACY_VERSION" '{marker:$marker,status:"PASS",routeBrowserOnly:true,student:$student,browser:$browser,legacy:$legacy,productionMutation:false}' | tee /tmp/cp12-postfailure-runtime-audit.json
+
+      - name: Upload read-only convergence evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-postfailure-rollback-convergence-readonly
+          path: |
+            /tmp/cp12-postfailure-pointer-audit.json
+            /tmp/cp12-postfailure-runtime-audit.json
+          if-no-files-found: error
+          retention-days: 30
