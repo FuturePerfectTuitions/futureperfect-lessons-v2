@@ -1,0 +1,88 @@
+name: Rebuild Checkpoint 13 - Legacy Retirement Validation
+
+on:
+  push:
+    branches:
+      - rebuild/checkpoint13-legacy-retirement-2026-09-15
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify CP13 retirement inventory and rollback source anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f docs/rebuild/CHECKPOINT_13_LEGACY_RETIREMENT_INVENTORY.md
+          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852^{commit}
+          git merge-base --is-ancestor 78094810cf96e5555e7af3e453d9e1f95e496852 HEAD
+
+      - name: Verify first obsolete workflow retirement batch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test ! -e .github/workflows/phase9-cloudflare-apply.yml
+          test ! -e .github/workflows/phase10-cloudflare-apply.yml
+          test ! -e .github/workflows/phase10-history-cloudflare-apply.yml
+          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852:.github/workflows/phase9-cloudflare-apply.yml
+          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852:.github/workflows/phase10-cloudflare-apply.yml
+          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852:.github/workflows/phase10-history-cloudflare-apply.yml
+
+      - name: Current runtime architecture remains intact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/student/src/index.js
+          node --check rebuild/student/src/lib/runtime.mjs
+          node --check rebuild/adminops/src/index.js
+          grep -F 'd1SessionLookup: false' rebuild/student/src/lib/runtime.mjs >/dev/null
+          grep -F 'activityWrites: false' rebuild/student/src/lib/runtime.mjs >/dev/null
+          ! grep -R -F 'ADMINOPS' rebuild/browser-staging/src rebuild/browser-staging/wrangler.toml
+          grep -F "service = \"fpt-portal-v2-rebuild-student-staging\"" rebuild/browser-staging/wrangler.toml >/dev/null
+
+      - name: Retained operational dependencies remain explicit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -F 'fpt-portal-v2-worker.futureperfectlessons.workers.dev' admin-import.html >/dev/null
+          grep -F "main = \"src/index-phase23-protected-view-stability.js\"" worker/wrangler.toml >/dev/null
+          grep -F "./admin-lesson-release-import-manual-email.js" worker/src/index-phase20-change17-parent-email.js >/dev/null
+          grep -F "./phase11-session-profile.js" worker/src/index-phase11-efficient.js >/dev/null
+          grep -F "./phase11-kv-audit.js" worker/src/index-phase11-efficient.js >/dev/null
+          grep -F "./lib/compatibility.mjs" rebuild/adminops/src/index.js >/dev/null
+          grep -F "String(env?.ENVIRONMENT || '') === 'staging'" rebuild/adminops/src/index.js >/dev/null
+
+      - name: Prior rebuild regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+
+      - name: Record CP13 static validation marker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '{"marker":"REBUILD_CHECKPOINT13_STATIC_VALIDATION_PASS","sha":"%s","rollbackSource":"78094810cf96e5555e7af3e453d9e1f95e496852"}\n' "$GITHUB_SHA" > /tmp/cp13-static-validation.json
+
+      - name: Upload CP13 static validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint13-static-validation-evidence
+          path: /tmp/cp13-static-validation.json
+          retention-days: 30
