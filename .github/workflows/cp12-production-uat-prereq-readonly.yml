@@ -74,5 +74,5 @@ jobs:
         run: |
           set -Eeuo pipefail
           node scripts/cp12-production-admin-view-prereq.mjs
-          jq -e '.marker=="CP12_PRODUCTION_ADMIN_VIEW_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .ordinary.vrCount==0 and .elevenPlus.vrCount>=4 and .elevenPlus.protectedVr>=2 and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
+          jq -e '.marker=="CP12_PRODUCTION_ADMIN_VIEW_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .ordinary.y5e2Open==true and .elevenPlus.y5e2Open==true and .baselinePresentationMetadataExpectedToBeRolledBack==true and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
           echo CP12_PRODUCTION_ADMIN_VIEW_PREREQ_GATE_PASS
