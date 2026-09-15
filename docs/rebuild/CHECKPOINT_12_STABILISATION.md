@@ -1,8 +1,9 @@
 # Checkpoint 12 — Stabilisation Period
 
-**Status: OPEN — INITIAL OBSERVATION PASS; REPRESENTATIVE-CYCLE GATE NOT MET**
+**Status: CLOSED — PASS**
 
 Date opened: 2026-09-14
+Date closed: 2026-09-15
 Official rebuild baseline: `rebuild/portal-v2-performance-2026-09-13` at `79dce756dfa3e0f2510b8b5afafee87a45d85e22`
 Checkpoint branch: `rebuild/checkpoint12-stabilisation-2026-09-14`
 
@@ -183,3 +184,94 @@ Therefore after this fresh observation:
 The repeated observer evidence proves a clean point-in-time state, but it still does **not** prove sustained clean operation through genuine representative normal release/import cycles. Before CP12 can close, evidence must cover genuine representative normal release/import activity and subsequent clean operation, including the required absence of material server errors/timeouts, snapshot or catalogue-build failures, protected-view failures and resource-load failures during the representative observation window.
 
 No synthetic pupil mutation is to be created merely to satisfy that gate. CP13 remains prohibited until this evidence exists and CP12 is formally recorded CLOSED — PASS.
+
+## Final closure — 2026-09-15
+
+Subsequent CP12 work established the missing representative-cycle and post-cycle stability evidence without weakening any architecture, security, rollback or entitlement invariant.
+
+### Production promotion and presentation parity
+
+The approved V2 presentation restoration was promoted through a fail-closed sequence with automatic rollback armed. The live production state at closure is:
+
+- Browser Worker active version: `67880177-1328-46dd-a228-47ba245e33ae`;
+- Student Worker active version: `32467053-f348-449c-a2ae-1dae9688b446`;
+- legacy Worker active version unchanged: `b1c8326e-a9cc-4150-b43b-cc572a4404c1`;
+- Browser rollback version retained: `412d5dd1-8f36-4e84-b5b6-eba39c670820`;
+- Student rollback version retained: `bed8e660-facb-47f3-afad-7a9996d95c5a`;
+- canonical public topology remains Browser Worker -> Student Worker service binding only, with no Browser -> AdminOps path.
+
+The presentation-only prepared-model publication covered `372` lesson scopes. `369` scopes changed only in approved presentation metadata, with `0` access-scope changes and `0` source-lesson writes. The exact current-source production oracle then PASSed all `372` lesson scopes with `0` mismatches and the exact resource census:
+
+- total resources: `1509`;
+- core: `984`;
+- 11+: `212`;
+- VR: `313`.
+
+The full current-student audit PASSed for all `23` current students across source entitlements, prepared access, public Browser->Student routes and real browser presentation. The Ayla, Reina and Kiaan anchors remained correct, including Kiaan's retained historical access classification and VR How-To isolation. VR How-To remains manual-only with `manual=3`, `direct=0`.
+
+### Security, runtime and performance closure
+
+Current production PASSed the live Answer Pack/password/capability matrix, capability-core regression suite, representative student smoke and canonical Admin smoke. Password checks remain live on every Answer Pack open, scoped capability claims remain bound to the authorised principal/view/lesson/resource/access version, protected resources remain protected, and the canonical prepared-model Student read path remains intact.
+
+The documented production performance thresholds PASSed. Representative recorded p95 evidence included:
+
+- warm lesson p95: `72 ms` against a `<300 ms` threshold;
+- cold lesson p95: `90 ms` against a `<800 ms` threshold;
+- protected Answer Pack open p95: `590 ms` against a `<1500 ms` threshold.
+
+No material server-error, timeout, snapshot/catalogue-build, protected-view or resource-load defect remained open at closure.
+
+### Representative importer cycle and final fail-closed importer proof
+
+A genuine normal CSV lesson-release/import cycle occurred during the CP12 stability window and was followed by repeated clean production observations. The final owner-authenticated importer closure checks on 2026-09-15 then exercised the real production importer without adding any authentication bypass:
+
+1. An already-processed real FULL row was replayed through the normal manual CSV fallback. The production UI returned `ALREADY_FULL`, `succeeded: 1`, `failed: 0`, and `emailsSent: 0`. Repeating an existing grant was therefore idempotent and did not send a parent email.
+2. A lesson with more than one Portal presentation was submitted with deliberately unconfigured Mode `CP12_INVALID_BATCH`. Production validation returned `BATCH_DEFINITION_REQUIRED`, `releasable: 0`, `errors: 1`, and the UI explicitly reported: `Nothing has been changed or sent.` The ambiguous-batch guard therefore failed closed before confirm/write.
+
+The validated importer guard is present in official source and its regression suite PASSes. No debug password, bypass route or weakened authentication was introduced.
+
+### Exact official source integration
+
+The official CP12 branch integrates only the validated six product/test files relative to frozen CP12 baseline `b5e38b3768d269f632bbf4fc95e7d3f2a3fb3ba2`:
+
+- `rebuild/adminops/src/lib/compiler.mjs`
+- `rebuild/shared/read-models/phase11-extension-resources.mjs`
+- `rebuild/student/src/lib/runtime.mjs`
+- `tests/rebuild-cp12-resource-presentation-groups.mjs`
+- `tests/admin-lesson-release-import-verification.mjs`
+- `worker/src/admin-lesson-release-import.js`
+
+The clean product-source integration commits are:
+
+- `e5e88776b2d1c7757df4f4f181527d5bcadd2fa0` — approved resource-presentation source;
+- `3a1bbc274bb0e8b7b413aa072b40dbcdfeb66281` — validated importer batch-view guard.
+
+Operational/debug staging history was not merged into the official product-source integration.
+
+### Final official read-only closure observer
+
+The official branch replaced its stale pre-presentation comparator with a strictly read-only current-source closure observer. Run `34955889707` completed **SUCCESS** and produced artifact `10391553481`, `cp12-final-readonly-closure-observer-evidence`.
+
+That independent official-branch run PASSed:
+
+- current source architecture/security/importer regressions;
+- exact `372`-lesson current-source production oracle with `0` mismatches;
+- exact `1509 / 984 / 212 / 313` resource census;
+- VR How-To `manual=3`, `direct=0`;
+- authoritative production route, service binding, KV/D1/R2 and security-binding checks;
+- exact active Browser/Student/legacy versions and retained rollback versions;
+- authenticated public Admin and representative-student smoke; and
+- retained Admin importer continuity/static verification.
+
+Therefore the complete closure state is:
+
+- `initialObservationStatus = PASS`;
+- `representativeCycleGateMet = true`;
+- `finalClosureObserver = PASS`;
+- rollback anchors retained: `true`;
+- canonical Browser -> Student topology retained: `true`;
+- CP13 started: `false`.
+
+**CP12 CLOSED — PASS**
+
+Checkpoint 13 was not started as part of this closure.
