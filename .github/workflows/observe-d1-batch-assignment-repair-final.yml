@@ -1,0 +1,104 @@
+name: Observe - D1 Batch Assignment Repair Final Read-only
+
+on:
+  push:
+    branches:
+      - repair/d1-batch-assignment-reconciliation-2026-09-15
+    paths:
+      - 'docs/rebuild/D1_ASSIGNMENT_FINAL_OBSERVER_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observe-d1-batch-assignment-repair-final-2026-09-15
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  PROD_HOST: lessons.futureperfect.education
+  AS_OF_DATE: '2026-09-15'
+  AUDIT_CLOSURE_SHA: 09149b47afdda15541977cfa3c68b7ee20632564
+  EXPECTED_BROWSER_VERSION: 67880177-1328-46dd-a228-47ba245e33ae
+  EXPECTED_STUDENT_VERSION: 32467053-f348-449c-a2ae-1dae9688b446
+  EXPECTED_LEGACY_VERSION: 2eec1f4d-daec-4d40-be55-b779852ddfb2
+
+jobs:
+  final-observer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/d1-batch-assignment-reconciliation-2026-09-15
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove observer is source-only/read-only support
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$AUDIT_CLOSURE_SHA" HEAD
+          node --check scripts/audit-d1-assignment-reconciliation.mjs
+          changed="$(git diff --name-only "$AUDIT_CLOSURE_SHA"...HEAD)"
+          ! printf '%s\n' "$changed" | grep -Eq '^(worker/|rebuild/browser|rebuild/student|rebuild/adminops|admin-import\.html$)'
+
+      - name: Independent D1 roster reconciliation read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/audit-d1-assignment-reconciliation.mjs >/tmp/final-d1-audit-console.log
+          jq -e '.readOnly == true and .status == "PASS" and .counts.rosterMemberships == 25 and .counts.exactMatches == 25 and .counts.missingAssignments == 0 and .counts.dateOrWindowMismatches == 0 and .counts.extraD1Assignments == 0 and .counts.safeToAdd == 0 and .counts.rebuiltStudentAssignmentReferences == 0' /tmp/d1-assignment-reconciliation.json >/dev/null
+
+      - name: Independent entitlement semantics read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin incident/entitlement-audit-2026-09-15:refs/remotes/origin/incident/entitlement-audit-2026-09-15
+          git worktree add --detach /tmp/final-incident-audit origin/incident/entitlement-audit-2026-09-15
+          (
+            cd /tmp/final-incident-audit
+            node scripts/incident-roster-entitlement-audit.mjs >/tmp/final-roster-console.log
+            node scripts/incident-entitlement-semantic-audit-v2.mjs >/tmp/final-semantic-console.log
+          )
+          jq -e '.readOnly == true and .status == "PASS" and (.defects.assignmentProblems|length) == 0 and (.defects.entitlementRows|length) == 0 and (.defects.profileProblems|length) == 0 and (.defects.sourceBatchVrProblems|length) == 0' /tmp/roster-entitlement-audit.json >/dev/null
+          jq -e '.readOnly == true and .status == "PASS" and .semanticUnderEntitlements.currentRows == 0 and (.profileGate.currentEnglish11WithoutVrEligible|length) == 0' /tmp/entitlement-semantic-audit.json >/dev/null
+
+      - name: Authoritative topology/version observer GET-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const browser=clean(process.env.BROWSER_WORKER), student=clean(process.env.STUDENT_WORKER), legacy=clean(process.env.LEGACY_WORKER), host=clean(process.env.PROD_HOST).toLowerCase();
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(`${base}${path}`,{headers});const b=await r.json().catch(()=>null);if(!r.ok||b?.success!==true)throw new Error(`Cloudflare GET failed ${r.status}: ${path}`);return b.result;}
+          async function settings(name){return await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function activeVersion(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);const zone=(zones||[]).filter(z=>host===clean(z.name).toLowerCase()||host.endsWith(`.${clean(z.name).toLowerCase()}`)).sort((a,b)=>clean(b.name).length-clean(a.name).length)[0];if(!zone)throw new Error('Zone missing');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);const hr=(routes||[]).filter(r=>clean(r.pattern).toLowerCase().includes(host));if(hr.length!==1||clean(hr[0].pattern).toLowerCase()!==`${host}/*`||clean(hr[0].script)!==browser)throw new Error('Route drift');
+          const bs=await settings(browser);const services=(bs?.bindings||[]).filter(b=>clean(b.type)==='service');if(services.length!==1||clean(services[0].service)!==student)throw new Error('Browser service drift');if((bs?.bindings||[]).some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('Forbidden Browser Admin binding');
+          const versions={browser:await activeVersion(browser),student:await activeVersion(student),legacy:await activeVersion(legacy)};
+          if(versions.browser!==process.env.EXPECTED_BROWSER_VERSION||versions.student!==process.env.EXPECTED_STUDENT_VERSION||versions.legacy!==process.env.EXPECTED_LEGACY_VERSION)throw new Error(`Active version drift: ${JSON.stringify(versions)}`);
+          const d1=JSON.parse(fs.readFileSync('/tmp/d1-assignment-reconciliation.json','utf8'));const roster=JSON.parse(fs.readFileSync('/tmp/roster-entitlement-audit.json','utf8'));const semantic=JSON.parse(fs.readFileSync('/tmp/entitlement-semantic-audit.json','utf8'));
+          const out={marker:'D1_ASSIGNMENT_FINAL_OBSERVER_PASS',readOnly:true,assignmentCounts:d1.counts,rosterStatus:roster.status,semanticStatus:semantic.status,semanticCurrentRows:semantic.semanticUnderEntitlements.currentRows,topology:{routePattern:clean(hr[0].pattern),routeScript:clean(hr[0].script),service:{name:clean(services[0].name),service:clean(services[0].service)},versions}};
+          fs.writeFileSync('/tmp/d1-assignment-final-observer-summary.json',JSON.stringify(out,null,2)+'\n');
+          console.log(JSON.stringify({marker:out.marker,readOnly:true,exactMatches:out.assignmentCounts.exactMatches,missingAssignments:out.assignmentCounts.missingAssignments,rosterStatus:out.rosterStatus,semanticStatus:out.semanticStatus,semanticCurrentRows:out.semanticCurrentRows,topology:out.topology},null,2));
+          NODE
+
+      - name: Upload final observer evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-assignment-final-readonly-observer-2026-09-15
+          path: /tmp/d1-assignment-final-observer-summary.json
+          if-no-files-found: error
+          retention-days: 30
