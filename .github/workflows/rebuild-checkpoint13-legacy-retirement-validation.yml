@@ -29,16 +29,24 @@ jobs:
           git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852^{commit}
           git merge-base --is-ancestor 78094810cf96e5555e7af3e453d9e1f95e496852 HEAD
 
-      - name: Verify first obsolete workflow retirement batch
+      - name: Verify obsolete workflow retirement batches
         shell: bash
         run: |
           set -Eeuo pipefail
-          test ! -e .github/workflows/phase9-cloudflare-apply.yml
-          test ! -e .github/workflows/phase10-cloudflare-apply.yml
-          test ! -e .github/workflows/phase10-history-cloudflare-apply.yml
-          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852:.github/workflows/phase9-cloudflare-apply.yml
-          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852:.github/workflows/phase10-cloudflare-apply.yml
-          git cat-file -e 78094810cf96e5555e7af3e453d9e1f95e496852:.github/workflows/phase10-history-cloudflare-apply.yml
+          retired=(
+            .github/workflows/phase9-cloudflare-apply.yml
+            .github/workflows/phase10-cloudflare-apply.yml
+            .github/workflows/phase10-history-cloudflare-apply.yml
+            .github/workflows/phase11-worker-performance-deploy.yml
+            .github/workflows/phase11-session-efficiency-deploy.yml
+            .github/workflows/phase12-batch-aware-deploy.yml
+            .github/workflows/phase13-excel-sync-deploy.yml
+            .github/workflows/phase15-guarded-development-deploy.yml
+          )
+          for file in "${retired[@]}"; do
+            test ! -e "$file"
+            git cat-file -e "78094810cf96e5555e7af3e453d9e1f95e496852:$file"
+          done
 
       - name: Current runtime architecture remains intact
         shell: bash
