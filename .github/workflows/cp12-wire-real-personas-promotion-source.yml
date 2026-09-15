@@ -1,0 +1,42 @@
+name: CP12 wire real personas into guarded promotion source
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths:
+      - '.github/workflows/cp12-wire-real-personas-promotion-source.yml'
+      - 'scripts/cp12-wire-real-personas-promotion-source.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch and verify guarded promotion source only
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/cp12-wire-real-personas-promotion-source.mjs
+          node scripts/cp12-wire-real-personas-promotion-source.mjs
+          node --check scripts/cp12-production-real-persona-prereq.mjs
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          git diff --check
+          echo CP12_REAL_PERSONA_PROMOTION_SOURCE_PATCH_PASS
+      - name: Commit source-only hardening
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add .github/workflows/cp12-approved-v2-ui-production-promote.yml
+          git diff --cached --quiet && { echo 'Expected promotion source change missing.' >&2; exit 1; }
+          git commit -m 'CP12: wire real student personas into guarded production UAT'
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
+          echo CP12_REAL_PERSONA_PROMOTION_SOURCE_PUSH_PASS
