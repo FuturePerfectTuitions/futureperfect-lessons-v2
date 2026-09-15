@@ -36,12 +36,15 @@ jobs:
           git checkout -B "$TARGET" "$OFFICIAL"
           git cherry-pick "$PRODUCT_UI"
           git cherry-pick "$IMPORTER"
-          test "$(git diff --name-only "$OFFICIAL"...HEAD | sort)" = $'rebuild/adminops/src/lib/compiler.mjs\nrebuild/shared/read-models/phase11-extension-resources.mjs\nrebuild/student/src/lib/runtime.mjs\ntests/admin-lesson-release-import-verification.mjs\nworker/src/admin-lesson-release-import.js'
+          EXPECTED=$'rebuild/adminops/src/lib/compiler.mjs\nrebuild/shared/read-models/phase11-extension-resources.mjs\nrebuild/student/src/lib/runtime.mjs\ntests/admin-lesson-release-import-verification.mjs\ntests/rebuild-cp12-resource-presentation-groups.mjs\nworker/src/admin-lesson-release-import.js'
+          test "$(git diff --name-only "$OFFICIAL"...HEAD | sort)" = "$EXPECTED"
+          test "$(git rev-list --count "$OFFICIAL"..HEAD)" = '2'
           node --check rebuild/adminops/src/lib/compiler.mjs
           node --check rebuild/shared/read-models/phase11-extension-resources.mjs
           node --check rebuild/student/src/lib/runtime.mjs
           node --check worker/src/admin-lesson-release-import.js
           node tests/rebuild-cp12-resource-presentation-groups.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
           node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
           node tests/rebuild-checkpoint11-scope-compatibility.mjs
           node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
