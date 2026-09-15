@@ -12,7 +12,6 @@ permissions:
 
 env:
   PROD_BASE: https://lessons.futureperfect.education
-  EXPECTED_STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
 
 jobs:
   diagnose:
@@ -21,7 +20,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      STUDENTS_KV_ID: ${{ env.EXPECTED_STUDENTS_KV }}
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
       CP12_PERSONA_SUMMARY: /tmp/cp12-vr-shape-persona-summary.json
       CP12_PERSONA_SECRETS: /tmp/cp12-vr-shape-persona-secrets.json
       CP12_VR_SHAPE_OUTPUT: /tmp/cp12-production-vr-lesson-shape.json
