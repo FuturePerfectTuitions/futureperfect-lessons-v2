@@ -1,0 +1,65 @@
+name: Audit - D1 Batch Assignment Reconciliation
+
+on:
+  push:
+    branches:
+      - audit/d1-batch-assignment-reconciliation-2026-09-15
+    paths:
+      - '.github/workflows/audit-d1-batch-assignment-reconciliation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-d1-batch-assignment-reconciliation-2026-09-15
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER: fpt-portal-v2-worker
+  CLEAN_BASELINE_SHA: 4559416ca66c39b2523a2f41405533f2857356b8
+
+jobs:
+  reconcile-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/d1-batch-assignment-reconciliation-2026-09-15
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove audit branch lineage and read-only implementation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$CLEAN_BASELINE_SHA" HEAD
+          node --check scripts/audit-d1-assignment-reconciliation.mjs
+          grep -Fq "Read-only SQL guard" scripts/audit-d1-assignment-reconciliation.mjs
+          ! grep -Eiq "method:[[:space:]]*['\"](PUT|PATCH|DELETE)['\"]" scripts/audit-d1-assignment-reconciliation.mjs
+          ! grep -Eiq "wrangler[[:space:]]+(deploy|rollback|d1 execute|kv|r2)" scripts/audit-d1-assignment-reconciliation.mjs
+
+      - name: Run production reconciliation read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/audit-d1-assignment-reconciliation.mjs
+          jq -e '.marker == "D1_BATCH_ASSIGNMENT_RECONCILIATION_READ_ONLY" and .status == "PASS" and .readOnly == true' /tmp/d1-assignment-reconciliation.json >/dev/null
+          jq '.counts' /tmp/d1-assignment-reconciliation.json
+
+      - name: Upload reconciliation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-batch-assignment-reconciliation-2026-09-15
+          path: |
+            /tmp/d1-assignment-reconciliation.json
+            /tmp/d1-assignment-reconciliation.md
+            /tmp/d1-assignment-source-refs.txt
+            /tmp/d1-assignment-current-rows.json
+          if-no-files-found: error
+          retention-days: 30
