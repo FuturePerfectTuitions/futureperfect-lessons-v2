@@ -1,4 +1,4 @@
-name: CP12 canonical VR selector source-lock update
+name: CP12 canonical VR selector source-lock render
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
     paths: ['.github/workflows/cp12-canonical-vr-selector-source-lock-update.yml']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  update-locks:
+  render-locks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -19,52 +19,42 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify exact harness change and atomically update guarded source locks
+      - name: Verify and render exact guarded workflow patch
         shell: bash
         run: |
           set -Eeuo pipefail
           test "${GITHUB_REF_NAME}" = 'fix/cp12-approved-v2-ui-staging-2026-09-14'
           test "$(git hash-object scripts/cp12-production-real-persona-prereq.mjs)" = '2c1ace8dadd683511e6876e6aaed44b1e7ed5fb1'
           node --check scripts/cp12-production-real-persona-prereq.mjs
+          mkdir -p /tmp/cp12-canonical-vr-patched/.github/workflows
+          cp .github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml /tmp/cp12-canonical-vr-patched/.github/workflows/
+          cp .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml /tmp/cp12-canonical-vr-patched/.github/workflows/
           python - <<'PY'
           from pathlib import Path
+          root=Path('/tmp/cp12-canonical-vr-patched/.github/workflows')
           old='REAL_PERSONA_PREREQ_BLOB: f40ff86ba9fd1d618f918d1b5f012121ec70196e'
           new='REAL_PERSONA_PREREQ_BLOB: 2c1ace8dadd683511e6876e6aaed44b1e7ed5fb1'
-          for name in [
-              '.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml',
-              '.github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml']:
-              p=Path(name); s=p.read_text()
+          for name in ['cp12-approved-v2-ui-production-preflight-v2.yml','cp12-approved-v2-ui-production-promote-attempt3.yml']:
+              p=root/name; s=p.read_text()
               if s.count(old)!=1: raise SystemExit(f'exact old persona blob lock not found once in {name}')
               p.write_text(s.replace(old,new))
-
-          p=Path('.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml')
-          s=p.read_text()
-          oldrev='PREFLIGHT_REVISION: lessons-kv-fix-2026-09-15'
-          newrev='PREFLIGHT_REVISION: canonical-vr-persona-2026-09-15'
+          p=root/'cp12-approved-v2-ui-production-preflight-v2.yml'; s=p.read_text()
+          oldrev='PREFLIGHT_REVISION: lessons-kv-fix-2026-09-15'; newrev='PREFLIGHT_REVISION: canonical-vr-persona-2026-09-15'
           if s.count(oldrev)!=1: raise SystemExit('preflight revision authority mismatch')
           s=s.replace(oldrev,newrev)
           oldassert='.vr.preparedVrAccess==true and .distinctPrincipals==true'
           newassert='.vr.preparedVrAccess==true and .vr.canonicalVrRows==true and .vr.canonicalVrResourceCount>=4 and .distinctPrincipals==true'
           if s.count(oldassert)!=1: raise SystemExit('preflight persona assertion authority mismatch')
           p.write_text(s.replace(oldassert,newassert))
-
-          p=Path('.github/workflows/cp12-attempt3-source-validate.yml')
-          s=p.read_text()
-          anchor='          node --check scripts/cp12-production-admin-view-prereq.mjs\n'
-          addition=anchor+'          node --check scripts/cp12-production-real-persona-prereq.mjs\n'
-          if s.count(anchor)!=1 or 'node --check scripts/cp12-production-real-persona-prereq.mjs' in s:
-              raise SystemExit('source-validator insertion authority mismatch')
-          p.write_text(s.replace(anchor,addition))
           PY
-          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml'); YAML.load_file('.github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml'); YAML.load_file('.github/workflows/cp12-attempt3-source-validate.yml')"
-          grep -F 'REAL_PERSONA_PREREQ_BLOB: 2c1ace8dadd683511e6876e6aaed44b1e7ed5fb1' .github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml >/dev/null
-          grep -F 'REAL_PERSONA_PREREQ_BLOB: 2c1ace8dadd683511e6876e6aaed44b1e7ed5fb1' .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
-          grep -F '.vr.canonicalVrRows==true and .vr.canonicalVrResourceCount>=4' .github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml >/dev/null
-          git diff --check
-          git config user.name 'FuturePerfectTuitions'
-          git config user.email 'futureperfectlessons@gmail.com'
-          git add .github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml .github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml .github/workflows/cp12-attempt3-source-validate.yml
-          git diff --cached --quiet && { echo 'Expected guarded source-lock changes were not produced.' >&2; exit 1; }
-          git commit -m 'CP12: lock source-canonical VR persona prerequisite'
-          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
-          echo CP12_CANONICAL_VR_SELECTOR_SOURCE_LOCK_UPDATE_PASS
+          ruby -e "require 'yaml'; YAML.load_file('/tmp/cp12-canonical-vr-patched/.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml'); YAML.load_file('/tmp/cp12-canonical-vr-patched/.github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml')"
+          grep -F 'REAL_PERSONA_PREREQ_BLOB: 2c1ace8dadd683511e6876e6aaed44b1e7ed5fb1' /tmp/cp12-canonical-vr-patched/.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml >/dev/null
+          grep -F 'REAL_PERSONA_PREREQ_BLOB: 2c1ace8dadd683511e6876e6aaed44b1e7ed5fb1' /tmp/cp12-canonical-vr-patched/.github/workflows/cp12-approved-v2-ui-production-promote-attempt3.yml >/dev/null
+          grep -F '.vr.canonicalVrRows==true and .vr.canonicalVrResourceCount>=4' /tmp/cp12-canonical-vr-patched/.github/workflows/cp12-approved-v2-ui-production-preflight-v2.yml >/dev/null
+          echo CP12_CANONICAL_VR_SELECTOR_SOURCE_LOCK_RENDER_PASS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp12-canonical-vr-patched-workflows
+          path: /tmp/cp12-canonical-vr-patched/.github/workflows/
+          if-no-files-found: error
+          retention-days: 7
