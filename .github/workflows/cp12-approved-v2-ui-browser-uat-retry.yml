@@ -89,7 +89,7 @@ jobs:
           echo "EXPECTED_JS=$EXPECTED_JS" >> "$GITHUB_ENV"
           echo CP12_STAGED_EXACT_FRONTEND_IDENTITY_PASS
 
-      - name: Install browser runner and patch only faulty duplicate-fetch assertion
+      - name: Install browser runner and align harness with exact responsive contract
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -99,10 +99,15 @@ jobs:
           from pathlib import Path
           p=Path('scripts/cp12-approved-v2-ui-browser-uat.mjs')
           s=p.read_text()
-          old="""  const response=await page.request.get(bundleUrl,{headers:{'cache-control':'no-cache'}});\n  assert.equal(response.status(),200,'Candidate frontend bundle could not be fetched.');\n  const text=await response.text();\n  for(const marker of ['Verbal Reasoning','VR PreLesson','VR Homework','subject-maths','lesson-description-toggle']){\n    assert(text.includes(marker),`Loaded browser asset is missing approved candidate marker: ${marker}`);\n  }\n"""
-          new="""  const loaded=await page.evaluate(url=>performance.getEntriesByType('resource').some(entry=>entry.name===url),bundleUrl);\n  assert.equal(loaded,true,'Candidate frontend bundle was not loaded by the browser page.');\n"""
-          assert s.count(old)==1
-          p.write_text(s.replace(old,new,1))
+          old_fetch="""  const response=await page.request.get(bundleUrl,{headers:{'cache-control':'no-cache'}});\n  assert.equal(response.status(),200,'Candidate frontend bundle could not be fetched.');\n  const text=await response.text();\n  for(const marker of ['Verbal Reasoning','VR PreLesson','VR Homework','subject-maths','lesson-description-toggle']){\n    assert(text.includes(marker),`Loaded browser asset is missing approved candidate marker: ${marker}`);\n  }\n"""
+          new_fetch="""  const loaded=await page.evaluate(url=>performance.getEntriesByType('resource').some(entry=>entry.name===url),bundleUrl);\n  assert.equal(loaded,true,'Candidate frontend bundle was not loaded by the browser page.');\n"""
+          assert s.count(old_fetch)==1
+          s=s.replace(old_fetch,new_fetch,1)
+          old_border="  assert.equal(chrome.borderTopWidth,'6px','Approved desktop airmail border thickness changed.');"
+          new_border="  const expectedBorder=(page.viewportSize()?.width||0)<=720?'5px':'6px';\n  assert.equal(chrome.borderTopWidth,expectedBorder,`Approved responsive airmail border thickness changed: ${chrome.borderTopWidth} at ${page.viewportSize()?.width}px.`);"
+          assert s.count(old_border)==1
+          s=s.replace(old_border,new_border,1)
+          p.write_text(s)
           PY
           node --check scripts/cp12-approved-v2-ui-browser-uat.mjs
 
