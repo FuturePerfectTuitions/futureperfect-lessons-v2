@@ -42,6 +42,10 @@ jobs:
             .github/workflows/phase12-batch-aware-deploy.yml
             .github/workflows/phase13-excel-sync-deploy.yml
             .github/workflows/phase15-guarded-development-deploy.yml
+            .github/workflows/phase11-cloudflare-apply.yml
+            .github/workflows/phase11-quota-safe-worker-deploy.yml
+            .github/workflows/phase11-change7-owner-homeworks-apply.yml
+            .github/workflows/phase11-vr-howto-real-catalogue-apply.yml
           )
           for file in "${retired[@]}"; do
             test ! -e "$file"
@@ -71,6 +75,8 @@ jobs:
           grep -F "./phase11-kv-audit.js" worker/src/index-phase11-efficient.js >/dev/null
           grep -F "./lib/compatibility.mjs" rebuild/adminops/src/index.js >/dev/null
           grep -F "String(env?.ENVIRONMENT || '') === 'staging'" rebuild/adminops/src/index.js >/dev/null
+          test -f .github/workflows/change17-parent-email-production-deploy.yml
+          test -f .github/workflows/y411-admin-import-production-deploy.yml
 
       - name: Prior rebuild regressions
         shell: bash
