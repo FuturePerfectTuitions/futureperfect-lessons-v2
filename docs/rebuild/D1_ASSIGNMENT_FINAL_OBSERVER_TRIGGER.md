@@ -11,3 +11,5 @@ The observer must perform no production mutation. It must independently confirm:
 - rebuilt Student still has no direct `student_batch_assignments` dependency;
 - public Browser → Student topology is unchanged;
 - Browser, Student and retained legacy active versions are unchanged from the successful repair evidence.
+
+Exact closure-head rerun requested after `D1_BATCH_ASSIGNMENT_PRODUCTION_REPAIR_FINAL_CLOSURE.md` was added. The branch is not considered formally closed unless this observer succeeds on that same final commit.
