@@ -1,0 +1,45 @@
+name: CP12 production UAT real-persona autodiscovery source patch
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths:
+      - '.github/workflows/cp12-uat-autodiscovery-source-patch.yml'
+      - 'scripts/cp12-uat-autodiscover-real-personas-patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch production UAT source for real-persona autodiscovery
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m py_compile scripts/cp12-uat-autodiscover-real-personas-patch.py
+          python scripts/cp12-uat-autodiscover-real-personas-patch.py
+          node --check scripts/cp12-production-real-persona-prereq.mjs
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          grep -F 'CP12_PRODUCTION_UAT_REAL_PERSONA_AUTODISCOVERY_PASS' scripts/cp12-approved-v2-ui-production-uat.mjs >/dev/null
+          git diff --check
+          echo CP12_PRODUCTION_UAT_AUTODISCOVERY_SOURCE_VALIDATION_PASS
+      - name: Commit UAT source-only hardening
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add scripts/cp12-approved-v2-ui-production-uat.mjs
+          git diff --cached --quiet && { echo 'Expected UAT source change missing.' >&2; exit 1; }
+          git commit -m 'CP12: autodiscover real student personas in production UAT'
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
+          echo CP12_PRODUCTION_UAT_AUTODISCOVERY_SOURCE_PUSH_PASS
