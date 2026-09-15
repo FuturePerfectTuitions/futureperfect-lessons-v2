@@ -158,7 +158,7 @@ jobs:
           export STUDENTS_KV_ID="$EXPECTED_STUDENTS_KV"
           export READ_MODELS_KV_ID="$EXPECTED_READ_MODELS_KV"
           node scripts/cp12-production-admin-view-prereq.mjs
-          jq -e '.marker=="CP12_PRODUCTION_ADMIN_VIEW_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .ordinary.vrCount==0 and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
+          jq -e '.marker=="CP12_PRODUCTION_ADMIN_VIEW_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .ordinary.observedBaselineVrCount==0 and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
           node scripts/cp12-production-real-persona-prereq.mjs
           jq -e '.marker=="CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .ordinary.lessonOpen==true and .ordinary.year5ElevenPlusAbsent==true and .vr.lessonOpen==true and .vr.vrHowToVisible==true and .vr.accessProven==true and .vr.preparedCoreAccess==true and .vr.preparedVrAccess==true and .distinctPrincipals==true and .secretMaterialLogged==false' /tmp/cp12-production-real-persona-prereq.json >/dev/null
           rm -f /tmp/cp12-production-real-persona-secrets.json
