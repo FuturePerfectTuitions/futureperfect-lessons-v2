@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  PROD_BASE: https://lessons.futureperfect.education
   PROD_HOST: lessons.futureperfect.education
   LEGACY_WORKER: fpt-portal-v2-worker
   BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
@@ -32,6 +33,10 @@ env:
   CANDIDATE_FRONTEND_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97
   STAGING_UAT_RUN_ID: '34931616127'
   STAGING_UAT_HEAD_SHA: 54ad981cbc2ce049d4703df0a369f75b8860b7e2
+  METADATA_HELPER_BLOB: 4cda45292706942a0e9f6b3c701a71c2a55c7d91
+  PRODUCTION_UAT_BLOB: 29018020587e01115187538997308b290b082f33
+  REAL_PERSONA_PREREQ_BLOB: a701a5540a6fbfc4e0b52f0bd21f414baf6de5d0
+  ADMIN_PREREQ_BLOB: 932ffe5c7dbc9b1ccbfaf527b051a388d5580cee
 
 jobs:
   preflight:
@@ -59,13 +64,22 @@ jobs:
           for path in rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs tests/rebuild-cp12-resource-presentation-groups.mjs; do
             test "$(git rev-parse "${METADATA_COMMIT}:${path}")" = "$(git hash-object "$path")"
           done
+          test "$(git hash-object scripts/cp12-resource-ui-production-metadata.mjs)" = "$METADATA_HELPER_BLOB"
+          test "$(git hash-object scripts/cp12-approved-v2-ui-production-uat.mjs)" = "$PRODUCTION_UAT_BLOB"
+          test "$(git hash-object scripts/cp12-production-real-persona-prereq.mjs)" = "$REAL_PERSONA_PREREQ_BLOB"
+          test "$(git hash-object scripts/cp12-production-admin-view-prereq.mjs)" = "$ADMIN_PREREQ_BLOB"
           RUNTIME_DIFF="$(git diff --name-only "$OFFICIAL_CP12_SHA"...HEAD -- rebuild/adminops/src/lib/compiler.mjs rebuild/shared/read-models/phase11-extension-resources.mjs rebuild/student/src/lib/runtime.mjs | sort)"
           test "$RUNTIME_DIFF" = $'rebuild/adminops/src/lib/compiler.mjs\nrebuild/shared/read-models/phase11-extension-resources.mjs\nrebuild/student/src/lib/runtime.mjs'
+          node --check scripts/cp12-resource-ui-production-metadata.mjs
+          node --check scripts/cp12-approved-v2-ui-production-uat.mjs
+          node --check scripts/cp12-production-real-persona-prereq.mjs
+          node --check scripts/cp12-production-admin-view-prereq.mjs
           node tests/rebuild-cp12-resource-presentation-groups.mjs
           node tests/rebuild-checkpoint8-phase11-resource-parity.mjs
           node tests/rebuild-checkpoint11-scope-compatibility.mjs
           node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
           node tests/rebuild-checkpoint6-new-student-worker.mjs
+          echo CP12_APPROVED_V2_UI_EXACT_SOURCE_PASS
 
       - name: Require successful exact staging UAT
         shell: bash
@@ -137,6 +151,19 @@ jobs:
           printf '%s\n' "$LEGACY_ACTIVE" >/tmp/legacy-before-version
           echo CP12_APPROVED_V2_UI_FRESH_PRODUCTION_TOPOLOGY_PASS
 
+      - name: Fresh admin credential shape and real-persona prerequisite
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export STUDENTS_KV_ID="$EXPECTED_STUDENTS_KV"
+          export READ_MODELS_KV_ID="$EXPECTED_READ_MODELS_KV"
+          node scripts/cp12-production-admin-view-prereq.mjs
+          jq -e '.marker=="CP12_PRODUCTION_ADMIN_VIEW_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .admin.requiredViews==true and .ordinary.vrCount==0 and .credentialDisclosed==false' /tmp/cp12-production-admin-view-prereq.json >/dev/null
+          node scripts/cp12-production-real-persona-prereq.mjs
+          jq -e '.marker=="CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .ordinary.lessonOpen==true and .ordinary.year5ElevenPlusAbsent==true and .vr.lessonOpen==true and .vr.vrHowToVisible==true and .vr.accessProven==true and .vr.preparedCoreAccess==true and .vr.preparedVrAccess==true and .distinctPrincipals==true and .secretMaterialLogged==false' /tmp/cp12-production-real-persona-prereq.json >/dev/null
+          rm -f /tmp/cp12-production-real-persona-secrets.json
+          echo CP12_APPROVED_V2_UI_FRESH_PERSONA_GATE_PASS
+
       - name: Prove prepared lesson migration remains presentation metadata only
         shell: bash
         run: |
@@ -164,7 +191,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          jq -n --arg marker CP12_APPROVED_V2_UI_PRODUCTION_PREFLIGHT_V2_PASS --arg official "$OFFICIAL_CP12_SHA" --arg frontend "$CANDIDATE_FRONTEND_SHA" --arg metadata "$METADATA_COMMIT" --arg stagingRun "$STAGING_UAT_RUN_ID" --arg student "$(cat /tmp/student-before-version)" --arg browser "$(cat /tmp/browser-before-version)" --arg legacy "$(cat /tmp/legacy-before-version)" --arg rollback "$EXPECTED_STUDENT_ROLLBACK" --slurpfile prepared /tmp/cp12-approved-v2-ui-prepared-preflight.json '{marker:$marker,status:"PASS",readOnly:true,officialCp12Sha:$official,frontendSha:$frontend,metadataCommit:$metadata,stagingUatRun:$stagingRun,studentVersion:$student,browserVersion:$browser,legacyVersion:$legacy,studentRollbackRetained:$rollback,canonicalTopology:true,browserToAdminOps:false,prepared:$prepared[0]}' >/tmp/cp12-approved-v2-ui-production-preflight-v2.json
+          jq -n --arg marker CP12_APPROVED_V2_UI_PRODUCTION_PREFLIGHT_V2_PASS --arg official "$OFFICIAL_CP12_SHA" --arg frontend "$CANDIDATE_FRONTEND_SHA" --arg metadata "$METADATA_COMMIT" --arg stagingRun "$STAGING_UAT_RUN_ID" --arg student "$(cat /tmp/student-before-version)" --arg browser "$(cat /tmp/browser-before-version)" --arg legacy "$(cat /tmp/legacy-before-version)" --arg rollback "$EXPECTED_STUDENT_ROLLBACK" --slurpfile prepared /tmp/cp12-approved-v2-ui-prepared-preflight.json --slurpfile personas /tmp/cp12-production-real-persona-prereq.json '{marker:$marker,status:"PASS",readOnly:true,officialCp12Sha:$official,frontendSha:$frontend,metadataCommit:$metadata,stagingUatRun:$stagingRun,studentVersion:$student,browserVersion:$browser,legacyVersion:$legacy,studentRollbackRetained:$rollback,canonicalTopology:true,browserToAdminOps:false,prepared:$prepared[0],realPersonas:$personas[0]}' >/tmp/cp12-approved-v2-ui-production-preflight-v2.json
           cat /tmp/cp12-approved-v2-ui-production-preflight-v2.json
 
       - name: Upload evidence
@@ -174,6 +201,8 @@ jobs:
           path: |
             /tmp/cp12-approved-v2-ui-production-preflight-v2.json
             /tmp/cp12-approved-v2-ui-prepared-preflight.json
+            /tmp/cp12-production-admin-view-prereq.json
+            /tmp/cp12-production-real-persona-prereq.json
             /tmp/student-binding-signature.json
             /tmp/browser-binding-signature.json
           if-no-files-found: error
