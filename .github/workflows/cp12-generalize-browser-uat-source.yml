@@ -45,3 +45,5 @@ jobs:
           git add scripts/cp12-approved-v2-ui-browser-uat.mjs
           git commit -m 'CP12: make approved V2 UI browser UAT environment-driven'
           git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
+
+# rerun after second-promotion rollback convergence audit
