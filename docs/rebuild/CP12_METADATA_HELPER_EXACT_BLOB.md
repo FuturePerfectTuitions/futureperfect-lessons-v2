@@ -1,0 +1,1 @@
+Validated metadata helper authority: `scripts/cp12-resource-ui-production-metadata.mjs` must match blob `c30146fb3674449ba3b972f41ef52c04554d74e1` from the previously validated CP12 resource UI promotion branch. This document itself does not authorize production mutation.
