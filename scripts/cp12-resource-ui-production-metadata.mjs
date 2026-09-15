@@ -17,54 +17,234 @@ if (action !== 'rollback' && !lessonsKv) throw new Error('LESSONS_KV is required
 
 const api = `https://api.cloudflare.com/client/v4/accounts/${account}`;
 const authHeaders = { Authorization: `Bearer ${token}` };
-const allowedGroups = new Set(['core-prelesson','core-homework','core-other','core-cumulative','core-answers','elevenplus-prelesson','elevenplus-homework','elevenplus-cumulative','elevenplus-answers','vr-prelesson','vr-homework','vr-answers']);
+const allowedGroups = new Set([
+  'core-prelesson','core-homework','core-other','core-cumulative','core-answers',
+  'elevenplus-prelesson','elevenplus-homework','elevenplus-cumulative','elevenplus-answers',
+  'vr-prelesson','vr-homework','vr-answers'
+]);
 
-async function cf(path, options = {}) {
-  const response = await fetch(`${api}${path}`, { ...options, headers:{ ...authHeaders, ...(options.headers || {}) } });
-  const text = await response.text(); let body=null; try { body=JSON.parse(text); } catch {}
-  if (!response.ok || body?.success !== true) throw new Error(`Cloudflare request failed ${response.status}: ${path}`);
-  return body;
-}
-async function kvRaw(ns,key){const r=await fetch(`${api}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:authHeaders});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read failed ${r.status}:${key}`);return r.text();}
-async function kvJson(ns,key){const text=await kvRaw(ns,key);return text==null?null:JSON.parse(text);}
-async function listKeys(ns,prefix){let cursor='',out=[];do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const body=await cf(`/storage/kv/namespaces/${ns}/keys?${q}`);out.push(...(body.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(body.result_info?.cursor);}while(cursor);return out;}
-async function bulkPut(ns,rows){if(!rows.length)return;const body=await cf(`/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(rows)});if((body.result?.unsuccessful_keys||[]).length)throw new Error('KV bulk put incomplete.');}
-function stripGroups(value){if(Array.isArray(value))return value.map(stripGroups);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>k!=='presentationGroup').map(([k,v])=>[k,stripGroups(v)]));return value;}
-
-if(action==='rollback'){
-  const backup=JSON.parse(fs.readFileSync(backupPath,'utf8'));
-  if(backup?.marker!=='CP12_RESOURCE_UI_POINTER_BACKUP'||!Array.isArray(backup.rows)||!backup.rows.length)throw new Error('Valid metadata backup is required for rollback.');
-  await bulkPut(readKv,backup.rows.map(row=>({key:row.pointerKey,value:JSON.stringify(row.pointer)})));
-  for(const row of backup.rows){const now=await kvJson(readKv,row.pointerKey);if(stableStringify(now)!==stableStringify(row.pointer))throw new Error(`Rollback verification failed:${row.pointerKey}`);}
-  const report={marker:'CP12_RESOURCE_UI_METADATA_ROLLBACK_PASS',status:'PASS',restoredPointers:backup.rows.length,reason:clean(process.env.CP12_ROLLBACK_REASON),sourceLessonWrites:0,accessScopesChanged:false};fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));process.exit(0);
+async function request(path, options = {}) {
+  const response = await fetch(api + path, {
+    ...options,
+    headers: { ...authHeaders, ...(options.headers || {}) }
+  });
+  const text = await response.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch {}
+  return { response, text, body };
 }
 
-const pointerKeys=(await listKeys(readKv,'rm:v1:scope:lesson_3A')).filter(k=>k.endsWith(':current')).sort();
-if(pointerKeys.length<250)throw new Error(`Unexpected lesson pointer count:${pointerKeys.length}`);
-const backup={marker:'CP12_RESOURCE_UI_POINTER_BACKUP',createdAt:new Date().toISOString(),runId,rows:[]};
-const writes=[];let changed=0,unchanged=0,resources=0,grouped=0;
-for(const pointerKey of pointerKeys){
-  const pointer=await kvJson(readKv,pointerKey),scope=clean(pointer?.scope),version=clean(pointer?.current?.version);
-  if(!scope.startsWith('lesson:')||!version)throw new Error(`Invalid pointer:${pointerKey}`);
-  backup.rows.push({pointerKey,pointer});
-  const lessonId=scope.slice(7),record=await kvJson(lessonsKv,`lesson:${lessonId}`);if(!record)throw new Error(`Missing lesson source:${lessonId}`);
-  const candidate=await compileLessonDetail(record,{resourceExists:async()=>true});
-  const currentKey=versionKey(scope,version),currentEnv=await kvJson(readKv,currentKey);if(!currentEnv?.payload)throw new Error(`Missing current envelope:${scope}`);
-  if(stableStringify(stripGroups(currentEnv.payload))!==stableStringify(stripGroups(candidate)))throw new Error(`Non-presentationGroup drift:${scope}`);
-  for(const resource of candidate.resources||[]){resources++;const group=clean(resource.presentationGroup);if(!allowedGroups.has(group))throw new Error(`Missing or invalid presentationGroup:${scope}:${group}`);grouped++;}
-  if(stableStringify(currentEnv.payload)===stableStringify(candidate)){unchanged++;continue;}
-  changed++;
-  const payloadText=stableStringify(candidate),payloadSha=await sha256Hex(payloadText);
-  const newVersion=`cp12-ui-${runId}-${lessonId}-${payloadSha.slice(0,12)}`;
-  const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version:newVersion,sha256:payloadSha,payload:candidate};
-  const envelopeText=stableStringify(envelope),envelopeSha=await sha256Hex(envelopeText);
-  const previous=pointer.current;
-  const nextPointer={...pointer,current:{version:newVersion,sha256:payloadSha,envelopeSha256:envelopeSha},previous,updatedAt:new Date().toISOString()};
-  writes.push({key:versionKey(scope,newVersion),value:envelopeText},{key:pointerKey(scope),value:stableStringify(nextPointer)});
+async function kvText(namespace, key) {
+  const out = await request(`/storage/kv/namespaces/${namespace}/values/${encodeURIComponent(key)}`);
+  if (out.response.status === 404) return null;
+  if (!out.response.ok) throw new Error(`KV read HTTP ${out.response.status}: ${key}`);
+  return out.text;
 }
-if(resources!==grouped)throw new Error('Not all resources have presentationGroup.');
-if(changed<300)throw new Error(`Unexpectedly small metadata migration:${changed}`);
-fs.writeFileSync(backupPath,JSON.stringify(backup,null,2)+'\n');
-for(let i=0;i<writes.length;i+=500)await bulkPut(readKv,writes.slice(i,i+500));
-for(const row of backup.rows){const now=await kvJson(readKv,row.pointerKey);if(!now?.current?.version)throw new Error(`Published pointer missing:${row.pointerKey}`);}
-const report={marker:'CP12_RESOURCE_UI_METADATA_APPLY_PASS',status:'PASS',publishedLessonScopes:pointerKeys.length,changedLessonScopes:changed,unchangedLessonScopes:unchanged,totalResources:resources,groupedResources:grouped,onlyPresentationGroupChanged:true,accessScopesChanged:false,sourceLessonWrites:0,backupPath};fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
+
+async function kvJson(namespace, key) {
+  const text = await kvText(namespace, key);
+  if (text == null) return null;
+  return JSON.parse(text);
+}
+
+async function listKeys(namespace, prefix) {
+  let cursor = '';
+  const keys = [];
+  do {
+    const query = new URLSearchParams({ prefix, limit: '1000' });
+    if (cursor) query.set('cursor', cursor);
+    const out = await request(`/storage/kv/namespaces/${namespace}/keys?${query}`);
+    if (!out.response.ok || out.body?.success !== true) throw new Error(`KV list failed: ${prefix}`);
+    keys.push(...(out.body.result || []).map(row => clean(row?.name)).filter(Boolean));
+    cursor = clean(out.body.result_info?.cursor);
+  } while (cursor);
+  return keys;
+}
+
+async function bulkPut(items) {
+  for (let offset = 0; offset < items.length; offset += 40) {
+    const batch = items.slice(offset, offset + 40);
+    const out = await request(`/storage/kv/namespaces/${readKv}/bulk`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(batch)
+    });
+    if (!out.response.ok || out.body?.success !== true || (out.body?.result?.unsuccessful_keys || []).length) {
+      throw new Error(`KV bulk write failed HTTP ${out.response.status} at offset ${offset}`);
+    }
+  }
+}
+
+function stripPresentationGroup(value) {
+  if (Array.isArray(value)) return value.map(stripPresentationGroup);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== 'presentationGroup')
+        .map(([key, nested]) => [key, stripPresentationGroup(nested)])
+    );
+  }
+  return value;
+}
+
+async function restoreBackup(reason = 'requested') {
+  if (!fs.existsSync(backupPath)) throw new Error(`Metadata rollback backup is missing: ${backupPath}`);
+  const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+  if (clean(backup?.readModelsKv) !== readKv || !Array.isArray(backup?.pointers) || !backup.pointers.length) {
+    throw new Error('Metadata rollback backup is malformed or targets a different namespace.');
+  }
+  await bulkPut(backup.pointers.map(row => ({ key: row.pointerKey, value: row.pointerRaw })));
+  for (const row of backup.pointers) {
+    const observed = await kvText(readKv, row.pointerKey);
+    if (observed !== row.pointerRaw) throw new Error(`Metadata rollback verification failed: ${row.scope}`);
+  }
+  const report = {
+    marker: 'CP12_RESOURCE_UI_METADATA_ROLLBACK_PASS', status: 'PASS', reason,
+    restoredPointers: backup.pointers.length, sourceRunId: clean(backup.runId), candidateEnvelopesDeleted: false
+  };
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
+  console.log(JSON.stringify(report));
+}
+
+if (action === 'rollback') {
+  await restoreBackup(clean(process.env.CP12_ROLLBACK_REASON || 'requested'));
+  process.exit(0);
+}
+
+const pointerKeys = (await listKeys(readKv, 'rm:v1:scope:lesson_3A'))
+  .filter(key => key.endsWith(':current'))
+  .sort();
+if (pointerKeys.length < 250) throw new Error(`Unexpected published lesson pointer count: ${pointerKeys.length}`);
+
+const candidates = [];
+const allPointers = [];
+let totalResources = 0;
+let coreResources = 0;
+let elevenPlusResources = 0;
+let vrResources = 0;
+let unchangedScopes = 0;
+
+for (const pointerKey of pointerKeys) {
+  const pointerRaw = await kvText(readKv, pointerKey);
+  if (!pointerRaw) throw new Error(`Published pointer disappeared: ${pointerKey}`);
+  const pointer = JSON.parse(pointerRaw);
+  const scope = clean(pointer?.scope);
+  const oldVersion = clean(pointer?.current?.version);
+  if (!scope.startsWith('lesson:') || !oldVersion) throw new Error(`Invalid published lesson pointer: ${pointerKey}`);
+  const lessonId = scope.slice('lesson:'.length);
+  const record = await kvJson(lessonsKv, `lesson:${lessonId}`);
+  if (!record?.lessonId || clean(record.lessonId) !== lessonId) throw new Error(`Missing canonical source for published scope: ${scope}`);
+  const candidate = await compileLessonDetail(record, { resourceExists: async () => true });
+  const oldEnvelopeRaw = await kvText(readKv, versionKey(scope, oldVersion));
+  if (!oldEnvelopeRaw) throw new Error(`Current prepared envelope missing: ${scope}`);
+  const oldEnvelope = JSON.parse(oldEnvelopeRaw);
+  if (!oldEnvelope?.payload) throw new Error(`Current prepared payload missing: ${scope}`);
+  if (stableStringify(stripPresentationGroup(oldEnvelope.payload)) !== stableStringify(stripPresentationGroup(candidate))) {
+    throw new Error(`NON_PRESENTATION_GROUP_DRIFT:${scope}`);
+  }
+  for (const resource of candidate.resources || []) {
+    const group = clean(resource?.presentationGroup);
+    if (!group || !allowedGroups.has(group)) throw new Error(`Missing/unknown presentationGroup:${scope}:${clean(resource?.objectKey)}:${group}`);
+    totalResources += 1;
+    if (group.startsWith('vr-')) vrResources += 1;
+    else if (group.startsWith('elevenplus-')) elevenPlusResources += 1;
+    else if (group.startsWith('core-')) coreResources += 1;
+  }
+  allPointers.push({ scope, pointerKey, pointerRaw, oldCurrent: pointer.current });
+  if (stableStringify(oldEnvelope.payload) === stableStringify(candidate)) {
+    unchangedScopes += 1;
+    continue;
+  }
+  const payloadText = stableStringify(candidate);
+  const payloadSha256 = await sha256Hex(payloadText);
+  const newVersion = `cp12-ui-${payloadSha256.slice(0, 16)}-${runId}`;
+  const envelope = {
+    schemaVersion: 1,
+    kind: 'prepared-read-model-envelope',
+    scope,
+    version: newVersion,
+    sha256: payloadSha256,
+    payload: candidate
+  };
+  const envelopeText = stableStringify(envelope);
+  const envelopeSha256 = await sha256Hex(envelopeText);
+  candidates.push({
+    scope, pointerKey, pointerRaw, oldCurrent: pointer.current,
+    newVersion, payloadSha256, envelopeSha256, envelopeText,
+    envelopeKey: versionKey(scope, newVersion)
+  });
+}
+
+if (!candidates.length) throw new Error('No published prepared lesson requires presentation metadata migration.');
+if (coreResources === 0 || elevenPlusResources === 0 || vrResources === 0) {
+  throw new Error(`Expected all presentation families: core=${coreResources}, elevenPlus=${elevenPlusResources}, vr=${vrResources}`);
+}
+
+const backup = {
+  marker: 'CP12_RESOURCE_UI_POINTER_BACKUP',
+  runId,
+  readModelsKv: readKv,
+  publishedScopes: pointerKeys.length,
+  changedScopes: candidates.length,
+  pointers: candidates.map(row => ({ scope: row.scope, pointerKey: row.pointerKey, pointerRaw: row.pointerRaw }))
+};
+fs.writeFileSync(backupPath, JSON.stringify(backup, null, 2) + '\n');
+
+if (action === 'preview') {
+  const report = {
+    marker: 'CP12_RESOURCE_UI_METADATA_PREVIEW_PASS', status: 'PASS', writes: false,
+    publishedLessonScopes: pointerKeys.length, changedLessonScopes: candidates.length,
+    unchangedLessonScopes: unchangedScopes, totalResources, coreResources, elevenPlusResources, vrResources,
+    nonPresentationGroupDiffs: 0
+  };
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
+  console.log(JSON.stringify(report));
+  process.exit(0);
+}
+
+if (action !== 'apply') throw new Error(`Unsupported CP12_METADATA_ACTION: ${action}`);
+
+let pointerMutationStarted = false;
+try {
+  await bulkPut(candidates.map(row => ({ key: row.envelopeKey, value: row.envelopeText })));
+  for (const row of candidates) {
+    const observed = await kvText(readKv, row.envelopeKey);
+    if (observed !== row.envelopeText) throw new Error(`Candidate envelope verification failed: ${row.scope}`);
+  }
+
+  const updatedAt = new Date().toISOString();
+  pointerMutationStarted = true;
+  await bulkPut(candidates.map(row => ({
+    key: row.pointerKey,
+    value: stableStringify({
+      schemaVersion: 1,
+      kind: 'prepared-read-model-pointer',
+      scope: row.scope,
+      current: { version: row.newVersion, sha256: row.payloadSha256, envelopeSha256: row.envelopeSha256 },
+      previous: row.oldCurrent || null,
+      updatedAt
+    })
+  })));
+  for (const row of candidates) {
+    const pointer = await kvJson(readKv, row.pointerKey);
+    if (clean(pointer?.current?.version) !== row.newVersion || clean(pointer?.current?.sha256) !== row.payloadSha256) {
+      throw new Error(`Published pointer verification failed: ${row.scope}`);
+    }
+  }
+
+  const report = {
+    marker: 'CP12_RESOURCE_UI_METADATA_APPLY_PASS', status: 'PASS', writes: true,
+    publishedLessonScopes: pointerKeys.length, changedLessonScopes: candidates.length,
+    unchangedLessonScopes: unchangedScopes, totalResources, coreResources, elevenPlusResources, vrResources,
+    onlyPresentationGroupChanged: true, accessScopesChanged: false, globalScopeChanged: false,
+    sourceLessonWrites: 0, pointerBackup: backupPath
+  };
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
+  console.log(JSON.stringify(report));
+} catch (error) {
+  if (pointerMutationStarted) {
+    try { await restoreBackup(`automatic after apply failure: ${error?.message || error}`); }
+    catch (rollbackError) { console.error('METADATA_ROLLBACK_FAILED', rollbackError); }
+  }
+  throw error;
+}
