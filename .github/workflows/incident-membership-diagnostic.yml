@@ -1,0 +1,33 @@
+name: Incident - Membership Diagnostic
+on:
+  push:
+    branches: [incident/entitlement-audit-2026-09-15]
+    paths: [.github/workflows/incident-membership-diagnostic.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Run read-only diagnostic
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/incident-membership-diagnostic.mjs
+          node scripts/incident-membership-diagnostic.mjs | tee /tmp/membership-console.log
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: membership-diagnostic
+          path: |
+            /tmp/membership-diagnostic.json
+            /tmp/membership-console.log
+          if-no-files-found: error
+          retention-days: 30
