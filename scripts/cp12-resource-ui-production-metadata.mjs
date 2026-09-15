@@ -11,9 +11,15 @@ const readKv = clean(process.env.EXPECTED_READ_MODELS_KV);
 const runId = clean(process.env.GITHUB_RUN_ID || 'manual');
 const backupPath = clean(process.env.CP12_METADATA_BACKUP || '/tmp/cp12-resource-ui-pointer-backup.json');
 const reportPath = clean(process.env.CP12_METADATA_REPORT || '/tmp/cp12-resource-ui-metadata-report.json');
+const verifyTimeoutMs = Number(process.env.CP12_KV_VERIFY_TIMEOUT_MS || 120000);
+const verifyPollMs = Number(process.env.CP12_KV_VERIFY_POLL_MS || 1500);
+const verifyConcurrency = Number(process.env.CP12_KV_VERIFY_CONCURRENCY || 12);
 
 if (!account || !token || !readKv) throw new Error('Cloudflare account/token and READ_MODELS_KV are required.');
 if (action !== 'rollback' && !lessonsKv) throw new Error('LESSONS_KV is required for metadata publication.');
+if (!Number.isFinite(verifyTimeoutMs) || verifyTimeoutMs < 1000) throw new Error('CP12_KV_VERIFY_TIMEOUT_MS must be at least 1000ms.');
+if (!Number.isFinite(verifyPollMs) || verifyPollMs < 100) throw new Error('CP12_KV_VERIFY_POLL_MS must be at least 100ms.');
+if (!Number.isInteger(verifyConcurrency) || verifyConcurrency < 1 || verifyConcurrency > 32) throw new Error('CP12_KV_VERIFY_CONCURRENCY must be an integer from 1 to 32.');
 
 const api = `https://api.cloudflare.com/client/v4/accounts/${account}`;
 const authHeaders = { Authorization: `Bearer ${token}` };
@@ -22,6 +28,8 @@ const allowedGroups = new Set([
   'elevenplus-prelesson','elevenplus-homework','elevenplus-cumulative','elevenplus-answers',
   'vr-prelesson','vr-homework','vr-answers'
 ]);
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function request(path, options = {}) {
   const response = await fetch(api + path, {
@@ -75,6 +83,43 @@ async function bulkPut(items) {
   }
 }
 
+async function verifyKvRowsEventually(rows, label) {
+  let pending = rows.map(row => ({ ...row }));
+  const deadline = Date.now() + verifyTimeoutMs;
+  let attempts = 0;
+  let lastReadError = null;
+  while (pending.length) {
+    attempts += 1;
+    const next = [];
+    let index = 0;
+    async function worker() {
+      while (true) {
+        const i = index++;
+        if (i >= pending.length) return;
+        const row = pending[i];
+        try {
+          const observed = await kvText(readKv, row.key);
+          if (observed !== row.expected) next.push(row);
+        } catch (error) {
+          lastReadError = error;
+          next.push(row);
+        }
+      }
+    }
+    const workers = Math.min(verifyConcurrency, Math.max(1, pending.length));
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+    if (!next.length) return { attempts, verified: rows.length };
+    if (Date.now() >= deadline) {
+      const first = next.slice(0, 8).map(row => row.scope || row.key).join(',');
+      const suffix = lastReadError ? ` lastReadError=${lastReadError?.message || lastReadError}` : '';
+      throw new Error(`${label} verification timed out after ${attempts} passes; pending=${next.length}; first=${first}${suffix}`);
+    }
+    pending = next;
+    await sleep(verifyPollMs);
+  }
+  return { attempts, verified: rows.length };
+}
+
 function stripPresentationGroup(value) {
   if (Array.isArray(value)) return value.map(stripPresentationGroup);
   if (value && typeof value === 'object') {
@@ -94,13 +139,14 @@ async function restoreBackup(reason = 'requested') {
     throw new Error('Metadata rollback backup is malformed or targets a different namespace.');
   }
   await bulkPut(backup.pointers.map(row => ({ key: row.pointerKey, value: row.pointerRaw })));
-  for (const row of backup.pointers) {
-    const observed = await kvText(readKv, row.pointerKey);
-    if (observed !== row.pointerRaw) throw new Error(`Metadata rollback verification failed: ${row.scope}`);
-  }
+  const verification = await verifyKvRowsEventually(
+    backup.pointers.map(row => ({ scope: row.scope, key: row.pointerKey, expected: row.pointerRaw })),
+    'Metadata rollback'
+  );
   const report = {
     marker: 'CP12_RESOURCE_UI_METADATA_ROLLBACK_PASS', status: 'PASS', reason,
-    restoredPointers: backup.pointers.length, sourceRunId: clean(backup.runId), candidateEnvelopesDeleted: false
+    restoredPointers: backup.pointers.length, sourceRunId: clean(backup.runId), candidateEnvelopesDeleted: false,
+    verification
   };
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report));
@@ -207,37 +253,34 @@ if (action !== 'apply') throw new Error(`Unsupported CP12_METADATA_ACTION: ${act
 let pointerMutationStarted = false;
 try {
   await bulkPut(candidates.map(row => ({ key: row.envelopeKey, value: row.envelopeText })));
-  for (const row of candidates) {
-    const observed = await kvText(readKv, row.envelopeKey);
-    if (observed !== row.envelopeText) throw new Error(`Candidate envelope verification failed: ${row.scope}`);
-  }
+  const envelopeVerification = await verifyKvRowsEventually(
+    candidates.map(row => ({ scope: row.scope, key: row.envelopeKey, expected: row.envelopeText })),
+    'Candidate envelope'
+  );
 
   const updatedAt = new Date().toISOString();
-  pointerMutationStarted = true;
-  await bulkPut(candidates.map(row => ({
-    key: row.pointerKey,
-    value: stableStringify({
+  const pointerUpdates = candidates.map(row => {
+    const value = stableStringify({
       schemaVersion: 1,
       kind: 'prepared-read-model-pointer',
       scope: row.scope,
       current: { version: row.newVersion, sha256: row.payloadSha256, envelopeSha256: row.envelopeSha256 },
       previous: row.oldCurrent || null,
       updatedAt
-    })
-  })));
-  for (const row of candidates) {
-    const pointer = await kvJson(readKv, row.pointerKey);
-    if (clean(pointer?.current?.version) !== row.newVersion || clean(pointer?.current?.sha256) !== row.payloadSha256) {
-      throw new Error(`Published pointer verification failed: ${row.scope}`);
-    }
-  }
+    });
+    return { scope: row.scope, key: row.pointerKey, expected: value };
+  });
+  pointerMutationStarted = true;
+  await bulkPut(pointerUpdates.map(row => ({ key: row.key, value: row.expected })));
+  const pointerVerification = await verifyKvRowsEventually(pointerUpdates, 'Published pointer');
 
   const report = {
     marker: 'CP12_RESOURCE_UI_METADATA_APPLY_PASS', status: 'PASS', writes: true,
     publishedLessonScopes: pointerKeys.length, changedLessonScopes: candidates.length,
     unchangedLessonScopes: unchangedScopes, totalResources, coreResources, elevenPlusResources, vrResources,
     onlyPresentationGroupChanged: true, accessScopesChanged: false, globalScopeChanged: false,
-    sourceLessonWrites: 0, pointerBackup: backupPath
+    sourceLessonWrites: 0, pointerBackup: backupPath,
+    verification: { envelope: envelopeVerification, pointer: pointerVerification }
   };
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report));
