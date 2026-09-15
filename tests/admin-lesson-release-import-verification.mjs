@@ -26,6 +26,10 @@ class MemoryDB {
       ['Y511OE', {
         batch_key:'Y511OE', subject:'english', school_year:5,
         stream:'11plus', maths_level:null, active_from:'2026-09-01', active_to:null
+      }],
+      ['Y5FE', {
+        batch_key:'Y5FE', subject:'english', school_year:5,
+        stream:'normal', maths_level:null, active_from:'2026-09-01', active_to:null
       }]
     ]);
   }
@@ -99,7 +103,7 @@ class MemoryDB {
         portal_user_id_norm:user,
         lesson_id:lesson,
         core_access:1,
-        vr_access:existing.vr_access ?? vrAccess,
+        vr_access:(Number(existing.vr_access || 0) === 1 || Number(vrAccess || 0) === 1) ? 1 : 0,
         source:'excel',
         first_granted_at:existing.first_granted_at ?? firstGrantedAt,
         last_confirmed_at:lastConfirmedAt,
@@ -342,6 +346,47 @@ assert.equal(
     r => r.portal_user_id_norm === 'pre0101' && r.lesson_id === 'Y5E2'
   ),
   false
+);
+
+// Regression: authoritative English 11+ batch semantics must grant VR even when
+// a stale student profile still says vrEligible=false. A later normal-English
+// confirmation must never revoke previously earned VR access.
+const staleProfileEnglish11 = {
+  ...onlineReady,
+  Name:'Synthetic Full',
+  Student:'Full0202',
+  Lesson:'Y5T1EE01 Descriptive Writing Settings and Atmosphere',
+  LessonStatus:'Completed',
+  Mode:'Y511OE'
+};
+const staleProfileEnglish11Confirm = await call(
+  '/api/v1/admin/lesson-releases/confirm',
+  { rows:[staleProfileEnglish11] },
+  token
+);
+assert.equal(staleProfileEnglish11Confirm.response.status, 200);
+assert.equal(staleProfileEnglish11Confirm.body.summary.failed, 0);
+assert.equal(
+  db.entitlements.get('full0202|Y5E2')?.vr_access,
+  1,
+  'Validated English 11+ batch must grant VR even when profile vrEligible is stale/false'
+);
+
+const normalEnglishReconfirm = {
+  ...staleProfileEnglish11,
+  Mode:'Y5FE'
+};
+const normalEnglishReconfirmResult = await call(
+  '/api/v1/admin/lesson-releases/confirm',
+  { rows:[normalEnglishReconfirm] },
+  token
+);
+assert.equal(normalEnglishReconfirmResult.response.status, 200);
+assert.equal(normalEnglishReconfirmResult.body.summary.failed, 0);
+assert.equal(
+  db.entitlements.get('full0202|Y5E2')?.vr_access,
+  1,
+  'A later non-11+ import must not downgrade previously earned VR access'
 );
 
 const elevenPlusDisplayAlias = {

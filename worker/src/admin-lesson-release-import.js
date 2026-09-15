@@ -241,7 +241,7 @@ async function validateAmbiguousBatchView(env, item, lesson) {
       message:'The CSV Mode batch definition does not map to a Portal presentation for this lesson.'
     };
   }
-  return { viewId };
+  return { viewId, batch };
 }
 
 async function validatePortalState(env, item, resolvedLesson = null) {
@@ -271,7 +271,7 @@ async function validatePortalState(env, item, resolvedLesson = null) {
     return { error:'PRELESSON_ONLINE_BATCH_REQUIRED', message:'PreLesson-only access requires an Online batch.' };
   }
 
-  return { student, lesson, subject };
+  return { student, lesson, subject, batch:batchView?.batch || null, viewId:batchView?.viewId || '' };
 }
 
 async function existingAccess(env, item) {
@@ -367,8 +367,7 @@ async function grantPrelesson(env, item, validation) {
 
   const now = new Date().toISOString();
   const vrAccess = validation.subject === 'english' &&
-    elevenPlusBatch(item.batchKey) &&
-    validation.student?.vrEligible === true ? 1 : 0;
+    clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0;
 
   const clearExisting = env.DB.prepare(
     `DELETE FROM online_prelesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ?`
@@ -398,8 +397,7 @@ async function grantFull(env, item, validation) {
   const access = await existingAccess(env, item);
   const now = new Date().toISOString();
   const firstVrAccess = validation.subject === 'english' &&
-    elevenPlusBatch(item.batchKey) &&
-    validation.student?.vrEligible === true ? 1 : 0;
+    clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0;
 
   const entitlement = env.DB.prepare(
     `INSERT INTO lesson_entitlements (
@@ -415,6 +413,10 @@ async function grantFull(env, item, validation) {
      ) VALUES (?, ?, 1, ?, 'excel', ?, ?, ?, ?)
      ON CONFLICT(portal_user_id_norm, lesson_id) DO UPDATE SET
        core_access = 1,
+       vr_access = CASE
+         WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1
+         ELSE 0
+       END,
        last_confirmed_at = excluded.last_confirmed_at,
        source_batch_code = excluded.source_batch_code,
        source_lesson_date = excluded.source_lesson_date`
