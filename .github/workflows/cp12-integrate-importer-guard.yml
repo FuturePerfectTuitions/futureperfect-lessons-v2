@@ -1,0 +1,42 @@
+name: CP12 integrate importer guard source
+
+on:
+  push:
+    branches: [fix/cp12-approved-v2-ui-staging-2026-09-14]
+    paths: ['.github/workflows/cp12-integrate-importer-guard.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Cherry-pick validated CP12 importer guard and verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF_NAME}" = 'fix/cp12-approved-v2-ui-staging-2026-09-14'
+          git fetch origin fix/cp12-import-batch-view-guard-2026-09-14
+          test "$(git show -s --format=%s c38b07c3fe73ed1806a616ed87e710a16df32dd8)" = 'CP12: reject undefined batch for ambiguous lesson views'
+          test "$(git diff-tree --no-commit-id --name-only -r c38b07c3fe73ed1806a616ed87e710a16df32dd8 | sort)" = $'tests/admin-lesson-release-import-verification.mjs\nworker/src/admin-lesson-release-import.js'
+          ! grep -F 'BATCH_DEFINITION_REQUIRED' worker/src/admin-lesson-release-import.js >/dev/null
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git cherry-pick c38b07c3fe73ed1806a616ed87e710a16df32dd8
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/admin-lesson-release-import-verification.mjs
+          grep -F "import { viewDefinition, viewIdForBatch }" worker/src/admin-lesson-release-import.js >/dev/null
+          grep -F 'validateAmbiguousBatchView' worker/src/admin-lesson-release-import.js >/dev/null
+          grep -F 'BATCH_DEFINITION_REQUIRED' worker/src/admin-lesson-release-import.js >/dev/null
+          grep -F 'BATCH_VIEW_MISMATCH' worker/src/admin-lesson-release-import.js >/dev/null
+          git diff --check HEAD^
+          git push origin HEAD:fix/cp12-approved-v2-ui-staging-2026-09-14
+          echo CP12_IMPORTER_GUARD_SOURCE_INTEGRATION_PASS
