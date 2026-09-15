@@ -1,0 +1,32 @@
+{
+  "source": "FuturePerfectLive 2026-27 DATE_FORMAT_FIXED_V2 / Email Database",
+  "sourceModifiedAt": "2026-09-11T09:50:06Z",
+  "asOfDate": "2026-09-15",
+  "memberships": [
+    {"portalUserId":"aar1811","batchKey":"Y611FM","subject":"maths","effectiveFrom":"2026-09-12"},
+    {"portalUserId":"aar1811","batchKey":"Y6FE","subject":"english","effectiveFrom":"2026-09-10"},
+    {"portalUserId":"abi3007","batchKey":"Y4FE","subject":"english","effectiveFrom":"2026-09-11"},
+    {"portalUserId":"ame0503","batchKey":"Y6FM","subject":"maths","effectiveFrom":"2026-09-08"},
+    {"portalUserId":"ann3009","batchKey":"Y511OE1","subject":"english","effectiveFrom":"2026-09-07"},
+    {"portalUserId":"ann3009","batchKey":"Y511OM1","subject":"maths","effectiveFrom":"2026-09-09"},
+    {"portalUserId":"ava2007","batchKey":"Y5FM","subject":"maths","effectiveFrom":"2026-09-09"},
+    {"portalUserId":"ayla0108","batchKey":"Y411FE","subject":"english","effectiveFrom":"2026-09-11"},
+    {"portalUserId":"rei0710","batchKey":"Y411OM","subject":"maths","effectiveFrom":"2026-09-07"},
+    {"portalUserId":"rei0710","batchKey":"Y411OE","subject":"english","effectiveFrom":"2026-09-10"},
+    {"portalUserId":"conn2209","batchKey":"Y6FM","subject":"maths","effectiveFrom":"2026-09-08"},
+    {"portalUserId":"dha2806","batchKey":"Y411FM","subject":"maths","effectiveFrom":"2026-09-07"},
+    {"portalUserId":"dha2806","batchKey":"Y411FE","subject":"english","effectiveFrom":"2026-09-11"},
+    {"portalUserId":"kiaan1312","batchKey":"Y511FM","subject":"maths","effectiveFrom":"2026-09-08"},
+    {"portalUserId":"kiaan1312","batchKey":"Y511FE","subject":"english","effectiveFrom":"2026-09-12"},
+    {"portalUserId":"ma0605","batchKey":"Y511FM","subject":"maths","effectiveFrom":"2026-09-08"},
+    {"portalUserId":"ma0605","batchKey":"Y511FE","subject":"english","effectiveFrom":"2026-09-12"},
+    {"portalUserId":"mahu1907","batchKey":"Y6FE","subject":"english","effectiveFrom":"2026-09-10"},
+    {"portalUserId":"mahu1907","batchKey":"Y6FM","subject":"maths","effectiveFrom":"2026-09-08"},
+    {"portalUserId":"riaan1808","batchKey":"Y5OE","subject":"english","effectiveFrom":"2026-09-11"},
+    {"portalUserId":"meh0510","batchKey":"Y3FM","subject":"maths","effectiveFrom":"2026-09-07"},
+    {"portalUserId":"meh0510","batchKey":"Y3FE","subject":"english","effectiveFrom":"2026-09-10"},
+    {"portalUserId":"yuug1210","batchKey":"Y3FM","subject":"maths","effectiveFrom":"2026-09-07"},
+    {"portalUserId":"yuug1210","batchKey":"Y3FE","subject":"english","effectiveFrom":"2026-09-10"},
+    {"portalUserId":"zar0603","batchKey":"Y6OE","subject":"english","effectiveFrom":"2026-09-07"}
+  ]
+}
