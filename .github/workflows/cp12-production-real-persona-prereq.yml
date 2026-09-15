@@ -34,6 +34,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,6 +49,7 @@ jobs:
           node --check scripts/cp12-production-real-persona-prereq.mjs
           node --check scripts/cp12-resource-ui-production-metadata.mjs
           ! grep -F 'console.log(secrets' scripts/cp12-production-real-persona-prereq.mjs
+          ! grep -F 'presentationScopes' scripts/cp12-production-real-persona-prereq.mjs
           echo CP12_REAL_PERSONA_SOURCE_PASS
 
       - name: Fresh rollback topology and Worker-version proof
@@ -68,6 +70,8 @@ jobs:
           jq -e --arg host "${PROD_HOST}/*" --arg browser "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$host and .script==$browser)]|length)==1 and ([.result[]|select(.pattern==$host and .script!=$browser)]|length)==0' /tmp/routes.json >/dev/null
           curl --fail --silent --show-error "${API}/workers/scripts/${BROWSER_WORKER}/settings" "${AUTH[@]}" -o /tmp/browser-settings.json
           jq -e --arg student "$STUDENT_WORKER" '([.result.bindings[]|select(.type=="service")]|length)==1 and any(.result.bindings[];.name=="STAGING_API" and .service==$student) and ([.result.bindings[]|select(.type=="service" and .name!="STAGING_API")]|length)==0' /tmp/browser-settings.json >/dev/null
+          curl --fail --silent --show-error "${API}/workers/scripts/${STUDENT_WORKER}/settings" "${AUTH[@]}" -o /tmp/student-settings.json
+          jq -e --arg students "$EXPECTED_STUDENTS_KV" --arg rm "$EXPECTED_READ_MODELS_KV" 'any(.result.bindings[];.name=="STUDENTS_KV" and (.namespace_id//.id)==$students) and any(.result.bindings[];.name=="READ_MODELS_KV" and (.namespace_id//.id)==$rm)' /tmp/student-settings.json >/dev/null
           echo CP12_POST_ATTEMPT3_ROLLBACK_TOPOLOGY_PASS
 
       - name: Prove exact prepared pointers are back on rolled-back baseline
@@ -78,12 +82,12 @@ jobs:
           jq -e '.marker=="CP12_RESOURCE_UI_METADATA_PREVIEW_PASS" and .status=="PASS" and .writes==false and .publishedLessonScopes==372 and .changedLessonScopes==369 and .unchangedLessonScopes==3 and .nonPresentationGroupDiffs==0' "$CP12_METADATA_REPORT" >/dev/null
           echo CP12_POST_ATTEMPT3_POINTER_BASELINE_PASS
 
-      - name: Find correct real ordinary and 11plus UAT principals without disclosure
+      - name: Find correct real ordinary and VR UAT principals without disclosure
         shell: bash
         run: |
           set -Eeuo pipefail
           node scripts/cp12-production-real-persona-prereq.mjs
-          jq -e '.marker=="CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .ordinary.y5e2Open==true and .ordinary.year5ElevenPlusAbsent==true and .vr.y5e2Open==true and .ordinary.credentialDisclosed==false and .vr.credentialDisclosed==false and .secretMaterialLogged==false' /tmp/cp12-production-real-persona-prereq.json >/dev/null
+          jq -e '.marker=="CP12_PRODUCTION_REAL_PERSONA_PREREQ_READONLY_PASS" and .status=="PASS" and .productionMutation==false and .ordinary.lessonOpen==true and .ordinary.year5ElevenPlusAbsent==true and .vr.lessonOpen==true and .vr.vrHowToVisible==true and .vr.accessProven==true and .vr.preparedCoreAccess==true and .vr.preparedVrAccess==true and .distinctPrincipals==true and .ordinary.credentialDisclosed==false and .vr.credentialDisclosed==false and .secretMaterialLogged==false' /tmp/cp12-production-real-persona-prereq.json >/dev/null
           test -s /tmp/cp12-production-real-persona-secrets.json
           rm -f /tmp/cp12-production-real-persona-secrets.json
           echo CP12_REAL_PRODUCTION_PERSONAS_PASS
