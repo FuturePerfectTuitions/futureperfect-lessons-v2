@@ -174,7 +174,7 @@ const report = {
     targetLessons: x.targetState
   })),
   exactMismatchCount: mismatchPairs.length,
-  exactMismatchPairs,
+  exactMismatchPairs: expectedMismatchPairs,
   published: [],
   rollback: null,
   status: allowWrite ? 'PENDING' : 'DRY_RUN_PASS'
@@ -182,7 +182,7 @@ const report = {
 
 if (!allowWrite) {
   fs.writeFileSync('/tmp/release-visibility-repair.json', JSON.stringify(report, null, 2) + '\n');
-  console.log(JSON.stringify({ marker: report.marker, mode: report.mode, status: report.status, exactMismatchCount: report.exactMismatchCount, exactMismatchPairs }, null, 2));
+  console.log(JSON.stringify({ marker: report.marker, mode: report.mode, status: report.status, exactMismatchCount: report.exactMismatchCount, exactMismatchPairs: expectedMismatchPairs }, null, 2));
   process.exit(0);
 }
 
@@ -201,7 +201,6 @@ async function restorePointers(reason) {
 
 try {
   for (const entry of prepared) {
-    // Abort if the current pointer moved since preflight; do not overwrite concurrent publication.
     const immediate = await kvText(readModelsNs, pointerKey(entry.scope));
     if (immediate !== entry.beforeRaw) throw new Error(`Concurrent pointer change detected for ${entry.id}`);
     const payloadSha = await sha256Hex(stableStringify(entry.expected));
