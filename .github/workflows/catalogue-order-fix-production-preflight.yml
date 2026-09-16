@@ -56,8 +56,8 @@ jobs:
           const lessonsNs=clean((settings.bindings||[]).find(x=>x.name==='LESSONS_KV')?.namespace_id);
           if(lessonsNs!==expectedLessons) throw new Error(`LESSONS_KV binding mismatch: ${lessonsNs}`);
 
-          async function current(scope){const p=await kvJson(readNs,pointerKey(scope));const v=clean(p?.current?.version);if(!v)throw new Error(`Missing current pointer ${scope}`);const e=await kvJson(readNs,versionKey(scope,v));if(!e?.payload)throw new Error(`Missing current envelope ${scope}/${v}`);return{pointer:p,version:v,payload:e.payload}}
-          const currentGlobal=await current('global');
+          async function readCurrentScope(scope){const p=await kvJson(readNs,pointerKey(scope));const v=clean(p?.current?.version);if(!v)throw new Error(`Missing current pointer ${scope}`);const e=await kvJson(readNs,versionKey(scope,v));if(!e?.payload)throw new Error(`Missing current envelope ${scope}/${v}`);return{pointer:p,version:v,payload:e.payload}}
+          const currentGlobal=await readCurrentScope('global');
 
           const curriculumCodes=['MATHS_Y2','MATHS_Y3','MATHS_L1','MATHS_L2','MATHS_L3','MATHS_Y6_EXTRA','ENGLISH_Y2','ENGLISH_Y3','ENGLISH_Y4','ENGLISH_Y5','ENGLISH_Y6'];
           const fallback={MATHS_Y2:['maths-year2'],MATHS_Y3:['maths-year3'],MATHS_L1:['maths-year4','maths-level1'],MATHS_L2:['maths-year5','maths-level2'],MATHS_L3:['maths-level3','maths-year6'],MATHS_Y6_EXTRA:['maths-year6-extra'],ENGLISH_Y2:['english-year2'],ENGLISH_Y3:['english-year3'],ENGLISH_Y4:['english-year4','english-year4-11plus'],ENGLISH_Y5:['english-year5','english-year5-11plus'],ENGLISH_Y6:['english-year6']};
@@ -69,16 +69,17 @@ jobs:
 
           const source=currentGlobal.payload?.source||{};
           const candidate=compileGlobalScope({sourceType:clean(source.type||'unknown'),sourceRevision:clean(source.revision||''),curricula,lessons},{sourceType:clean(source.type||'unknown'),sourceRevision:clean(source.revision||'')});
-          const current=currentGlobal.payload;
+          const currentPayload=currentGlobal.payload;
           if(Object.keys(candidate.catalogues||{}).length!==Object.keys(VIEW_DEFINITIONS).length) throw new Error('Candidate view count mismatch.');
-          if(stableStringify(candidate.navigation)!==stableStringify(current.navigation)) throw new Error('Navigation changed unexpectedly.');
-          if(stableStringify(candidate.lessonToViews)!==stableStringify(current.lessonToViews)) throw new Error('lessonToViews changed unexpectedly.');
+          if(stableStringify(candidate.navigation)!==stableStringify(currentPayload.navigation)) throw new Error('Navigation changed unexpectedly.');
+          if(stableStringify(candidate.lessonToViews)!==stableStringify(currentPayload.lessonToViews)) throw new Error('lessonToViews changed unexpectedly.');
 
           const changed=[];
           const details=[];
           const stripOrder=row=>{const {order,...rest}=row||{};return rest};
+          function first(rows){return rows.slice(0,25).map(r=>({lessonId:clean(r.lessonId),displayLessonId:clean(r.displayLessonId),order:Number(r.order),title:clean(r.title)}))}
           for(const viewId of Object.keys(candidate.catalogues||{})){
-            const before=current.catalogues?.[viewId]?.lessons||[];
+            const before=currentPayload.catalogues?.[viewId]?.lessons||[];
             const after=candidate.catalogues?.[viewId]?.lessons||[];
             if(before.length!==after.length) throw new Error(`${viewId}: lesson count changed.`);
             const beforeBy=new Map(before.map(r=>[clean(r.lessonId),stripOrder(r)]));
@@ -95,7 +96,6 @@ jobs:
             if(stableStringify(sequenceAfter)!==stableStringify(expected)) throw new Error(`${viewId}: candidate does not exactly follow authoritative curriculum sequence.`);
             if(after.some((r,i)=>Number(r.order)!==i+1)) throw new Error(`${viewId}: candidate order metadata is not normalized.`);
           }
-          function first(rows){return rows.slice(0,25).map(r=>({lessonId:clean(r.lessonId),displayLessonId:clean(r.displayLessonId),order:Number(r.order),title:clean(r.title)}))}
           const report={marker:'CATALOGUE_ORDER_FIX_PRODUCTION_PREFLIGHT_PASS',readOnly:true,observedAt:new Date().toISOString(),currentGlobalVersion:currentGlobal.version,canonicalLessonCount:Object.keys(lessons).length,changedViewIds:changed,details,candidatePreview:{mathsYear6:first(candidate.catalogues?.['maths-year6']?.lessons||[]),englishYear4:first(candidate.catalogues?.['english-year4']?.lessons||[])}};
           fs.writeFileSync('/tmp/catalogue-order-preflight.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
           NODE
