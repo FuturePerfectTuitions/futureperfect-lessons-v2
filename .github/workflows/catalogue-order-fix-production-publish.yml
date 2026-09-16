@@ -26,7 +26,7 @@ jobs:
       STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
       READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
       EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
-      EXPECTED_OLD_GLOBAL_VERSION: cp11-g-c317ce9e7ac6470f763f-34970938223
+      EXPECTED_OLD_GLOBAL_VERSION: catalogue-order-20260916-1789558989628
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,6 +96,11 @@ jobs:
           const currentPayload=oldGlobal.payload;
           if(stableStringify(candidate.navigation)!==stableStringify(currentPayload.navigation)) throw new Error('Navigation changed unexpectedly.');
           if(stableStringify(candidate.lessonToViews)!==stableStringify(currentPayload.lessonToViews)) throw new Error('lessonToViews changed unexpectedly.');
+
+          function displayId(record, viewId){const target=clean(viewId).toLowerCase();for(const src of [record?.displayIds,record?.displayLessonIds,record?.presentation?.displayIds]){if(!src||typeof src!=='object'||Array.isArray(src))continue;const direct=clean(src[target]);if(direct)return direct;const match=Object.entries(src).find(([k])=>clean(k).toLowerCase()===target);if(match&&clean(match[1]))return clean(match[1]);}return clean(record?.lessonId)}
+          function chronology(id){const m=clean(id).toUpperCase().match(/T(\d+)[A-Z]+(\d{1,3})$/);return m?{term:Number(m[1]),number:Number(m[2])}:null}
+          function expectedSequence(viewId){const def=VIEW_DEFINITIONS[viewId];const joined=[];const seen=new Set();for(const code of def.curricula){for(const id of curricula[code]?.lessonIds||[]){if(seen.has(id))continue;seen.add(id);if(lessons[id]?.active!==false)joined.push({id,display:displayId(lessons[id],viewId),sourceIndex:joined.length})}}if(def.curricula.length===1)return joined.map(x=>x.id);return joined.sort((a,b)=>{const ak=chronology(a.display),bk=chronology(b.display);if(ak&&bk)return ak.term-bk.term||ak.number-bk.number||a.display.localeCompare(b.display)||a.sourceIndex-b.sourceIndex;if(ak)return -1;if(bk)return 1;return a.sourceIndex-b.sourceIndex}).map(x=>x.id)}
+
           const changed=[];const stripOrder=row=>{const {order,...rest}=row||{};return rest};
           for(const viewId of Object.keys(candidate.catalogues||{})){
             const before=currentPayload.catalogues?.[viewId]?.lessons||[], after=candidate.catalogues?.[viewId]?.lessons||[];
@@ -106,11 +111,11 @@ jobs:
             const sequenceBefore=before.map(r=>clean(r.lessonId)), sequenceAfter=after.map(r=>clean(r.lessonId));
             const orderBefore=before.map(r=>Number(r.order)), orderAfter=after.map(r=>Number(r.order));
             if(stableStringify(sequenceBefore)!==stableStringify(sequenceAfter)||stableStringify(orderBefore)!==stableStringify(orderAfter))changed.push(viewId);
-            const expected=[];const seen=new Set();for(const code of VIEW_DEFINITIONS[viewId].curricula){for(const id of curricula[code]?.lessonIds||[]){if(seen.has(id))continue;seen.add(id);if(lessons[id]?.active!==false)expected.push(id)}}
-            if(stableStringify(sequenceAfter)!==stableStringify(expected))throw new Error(`${viewId}: candidate sequence does not match authoritative curricula.`);
+            const expected=expectedSequence(viewId);
+            if(stableStringify(sequenceAfter)!==stableStringify(expected))throw new Error(`${viewId}: candidate sequence does not match independently calculated presentation chronology.`);
             if(after.some((r,i)=>Number(r.order)!==i+1))throw new Error(`${viewId}: candidate order not normalized.`);
           }
-          const expectedChanged=['english-year4','english-year4-11plus','maths-year6'];
+          const expectedChanged=['maths-year6'];
           if(stableStringify([...changed].sort())!==stableStringify(expectedChanged))throw new Error(`Unexpected changed views: ${JSON.stringify(changed)}`);
 
           const pointerImmediatelyBefore=await kvJson(readNs,pointerKey('global'));
@@ -118,7 +123,7 @@ jobs:
           const store={get:key=>kvText(readNs,key),put:(key,value)=>kvPut(readNs,key,value)};
           let publication=null;
           try{
-            publication=await publishScopeAtomic(store,{scope:'global',payload:candidate,version:`catalogue-order-20260916-${Date.now()}`,updatedAt:new Date().toISOString()});
+            publication=await publishScopeAtomic(store,{scope:'global',payload:candidate,version:`catalogue-chronology-20260916-${Date.now()}`,updatedAt:new Date().toISOString()});
             const after=await readCurrentScope('global');
             if(after.version!==publication.version)throw new Error('Published global version did not become current.');
             if(stableStringify(after.payload)!==stableStringify(candidate))throw new Error('Published global payload mismatch.');
@@ -130,7 +135,10 @@ jobs:
             const browserSettingsAfter=await envp(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
             const svcAfter=(browserSettingsAfter.bindings||[]).filter(x=>x.type==='service');
             if(svcAfter.length!==1||clean(svcAfter[0].name)!=='STAGING_API'||clean(svcAfter[0].service)!==student)throw new Error('Public topology changed during catalogue publication.');
-            const report={marker:'CATALOGUE_ORDER_FIX_PRODUCTION_PUBLISH_PASS',status:'PASS',publishedAt:new Date().toISOString(),oldGlobalVersion:expectedOldGlobal,newGlobalVersion:publication.version,previousVersion:clean(after.pointer?.previous?.version),changedViewIds:changed,canonicalLessonCount:Object.keys(lessons).length,accessPointerCount:accessAfter.count,accessPointerDigestBefore:accessBefore.sha256,accessPointerDigestAfter:accessAfter.sha256,browserVersion:browserAfter,studentVersion:studentAfter,browserToStudentOnly:true,year6FirstLessons:(after.payload.catalogues?.['maths-year6']?.lessons||[]).slice(0,25).map(r=>clean(r.displayLessonId)),year4Term2:(after.payload.catalogues?.['english-year4']?.lessons||[]).filter(r=>clean(r.displayLessonId).startsWith('Y4T2')).slice(0,8).map(r=>clean(r.displayLessonId))};
+            const y6=after.payload.catalogues?.['maths-year6']?.lessons||[];
+            const standard=y6.map(r=>clean(r.displayLessonId)).filter(id=>chronology(id));
+            for(let i=1;i<standard.length;i++){const a=chronology(standard[i-1]),b=chronology(standard[i]);if(b.term<a.term||(b.term===a.term&&b.number<a.number))throw new Error(`Published Year 6 chronology inversion: ${standard[i-1]} -> ${standard[i]}`)}
+            const report={marker:'CATALOGUE_ORDER_FIX_PRODUCTION_PUBLISH_PASS',status:'PASS',publishedAt:new Date().toISOString(),oldGlobalVersion:expectedOldGlobal,newGlobalVersion:publication.version,previousVersion:clean(after.pointer?.previous?.version),changedViewIds:changed,canonicalLessonCount:Object.keys(lessons).length,accessPointerCount:accessAfter.count,accessPointerDigestBefore:accessBefore.sha256,accessPointerDigestAfter:accessAfter.sha256,browserVersion:browserAfter,studentVersion:studentAfter,browserToStudentOnly:true,year6FirstLessons:y6.slice(0,30).map(r=>clean(r.displayLessonId)),year6LastLessons:y6.slice(-15).map(r=>clean(r.displayLessonId)),year4Term2:(after.payload.catalogues?.['english-year4']?.lessons||[]).filter(r=>clean(r.displayLessonId).startsWith('Y4T2')).slice(0,8).map(r=>clean(r.displayLessonId))};
             fs.writeFileSync('/tmp/catalogue-order-publish.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
           }catch(error){
             if(publication){await kvPut(readNs,pointerKey('global'),oldPointerText);const restored=await readCurrentScope('global');if(restored.version!==expectedOldGlobal)throw new Error(`Publish failed and rollback verification failed. Original error: ${error?.message}`);}
