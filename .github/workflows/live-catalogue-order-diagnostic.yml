@@ -1,0 +1,85 @@
+name: Live catalogue order diagnostic
+
+on:
+  push:
+    branches:
+      - fix/importer-publish-email-per-lesson-2026-09-16
+    paths:
+      - docs/rebuild/LIVE_CATALOGUE_ORDER_DIAGNOSTIC_TRIGGER.md
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/importer-publish-email-per-lesson-2026-09-16
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read-only production catalogue order audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { opaqueAccessScopeId } from './rebuild/student/src/lib/access-scope.mjs';
+          import { pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim(), norm=v=>clean(v).toLowerCase();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const readNs=clean(process.env.READ_MODELS_KV), worker=clean(process.env.LEGACY_WORKER);
+          if(!account||!token||!readNs) throw new Error('Cloudflare credentials/config missing');
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function req(path,opt={}){const r=await fetch(base+path,{...opt,headers:{...headers,...(opt.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{}return{r,text,body}}
+          async function envp(path,opt={}){const o=await req(path,opt);if(!o.r.ok||o.body?.success!==true)throw new Error(`${o.r.status} ${path}: ${JSON.stringify(o.body?.errors||[])}`);return o.body.result}
+          async function kvText(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read ${o.r.status}: ${key}`);return o.text}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t)}
+          async function kvKeys(ns,prefix){const result=[];let cursor='';do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);if(!o.r.ok||o.body?.success!==true)throw new Error(`KV keys failed ${o.r.status}`);result.push(...(o.body.result||[]).map(x=>x.name));cursor=clean(o.body.result_info?.cursor);}while(cursor);return result}
+          async function current(scope){const p=await kvJson(readNs,pointerKey(scope));const v=clean(p?.current?.version);if(!v)throw new Error(`Missing pointer ${scope}`);const e=await kvJson(readNs,versionKey(scope,v));if(!e?.payload)throw new Error(`Missing envelope ${scope}/${v}`);return{version:v,payload:e.payload}}
+          function seq(id){const s=clean(id).toUpperCase();const m=s.match(/T(\d+)[A-Z]+(\d{1,3})$/);return m?{term:Number(m[1]),num:Number(m[2])}:null}
+          const global=await current('global');
+          const catalogues=global.payload?.catalogues||{};
+          const views=[];
+          const affected=[];
+          for(const [viewId,cat] of Object.entries(catalogues)){
+            const lessons=Array.isArray(cat?.lessons)?cat.lessons:[];
+            const rows=lessons.map((r,i)=>({i:i+1,lessonId:clean(r.lessonId),displayLessonId:clean(r.displayLessonId),title:clean(r.title),order:Number(r.order),seq:seq(r.displayLessonId)}));
+            let inversionCount=0; const inversions=[]; let prev=null;
+            for(const row of rows){if(!row.seq)continue;if(prev && (row.seq.term<prev.seq.term || (row.seq.term===prev.seq.term&&row.seq.num<prev.seq.num))){inversionCount++;inversions.push({before:prev.displayLessonId,after:row.displayLessonId,beforeOrder:prev.order,afterOrder:row.order});}prev=row;}
+            const item={viewId,label:clean(cat?.label),lessonCount:rows.length,inversionCount,inversions,rows};
+            views.push(item); if(inversionCount)affected.push(viewId);
+          }
+          const settings=await envp(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/settings`);
+          const studentsNs=clean((settings.bindings||[]).find(x=>x.name==='STUDENTS_KV')?.namespace_id);
+          if(!studentsNs)throw new Error('STUDENTS_KV binding missing');
+          const salt=clean(await kvText(readNs,'meta:scope-salt'));
+          const impacted=[];
+          for(const key of (await kvKeys(studentsNs,'user:')).sort()){
+            const id=norm(key.slice(5));if(!id||id==='admin')continue;
+            const user=await kvJson(studentsNs,key);if(!user)continue;
+            const scopeId=await opaqueAccessScopeId(id,salt);let access=null;try{access=(await current(`access:${scopeId}`)).payload}catch{continue}
+            const snap=access?.snapshot||{};
+            const visible=(Array.isArray(snap.views)?snap.views:[]).filter(v=>affected.includes(clean(v.viewId))&&!v.lockedPreview);
+            if(!visible.length)continue;
+            impacted.push({portalUserId:id,name:clean(user.firstName||user.name),demo:id.startsWith('demo'),views:visible.map(v=>({viewId:clean(v.viewId),current:v.current===true,group:clean(v.group)}))});
+          }
+          const report={marker:'LIVE_CATALOGUE_ORDER_DIAGNOSTIC',readOnly:true,observedAt:new Date().toISOString(),globalVersion:global.version,affectedViewIds:affected,views,impactedUsers:impacted};
+          fs.writeFileSync('/tmp/live-catalogue-order-diagnostic.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify({marker:report.marker,globalVersion:report.globalVersion,affectedViewIds:affected,affectedViews:views.filter(v=>v.inversionCount).map(v=>({viewId:v.viewId,label:v.label,inversionCount:v.inversionCount,firstRows:v.rows.slice(0,12).map(r=>({displayLessonId:r.displayLessonId,order:r.order,title:r.title})),inversions:v.inversions.slice(0,12)})),impactedUsers:impacted},null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-catalogue-order-diagnostic
+          path: /tmp/live-catalogue-order-diagnostic.json
+          retention-days: 30
+          if-no-files-found: error
