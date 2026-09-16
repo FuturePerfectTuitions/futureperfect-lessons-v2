@@ -1,4 +1,5 @@
 import { viewDefinition, viewIdForBatch } from '../../rebuild/shared/read-models/view-registry.mjs';
+import { publishStudentPreparedAccess } from './admin-prepared-access-publisher.js';
 
 const LOGIN_PATH = '/api/v1/admin/lesson-releases/login';
 const PREVIEW_PATH = '/api/v1/admin/lesson-releases/preview';
@@ -527,6 +528,7 @@ function configured(env) {
   return Boolean(
     env?.STUDENTS_KV &&
     env?.LESSONS_KV &&
+    env?.REBUILD_SHADOW_KV &&
     env?.DB &&
     env?.ADMIN_IMPORT_PASSWORD &&
     env?.ADMIN_IMPORT_SESSION_SECRET
@@ -596,10 +598,57 @@ async function handleConfirm(request, env) {
   }
 
   const candidates = applyCandidates(preview);
-  const results = [];
+  const entitlementResults = [];
   for (const item of candidates) {
-    results.push(await applyItem(env, item));
+    entitlementResults.push(await applyItem(env, item));
   }
+
+  // The rebuilt Student Worker reads prepared access snapshots, not raw D1
+  // entitlements. A Portal action is therefore not complete until every
+  // affected student's snapshot has been compiled from the authoritative
+  // post-write state and atomically published. Multiple lesson rows for the
+  // same student are collapsed to one publication AFTER all D1 writes, while
+  // individual lesson rows remain separate for parent-email handling.
+  const affectedUsers = [...new Set(
+    entitlementResults
+      .filter(row => row.ok && row.portalUserIdNorm)
+      .map(row => row.portalUserIdNorm)
+  )];
+  const publicationByUser = new Map();
+  for (const portalUserIdNorm of affectedUsers) {
+    try {
+      publicationByUser.set(
+        portalUserIdNorm,
+        await publishStudentPreparedAccess(env, portalUserIdNorm)
+      );
+    } catch (error) {
+      publicationByUser.set(portalUserIdNorm, {
+        ok:false,
+        error:clean(error?.message) || 'PREPARED_ACCESS_PUBLISH_FAILED'
+      });
+    }
+  }
+
+  const results = entitlementResults.map(row => {
+    if (!row.ok) return row;
+    const publication = publicationByUser.get(row.portalUserIdNorm);
+    if (!publication?.ok) {
+      return {
+        ...row,
+        ok:false,
+        status:'PREPARED_ACCESS_PUBLISH_FAILED',
+        entitlementApplied:true,
+        preparedAccessReady:false,
+        message:`The entitlement was written, but the live prepared access model could not be published: ${clean(publication?.error) || 'unknown error'}`
+      };
+    }
+    return {
+      ...row,
+      preparedAccessReady:true,
+      preparedAccessChanged:publication.published === true,
+      preparedAccessVersion:clean(publication.version)
+    };
+  });
 
   return json({
     ok:true,

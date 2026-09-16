@@ -143,10 +143,16 @@ const lessons = new Map([
 ]);
 
 const db = new MemoryDB();
+const preparedPublishCalls = [];
 const env = {
   DB:db,
   STUDENTS_KV:{ async get(key) { return students.get(key) || null; } },
   LESSONS_KV:{ async get(key) { return lessons.get(key) || null; } },
+  REBUILD_SHADOW_KV:{},
+  __TEST_PREPARED_ACCESS_PUBLISHER:async portalUserIdNorm => {
+    preparedPublishCalls.push(portalUserIdNorm);
+    return { ok:true, published:true, version:`test-${portalUserIdNorm}-${preparedPublishCalls.length}` };
+  },
   ALLOWED_ORIGINS:'https://futureperfecttuitions.github.io,https://lessons.futureperfect.education',
   ADMIN_IMPORT_PASSWORD:'synthetic-admin-password',
   ADMIN_IMPORT_SESSION_SECRET:'synthetic-session-secret-at-least-long-enough'
@@ -284,6 +290,8 @@ assert.equal(confirm.response.status, 200);
 assert.equal(confirm.body.summary.total, 2);
 assert.equal(confirm.body.summary.succeeded, 2);
 assert.equal(confirm.body.summary.failed, 0);
+assert.equal(confirm.body.results.every(row => row.preparedAccessReady === true), true);
+assert.deepEqual(preparedPublishCalls, ['pre0101','full0202'], 'Prepared access must publish once per affected student, not once per lesson row.');
 assert.equal(db.prelessons.size, 1);
 assert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);
 assert.equal(
@@ -428,5 +436,24 @@ assert.equal(db.prelessons.size, prelessonCountBeforeGuardedConfirm, 'Guarded co
 // A single-presentation lesson may retain an unknown batch code as audit metadata;
 // the compiler has exactly one safe fallback view in that case.
 assert.equal(db.entitlements.get('full0202|Y3M1')?.source_batch_code, 'Y3FM_NEW_X');
+
+
+// A D1 entitlement write without a successful prepared-model publication
+// must be reported as a failed Portal action so the email layer cannot
+// claim success or send a parent email against stale live access.
+const goodPublisher = env.__TEST_PREPARED_ACCESS_PUBLISHER;
+env.__TEST_PREPARED_ACCESS_PUBLISHER = async () => { throw new Error('synthetic publish failure'); };
+const publishFailure = await call(
+  '/api/v1/admin/lesson-releases/confirm',
+  { rows:[upgradeRow] },
+  token
+);
+assert.equal(publishFailure.response.status, 200);
+assert.equal(publishFailure.body.summary.succeeded, 0);
+assert.equal(publishFailure.body.summary.failed, 1);
+assert.equal(publishFailure.body.results[0].status, 'PREPARED_ACCESS_PUBLISH_FAILED');
+assert.equal(publishFailure.body.results[0].entitlementApplied, true);
+assert.equal(publishFailure.body.results[0].preparedAccessReady, false);
+env.__TEST_PREPARED_ACCESS_PUBLISHER = goodPublisher;
 
 console.log('Lesson release importer validates ambiguous batch views and preserves safe single-view fallback + FULL/PRELESSON_ONLY + continuing FULL release: PASS');

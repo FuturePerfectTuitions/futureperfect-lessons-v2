@@ -34,11 +34,11 @@ function partialProgressFromRemarks(value) {
 
 function emailTypeForItem(item) {
   const status = clean(item?.lessonStatus);
+  // Final lesson status is authoritative. A Completed macro can leave a
+  // historical progress remark such as "Start from Slide 20" on the row;
+  // that remark must never turn the completed lesson back into Ongoing.
+  if (completedStatus(status)) return 'COMPLETED';
   if (/\bslide\b/i.test(status)) return 'ONGOING';
-  if (completedStatus(status)) {
-    if (partialProgressFromRemarks(item?.remarks)) return 'ONGOING';
-    return 'COMPLETED';
-  }
   if (norm(status) === 'ready' && onlineMode(item?.batchKey)) {
     // A Ready row such as "Start from 10" is the next session of a lesson that
     // is already in progress. It is not a new upcoming lesson, so it does not
