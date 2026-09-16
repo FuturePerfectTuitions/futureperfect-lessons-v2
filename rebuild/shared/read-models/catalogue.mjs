@@ -59,6 +59,29 @@ function safeLessonMetadata(record, viewId) {
   };
 }
 
+function displayedChronology(value) {
+  const match = clean(value).toUpperCase().match(/T(\d+)[A-Z]+(\d{1,3})$/);
+  if (!match) return null;
+  return { term: Number(match[1]), number: Number(match[2]) };
+}
+
+function mergeCurriculaChronologically(rows) {
+  return rows
+    .map((row, sourceIndex) => ({ row, sourceIndex, key: displayedChronology(row.displayLessonId) }))
+    .sort((left, right) => {
+      if (left.key && right.key) {
+        return left.key.term - right.key.term
+          || left.key.number - right.key.number
+          || left.row.displayLessonId.localeCompare(right.row.displayLessonId)
+          || left.sourceIndex - right.sourceIndex;
+      }
+      if (left.key) return -1;
+      if (right.key) return 1;
+      return left.sourceIndex - right.sourceIndex;
+    })
+    .map(item => item.row);
+}
+
 function compileViewCatalogue(input, viewId) {
   const definition = viewDefinition(viewId);
   if (!definition) return null;
@@ -67,11 +90,12 @@ function compileViewCatalogue(input, viewId) {
   const lessonIds = [];
   const seen = new Set();
 
-  // The curriculum arrays are the authoritative lesson sequence for a view.
-  // Some legacy lesson records contain duplicated or stale numeric order values,
-  // especially when one presentation view concatenates multiple curricula.
-  // Preserve the declared curriculum sequence and publish a normalized 1..N order
-  // so all consumers observe the same chronology.
+  // Each curriculum array is authoritative within that curriculum. When a
+  // presentation view combines multiple curricula (currently Year 6 Maths),
+  // merge ordinary T<n><subject><n> display IDs by their displayed term/lesson
+  // chronology. Non-standard/special IDs retain source order after the ordinary
+  // chronology. This prevents duplicated legacy order values from interleaving
+  // curricula or an appended curriculum from jumping backwards in term number.
   for (const curriculumCode of definition.curricula) {
     const raw = curricula[curriculumCode] ?? curricula[`curriculum:${curriculumCode}`];
     for (const lessonId of lessonIdsFromCurriculum(raw)) {
@@ -81,11 +105,13 @@ function compileViewCatalogue(input, viewId) {
     }
   }
 
-  const rows = lessonIds
+  let rows = lessonIds
     .map(lessonId => lessons[lessonId] ?? lessons[`lesson:${lessonId}`])
     .map(record => safeLessonMetadata(record, definition.viewId))
-    .filter(Boolean)
-    .map((row, index) => ({ ...row, order: index + 1 }));
+    .filter(Boolean);
+
+  if (definition.curricula.length > 1) rows = mergeCurriculaChronologically(rows);
+  rows = rows.map((row, index) => ({ ...row, order: index + 1 }));
 
   return {
     viewId: definition.viewId,
@@ -167,6 +193,8 @@ export {
   displayLessonId,
   cleanStudentTitle,
   safeLessonMetadata,
+  displayedChronology,
+  mergeCurriculaChronologically,
   compileViewCatalogue,
   compileCatalogueReadModel,
   assertMetadataOnlyCatalogue
