@@ -3,10 +3,10 @@ import { compileCatalogueReadModel } from '../rebuild/shared/read-models/catalog
 
 const input = {
   sourceType: 'catalogue-order-regression-fixture',
-  sourceRevision: 'v1',
+  sourceRevision: 'v2',
   curricula: {
-    MATHS_L3: { lessonIds: ['L3A', 'L3B', 'L3C'] },
-    MATHS_Y6_EXTRA: { lessonIds: ['Y6X17', 'Y6X18'] },
+    MATHS_L3: { lessonIds: ['L3A', 'L3B', 'L3C', 'L3D'] },
+    MATHS_Y6_EXTRA: { lessonIds: ['Y6X17', 'Y6X18', 'Y6S1'] },
     ENGLISH_Y4: { lessonIds: ['E4_11', 'E4_12', 'E4_13', 'E4_14'] }
   },
   lessons: {
@@ -22,6 +22,10 @@ const input = {
       lessonId: 'L3C', title: 'Number and Place Value III', order: 3, active: true,
       displayIds: { 'maths-year6': 'Y6T1M03', 'maths-level3': 'L3T1M03' }
     },
+    L3D: {
+      lessonId: 'L3D', title: 'Late main curriculum lesson', order: 43, active: true,
+      displayIds: { 'maths-year6': 'Y6T3M43', 'maths-level3': 'L3T3M43' }
+    },
     Y6X17: {
       lessonId: 'Y6X17', title: 'Ratio and Proportion 1', order: 1, active: true,
       displayIds: { 'maths-year6': 'Y6T1M17' }
@@ -29,6 +33,10 @@ const input = {
     Y6X18: {
       lessonId: 'Y6X18', title: 'Ratio and Proportion 2', order: 2, active: true,
       displayIds: { 'maths-year6': 'Y6T1M18' }
+    },
+    Y6S1: {
+      lessonId: 'Y6S1', title: 'SATs Preparation Measurement', order: 6, active: true,
+      displayIds: { 'maths-year6': 'Y6MS1' }
     },
     E4_11: {
       lessonId: 'E4_11', title: 'Term Starter', order: 12, active: true,
@@ -53,18 +61,18 @@ const catalogue = compileCatalogueReadModel(input);
 
 assert.deepEqual(
   catalogue.views['maths-year6'].lessons.map(row => row.displayLessonId),
-  ['Y6T1M01', 'Y6T1M02', 'Y6T1M03', 'Y6T1M17', 'Y6T1M18'],
-  'Year 6 Maths must preserve MATHS_L3 followed by MATHS_Y6_EXTRA curriculum sequence.'
+  ['Y6T1M01', 'Y6T1M02', 'Y6T1M03', 'Y6T1M17', 'Y6T1M18', 'Y6T3M43', 'Y6MS1'],
+  'Year 6 Maths must merge ordinary lessons from multiple curricula by displayed term/lesson chronology and keep special IDs after the ordinary chronology.'
 );
 assert.deepEqual(
   catalogue.views['maths-year6'].lessons.map(row => row.order),
-  [1, 2, 3, 4, 5],
-  'Published order must be normalized to the final curriculum sequence.'
+  [1, 2, 3, 4, 5, 6, 7],
+  'Published order must be normalized to the final merged chronology.'
 );
 assert.deepEqual(
   catalogue.views['maths-level3'].lessons.map(row => row.displayLessonId),
-  ['L3T1M01', 'L3T1M02', 'L3T1M03'],
-  'Level 3 must retain the MATHS_L3 sequence without Year 6 extras.'
+  ['L3T1M01', 'L3T1M02', 'L3T1M03', 'L3T3M43'],
+  'Level 3 must retain its single authoritative MATHS_L3 source sequence without Year 6 extras.'
 );
 assert.deepEqual(
   catalogue.views['english-year4'].lessons.map(row => row.displayLessonId),
