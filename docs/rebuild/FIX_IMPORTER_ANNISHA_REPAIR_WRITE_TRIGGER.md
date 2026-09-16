@@ -1,0 +1,3 @@
+# Annisha prepared-access repair trigger
+
+The live 16 September import successfully created Annisha's full D1 entitlement for canonical lesson `Y6M2.2` (`L3T1M02`), but the rebuilt portal's prepared access scope remained stale, leaving the lesson unavailable. This trigger authorizes a single-scope canonical compile and atomic publication for `ann3009` only. The workflow must dry-run first, require the D1 full entitlement, preserve the previous prepared version, reject concurrent pointer drift, verify the published payload, and automatically restore the old pointer if post-publication verification fails. No D1 row, profile, lesson, resource, Worker, route or other student's prepared scope is authorized to change.
