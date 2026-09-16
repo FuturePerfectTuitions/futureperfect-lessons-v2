@@ -1,0 +1,67 @@
+name: Incident - Broad Release Visibility Audit
+
+on:
+  push:
+    branches:
+      - incident/import-release-visibility-2026-09-16
+    paths:
+      - 'docs/rebuild/INCIDENT_RELEASE_VISIBILITY_BROAD_TRIGGER.md'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+  D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  LEGACY_WORKER: fpt-portal-v2-worker
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: incident/import-release-visibility-2026-09-16
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit every entitlement confirmed today against prepared access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=String(process.env.CLOUDFLARE_ACCOUNT_ID||'').trim(),token=String(process.env.CLOUDFLARE_API_TOKEN||'').trim();
+          const db=process.env.D1_ID,readNs=process.env.READ_MODELS_KV,studentsNs=process.env.STUDENTS_KV,worker=process.env.LEGACY_WORKER;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}`,headers={Authorization:`Bearer ${token}`},clean=v=>String(v??'').trim();
+          async function api(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...headers,...(options.headers||{})}});const b=await r.json().catch(()=>null);if(!r.ok||b?.success!==true)throw new Error(`Cloudflare read failed ${r.status} ${path}: ${JSON.stringify(b?.errors||[])}`);return b;}
+          async function sql(statement,params=[]){if(!/^\s*(SELECT|WITH|PRAGMA)\b/i.test(statement)||/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b/i.test(statement))throw new Error('Read-only SQL guard');const b=await api(`/d1/database/${db}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql:statement,params})});const x=Array.isArray(b.result)?b.result[0]:b.result;return Array.isArray(x?.results)?x.results:[];}
+          async function kvText(ns,key){const r=await fetch(`${base}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV read failed ${r.status} ${key}`);return r.text();}
+          async function kvJson(ns,key){const t=await kvText(ns,key);if(t==null)return null;try{return JSON.parse(t);}catch{return null;}}
+          async function list(ns,prefix){let out=[],cursor='';do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const b=await api(`/storage/kv/namespaces/${ns}/keys?${q}`);out.push(...(b.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
+          function versionKey(scope,version){const es=encodeURIComponent(scope).replace(/%/g,'_'),ev=encodeURIComponent(version).replace(/%/g,'_');return `rm:v1:scope:${es}:version:${ev}`;}
+          const today=await sql(`SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source, source_batch_code, source_lesson_date, first_granted_at, last_confirmed_at FROM lesson_entitlements WHERE last_confirmed_at >= ? ORDER BY last_confirmed_at, portal_user_id_norm, lesson_id`,['2026-09-16T00:00:00.000Z']);
+          const ids=[...new Set(today.map(r=>clean(r.portal_user_id_norm).toLowerCase()).filter(Boolean))].sort();
+          const profiles={};
+          for(const id of ids){const p=await kvJson(studentsNs,`user:${id}`);profiles[id]={firstName:clean(p?.firstName||p?.name),accountStatus:clean(p?.accountStatus||p?.status),scopeLikeFields:Object.fromEntries(Object.entries(p||{}).filter(([k])=>/scope|prepared|read.?model/i.test(k)&&!/secret|pass|token/i.test(k)).map(([k,v])=>[k,typeof v==='string'||typeof v==='number'||typeof v==='boolean'?v:'[complex]']))};}
+          const pointerKeys=(await list(readNs,'rm:v1:scope:access_3A')).filter(k=>k.endsWith(':current')).sort();
+          const snaps=[];
+          for(const key of pointerKeys){const p=await kvJson(readNs,key),scope=clean(p?.scope),version=clean(p?.current?.version);if(!scope||!version)continue;const e=await kvJson(readNs,versionKey(scope,version)),s=e?.payload?.snapshot;if(!s)continue;snaps.push({scope,version,updatedAt:clean(p?.updatedAt),firstName:clean(s?.account?.firstName),lessonAccess:s?.lessonAccess||{},views:s?.views||[]});}
+          const users={};let mismatchCount=0;
+          for(const id of ids){const rows=today.filter(r=>clean(r.portal_user_id_norm).toLowerCase()===id),fn=profiles[id]?.firstName||'';const matches=snaps.filter(s=>clean(s.firstName).toLowerCase()===clean(fn).toLowerCase());const prepared=matches.length===1?matches[0]:null;const mismatches=[];if(prepared){for(const r of rows){if(Number(r.core_access||0)!==1)continue;const a=prepared.lessonAccess?.[clean(r.lesson_id)];if(!a||a.core!==true)mismatches.push({lessonId:clean(r.lesson_id),prepared:a||null,lastConfirmedAt:clean(r.last_confirmed_at),sourceBatch:clean(r.source_batch_code),sourceLessonDate:clean(r.source_lesson_date)});}}else{for(const r of rows)mismatches.push({lessonId:clean(r.lesson_id),prepared:null,reason:`prepared snapshot match count ${matches.length}`});}mismatchCount+=mismatches.length;users[id]={profile:profiles[id],todayRows:rows,matchingPreparedSnapshotCount:matches.length,prepared:prepared?{scope:prepared.scope,version:prepared.version,updatedAt:prepared.updatedAt,views:prepared.views}:null,mismatches};}
+          const settings=(await api(`/workers/scripts/${encodeURIComponent(worker)}/settings`)).result;const bindings=(settings?.bindings||[]).map(b=>({name:b.name,type:b.type}));
+          const report={marker:'FPT_BROAD_RELEASE_VISIBILITY_AUDIT',readOnly:true,observedAt:new Date().toISOString(),todayEntitlementRows:today.length,affectedPortalUsers:ids.length,mismatchCount,users,legacyWorkerBindings:bindings,legacyHasReadModelsBinding:bindings.some(b=>b.name==='READ_MODELS_KV'),legacyHasAdminOpsServiceBinding:bindings.some(b=>b.type==='service'&&/admin/i.test(`${b.name} ${b.service||''}`))};
+          fs.writeFileSync('/tmp/broad-release-visibility-audit.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify({marker:report.marker,readOnly:true,todayEntitlementRows:report.todayEntitlementRows,affectedPortalUsers:report.affectedPortalUsers,mismatchCount:report.mismatchCount,users:Object.fromEntries(ids.map(id=>[id,{firstName:users[id].profile.firstName,preparedUpdatedAt:users[id].prepared?.updatedAt||null,todayLessons:users[id].todayRows.map(r=>r.lesson_id),mismatches:users[id].mismatches}])),legacyHasReadModelsBinding:report.legacyHasReadModelsBinding,legacyHasAdminOpsServiceBinding:report.legacyHasAdminOpsServiceBinding},null,2));
+          NODE
+      - name: Upload audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-broad-release-visibility-audit-2026-09-16
+          path: /tmp/broad-release-visibility-audit.json
+          if-no-files-found: error
+          retention-days: 30
