@@ -1,0 +1,210 @@
+name: Fix importer - guarded production deploy
+
+on:
+  push:
+    branches:
+      - fix/importer-publish-email-per-lesson-2026-09-16
+    paths:
+      - docs/rebuild/FIX_IMPORTER_PRODUCTION_DEPLOY_TRIGGER.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fix-importer-production-deploy-2026-09-16
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      PROD_HOST: lessons.futureperfect.education
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      PATCH_COMMIT: df26d9e5a3a438b8506d3181dcbb23800b0b663b
+      WRANGLER_VERSION: 4.125.0
+      AS_OF_DATE: '2026-09-16'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/importer-publish-email-per-lesson-2026-09-16
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Source and regression gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$PATCH_COMMIT" HEAD
+          node --check worker/src/admin-prepared-access-publisher.js
+          node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/parent-email.js
+          node tests/admin-prepared-access-publisher-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          grep -Fq "import { publishStudentPreparedAccess } from './admin-prepared-access-publisher.js';" worker/src/admin-lesson-release-import.js
+          grep -Fq "status:'PREPARED_ACCESS_PUBLISH_FAILED'" worker/src/admin-lesson-release-import.js
+          grep -Fq "if (completedStatus(status)) return 'COMPLETED';" worker/src/parent-email.js
+          grep -Fq "['COMPLETED','COMPLETED','ONGOING']" tests/parent-email-completed-status-verification.mjs
+          grep -Fq "clean(validation.batch?.stream).toLowerCase() === '11plus' ? 1 : 0" worker/src/admin-lesson-release-import.js
+          grep -Fq 'WHEN lesson_entitlements.vr_access = 1 OR excluded.vr_access = 1 THEN 1' worker/src/admin-lesson-release-import.js
+          ! grep -Fq 'validation.student?.vrEligible === true ? 1 : 0' worker/src/admin-lesson-release-import.js
+
+      - name: Independent predeploy D1 to prepared-access parity
+        shell: bash
+        env:
+          PARITY_OUTPUT: /tmp/fix-importer-parity-before.json
+        run: |
+          set -Eeuo pipefail
+          node scripts/fix-importer-prepared-access-parity-audit.mjs
+          jq -e '.status == "PASS" and .mismatches == 0' /tmp/fix-importer-parity-before.json >/dev/null
+
+      - name: Fresh topology preflight and binding-preserving deploy config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const legacy=process.env.LEGACY_WORKER, browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, host=process.env.PROD_HOST;
+          const expectedRead=process.env.READ_MODELS_KV_ID;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hostRoutes.length!==1||String(hostRoutes[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hostRoutes[0].script!==browser)throw new Error(`Public route drift: ${JSON.stringify(hostRoutes)}`);
+          const browserSettings=await settings(browser), services=(browserSettings.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].service!==student)throw new Error(`Browser service drift: ${JSON.stringify(services)}`);
+          if((browserSettings.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Forbidden Browser Admin binding');
+          const beforeTopology={route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},browserVersion:await active(browser),studentVersion:await active(student),service:{name:services[0].name,service:services[0].service}};
+          const legacySettings=await settings(legacy), oldVersion=await active(legacy);
+          if(!oldVersion)throw new Error('Operational importer active version unresolved');
+          const readBinding=(legacySettings.bindings||[]).find(b=>b.name==='REBUILD_SHADOW_KV');
+          if(readBinding?.type!=='kv_namespace'||readBinding.namespace_id!==expectedRead)throw new Error(`REBUILD_SHADOW_KV drift: ${JSON.stringify(readBinding)}`);
+          const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const unsupported=(legacySettings.bindings||[]).filter(b=>!/secret/i.test(String(b.type))&&!supported.has(b.type));
+          if(unsupported.length)throw new Error(`Unsupported live binding types: ${JSON.stringify(unsupported.map(b=>({name:b.name,type:b.type})))}`);
+          const secretNames=(legacySettings.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort();
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const nonSecret=(legacySettings.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+          fs.writeFileSync('/tmp/fix-importer-bindings-before.json',JSON.stringify({nonSecret,secretNames},null,2)+'\n',{mode:0o600});
+          fs.writeFileSync('/tmp/fix-importer-topology-before.json',JSON.stringify(beforeTopology,null,2)+'\n');
+          fs.writeFileSync('/tmp/fix-importer-old-version.txt',oldVersion+'\n');
+          const q=v=>JSON.stringify(String(v??''));
+          let toml=`name = ${q(legacy)}\nmain = \"src/index-phase23-protected-view-stability.js\"\ncompatibility_date = \"2026-08-20\"\nkeep_vars = true\nworkers_dev = true\n`;
+          const plains=nonSecret.filter(b=>b.type==='plain_text');
+          if(plains.length){toml+='\n[vars]\n';for(const b of plains)toml+=`${b.name} = ${q(b.text)}\n`;}
+          for(const b of nonSecret.filter(b=>b.type==='kv_namespace'))toml+=`\n[[kv_namespaces]]\nbinding = ${q(b.name)}\nid = ${q(b.namespace_id)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='r2_bucket'))toml+=`\n[[r2_buckets]]\nbinding = ${q(b.name)}\nbucket_name = ${q(b.bucket_name)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='d1')){const db=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(b.id)}`);toml+=`\n[[d1_databases]]\nbinding = ${q(b.name)}\ndatabase_name = ${q(db.name)}\ndatabase_id = ${q(b.id)}\n`;}
+          for(const b of nonSecret.filter(b=>b.type==='send_email'))toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
+          fs.writeFileSync('worker/wrangler.fix-importer.toml',toml);
+          const safe={marker:'FIX_IMPORTER_PRODUCTION_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,patchCommit:process.env.PATCH_COMMIT,oldVersion,beforeTopology,readModelsBinding:{name:readBinding.name,namespace_id:readBinding.namespace_id},nonSecretBindingNames:nonSecret.map(b=>`${b.name}:${b.type}`),secretNames};
+          fs.writeFileSync('/tmp/fix-importer-deploy.json',JSON.stringify(safe,null,2)+'\n');
+          console.log(JSON.stringify(safe,null,2));
+          NODE
+          test -s worker/wrangler.fix-importer.toml
+          grep -Fq 'binding = "REBUILD_SHADOW_KV"' worker/wrangler.fix-importer.toml
+          grep -Fq "$READ_MODELS_KV_ID" worker/wrangler.fix-importer.toml
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/fix-importer-dryrun --config worker/wrangler.fix-importer.toml >/tmp/fix-importer-dryrun.log
+          grep -R -Fq 'PREPARED_ACCESS_POST_PUBLISH_VERIFY_FAILED' /tmp/fix-importer-dryrun
+          grep -R -Fq 'PREPARED_ACCESS_PUBLISH_FAILED' /tmp/fix-importer-dryrun
+
+      - name: Deploy operational importer Worker with automatic rollback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_VERSION="$(tr -d '\r\n' </tmp/fix-importer-old-version.txt)"
+          DEPLOYED=0
+          rollback(){
+            rc=$?
+            if [ "$DEPLOYED" = '1' ]; then
+              echo "Post-deploy gate failed; restoring $LEGACY_WORKER to $OLD_VERSION" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" rollback "$OLD_VERSION" --name "$LEGACY_WORKER" --message 'Automatic rollback: importer prepared-access/email gate failure' || echo 'ROLLBACK_COMMAND_FAILED' >&2
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.fix-importer.toml --keep-vars --message 'Fix importer: publish prepared access before success and classify email per lesson'
+          DEPLOYED=1
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN,legacy=process.env.LEGACY_WORKER,browser=process.env.BROWSER_WORKER,student=process.env.STUDENT_WORKER,host=process.env.PROD_HOST;
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const oldVersion=fs.readFileSync('/tmp/fix-importer-old-version.txt','utf8').trim(),beforeTopology=JSON.parse(fs.readFileSync('/tmp/fix-importer-topology-before.json','utf8')),baseline=JSON.parse(fs.readFileSync('/tmp/fix-importer-bindings-before.json','utf8'));
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`),zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0],routes=await cf(`/zones/${zone.id}/workers/routes`),hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          const bs=await settings(browser),services=(bs.bindings||[]).filter(b=>b.type==='service');
+          const afterTopology={route:{pattern:hostRoutes[0]?.pattern,script:hostRoutes[0]?.script},browserVersion:await active(browser),studentVersion:await active(student),service:{name:services[0]?.name,service:services[0]?.service}};
+          if(JSON.stringify(afterTopology)!==JSON.stringify(beforeTopology))throw new Error(`Public topology/version changed: ${JSON.stringify({beforeTopology,afterTopology})}`);
+          const ls=await settings(legacy),normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const now={nonSecret:(ls.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(ls.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};
+          if(JSON.stringify(now)!==JSON.stringify(baseline))throw new Error('Operational Worker bindings changed unexpectedly');
+          const newVersion=await active(legacy);
+          if(!newVersion||newVersion===oldVersion)throw new Error(`Operational Worker version did not advance: ${newVersion}`);
+          const safe=JSON.parse(fs.readFileSync('/tmp/fix-importer-deploy.json','utf8'));safe.newVersion=newVersion;safe.afterTopology=afterTopology;safe.bindingParity=true;fs.writeFileSync('/tmp/fix-importer-deploy.json',JSON.stringify(safe,null,2)+'\n');
+          console.log(JSON.stringify({marker:'FIX_IMPORTER_DEPLOY_VERSION_BINDING_PASS',oldVersion,newVersion,bindingParity:true,afterTopology},null,2));
+          NODE
+
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --output /tmp/fix-importer-login-negative.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"password":"__deliberately_wrong__"}' "$BASE/api/v1/admin/lesson-releases/login")"
+          test "$code" = '401'
+          jq -e '.error == "UNAUTHORISED"' /tmp/fix-importer-login-negative.json >/dev/null
+          code="$(curl --silent --show-error --output /tmp/fix-importer-preview-negative.json --write-out '%{http_code}' --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --request POST --data '{"rows":[]}' "$BASE/api/v1/admin/lesson-releases/preview")"
+          test "$code" = '401'
+          jq -e '.error == "UNAUTHORISED"' /tmp/fix-importer-preview-negative.json >/dev/null
+
+          PARITY_OUTPUT=/tmp/fix-importer-parity-after.json node scripts/fix-importer-prepared-access-parity-audit.mjs
+          jq -e '.status == "PASS" and .mismatches == 0' /tmp/fix-importer-parity-after.json >/dev/null
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const before=JSON.parse(fs.readFileSync('/tmp/fix-importer-parity-before.json','utf8')),after=JSON.parse(fs.readFileSync('/tmp/fix-importer-parity-after.json','utf8'));
+          if(before.currentStudents!==after.currentStudents)throw new Error(`Current student census changed during deploy: ${before.currentStudents} -> ${after.currentStudents}`);
+          if(after.mismatches!==0)throw new Error(`Postdeploy prepared-access mismatches: ${after.mismatches}`);
+          const safe=JSON.parse(fs.readFileSync('/tmp/fix-importer-deploy.json','utf8'));safe.preparedAccessParity={before:before.mismatches,after:after.mismatches,currentStudents:after.currentStudents};safe.success=true;safe.completedAt=new Date().toISOString();fs.writeFileSync('/tmp/fix-importer-deploy.json',JSON.stringify(safe,null,2)+'\n');
+          NODE
+
+          trap - ERR
+
+      - name: Upload guarded deploy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fix-importer-production-deploy-2026-09-16
+          path: |
+            /tmp/fix-importer-deploy.json
+            /tmp/fix-importer-parity-before.json
+            /tmp/fix-importer-parity-after.json
+            /tmp/fix-importer-topology-before.json
+            /tmp/fix-importer-login-negative.json
+            /tmp/fix-importer-preview-negative.json
+            /tmp/fix-importer-dryrun.log
+          if-no-files-found: warn
+          retention-days: 30
