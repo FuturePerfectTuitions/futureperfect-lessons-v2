@@ -67,6 +67,11 @@ function compileViewCatalogue(input, viewId) {
   const lessonIds = [];
   const seen = new Set();
 
+  // The curriculum arrays are the authoritative lesson sequence for a view.
+  // Some legacy lesson records contain duplicated or stale numeric order values,
+  // especially when one presentation view concatenates multiple curricula.
+  // Preserve the declared curriculum sequence and publish a normalized 1..N order
+  // so all consumers observe the same chronology.
   for (const curriculumCode of definition.curricula) {
     const raw = curricula[curriculumCode] ?? curricula[`curriculum:${curriculumCode}`];
     for (const lessonId of lessonIdsFromCurriculum(raw)) {
@@ -80,7 +85,7 @@ function compileViewCatalogue(input, viewId) {
     .map(lessonId => lessons[lessonId] ?? lessons[`lesson:${lessonId}`])
     .map(record => safeLessonMetadata(record, definition.viewId))
     .filter(Boolean)
-    .sort((left, right) => left.order - right.order || left.lessonId.localeCompare(right.lessonId));
+    .map((row, index) => ({ ...row, order: index + 1 }));
 
   return {
     viewId: definition.viewId,
