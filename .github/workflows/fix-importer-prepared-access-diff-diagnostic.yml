@@ -1,0 +1,36 @@
+name: Fix importer - prepared access diff diagnostic
+
+on:
+  push:
+    branches:
+      - fix/importer-publish-email-per-lesson-2026-09-16
+    paths:
+      - docs/rebuild/FIX_IMPORTER_DIFF_DIAGNOSTIC_TRIGGER.md
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      AS_OF_DATE: '2026-09-16'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/importer-publish-email-per-lesson-2026-09-16
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run read-only field-level diagnostic
+        run: node scripts/fix-importer-prepared-access-diff-diagnostic.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fix-importer-prepared-access-diff-diagnostic
+          path: /tmp/fix-importer-prepared-access-diff.json
+          retention-days: 30
