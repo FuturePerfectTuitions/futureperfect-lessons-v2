@@ -74,6 +74,10 @@ jobs:
           if(stableStringify(candidate.navigation)!==stableStringify(currentPayload.navigation)) throw new Error('Navigation changed unexpectedly.');
           if(stableStringify(candidate.lessonToViews)!==stableStringify(currentPayload.lessonToViews)) throw new Error('lessonToViews changed unexpectedly.');
 
+          function displayId(record, viewId){const target=clean(viewId).toLowerCase();for(const src of [record?.displayIds,record?.displayLessonIds,record?.presentation?.displayIds]){if(!src||typeof src!=='object'||Array.isArray(src))continue;const direct=clean(src[target]);if(direct)return direct;const match=Object.entries(src).find(([k])=>clean(k).toLowerCase()===target);if(match&&clean(match[1]))return clean(match[1]);}return clean(record?.lessonId)}
+          function chronology(id){const m=clean(id).toUpperCase().match(/T(\d+)[A-Z]+(\d{1,3})$/);return m?{term:Number(m[1]),number:Number(m[2])}:null}
+          function expectedSequence(viewId){const def=VIEW_DEFINITIONS[viewId];const joined=[];const seen=new Set();for(const code of def.curricula){for(const id of curricula[code]?.lessonIds||[]){if(seen.has(id))continue;seen.add(id);if(lessons[id]?.active!==false)joined.push({id,display:displayId(lessons[id],viewId),sourceIndex:joined.length})}}if(def.curricula.length===1)return joined.map(x=>x.id);return joined.sort((a,b)=>{const ak=chronology(a.display),bk=chronology(b.display);if(ak&&bk)return ak.term-bk.term||ak.number-bk.number||a.display.localeCompare(b.display)||a.sourceIndex-b.sourceIndex;if(ak)return -1;if(bk)return 1;return a.sourceIndex-b.sourceIndex}).map(x=>x.id)}
+
           const changed=[];
           const details=[];
           const stripOrder=row=>{const {order,...rest}=row||{};return rest};
@@ -92,10 +96,12 @@ jobs:
             if(stableStringify(sequenceBefore)!==stableStringify(sequenceAfter)||stableStringify(orderBefore)!==stableStringify(orderAfter)){
               changed.push(viewId);details.push({viewId,sequenceChanged:stableStringify(sequenceBefore)!==stableStringify(sequenceAfter),orderChanged:stableStringify(orderBefore)!==stableStringify(orderAfter),before:first(before),after:first(after)});
             }
-            const expected=[];const seen=new Set();for(const code of VIEW_DEFINITIONS[viewId].curricula){for(const id of curricula[code]?.lessonIds||[]){if(seen.has(id))continue;seen.add(id);if(lessons[id]?.active!==false)expected.push(id);}}
-            if(stableStringify(sequenceAfter)!==stableStringify(expected)) throw new Error(`${viewId}: candidate does not exactly follow authoritative curriculum sequence.`);
+            const expected=expectedSequence(viewId);
+            if(stableStringify(sequenceAfter)!==stableStringify(expected)) throw new Error(`${viewId}: candidate does not exactly follow independently calculated presentation chronology.`);
             if(after.some((r,i)=>Number(r.order)!==i+1)) throw new Error(`${viewId}: candidate order metadata is not normalized.`);
           }
+          const expectedChanged=['maths-year6'];
+          if(stableStringify([...changed].sort())!==stableStringify(expectedChanged)) throw new Error(`Unexpected changed views: ${JSON.stringify(changed)}`);
           const report={marker:'CATALOGUE_ORDER_FIX_PRODUCTION_PREFLIGHT_PASS',readOnly:true,observedAt:new Date().toISOString(),currentGlobalVersion:currentGlobal.version,canonicalLessonCount:Object.keys(lessons).length,changedViewIds:changed,details,candidatePreview:{mathsYear6:first(candidate.catalogues?.['maths-year6']?.lessons||[]),englishYear4:first(candidate.catalogues?.['english-year4']?.lessons||[])}};
           fs.writeFileSync('/tmp/catalogue-order-preflight.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
           NODE
