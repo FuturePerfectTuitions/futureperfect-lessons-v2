@@ -13,6 +13,7 @@ const asOfDate = clean(process.env.AS_OF_DATE) || new Intl.DateTimeFormat('en-CA
   timeZone:'Europe/London', year:'numeric', month:'2-digit', day:'2-digit'
 }).format(new Date());
 const output = clean(process.env.PARITY_OUTPUT || '/tmp/fix-importer-prepared-access-parity.json');
+const explicitTestUsers = new Set(['mahu1907']);
 if (!account || !token) throw new Error('Cloudflare credentials are required.');
 
 const base = 'https://api.cloudflare.com/client/v4';
@@ -50,8 +51,7 @@ async function kvKeys(ns, prefix) {
     if (cursor) q.set('cursor', cursor);
     const body = await envelope(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);
     keys.push(...(body || []).map?.(x => x.name).filter(Boolean) || []);
-    // The REST wrapper above returns result only, so fetch result_info separately
-    // when pagination could matter. user:* is far below 1000 in this portal.
+    // user:* is far below 1000 in this portal.
     cursor = '';
   } while (cursor);
   return keys;
@@ -63,6 +63,17 @@ async function d1Query(db, sql) {
   });
   const first = Array.isArray(result) ? result[0] : result;
   return Array.isArray(first?.results) ? first.results : [];
+}
+function semanticPayload(payload) {
+  if (payload == null) return null;
+  const copy = JSON.parse(JSON.stringify(payload));
+  // asOfDate is snapshot metadata, not an access semantic. A previous day's
+  // prepared model may be semantically current even when this date differs.
+  if (copy && typeof copy === 'object') {
+    delete copy.asOfDate;
+    if (copy.snapshot && typeof copy.snapshot === 'object') delete copy.snapshot.asOfDate;
+  }
+  return copy;
 }
 
 const settings = await envelope(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/settings`);
@@ -121,10 +132,15 @@ function isCurrentStudent(id, user) {
 
 const userKeys = (await kvKeys(studentsKv, 'user:')).sort();
 const rows = [];
+const skippedTestUsers = [];
 for (const key of userKeys) {
   const id = norm(key.replace(/^user:/, ''));
   const user = await kvJson(studentsKv, key);
   if (!user || !isCurrentStudent(id, user)) continue;
+  if (explicitTestUsers.has(id)) {
+    skippedTestUsers.push(id);
+    continue;
+  }
   const scopeId = await opaqueAccessScopeId(id, salt);
   const scope = `access:${scopeId}`;
   const input = {
@@ -140,17 +156,22 @@ for (const key of userKeys) {
   const version = clean(pointer?.current?.version);
   const envelopeRow = version ? await kvJson(readModelsKv, versionKey(scope, version)) : null;
   const actual = envelopeRow?.payload || null;
-  const match = actual != null && stableStringify(actual) === stableStringify(expected);
-  rows.push({ portalUserIdNorm:id, scope, version:version || null, match });
+  const exactMatch = actual != null && stableStringify(actual) === stableStringify(expected);
+  const semanticMatch = actual != null && stableStringify(semanticPayload(actual)) === stableStringify(semanticPayload(expected));
+  rows.push({ portalUserIdNorm:id, scope, version:version || null, exactMatch, semanticMatch });
 }
 
-const mismatches = rows.filter(row => !row.match);
+const mismatches = rows.filter(row => !row.semanticMatch);
 const report = {
   marker:mismatches.length ? 'FIX_IMPORTER_PREPARED_ACCESS_PARITY_FAIL' : 'FIX_IMPORTER_PREPARED_ACCESS_PARITY_PASS',
   status:mismatches.length ? 'FAIL' : 'PASS',
   readOnly:true,
+  comparison:'semantic_access_ignoring_snapshot_asOfDate',
   asOfDate,
-  currentStudents:rows.length,
+  currentRealStudents:rows.length,
+  skippedExplicitTestUsers:skippedTestUsers,
+  exactMatches:rows.filter(row => row.exactMatch).length,
+  semanticMatches:rows.filter(row => row.semanticMatch).length,
   mismatches:mismatches.length,
   mismatchUsers:mismatches.map(row => row.portalUserIdNorm),
   rows
