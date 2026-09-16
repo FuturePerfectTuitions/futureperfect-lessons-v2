@@ -1,0 +1,146 @@
+name: Catalogue order fix - guarded production publish
+
+on:
+  push:
+    branches:
+      - fix/importer-publish-email-per-lesson-2026-09-16
+    paths:
+      - docs/rebuild/CATALOGUE_ORDER_FIX_PRODUCTION_PUBLISH_TRIGGER.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalogue-order-fix-production-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_OLD_GLOBAL_VERSION: cp11-g-c317ce9e7ac6470f763f-34970938223
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/importer-publish-email-per-lesson-2026-09-16
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Regression gate
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/shared/read-models/catalogue.mjs
+          node tests/catalogue-curriculum-order-verification.mjs
+          node tests/rebuild-checkpoint2-read-models.mjs
+      - name: Guarded atomic global catalogue publish
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { compileGlobalScope } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { pointerKey, versionKey, stableStringify, publishScopeAtomic } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          import { VIEW_DEFINITIONS } from './rebuild/shared/read-models/view-registry.mjs';
+
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const readNs=clean(process.env.READ_MODELS_KV), legacy=clean(process.env.LEGACY_WORKER), browser=clean(process.env.BROWSER_WORKER), student=clean(process.env.STUDENT_WORKER);
+          const expectedLessons=clean(process.env.EXPECTED_LESSONS_KV), expectedOldGlobal=clean(process.env.EXPECTED_OLD_GLOBAL_VERSION);
+          if(!account||!token||!readNs||!legacy||!browser||!student||!expectedLessons||!expectedOldGlobal) throw new Error('Required production configuration missing.');
+          const base='https://api.cloudflare.com/client/v4';
+          const auth={Authorization:`Bearer ${token}`};
+          async function req(path,opt={}){const r=await fetch(base+path,{...opt,headers:{...auth,...(opt.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{}return{r,text,body}}
+          async function envp(path){const o=await req(path);if(!o.r.ok||o.body?.success!==true)throw new Error(`${o.r.status} ${path}: ${JSON.stringify(o.body?.errors||[])}`);return o.body.result}
+          async function kvText(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read ${o.r.status}: ${key}`);return o.text}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t)}
+          async function kvPut(ns,key,value){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{'content-type':'text/plain; charset=utf-8'},body:String(value)});if(!o.r.ok||o.body?.success!==true)throw new Error(`KV write ${o.r.status}: ${key}: ${JSON.stringify(o.body?.errors||[])}`)}
+          async function kvKeys(ns,prefix){let cursor='',out=[];do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);if(!o.r.ok||o.body?.success!==true)throw new Error(`KV list failed ${o.r.status}: ${prefix}`);out.push(...(o.body.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(o.body.result_info?.cursor);}while(cursor);return out.sort();}
+          async function readCurrentScope(scope){const p=await kvJson(readNs,pointerKey(scope));const v=clean(p?.current?.version);if(!v)throw new Error(`Missing current pointer ${scope}`);const e=await kvJson(readNs,versionKey(scope,v));if(!e?.payload)throw new Error(`Missing current envelope ${scope}/${v}`);return{pointer:p,version:v,payload:e.payload}}
+          async function activeVersion(worker){const d=await envp(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/deployments`);return clean(d?.deployments?.[0]?.versions?.find(v=>Number(v?.percentage||0)===100)?.version_id)}
+          function sha(text){return createHash('sha256').update(String(text)).digest('hex')}
+          async function accessPointerDigest(){const keys=await kvKeys(readNs,'rm:v1:scope:access_3A');const pointers=keys.filter(k=>k.endsWith(':current'));const material=[];for(const key of pointers){material.push(`${key}\n${await kvText(readNs,key)}`)}return{count:pointers.length,sha256:sha(material.join('\n---\n'))}}
+
+          const legacySettings=await envp(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const lessonsNs=clean((legacySettings.bindings||[]).find(x=>x.name==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==expectedLessons) throw new Error(`LESSONS_KV binding mismatch: ${lessonsNs}`);
+          const browserSettings=await envp(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+          const serviceBindings=(browserSettings.bindings||[]).filter(x=>x.type==='service');
+          if(serviceBindings.length!==1||clean(serviceBindings[0].name)!=='STAGING_API'||clean(serviceBindings[0].service)!==student) throw new Error('Public Browser->Student service topology drifted.');
+          const browserBefore=await activeVersion(browser), studentBefore=await activeVersion(student);
+          if(!browserBefore||!studentBefore) throw new Error('Could not resolve active Browser/Student versions.');
+
+          const oldGlobal=await readCurrentScope('global');
+          if(oldGlobal.version!==expectedOldGlobal) throw new Error(`Concurrent/global drift: expected ${expectedOldGlobal}, found ${oldGlobal.version}`);
+          const oldPointerText=await kvText(readNs,pointerKey('global'));
+          const accessBefore=await accessPointerDigest();
+
+          const curriculumCodes=['MATHS_Y2','MATHS_Y3','MATHS_L1','MATHS_L2','MATHS_L3','MATHS_Y6_EXTRA','ENGLISH_Y2','ENGLISH_Y3','ENGLISH_Y4','ENGLISH_Y5','ENGLISH_Y6'];
+          const fallback={MATHS_Y2:['maths-year2'],MATHS_Y3:['maths-year3'],MATHS_L1:['maths-year4','maths-level1'],MATHS_L2:['maths-year5','maths-level2'],MATHS_L3:['maths-level3','maths-year6'],MATHS_Y6_EXTRA:['maths-year6-extra'],ENGLISH_Y2:['english-year2'],ENGLISH_Y3:['english-year3'],ENGLISH_Y4:['english-year4','english-year4-11plus'],ENGLISH_Y5:['english-year5','english-year5-11plus'],ENGLISH_Y6:['english-year6']};
+          const items=raw=>Array.isArray(raw)?raw:Array.isArray(raw?.lessonIds)?raw.lessonIds:Array.isArray(raw?.lessons)?raw.lessons:Array.isArray(raw?.items)?raw.items:[];
+          const curricula={}, ids=new Set();
+          for(const code of curriculumCodes){let raw=await kvJson(lessonsNs,`curriculum:${code}`);if(!items(raw).length){for(const view of fallback[code]||[]){const probe=await kvJson(lessonsNs,`view:${view}`);if(items(probe).length){raw=probe;break;}}}const lessonIds=items(raw).map(x=>typeof x==='string'?clean(x):clean(x?.lessonId)).filter(Boolean);if(!lessonIds.length)throw new Error(`Empty curriculum ${code}`);curricula[code]={lessonIds};lessonIds.forEach(id=>ids.add(id));}
+          const lessons={};for(const id of [...ids].sort()){const row=await kvJson(lessonsNs,`lesson:${id}`);if(!row)throw new Error(`Missing lesson:${id}`);lessons[id]=row;}
+          if(Object.keys(lessons).length!==372) throw new Error(`Unexpected canonical lesson count ${Object.keys(lessons).length}; expected 372.`);
+
+          const source=oldGlobal.payload?.source||{};
+          const candidate=compileGlobalScope({sourceType:clean(source.type||'unknown'),sourceRevision:clean(source.revision||''),curricula,lessons},{sourceType:clean(source.type||'unknown'),sourceRevision:clean(source.revision||'')});
+          const currentPayload=oldGlobal.payload;
+          if(stableStringify(candidate.navigation)!==stableStringify(currentPayload.navigation)) throw new Error('Navigation changed unexpectedly.');
+          if(stableStringify(candidate.lessonToViews)!==stableStringify(currentPayload.lessonToViews)) throw new Error('lessonToViews changed unexpectedly.');
+          const changed=[];const stripOrder=row=>{const {order,...rest}=row||{};return rest};
+          for(const viewId of Object.keys(candidate.catalogues||{})){
+            const before=currentPayload.catalogues?.[viewId]?.lessons||[], after=candidate.catalogues?.[viewId]?.lessons||[];
+            if(before.length!==after.length)throw new Error(`${viewId}: lesson count changed.`);
+            const beforeBy=Object.fromEntries(before.map(r=>[clean(r.lessonId),stripOrder(r)]).sort(([a],[b])=>a.localeCompare(b)));
+            const afterBy=Object.fromEntries(after.map(r=>[clean(r.lessonId),stripOrder(r)]).sort(([a],[b])=>a.localeCompare(b)));
+            if(stableStringify(beforeBy)!==stableStringify(afterBy))throw new Error(`${viewId}: non-order metadata changed.`);
+            const sequenceBefore=before.map(r=>clean(r.lessonId)), sequenceAfter=after.map(r=>clean(r.lessonId));
+            const orderBefore=before.map(r=>Number(r.order)), orderAfter=after.map(r=>Number(r.order));
+            if(stableStringify(sequenceBefore)!==stableStringify(sequenceAfter)||stableStringify(orderBefore)!==stableStringify(orderAfter))changed.push(viewId);
+            const expected=[];const seen=new Set();for(const code of VIEW_DEFINITIONS[viewId].curricula){for(const id of curricula[code]?.lessonIds||[]){if(seen.has(id))continue;seen.add(id);if(lessons[id]?.active!==false)expected.push(id)}}
+            if(stableStringify(sequenceAfter)!==stableStringify(expected))throw new Error(`${viewId}: candidate sequence does not match authoritative curricula.`);
+            if(after.some((r,i)=>Number(r.order)!==i+1))throw new Error(`${viewId}: candidate order not normalized.`);
+          }
+          const expectedChanged=['english-year4','english-year4-11plus','maths-year6'];
+          if(stableStringify([...changed].sort())!==stableStringify(expectedChanged))throw new Error(`Unexpected changed views: ${JSON.stringify(changed)}`);
+
+          const pointerImmediatelyBefore=await kvJson(readNs,pointerKey('global'));
+          if(clean(pointerImmediatelyBefore?.current?.version)!==expectedOldGlobal)throw new Error('Global pointer changed during pre-publish validation.');
+          const store={get:key=>kvText(readNs,key),put:(key,value)=>kvPut(readNs,key,value)};
+          let publication=null;
+          try{
+            publication=await publishScopeAtomic(store,{scope:'global',payload:candidate,version:`catalogue-order-20260916-${Date.now()}`,updatedAt:new Date().toISOString()});
+            const after=await readCurrentScope('global');
+            if(after.version!==publication.version)throw new Error('Published global version did not become current.');
+            if(stableStringify(after.payload)!==stableStringify(candidate))throw new Error('Published global payload mismatch.');
+            if(clean(after.pointer?.previous?.version)!==expectedOldGlobal)throw new Error('Previous global rollback version not retained.');
+            const accessAfter=await accessPointerDigest();
+            if(accessAfter.count!==accessBefore.count||accessAfter.sha256!==accessBefore.sha256)throw new Error('Student access pointers changed during global-only publication.');
+            const browserAfter=await activeVersion(browser),studentAfter=await activeVersion(student);
+            if(browserAfter!==browserBefore||studentAfter!==studentBefore)throw new Error('Browser or Student Worker version changed during catalogue publication.');
+            const browserSettingsAfter=await envp(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+            const svcAfter=(browserSettingsAfter.bindings||[]).filter(x=>x.type==='service');
+            if(svcAfter.length!==1||clean(svcAfter[0].name)!=='STAGING_API'||clean(svcAfter[0].service)!==student)throw new Error('Public topology changed during catalogue publication.');
+            const report={marker:'CATALOGUE_ORDER_FIX_PRODUCTION_PUBLISH_PASS',status:'PASS',publishedAt:new Date().toISOString(),oldGlobalVersion:expectedOldGlobal,newGlobalVersion:publication.version,previousVersion:clean(after.pointer?.previous?.version),changedViewIds:changed,canonicalLessonCount:Object.keys(lessons).length,accessPointerCount:accessAfter.count,accessPointerDigestBefore:accessBefore.sha256,accessPointerDigestAfter:accessAfter.sha256,browserVersion:browserAfter,studentVersion:studentAfter,browserToStudentOnly:true,year6FirstLessons:(after.payload.catalogues?.['maths-year6']?.lessons||[]).slice(0,25).map(r=>clean(r.displayLessonId)),year4Term2:(after.payload.catalogues?.['english-year4']?.lessons||[]).filter(r=>clean(r.displayLessonId).startsWith('Y4T2')).slice(0,8).map(r=>clean(r.displayLessonId))};
+            fs.writeFileSync('/tmp/catalogue-order-publish.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
+          }catch(error){
+            if(publication){await kvPut(readNs,pointerKey('global'),oldPointerText);const restored=await readCurrentScope('global');if(restored.version!==expectedOldGlobal)throw new Error(`Publish failed and rollback verification failed. Original error: ${error?.message}`);}
+            throw error;
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: catalogue-order-production-publish
+          path: /tmp/catalogue-order-publish.json
+          retention-days: 90
+          if-no-files-found: error
