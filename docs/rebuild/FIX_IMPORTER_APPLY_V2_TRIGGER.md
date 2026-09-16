@@ -1,3 +1,3 @@
 # Importer source patch V2 trigger
 
-Rerun after correcting the remaining historical regression fixture that encoded Completed + progress Remarks as Ongoing. The source patch remains narrow: prepared-access publication must complete before Portal success, and final Completed status must take precedence over stale progress remarks for each independent parent-email row.
+Rerun after restoring the original full parent-email integration regression coverage and changing only the business-rule expectations that are intentionally different: final Completed status is authoritative over historical progress Remarks. Prepared-access publication must also complete before Portal success is reported.
