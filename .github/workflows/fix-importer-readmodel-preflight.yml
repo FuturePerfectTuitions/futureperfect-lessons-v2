@@ -1,0 +1,59 @@
+name: Fix importer - read-only production binding preflight
+
+on:
+  push:
+    branches: [fix/importer-publish-email-per-lesson-2026-09-16]
+    paths: [docs/rebuild/FIX_IMPORTER_PREFLIGHT_TRIGGER.md]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Inspect live bindings and versions read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const names=[process.env.LEGACY_WORKER,process.env.BROWSER_WORKER,process.env.STUDENT_WORKER];
+          const out={marker:'FIX_IMPORTER_BINDING_PREFLIGHT_PASS',readOnly:true,workers:{}};
+          for(const name of names){
+            const s=await settings(name);
+            out.workers[name]={activeVersion:await active(name),bindings:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(b=>({name:b.name,type:b.type,namespace_id:b.namespace_id||null,database_id:b.database_id||b.id||null,bucket_name:b.bucket_name||null,service:b.service||null}))};
+          }
+          const legacy=out.workers[process.env.LEGACY_WORKER].bindings;
+          const rm=legacy.find(b=>b.namespace_id===process.env.EXPECTED_READ_MODELS_KV)||null;
+          out.legacyReadModelsBinding=rm;
+          if(!rm) throw new Error('Legacy Worker has no binding to expected READ_MODELS_KV namespace');
+          const r=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${process.env.EXPECTED_READ_MODELS_KV}/values/${encodeURIComponent('meta:scope-salt')}`,{headers});
+          if(!r.ok) throw new Error(`Scope-salt read failed ${r.status}`);
+          const salt=(await r.text()).trim();
+          if(!/^[0-9a-f]{64}$/i.test(salt)) throw new Error('Scope salt missing or malformed');
+          out.scopeSaltPresent=true;
+          fs.writeFileSync('/tmp/fix-importer-preflight.json',JSON.stringify(out,null,2)+'\n');
+          console.log(JSON.stringify(out,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fix-importer-binding-preflight
+          path: /tmp/fix-importer-preflight.json
+          retention-days: 30
