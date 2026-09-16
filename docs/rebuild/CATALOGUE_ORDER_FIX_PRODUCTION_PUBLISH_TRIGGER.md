@@ -1,5 +1,5 @@
 Trigger the guarded atomic production publication for the verified catalogue chronology repair.
 
-Preflight run 35091432104 passed and proved exactly three changed presentation views: english-year4, english-year4-11plus, maths-year6. No lesson membership, navigation, entitlement, or non-order metadata change is authorized.
+Initial preflight run 35091432104 repaired the three original ordering defects. Independent post-publish verification then exposed one residual Year 6 cross-curriculum term reset. Final preflight run 35092360995 passed and proves the second publication changes only maths-year6, preserves all 372 lesson memberships and non-order metadata, and produces the independently calculated displayed chronology.
 
-Triggered: 2026-09-16.
+Final guarded publication triggered: 2026-09-16T11:51Z.
