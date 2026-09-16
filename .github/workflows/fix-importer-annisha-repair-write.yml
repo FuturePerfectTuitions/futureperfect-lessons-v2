@@ -1,0 +1,56 @@
+name: Fix importer - Annisha prepared access production repair
+
+on:
+  push:
+    branches:
+      - fix/importer-publish-email-per-lesson-2026-09-16
+    paths:
+      - docs/rebuild/FIX_IMPORTER_ANNISHA_REPAIR_WRITE_TRIGGER.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fix-importer-annisha-prepared-access-repair-2026-09-16
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+      STUDENTS_KV: c9723c8806334e4ea54d1b456d31b794
+      D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      AS_OF_DATE: '2026-09-16'
+      ALLOW_WRITE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/importer-publish-email-per-lesson-2026-09-16
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static and dry-run authority guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/fix-importer-annisha-prepared-access-repair.mjs
+          grep -Fq "Concurrent pointer change detected for Annisha" scripts/fix-importer-annisha-prepared-access-repair.mjs
+          grep -Fq "targetLesson='Y6M2.2'" scripts/fix-importer-annisha-prepared-access-repair.mjs
+          ALLOW_WRITE=false node scripts/fix-importer-annisha-prepared-access-repair.mjs
+          jq -e '.status == "DRY_RUN_PASS" and .portalUserId == "ann3009" and .targetLesson == "Y6M2.2" and .d1TargetEntitlement.coreAccess == 1' /tmp/fix-importer-annisha-repair.json >/dev/null
+      - name: Publish exact Annisha prepared-access scope
+        run: node scripts/fix-importer-annisha-prepared-access-repair.mjs
+      - name: Verify production repair evidence
+        run: jq -e '.status == "WRITE_PASS" and .portalUserId == "ann3009" and .published.previousVersion != null' /tmp/fix-importer-annisha-repair.json >/dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fix-importer-annisha-prepared-access-production-repair
+          path: /tmp/fix-importer-annisha-repair.json
+          retention-days: 30
+          if-no-files-found: error
