@@ -1,0 +1,134 @@
+name: Incident - Release Visibility Diagnostic
+
+on:
+  push:
+    branches:
+      - incident/import-release-visibility-2026-09-16
+    paths:
+      - 'docs/rebuild/INCIDENT_RELEASE_VISIBILITY_TRIGGER.md'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  LEGACY_WORKER: fpt-portal-v2-worker
+  READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: incident/import-release-visibility-2026-09-16
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read-only D1 versus prepared-access diagnostic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=String(process.env.CLOUDFLARE_ACCOUNT_ID||'').trim();
+          const token=String(process.env.CLOUDFLARE_API_TOKEN||'').trim();
+          const db=String(process.env.D1_ID||'').trim();
+          const readNs=String(process.env.READ_MODELS_KV||'').trim();
+          if(!account||!token||!db||!readNs) throw new Error('Missing protected Cloudflare configuration');
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}`;
+          const headers={Authorization:`Bearer ${token}`};
+          const clean=v=>String(v??'').trim();
+          const users=['kiaan1312','zar0603'];
+
+          async function api(path, options={}) {
+            const r=await fetch(`${base}${path}`,{...options,headers:{...headers,...(options.headers||{})}});
+            const b=await r.json().catch(()=>null);
+            if(!r.ok||b?.success!==true) throw new Error(`Cloudflare read failed ${r.status} ${path}: ${JSON.stringify(b?.errors||[])}`);
+            return b;
+          }
+          async function sql(statement, params=[]) {
+            if(!/^\s*(SELECT|WITH|PRAGMA)\b/i.test(statement)||/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b/i.test(statement)) throw new Error('Read-only SQL guard');
+            const b=await api(`/d1/database/${db}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql:statement,params})});
+            const x=Array.isArray(b.result)?b.result[0]:b.result;
+            return Array.isArray(x?.results)?x.results:[];
+          }
+          async function kvText(key){
+            const r=await fetch(`${base}/storage/kv/namespaces/${readNs}/values/${encodeURIComponent(key)}`,{headers});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV read failed ${r.status} ${key}`);
+            return r.text();
+          }
+          async function kvJson(key){const t=await kvText(key);if(t==null)return null;try{return JSON.parse(t);}catch{return null;}}
+          async function list(prefix){let out=[],cursor='';do{const q=new URLSearchParams({prefix,limit:'1000'});if(cursor)q.set('cursor',cursor);const b=await api(`/storage/kv/namespaces/${readNs}/keys?${q}`);out.push(...(b.result||[]).map(x=>clean(x.name)).filter(Boolean));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
+          function encodedScope(scope){return encodeURIComponent(scope).replace(/%/g,'_');}
+          function pointerKey(scope){return `rm:v1:scope:${encodedScope(scope)}:current`;}
+          function versionKey(scope,version){return `rm:v1:scope:${encodedScope(scope)}:version:${encodeURIComponent(version).replace(/%/g,'_')}`;}
+          async function readScope(scope){
+            const p=await kvJson(pointerKey(scope));
+            const version=clean(p?.current?.version);
+            const e=version?await kvJson(versionKey(scope,version)):null;
+            return {pointer:p,envelope:e,payload:e?.payload||null};
+          }
+
+          const entitlements=await sql(`SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source, source_batch_code, source_lesson_date, first_granted_at, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN (?, ?) ORDER BY portal_user_id_norm, last_confirmed_at DESC, lesson_id`,users);
+          const prelessons=await sql(`SELECT portal_user_id_norm, lesson_id, batch_key, lesson_date, vr_access, first_granted_at, last_confirmed_at FROM online_prelesson_entitlements WHERE portal_user_id_norm IN (?, ?) ORDER BY portal_user_id_norm, last_confirmed_at DESC, lesson_id`,users);
+          const reconciliation=await sql(`SELECT portal_user_id_norm, operation_id, status, shadow_scope, shadow_version, shadow_sha256, error_message, first_seen_at, last_updated_at FROM rebuild_shadow_reconciliation WHERE portal_user_id_norm IN (?, ?) ORDER BY portal_user_id_norm, last_updated_at DESC`,users);
+
+          // Build any known user->access scope map from reconciliation rows. If that is absent,
+          // inspect all access payloads and record their metadata without trying to guess identity.
+          const userScopes={};
+          for(const u of users){
+            const row=reconciliation.find(r=>clean(r.portal_user_id_norm).toLowerCase()===u && clean(r.shadow_scope).startsWith('access:'));
+            if(row) userScopes[u]=clean(row.shadow_scope);
+          }
+          const allAccessPointerKeys=(await list('rm:v1:scope:access_3A')).filter(k=>k.endsWith(':current')).sort();
+          const snapshots=[];
+          for(const key of allAccessPointerKeys){
+            const p=await kvJson(key); const scope=clean(p?.scope); const version=clean(p?.current?.version);
+            if(!scope||!version) continue;
+            const e=await kvJson(versionKey(scope,version));
+            const payload=e?.payload||null;
+            snapshots.push({key,scope,version,updatedAt:clean(p?.updatedAt),lessonAccess:payload?.snapshot?.lessonAccess||{},currentViews:payload?.snapshot?.currentViews||[],historicalViews:payload?.snapshot?.historicalViews||[]});
+          }
+
+          const report={marker:'FPT_RELEASE_VISIBILITY_DIAGNOSTIC',readOnly:true,observedAt:new Date().toISOString(),users:{}};
+          for(const u of users){
+            const d1=entitlements.filter(r=>clean(r.portal_user_id_norm).toLowerCase()===u);
+            const pre=prelessons.filter(r=>clean(r.portal_user_id_norm).toLowerCase()===u);
+            const rec=reconciliation.filter(r=>clean(r.portal_user_id_norm).toLowerCase()===u);
+            let prepared=null;
+            if(userScopes[u]){
+              const s=await readScope(userScopes[u]);
+              prepared={scope:userScopes[u],pointerUpdatedAt:clean(s.pointer?.updatedAt),version:clean(s.pointer?.current?.version),lessonAccess:s.payload?.snapshot?.lessonAccess||{},currentViews:s.payload?.snapshot?.currentViews||[],historicalViews:s.payload?.snapshot?.historicalViews||[]};
+            }
+            const todayRows=d1.filter(r=>clean(r.last_confirmed_at).startsWith('2026-09-16'));
+            const mismatches=[];
+            if(prepared){
+              for(const r of d1){
+                if(Number(r.core_access||0)!==1) continue;
+                const a=prepared.lessonAccess?.[clean(r.lesson_id)];
+                if(!a || a.core!==true) mismatches.push({lessonId:clean(r.lesson_id),d1Core:true,prepared:a||null,lastConfirmedAt:clean(r.last_confirmed_at),sourceBatch:clean(r.source_batch_code),sourceLessonDate:clean(r.source_lesson_date)});
+              }
+            }
+            report.users[u]={d1Entitlements:d1,onlinePrelesson:pre,reconciliation:rec,userScope:userScopes[u]||null,prepared,todayD1Rows:todayRows,d1PreparedCoreMismatches:mismatches};
+          }
+          report.accessSnapshotCount=snapshots.length;
+          report.allAccessSnapshotMetadata=snapshots.map(s=>({scope:s.scope,version:s.version,updatedAt:s.updatedAt,lessonCount:Object.keys(s.lessonAccess||{}).length}));
+          report.importerSourceObservation={confirmWritesD1Directly:true,preparedPublishCallFound:false,note:'Current admin-lesson-release-import.js grantFull/grantPrelesson write D1 directly; no READ_MODELS_KV publication is performed in that module.'};
+          fs.writeFileSync('/tmp/release-visibility-diagnostic.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify({marker:report.marker,readOnly:true,observedAt:report.observedAt,users:Object.fromEntries(users.map(u=>[u,{todayD1Rows:report.users[u].todayD1Rows,d1PreparedCoreMismatches:report.users[u].d1PreparedCoreMismatches,userScope:report.users[u].userScope,preparedPointerUpdatedAt:report.users[u].prepared?.pointerUpdatedAt||null,preparedVersion:report.users[u].prepared?.version||null}])),accessSnapshotCount:report.accessSnapshotCount,importerSourceObservation:report.importerSourceObservation},null,2));
+          NODE
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-release-visibility-diagnostic-2026-09-16
+          path: /tmp/release-visibility-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
