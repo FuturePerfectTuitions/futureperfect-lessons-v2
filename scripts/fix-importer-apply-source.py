@@ -183,9 +183,9 @@ assert.equal(db.prelessons.size, 1);
 
 p = Path(test)
 text = p.read_text()
-marker = "console.log('Admin lesson-release import verification: PASS');"
+marker = "console.log('Lesson release importer validates ambiguous batch views and preserves safe single-view fallback + FULL/PRELESSON_ONLY + continuing FULL release: PASS');"
 if marker not in text:
-    raise SystemExit('admin importer test PASS marker not found')
+    raise SystemExit('admin importer final PASS marker not found')
 injection = """
 // A D1 entitlement write without a successful prepared-model publication
 // must be reported as a failed Portal action so the email layer cannot
