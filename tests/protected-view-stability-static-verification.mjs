@@ -58,3 +58,4 @@ if (process.env.REQUIRE_PHASE23_ENTRYPOINT === '1') {
 }
 
 console.log('PROTECTED_VIEW_STABILITY_STATIC_VERIFICATION_PASS');
+// Guarded one-time TrialEva provisioning is executed only by the production deploy script.
