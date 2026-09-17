@@ -25,13 +25,13 @@ env:
   READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
   MATERIALS_R2: fpt-materials-dev
   EXPECTED_PREPARED_VERSION: d102017895720-408100f905d1
+  DRIVE_FILE_ID: 1G5b015ALOcHqDXakPpyumuh-PN2Ej7oC
   OLD_NAME: FAR210225Y5T1EE01VRH01.pdf
   OLD_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01.pdf
   NEW_NAME: FAR210225Y5E2.pdf
   NEW_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf
   NEW_SIZE: '236797'
   NEW_SHA256: 86288e1f40ef8b012ad791fc3be70026cd3d274c8a586e0188ca51867c1fdbd5
-  SOURCE_DOWNLOAD_URL: 'https://sdmntprnortheu.oaiusercontent.com/files/00000000-251c-81f4-a11a-445b76cccebf/raw?se=2026-09-17T07%3A22%3A14Z&sp=r&sv=2026-02-06&sr=b&scid=22969501-73ff-538b-a503-97cafcb71cf3&skoid=002823aa-689d-47ca-9347-108c20f4f00d&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-16T19%3A59%3A33Z&ske=2026-09-17T19%3A59%3A33Z&sks=b&skv=2026-02-06&sig=B46G/vLKB1LWjYpLFf3FQU4CzPxPGNWx%2BCUgf0Adam4%3D'
 
 jobs:
   apply:
@@ -45,14 +45,32 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify exact replacement bytes
+      - name: Fetch exact replacement privately from Google Drive and verify bytes
+        env:
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          curl -fL --retry 2 --connect-timeout 10 --max-time 60 "$SOURCE_DOWNLOAD_URL" -o /tmp/new.pdf
-          test "$(stat -c '%s' /tmp/new.pdf)" = "$NEW_SIZE"
-          test "$(sha256sum /tmp/new.pdf | awk '{print $1}')" = "$NEW_SHA256"
-          test "$(head -c 4 /tmp/new.pdf)" = '%PDF'
+          python3 -m pip install --quiet google-auth requests
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, requests
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+          info=json.loads(os.environ['GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON'])
+          creds=service_account.Credentials.from_service_account_info(info,scopes=['https://www.googleapis.com/auth/drive.readonly'])
+          creds.refresh(Request())
+          fid=os.environ['DRIVE_FILE_ID']
+          url=f'https://www.googleapis.com/drive/v3/files/{fid}?alt=media&supportsAllDrives=true'
+          r=requests.get(url,headers={'Authorization':f'Bearer {creds.token}'},timeout=60)
+          r.raise_for_status()
+          data=r.content
+          if len(data)!=int(os.environ['NEW_SIZE']): raise SystemExit(f'Unexpected Drive size: {len(data)}')
+          got=hashlib.sha256(data).hexdigest()
+          if got!=os.environ['NEW_SHA256']: raise SystemExit(f'Unexpected Drive SHA256: {got}')
+          if data[:4]!=b'%PDF': raise SystemExit('Drive object is not a PDF')
+          pathlib.Path('/tmp/new.pdf').write_bytes(data)
+          print(f'DRIVE_FILE_VERIFIED size={len(data)} sha256={got}')
+          PY
 
       - name: Prepare guarded candidate from fresh production reads
         shell: bash
@@ -60,7 +78,7 @@ jobs:
           set -Eeuo pipefail
           actual="$(git ls-remote origin "refs/heads/${AUTHORITY_BRANCH}" | awk '{print $1}')"
           test "$actual" = "$AUTHORITY_SHA"
-          cat >/tmp/prepare.mjs <<'NODE'
+          node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
           import { stableStringify, sha256Hex, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
@@ -89,8 +107,6 @@ jobs:
           const payloadText=stableStringify(detail), payloadSha=await sha256Hex(payloadText), version=`ops-y5e2-vr-${payloadSha.slice(0,16)}-${c(process.env.GITHUB_RUN_ID)}`;const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope:'lesson:Y5E2',version,sha256:payloadSha,payload:detail};const envelopeText=stableStringify(envelope), envelopeSha=await sha256Hex(envelopeText);
           fs.writeFileSync('/tmp/source-old.txt',sourceText);fs.writeFileSync('/tmp/source-new.txt',JSON.stringify(next));fs.writeFileSync('/tmp/pointer-old.txt',pointerText);fs.writeFileSync('/tmp/envelope-new.txt',envelopeText);fs.writeFileSync('/tmp/meta.json',JSON.stringify({version,payloadSha,envelopeSha,oldPreparedVersion:expectedVersion,newResourceId:newRow.resourceId},null,2));
           NODE
-          node --check /tmp/prepare.mjs
-          node /tmp/prepare.mjs
 
       - name: Upload and hash-verify new R2 object at a new key
         shell: bash
@@ -105,7 +121,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          cat >/tmp/publish.mjs <<'NODE'
+          node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import { stableStringify, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
           const c=v=>String(v??'').trim(), account=c(process.env.CLOUDFLARE_ACCOUNT_ID), token=c(process.env.CLOUDFLARE_API_TOKEN), lessons=c(process.env.LESSONS_KV), read=c(process.env.READ_MODELS_KV), base='https://api.cloudflare.com/client/v4', H={Authorization:`Bearer ${token}`};
@@ -115,10 +131,10 @@ jobs:
           const oldSource=fs.readFileSync('/tmp/source-old.txt','utf8'), newSource=fs.readFileSync('/tmp/source-new.txt','utf8'), oldPointer=fs.readFileSync('/tmp/pointer-old.txt','utf8'), envelope=fs.readFileSync('/tmp/envelope-new.txt','utf8'), meta=JSON.parse(fs.readFileSync('/tmp/meta.json','utf8'));
           let sourceWritten=false,pointerWritten=false;
           try{
-            await put(lessons,'lesson:Y5E2',newSource);sourceWritten=true;if(await get(lessons,'lesson:Y5E2')!==newSource)throw new Error('Source readback mismatch');
-            await put(read,versionKey('lesson:Y5E2',meta.version),envelope);if(await get(read,versionKey('lesson:Y5E2',meta.version))!==envelope)throw new Error('Prepared candidate readback mismatch');
+            await put(lessons,'lesson:Y5E2',newSource);sourceWritten=true;if((await get(lessons,'lesson:Y5E2'))!==newSource)throw new Error('Source readback mismatch');
+            await put(read,versionKey('lesson:Y5E2',meta.version),envelope);if((await get(read,versionKey('lesson:Y5E2',meta.version)))!==envelope)throw new Error('Prepared candidate readback mismatch');
             const prior=JSON.parse(oldPointer), pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope:'lesson:Y5E2',current:{version:meta.version,sha256:meta.payloadSha,envelopeSha256:meta.envelopeSha},previous:prior.current||null,updatedAt:new Date().toISOString()};
-            await put(read,pointerKey('lesson:Y5E2'),stableStringify(pointer));pointerWritten=true;const confirmed=JSON.parse(await get(read,pointerKey('lesson:Y5E2'));if(c(confirmed?.current?.version)!==meta.version)throw new Error('Pointer readback mismatch');
+            await put(read,pointerKey('lesson:Y5E2'),stableStringify(pointer));pointerWritten=true;const confirmed=JSON.parse(await get(read,pointerKey('lesson:Y5E2')));if(c(confirmed?.current?.version)!==meta.version)throw new Error('Pointer readback mismatch');
             fs.writeFileSync('/tmp/apply.json',JSON.stringify({marker:'Y5E2_VR_HOMEWORK_REPLACEMENT_APPLY_PASS',observedAt:new Date().toISOString(),previousVersion:meta.oldPreparedVersion,currentVersion:meta.version,newKey:process.env.NEW_KEY,newSha256:process.env.NEW_SHA256,newSize:Number(process.env.NEW_SIZE),oldR2Retained:true},null,2));
           }catch(e){
             if(pointerWritten)await put(read,pointerKey('lesson:Y5E2'),oldPointer);
@@ -126,14 +142,12 @@ jobs:
             throw e;
           }
           NODE
-          node --check /tmp/publish.mjs
-          node /tmp/publish.mjs
 
       - name: Verify public portal model and current references
         shell: bash
         run: |
           set -Eeuo pipefail
-          cat >/tmp/verify.mjs <<'NODE'
+          node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import { pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
           const c=v=>String(v??'').trim(), account=c(process.env.CLOUDFLARE_ACCOUNT_ID), token=c(process.env.CLOUDFLARE_API_TOKEN), students=c(process.env.STUDENTS_KV), lessons=c(process.env.LESSONS_KV), read=c(process.env.READ_MODELS_KV), baseCf='https://api.cloudflare.com/client/v4', base=c(process.env.PROD_BASE).replace(/\/$/,''), H={Authorization:`Bearer ${token}`}, oldKey=c(process.env.OLD_KEY), oldName=c(process.env.OLD_NAME), newKey=c(process.env.NEW_KEY), newName=c(process.env.NEW_NAME);
@@ -147,8 +161,6 @@ jobs:
           if(!publicBody?.ok||(publicBody.resources||[]).some(x=>c(x.displayName)===oldName)||!(publicBody.resources||[]).some(x=>c(x.displayName)===newName))throw new Error('Public portal did not converge to replacement');
           fs.writeFileSync('/tmp/verify.json',JSON.stringify({marker:'Y5E2_VR_HOMEWORK_REPLACEMENT_PUBLIC_VERIFY_PASS',observedAt:new Date().toISOString(),preparedVersion:c(p.current.version),publicModelVersion:c(publicBody?.modelVersions?.lesson),newDisplayNamePresent:true,oldDisplayNameAbsent:true},null,2));
           NODE
-          node --check /tmp/verify.mjs
-          node /tmp/verify.mjs
           npx --yes wrangler@4.125.0 r2 object get "${MATERIALS_R2}/${NEW_KEY}" --file /tmp/r2-final.pdf --remote >/dev/null
           test "$(sha256sum /tmp/r2-final.pdf | awk '{print $1}')" = "$NEW_SHA256"
 
