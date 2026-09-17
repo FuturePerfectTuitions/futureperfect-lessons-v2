@@ -61,5 +61,17 @@ jobs:
           for name, needle in needles.items():
             print(f'{name}={str(needle in text).lower()}')
           print('Y4E1_occurrences=', text.count('Y4E1'))
+          print('=== Y4E1 BOUNDED CONTEXTS ===')
+          start = 0
+          count = 0
+          while True:
+            i = text.find('Y4E1', start)
+            if i < 0:
+              break
+            count += 1
+            snippet = text[max(0, i-260):min(len(text), i+520)].replace('\r',' ').replace('\n',' ')
+            print(f'--- occurrence {count} @ {i} ---')
+            print(snippet)
+            start = i + 4
           PY
           echo 'DEPLOYED_PACKAGE_AND_KV_AUDIT_COMPLETE=true'
