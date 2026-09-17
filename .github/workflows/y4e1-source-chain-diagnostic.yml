@@ -1,0 +1,52 @@
+name: Y4E1 source chain diagnostic
+
+on:
+  push:
+    branches:
+      - diag/y4e1-live-api-20260917
+    paths:
+      - .github/workflows/y4e1-source-chain-diagnostic.yml
+      - .github/y4e1-source-chain-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace all PreLesson transformations in the deployed worker chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== PRELESSON REFERENCES IN WORKER SOURCE ==='
+          grep -RInE 'preLessonSheets|prelessonSection|renderPreLesson|phase11Resources' worker/src assets | head -n 500 || true
+          echo '=== WORKER IMPORT CHAIN ==='
+          for f in \
+            worker/src/index-step10-quiz-bridge.js \
+            worker/src/index-admin-tools.js \
+            worker/src/index-phase24-trial-vr.js \
+            worker/src/index-phase23-protected-view-stability.js \
+            worker/src/index-phase20-change20-configured-upsell.js \
+            worker/src/index-phase20-change19-admin-fast.js \
+            worker/src/index-phase20-change18-admin-superuser.js \
+            worker/src/index-phase20-change17-parent-email.js \
+            worker/src/index-phase20-change17.js \
+            worker/src/index-phase20-change16.js \
+            worker/src/index-phase20-change15.js \
+            worker/src/index-phase20-change14.js \
+            worker/src/index-phase20-change13.js \
+            worker/src/index-phase20-change12.js \
+            worker/src/index-phase20-change11.js \
+            worker/src/index-phase20-change10.js \
+            worker/src/index-phase20-change9.js \
+            worker/src/index-phase20-change8.js \
+            worker/src/index-phase20-change7.js \
+            worker/src/index-phase19-access.js \
+            worker/src/index-phase18-online-prelesson.js; do
+              echo "--- $f"
+              sed -n '1,8p' "$f"
+          done
+          echo 'SOURCE_CHAIN_DIAGNOSTIC_COMPLETE=true'
