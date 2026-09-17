@@ -1,0 +1,45 @@
+name: Trial ended upsell - live frontend diagnostic
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/trial-ended-live-frontend-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect public frontend without mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          HOST='https://lessons.futureperfect.education'
+          curl --silent --show-error --dump-header /tmp/root.headers "$HOST/" -o /tmp/live-index.html
+          STATUS="$(awk 'NR==1{print $2}' /tmp/root.headers)"
+          echo "ROOT_HTTP=$STATUS"
+          test "$STATUS" = '200'
+          echo "LIVE_INDEX_SHA256=$(sha256sum /tmp/live-index.html | awk '{print $1}')"
+          echo 'SCRIPT_REFS_BEGIN'
+          grep -oE '<script[^>]+src="[^"]+"' /tmp/live-index.html || true
+          echo 'SCRIPT_REFS_END'
+          echo 'STYLESHEET_REFS_BEGIN'
+          grep -oE '<link[^>]+href="[^"]+"' /tmp/live-index.html || true
+          echo 'STYLESHEET_REFS_END'
+          if grep -Fq 'phase19-access-ui.js' /tmp/live-index.html; then
+            REF="$(grep -oE 'assets/phase19-access-ui\.js[^" ]*' /tmp/live-index.html | head -n1)"
+            echo "PHASE19_REF=$REF"
+            CODE="$(curl --silent --show-error --output /tmp/live-phase19.js --write-out '%{http_code}' "$HOST/$REF")"
+            echo "PHASE19_HTTP=$CODE"
+            if [ "$CODE" = '200' ]; then
+              echo "LIVE_PHASE19_SHA256=$(sha256sum /tmp/live-phase19.js | awk '{print $1}')"
+              grep -F 'TRIAL_ACCESS_ENDED' /tmp/live-phase19.js | head -n2 || true
+            fi
+          else
+            echo 'PHASE19_REF=ABSENT'
+          fi
