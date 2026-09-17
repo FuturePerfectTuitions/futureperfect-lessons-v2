@@ -1,0 +1,64 @@
+name: Y4E1 deployed package read-only audit
+
+on:
+  push:
+    branches:
+      - diag/y4e1-live-api-20260917
+    paths:
+      - .github/workflows/y4e1-deployed-package-audit.yml
+      - .github/y4e1-deployed-package-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Inspect current production deployment and compiled worker text without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          deployments="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/deployments")"
+          jq -e '.success == true' <<<"$deployments" >/dev/null
+          echo '=== CURRENT DEPLOYMENT ==='
+          jq '.result.deployments[0] | {id,created_on,source,annotations,versions}' <<<"$deployments"
+
+          curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}" \
+            -D /tmp/headers -o /tmp/package
+          echo '=== PACKAGE ==='
+          wc -c /tmp/package
+          sha256sum /tmp/package
+          grep -i '^content-type:' /tmp/headers || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+          raw = Path('/tmp/package').read_bytes()
+          text = raw.decode('utf-8', 'ignore')
+          needles = {
+            'Y4E1_literal': 'Y4E1',
+            'standard_prelesson_fallback': 'Array.isArray(core.preLessonSheets)',
+            'standard_prelesson_payload': 'preLessonSheets: await Promise.all(packageData.preLessonSheets.map(safeFile))',
+            'lessonCollections': 'function lessonCollections(record)',
+            'phase20_full_access_early_return': 'baseBody?.lesson?.locked === false',
+            'step10_quiz_route': '/api/v1/student/quiz/eligibility',
+          }
+          for name, needle in needles.items():
+            print(f'{name}={str(needle in text).lower()}')
+          print('Y4E1_occurrences=', text.count('Y4E1'))
+          # Print bounded snippets only around renderer signatures, never secrets/bindings.
+          for needle in ['function lessonCollections(record)', 'preLessonSheets: await Promise.all(packageData.preLessonSheets.map(safeFile))']:
+            i = text.find(needle)
+            if i >= 0:
+              print('--- SNIPPET', needle)
+              print(text[max(0,i-500):i+1200])
+          PY
+          echo 'DEPLOYED_PACKAGE_AUDIT_COMPLETE=true'
