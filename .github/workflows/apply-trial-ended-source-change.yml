@@ -1,0 +1,136 @@
+name: Apply Trial-ended UX to rebuilt Browser UI source
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/apply-trial-ended-source-change.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch recovered source and capture exact live logo
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APP='rebuild/browser-ui/src/app.js'
+          CSS='rebuild/browser-ui/src/styles.css'
+          test -f "$APP"
+          test -f "$CSS"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          app=Path('rebuild/browser-ui/src/app.js')
+          s=app.read_text(encoding='utf-8')
+          old="""function friendlyError(error) {
+            if (error?.name === 'AbortError') return 'This is taking longer than expected. Please try again.';
+            if (error?.message === 'ACCOUNT_LOCKED') return 'Your access to Future Perfect Material has now been withdrawn.';
+            return 'This part of the portal could not be loaded. Please try again.';
+          }"""
+          new="""function isTrialEndedError(error) {
+            return error?.message === 'TRIAL_ACCESS_ENDED' || error?.payload?.error === 'TRIAL_ACCESS_ENDED';
+          }
+
+          function friendlyError(error) {
+            if (error?.name === 'AbortError') return 'This is taking longer than expected. Please try again.';
+            if (error?.message === 'ACCOUNT_LOCKED') return 'Your access to Future Perfect Material has now been withdrawn.';
+            if (isTrialEndedError(error)) return 'Your Future Perfect trial has now ended.\\nTo continue accessing lessons and resources, please contact us to discuss the right programme for your child.';
+            return 'This part of the portal could not be loaded. Please try again.';
+          }"""
+          if old not in s:
+              raise SystemExit('friendlyError source anchor not found or already changed')
+          s=s.replace(old,new,1)
+
+          old2="button.disabled = true; button.textContent = 'Logging in…'; error.hidden = true;"
+          new2="button.disabled = true; button.textContent = 'Logging in…'; error.hidden = true; error.classList.remove('trial-ended');"
+          if old2 not in s:
+              raise SystemExit('login reset anchor not found')
+          s=s.replace(old2,new2,1)
+
+          old3="error.textContent = err.status === 401 ? 'Invalid username or password.' : friendlyError(err);\n      error.hidden = false;"
+          new3="error.textContent = err.status === 401 ? 'Invalid username or password.' : friendlyError(err);\n      error.classList.toggle('trial-ended', isTrialEndedError(err));\n      error.hidden = false;"
+          if old3 not in s:
+              raise SystemExit('login catch anchor not found')
+          s=s.replace(old3,new3,1)
+
+          old4='''function renderPortalError(title, error, retry) {
+            root.innerHTML = shell(`<section class="card"><p class="eyebrow">Student Portal</p><h1>${escapeHtml(title)}</h1><div class="error-box" role="alert">${escapeHtml(friendlyError(error))}</div><p><button id="retry" class="button button-primary" type="button">Try again</button></p></section>`, { portal: true });'''
+          new4='''function renderPortalError(title, error, retry) {
+            const errorClass = isTrialEndedError(error) ? 'error-box trial-ended' : 'error-box';
+            root.innerHTML = shell(`<section class="card"><p class="eyebrow">Student Portal</p><h1>${escapeHtml(title)}</h1><div class="${errorClass}" role="alert">${escapeHtml(friendlyError(error))}</div><p><button id="retry" class="button button-primary" type="button">Try again</button></p></section>`, { portal: true });'''
+          if old4 not in s:
+              raise SystemExit('portal error anchor not found')
+          s=s.replace(old4,new4,1)
+          app.write_text(s,encoding='utf-8')
+
+          css=Path('rebuild/browser-ui/src/styles.css')
+          c=css.read_text(encoding='utf-8')
+          rule='''.error-box.trial-ended{background:#eef8f3;color:#174c3a;border-color:#b8dfce;white-space:pre-line;font-weight:500}'''
+          if rule not in c:
+              c += rule
+          css.write_text(c,encoding='utf-8')
+          PY
+
+          # Capture the exact logo currently referenced by the live rebuilt bundle.
+          mkdir -p rebuild/browser-ui/assets
+          curl --fail --silent --show-error 'https://lessons.futureperfect.education/assets/portal-Bn42oxXd.js' -o /tmp/live-portal.js
+          LOGO_REF="$(grep -oE 'assets/[A-Za-z0-9._-]*fpt-logo[A-Za-z0-9._-]*\.png' /tmp/live-portal.js | head -n1 || true)"
+          if [ -n "$LOGO_REF" ]; then
+            curl --fail --silent --show-error "https://lessons.futureperfect.education/$LOGO_REF" -o rebuild/browser-ui/assets/fpt-logo.png
+          else
+            cp assets/fpt-logo.png rebuild/browser-ui/assets/fpt-logo.png
+          fi
+          test -s rebuild/browser-ui/assets/fpt-logo.png
+
+          cat > rebuild/browser-ui/vite.config.js <<'JS'
+          import { defineConfig } from 'vite';
+          export default defineConfig({
+            base: './',
+            build: {
+              sourcemap: true,
+              rollupOptions: {
+                output: {
+                  entryFileNames: 'assets/portal-[hash].js',
+                  chunkFileNames: 'assets/portal-[hash].js',
+                  assetFileNames: 'assets/portal-[hash][extname]'
+                }
+              }
+            }
+          });
+          JS
+
+          grep -Fq 'TRIAL_ACCESS_ENDED' "$APP"
+          grep -Fq 'Your Future Perfect trial has now ended.' "$APP"
+          grep -Fq 'right programme for your child.' "$APP"
+          grep -Fq '.error-box.trial-ended' "$CSS"
+
+          cd rebuild/browser-ui
+          npm install --no-audit --no-fund >/tmp/trial-ended-npm-install.log
+          npm run build >/tmp/trial-ended-build.log
+          test -f dist/index.html
+          BUNDLE="$(find dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*.map' | head -n1)"
+          STYLE="$(find dist/assets -maxdepth 1 -type f -name 'portal-*.css' ! -name '*.map' | head -n1)"
+          test -n "$BUNDLE"
+          test -n "$STYLE"
+          grep -Fq 'Your Future Perfect trial has now ended.' "$BUNDLE"
+          grep -Fq 'right programme for your child.' "$BUNDLE"
+          grep -Fq 'eef8f3' "$STYLE"
+
+      - name: Commit source change
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add rebuild/browser-ui/src/app.js rebuild/browser-ui/src/styles.css rebuild/browser-ui/assets/fpt-logo.png rebuild/browser-ui/vite.config.js rebuild/browser-ui/package.json rebuild/browser-ui/package-lock.json
+          git diff --cached --quiet && exit 0
+          git commit -m 'Show friendly informational message when Trial is exhausted'
+          git push origin HEAD:feature/trial-ended-upsell-browser-2026-09-17
