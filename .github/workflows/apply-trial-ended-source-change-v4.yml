@@ -1,0 +1,48 @@
+name: Apply Trial-ended rebuilt UI v4
+on:
+  push:
+    branches:
+      - feature/trial-ended-upsell-browser-2026-09-17
+    paths:
+      - .github/workflows/apply-trial-ended-source-change-v4.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch and build
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/apply_trial_ended_ui.py
+          cd rebuild/browser-ui
+          npm install --no-audit --no-fund
+          npm run build
+          bundle=$(find dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*.map' | head -n1)
+          style=$(find dist/assets -maxdepth 1 -type f -name 'portal-*.css' ! -name '*.map' | head -n1)
+          test -n "$bundle"
+          test -n "$style"
+          grep -Fq 'Your Future Perfect trial has now ended.' "$bundle"
+          grep -Fq 'right programme for your child.' "$bundle"
+          grep -Fq 'This part of the portal could not be loaded. Please try again.' "$bundle"
+          grep -Fq 'TRIAL_ACCESS_ENDED' "$bundle"
+          grep -Fq 'protected-viewer.js' "$bundle"
+          grep -Fq 'eef8f3' "$style"
+          curl --fail --silent --show-error https://lessons.futureperfect.education/assets/portal-protected-viewer-MQIf8meW.js -o dist/assets/protected-viewer.js
+          test -s dist/assets/protected-viewer.js
+          echo NARROW_BROWSER_BUILD_PASS
+      - name: Commit maintained source
+        run: |
+          set -Eeuo pipefail
+          git config user.name FuturePerfectTuitions
+          git config user.email futureperfectlessons@gmail.com
+          git add rebuild/browser-ui/src/app.js rebuild/browser-ui/src/styles.css rebuild/browser-ui/src/protected-viewer.js rebuild/browser-ui/assets/fpt-logo.png rebuild/browser-ui/package.json rebuild/browser-ui/package-lock.json rebuild/browser-ui/vite.config.js
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Show friendly informational message after Trial exhaustion'
+          git push origin HEAD:feature/trial-ended-upsell-browser-2026-09-17
