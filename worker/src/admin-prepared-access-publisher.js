@@ -5,6 +5,7 @@ import {
   resolveCurrentScope,
   stableStringify
 } from '../../rebuild/adminops/src/lib/atomic-publisher.mjs';
+import { VIEW_DEFINITIONS } from '../../rebuild/shared/read-models/view-registry.mjs';
 import { opaqueAccessScopeId } from '../../rebuild/student/src/lib/access-scope.mjs';
 
 const clean = value => String(value ?? '').trim();
@@ -19,6 +20,81 @@ function londonDate(now = new Date()) {
 async function allRows(statement) {
   const result = await statement.all();
   return Array.isArray(result?.results) ? result.results : [];
+}
+
+function trialViewIds(user) {
+  const values = Array.isArray(user?.trialViews) ? user.trialViews : [];
+  return [...new Set(values.map(norm).filter(viewId => VIEW_DEFINITIONS[viewId]))];
+}
+
+function isTrialProfile(user) {
+  const id = norm(user?.portalUserId);
+  return id.startsWith('trial') && !id.startsWith('admintrial') && trialViewIds(user).length > 0;
+}
+
+function trialCompilationSource(source, catalogue) {
+  if (!isTrialProfile(source?.user)) return { source, trialViews:[] };
+  const views = trialViewIds(source.user);
+  const fullLibraries = [];
+  const vrLessons = new Set();
+
+  for (const viewId of views) {
+    const definition = VIEW_DEFINITIONS[viewId];
+    fullLibraries.push(...(definition?.fullLibraryIds || []));
+    if (definition?.subject === 'english' && definition?.stream === '11plus') {
+      for (const row of catalogue?.views?.[viewId]?.lessons || []) {
+        const lessonId = clean(row?.lessonId);
+        if (lessonId) vrLessons.add(lessonId);
+      }
+    }
+  }
+
+  return {
+    trialViews:views,
+    source:{
+      ...source,
+      user:{
+        ...source.user,
+        // Trial access is compiled as an overlay only. The stored profile does
+        // not pretend that the child owns a permanent Full Library.
+        fullLibraries:[...new Set(fullLibraries)],
+        upsellViews:[],
+        manualAccess:{
+          ...(source.user?.manualAccess || {}),
+          coreLessons:[],
+          vrLessons:[...vrLessons].sort(),
+          specialBuckets:[]
+        },
+        manualLessonAccess:{},
+        specialAccess:[]
+      }
+    }
+  };
+}
+
+function applyTrialMetadata(compiled, views) {
+  if (!views.length) return compiled;
+  const allowed = new Set(views);
+  const snapshot = compiled?.snapshot;
+  if (!snapshot || typeof snapshot !== 'object') return compiled;
+
+  snapshot.account = {
+    ...(snapshot.account || {}),
+    trial:true,
+    trialViews:[...views]
+  };
+  snapshot.views = (Array.isArray(snapshot.views) ? snapshot.views : [])
+    .filter(view => allowed.has(norm(view?.viewId)))
+    .map(view => ({
+      ...view,
+      current:true,
+      group:'current',
+      lockedPreview:false,
+      source:'trial'
+    }));
+  snapshot.fullViewIds = [...views];
+  snapshot.specialAreas = [];
+  return compiled;
 }
 
 async function sourceForStudent(env, portalUserIdNorm, asOfDate) {
@@ -91,8 +167,12 @@ async function publishStudentPreparedAccess(env, portalUserIdNorm, options = {})
   const id = norm(portalUserIdNorm);
   const scopeId = await opaqueAccessScopeId(id, scopeSalt);
   const scope = `access:${scopeId}`;
-  const source = await sourceForStudent(env, id, asOfDate);
-  const compiled = compileAccessScope(source, catalogue, { scopeId, asOfDate });
+  const rawSource = await sourceForStudent(env, id, asOfDate);
+  const prepared = trialCompilationSource(rawSource, catalogue);
+  const compiled = applyTrialMetadata(
+    compileAccessScope(prepared.source, catalogue, { scopeId, asOfDate }),
+    prepared.trialViews
+  );
 
   let current = null;
   try {
@@ -138,6 +218,10 @@ async function publishStudentPreparedAccess(env, portalUserIdNorm, options = {})
 
 export {
   londonDate,
+  trialViewIds,
+  isTrialProfile,
+  trialCompilationSource,
+  applyTrialMetadata,
   sourceForStudent,
   publishStudentPreparedAccess
 };
