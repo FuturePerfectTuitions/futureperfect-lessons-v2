@@ -1,0 +1,28 @@
+name: Detect live pdfjs version
+on:
+  push:
+    branches: ['feature/trial-ended-upsell-browser-2026-09-17']
+    paths: ['.github/workflows/detect-live-pdfjs-version.yml']
+permissions:
+  contents: read
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read pdfjs version from live protected-viewer sourcemap
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error 'https://lessons.futureperfect.education/assets/portal-protected-viewer-MQIf8meW.js.map' -o /tmp/p.map
+          python3 - <<'PY'
+          import json,re
+          d=json.load(open('/tmp/p.map',encoding='utf-8'))
+          for src,content in zip(d.get('sources',[]),d.get('sourcesContent',[])):
+              if not content: continue
+              if 'pdfjsVersion' in content or ('pdfjs-dist' in src and 'pdf.mjs' in src):
+                  m=re.search(r'pdfjsVersion\s*=\s*["\']([^"\']+)',content)
+                  print('SOURCE',src)
+                  print('PDFJS_VERSION',m.group(1) if m else 'NOT_FOUND')
+                  print('HEAD',repr(content[:500]))
+          PY
