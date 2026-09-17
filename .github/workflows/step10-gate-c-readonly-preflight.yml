@@ -1,0 +1,72 @@
+name: Step 10 Gate C read-only production preflight
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.134.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify live Portal Worker identity and sanitized bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/step10-settings.json
+          jq -e '.success == true' /tmp/step10-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/step10-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="DB" and .type=="d1" and .database_name=="fpt_portal_v2_db")' /tmp/step10-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/step10-settings.json >/dev/null
+          jq -r '.result.bindings[] | select(.name=="DB" and .type=="d1") | "PORTAL_D1_BINDING=DB DATABASE_NAME=" + .database_name + " DATABASE_ID=" + (.id // .database_id // "")' /tmp/step10-settings.json
+          echo 'PORTAL_WORKER_IDENTITY_AND_BINDINGS_PASS'
+      - name: Capture current Worker deployment state read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json | tee /tmp/step10-deploy-status.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments list --name "$WORKER_NAME" --json | tee /tmp/step10-deploy-list.json
+          echo 'PORTAL_WORKER_DEPLOYMENT_STATE_CAPTURED'
+      - name: Verify Gate C D1 schema and capture current Time Travel bookmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_launch_codes'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_quiz_launch_expiry','idx_quiz_launch_user') ORDER BY name; SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;" --yes | tee /tmp/step10-d1-schema.txt
+          grep -Fq 'quiz_launch_codes' /tmp/step10-d1-schema.txt
+          grep -Fq 'idx_quiz_launch_expiry' /tmp/step10-d1-schema.txt
+          grep -Fq 'idx_quiz_launch_user' /tmp/step10-d1-schema.txt
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 time-travel info fpt_portal_v2_db --json | tee /tmp/step10-d1-bookmark.json
+          echo 'PORTAL_D1_SCHEMA_AND_BOOKMARK_PASS'
+      - name: Verify existing production Portal routes remain healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          admin_code="$(curl --silent --show-error --request POST --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --data '{}' --output /tmp/step10-admin.json --write-out '%{http_code}' "$BASE/api/v1/admin/trials/list")"
+          protected_code="$(curl --silent --show-error --header "Origin: $ORIGIN" --dump-header /tmp/step10-protected-headers.txt --output /tmp/step10-protected.json --write-out '%{http_code}' "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+          test "$admin_code" = '401'
+          grep -Fq 'UNAUTHORISED' /tmp/step10-admin.json
+          test "$protected_code" = '410'
+          grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/step10-protected-headers.txt
+          grep -Fq 'ANSWER_VIEW_INVALID' /tmp/step10-protected.json
+          echo 'EXISTING_PORTAL_ROUTES_PASS'
+      - name: Complete
+        run: echo 'STEP10_GATE_C_READ_ONLY_PREFLIGHT_PASS'
