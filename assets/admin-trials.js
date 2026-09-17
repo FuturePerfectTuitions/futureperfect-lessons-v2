@@ -114,6 +114,27 @@
     return trial.consumedAt ? `Used ${new Date(trial.consumedAt).toLocaleString()}` : 'Used';
   }
 
+  function ensurePasswordColumns() {
+    const body = $('trialListBody');
+    const headerRow = body?.closest('table')?.querySelector('thead tr');
+    if (!body || !headerRow) return;
+
+    const headers = [...headerRow.children].map(cell => cell.textContent.trim());
+    if (!headers.includes('Login Password')) {
+      const accessHeader = [...headerRow.children].find(cell => cell.textContent.trim() === 'Access');
+      if (accessHeader) {
+        const loginHeader = document.createElement('th');
+        loginHeader.textContent = 'Login Password';
+        const answerHeader = document.createElement('th');
+        answerHeader.textContent = 'Answer Pack Password';
+        headerRow.insertBefore(loginHeader, accessHeader);
+        headerRow.insertBefore(answerHeader, accessHeader);
+      }
+    }
+
+    for (const cell of body.querySelectorAll('td[colspan]')) cell.colSpan = 7;
+  }
+
   function button(label, action, portalUserId, className='ghost') {
     const el = document.createElement('button');
     el.type = 'button';
@@ -127,11 +148,12 @@
   function renderTrials(trials) {
     const body = $('trialListBody');
     if (!body) return;
+    ensurePasswordColumns();
     body.innerHTML = '';
     if (!trials.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 5;
+      td.colSpan = 7;
       td.textContent = 'No Trial logins found.';
       td.className = 'muted';
       tr.appendChild(td);
@@ -144,6 +166,8 @@
       const cells = [
         trial.portalUserId || '',
         trial.firstName || '',
+        trial.loginPassword || '—',
+        trial.answerPassword || '—',
         accessText(trial.trialViews || []),
         stateText(trial)
       ];
@@ -260,6 +284,8 @@
     if (!target) return;
     actionOnTrial(target.dataset.trialAction, target.dataset.portalUserId);
   });
+
+  ensurePasswordColumns();
 
   // If an Admin token is already present from this page, quietly populate the
   // list. Otherwise the first Create/Refresh action will use the token issued by
