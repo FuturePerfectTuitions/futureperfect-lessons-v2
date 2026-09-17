@@ -1,0 +1,38 @@
+name: Trial ended upsell - sourcemap diagnostic
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/trial-ended-sourcemap-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate source file for generic portal error
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          HOST='https://lessons.futureperfect.education'
+          curl --fail --silent --show-error "$HOST/assets/portal-Bn42oxXd.js.map" -o /tmp/portal.map
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/portal.map',encoding='utf-8'))
+          needle='This part of the portal could not be loaded. Please try again.'
+          sources=data.get('sources') or []
+          contents=data.get('sourcesContent') or []
+          print('SOURCE_COUNT',len(sources))
+          for i,(src,content) in enumerate(zip(sources,contents)):
+            if content and needle in content:
+              print('MATCH_SOURCE',src)
+              pos=content.index(needle)
+              print('CONTEXT_BEGIN')
+              print(content[max(0,pos-1800):pos+len(needle)+1800])
+              print('CONTEXT_END')
+          PY
