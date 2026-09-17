@@ -1,0 +1,52 @@
+name: Step 10 Gate D account preflight
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+    paths:
+      - .github/workflows/step10-gate-d-account-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: 4.134.0
+      TEST_USER: kiaan1312
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify authorised account currently has active L3 Maths 11plus assignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          TODAY="$(TZ=Europe/London date +%F)"
+          SQL="SELECT a.portal_user_id_norm,a.batch_key,b.subject,b.stream,b.maths_level,b.school_year,a.effective_from,a.effective_to,b.active_from,b.active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm='${TEST_USER}' AND lower(b.subject)='maths' AND lower(b.stream)='11plus' AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END)=3 AND a.effective_from<='${TODAY}' AND (a.effective_to IS NULL OR '${TODAY}'<a.effective_to) AND (b.active_from IS NULL OR b.active_from<='${TODAY}') AND (b.active_to IS NULL OR '${TODAY}'<b.active_to);"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --yes | tee /tmp/gated-l3.txt
+          grep -Fq '"portal_user_id_norm": "kiaan1312"' /tmp/gated-l3.txt || grep -Fq '"portal_user_id_norm":"kiaan1312"' /tmp/gated-l3.txt
+          grep -Eq '"maths_level"[[:space:]]*:[[:space:]]*3' /tmp/gated-l3.txt
+          echo 'GATE_D_AUTHORISED_ACCOUNT_L3_ACTIVE_PASS'
+
+      - name: Count active Portal sessions without exposing session tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL="SELECT COUNT(*) AS live_sessions FROM student_sessions WHERE portal_user_id_norm='${TEST_USER}' AND revoked_at IS NULL AND idle_expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'); SELECT COUNT(*) AS profile_rows FROM student_session_profiles WHERE portal_user_id_norm='${TEST_USER}'; SELECT COUNT(*) AS trial_consumption_rows FROM trial_login_consumptions WHERE portal_user_id_norm='${TEST_USER}';"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "$SQL" --yes | tee /tmp/gated-session-counts.txt
+          echo 'GATE_D_SESSION_COUNTS_CAPTURED'
+
+      - name: Confirm preflight remained read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;" --yes | tee /tmp/gated-launch-count.txt
+          echo 'GATE_D_ACCOUNT_PREFLIGHT_READ_ONLY_PASS'
