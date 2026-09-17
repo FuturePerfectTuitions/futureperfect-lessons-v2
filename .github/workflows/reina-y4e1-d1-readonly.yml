@@ -1,0 +1,53 @@
+name: Reina Y4E1 D1 read-only access audit
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/reina-y4e1-d1-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      USER_ID: rei0710
+      LESSON_ID: Y4E1
+    steps:
+      - name: Inspect production D1 access rows without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          db="$(jq -r '.result.bindings[]? | select(.name=="DB" and .type=="d1") | (.id // .database_id // "")' <<<"$settings")"
+          test -n "$db"; test "$db" != null
+          query() {
+            sql="$1"
+            curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+              --data "$(jq -nc --arg sql "$sql" '{sql:$sql}')" \
+              "${BASE}/d1/database/${db}/query"
+          }
+
+          echo '=== STUDENT BATCH ASSIGNMENTS ==='
+          query "SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm='${USER_ID}' ORDER BY a.effective_from,a.batch_key" | jq '.result[0].results'
+
+          echo '=== Y4E1 ENTITLEMENT ==='
+          query "SELECT portal_user_id_norm,lesson_id,core_access,vr_access,source,first_granted_at,last_confirmed_at,source_batch_code,source_lesson_date FROM lesson_entitlements WHERE portal_user_id_norm='${USER_ID}' AND lesson_id='${LESSON_ID}'" | jq '.result[0].results'
+
+          echo '=== Y4E1 PRELESSON-ONLY ROWS ==='
+          query "SELECT portal_user_id_norm,lesson_id,batch_key,lesson_date,vr_access,source_row_id,first_granted_at,last_confirmed_at FROM online_prelesson_entitlements WHERE portal_user_id_norm='${USER_ID}' AND lesson_id='${LESSON_ID}'" | jq '.result[0].results'
+
+          echo '=== RELATED BATCH RELEASES ==='
+          query "SELECT batch_key,lesson_id,lesson_date,completed_at FROM batch_lesson_releases WHERE lesson_id='${LESSON_ID}' ORDER BY lesson_date,batch_key" | jq '.result[0].results'
+
+          echo 'READ_ONLY_COMPLETE=true'
