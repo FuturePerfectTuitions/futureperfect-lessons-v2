@@ -1,0 +1,52 @@
+name: Step 10 Gate C Worker version reconcile
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      OLD_VERSION: b590516b-8258-49e1-81e4-38f89979523b
+      CURRENT_VERSION: 4ae03435-4b2f-4d7c-aa0e-2804417e862c
+    steps:
+      - name: Compare captured and current Worker versions without exposing secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/versions"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/$OLD_VERSION" -H "$AUTH" -o /tmp/old.json
+          curl --fail --silent --show-error "$API/$CURRENT_VERSION" -H "$AUTH" -o /tmp/current.json
+          jq -e '.success == true' /tmp/old.json >/dev/null
+          jq -e '.success == true' /tmp/current.json >/dev/null
+          old_etag="$(jq -r '.result.resources.script.etag // empty' /tmp/old.json)"
+          current_etag="$(jq -r '.result.resources.script.etag // empty' /tmp/current.json)"
+          test -n "$old_etag"
+          test -n "$current_etag"
+          echo "OLD_VERSION=$OLD_VERSION"
+          echo "CURRENT_VERSION=$CURRENT_VERSION"
+          echo "OLD_SCRIPT_ETAG=$old_etag"
+          echo "CURRENT_SCRIPT_ETAG=$current_etag"
+          jq -c '{id:.result.id,number:.result.number,metadata:.result.metadata,bindings:[(.result.resources.bindings // [])[] | if ((.type//"")|test("secret";"i")) then {name,type} else {name,type,namespace_id,bucket_name,database_id,id} end]}' /tmp/old.json > /tmp/old-sanitized.json
+          jq -c '{id:.result.id,number:.result.number,metadata:.result.metadata,bindings:[(.result.resources.bindings // [])[] | if ((.type//"")|test("secret";"i")) then {name,type} else {name,type,namespace_id,bucket_name,database_id,id} end]}' /tmp/current.json > /tmp/current-sanitized.json
+          echo 'OLD_VERSION_SANITIZED:'
+          cat /tmp/old-sanitized.json
+          echo 'CURRENT_VERSION_SANITIZED:'
+          cat /tmp/current-sanitized.json
+          test "$old_etag" = "$current_etag"
+          old_nonsecret="$(jq -c '[.result.resources.bindings[]? | select(((.type//"")|test("secret";"i"))|not) | {name,type,namespace_id,bucket_name,database_id,id}] | sort_by(.name)' /tmp/old.json)"
+          current_nonsecret="$(jq -c '[.result.resources.bindings[]? | select(((.type//"")|test("secret";"i"))|not) | {name,type,namespace_id,bucket_name,database_id,id}] | sort_by(.name)' /tmp/current.json)"
+          test "$old_nonsecret" = "$current_nonsecret"
+          jq -e '.result.resources.bindings[]? | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/current.json >/dev/null
+          echo 'SCRIPT_CONTENT_IDENTICAL_AND_NONSECRET_BINDINGS_IDENTICAL'
+          echo 'CURRENT_VERSION_IS_SAFE_FRESH_ROLLBACK_ANCHOR'
