@@ -16,32 +16,39 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect live portal frontend paths and renderer without mutation
+      - name: Inspect actual live Vite bundle and PreLesson handling without mutation
         shell: bash
         run: |
           set -euo pipefail
-          for path in '/' '/index.html' '/phase11.html' '/config.js' '/assets/phase7.js' '/assets/phase7.js?v=20260907-prelesson-empty-1'; do
-            safe="$(printf '%s' "$path" | tr '/?=&' '____')"
-            code="$(curl -sSL -D "/tmp/${safe}.headers" -o "/tmp/${safe}.body" -w '%{http_code}' "https://lessons.futureperfect.education${path}")"
-            echo "=== ${path} status=${code} ==="
-            grep -Ei '^(location|cache-control|etag|last-modified|cf-cache-status|age|content-type|server):' "/tmp/${safe}.headers" || true
-            wc -c "/tmp/${safe}.body"
-            sha256sum "/tmp/${safe}.body"
-          done
-
-          live=/tmp/_assets_phase7.js.body
-          if [ -s "$live" ]; then
-            echo '=== PRELESSON RENDERER IN LIVE /assets/phase7.js ==='
-            grep -n -A8 -B2 'function renderPreLesson' "$live" || true
-            echo '=== REPOSITORY PHASE7 HASH ==='
-            sha256sum assets/phase7.js
-            cmp -s "$live" assets/phase7.js && echo 'LIVE_PHASE7_EQUALS_REPO=true' || echo 'LIVE_PHASE7_EQUALS_REPO=false'
+          curl -sSL -D /tmp/root.headers -o /tmp/root.html https://lessons.futureperfect.education/
+          echo '=== LIVE ROOT HTML ==='
+          cat /tmp/root.html
+          script="$(grep -oE 'src="\./assets/[^"]+\.js"' /tmp/root.html | head -n1 | sed -E 's/^src="\.([^\"]+)"$/\1/')"
+          if [ -z "$script" ]; then
+            echo 'No live JS bundle reference found' >&2
+            exit 1
           fi
-
-          for candidate in /tmp/_.body /tmp/_index.html.body /tmp/_phase11.html.body; do
-            [ -s "$candidate" ] || continue
-            if grep -q '<script' "$candidate"; then
-              echo "=== SCRIPT REFERENCES: ${candidate} ==="
-              grep -oE '<script[^>]+src="[^"]+"' "$candidate" | tail -n 40 || true
-            fi
-          done
+          echo "LIVE_BUNDLE_PATH=${script}"
+          curl -fsSL -D /tmp/bundle.headers "https://lessons.futureperfect.education${script}" -o /tmp/live-bundle.js
+          echo '=== LIVE BUNDLE META ==='
+          wc -c /tmp/live-bundle.js
+          sha256sum /tmp/live-bundle.js
+          grep -Ei '^(cache-control|etag|last-modified|cf-cache-status|age|content-type|server):' /tmp/bundle.headers || true
+          echo '=== PRELESSON STRING COUNTS ==='
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('/tmp/live-bundle.js').read_text(errors='ignore')
+          for needle in ['preLessonSheets','PreLesson Sheets','PreLesson Sheet','prelesson','Before the lesson','phase11Resources','Verbal Reasoning']:
+              print(f'{needle}={text.count(needle)}')
+          print('=== BOUNDED PRELESSONSHEET CONTEXTS ===')
+          for needle in ['preLessonSheets','PreLesson Sheets','Before the lesson']:
+              start=0; shown=0
+              while shown < 12:
+                  i=text.find(needle,start)
+                  if i<0: break
+                  print(f'--- {needle} occurrence {shown+1} @ {i} ---')
+                  print(text[max(0,i-500):min(len(text),i+1200)].replace('\n',' '))
+                  start=i+len(needle); shown+=1
+          PY
+          echo '=== SEARCH REPOSITORY FOR LIVE UI SOURCE TEXT ==='
+          grep -RIn --exclude-dir=.git -E 'PreLesson Sheets|preLessonSheets|Before the lesson' . | head -n 300 || true
