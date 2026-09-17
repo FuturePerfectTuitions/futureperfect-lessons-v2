@@ -13,18 +13,65 @@ PARENT_EMAIL_TEST_TO = ""
 [[send_email]]
 name = "EMAIL"
 
-# Canonical Portal V2 production entrypoint on this isolated Step 10 branch.
-# Step 10 wraps index-admin-tools.js only to add the minimal standalone 11+ Practice
-# launch bridge. All existing Portal authentication, entitlement and resource logic
-# remains delegated unchanged to the established Worker chain.
+# Canonical Portal V2 production configuration preserved on this isolated Step 10 branch.
+# Step 10 changes only the Worker entrypoint above: index-step10-quiz-bridge.js wraps
+# index-admin-tools.js to add the minimal standalone 11+ Practice launch bridge.
+# Every non-quiz request is delegated unchanged to the established production chain.
 #
-# The bridge exposes only:
-# - authenticated L3 eligibility for the Portal top link;
-# - a short-lived, single-use launch code tied to the live Portal session;
-# - server-to-server redemption protected by QUIZ_BRIDGE_SECRET.
-# Portal cookies are never shared with quiz.futureperfect.education.
-# Production question-bank content is never served or stored by this Worker.
+# Step 10 bridge responsibilities are limited to:
+# - authenticated current L3 Maths 11+ eligibility for the Portal top link;
+# - a short-lived, single-use launch code bound to the live Portal session;
+# - a server-to-server redemption endpoint protected by QUIZ_BRIDGE_SECRET;
+# - a release-context snapshot containing inherited L2 plus currently released L3 lessons.
+# Portal cookies are never shared with quiz.futureperfect.education and production
+# question-bank content is never stored in or served by this Portal Worker.
 #
 # QUIZ_BRIDGE_SECRET must be configured as a Cloudflare secret and must never be
 # committed. Migration 0011_quiz_launch_codes.sql must be applied before activation.
 # No production deployment is authorised by this branch change alone.
+#
+# Admin Tools wraps Phase 24 only to add authenticated operational routes such as
+# Replace Resource. Every non-admin-resource request is delegated unchanged to
+# Phase 24. Production KV, D1, R2 bindings and secrets remain Cloudflare-managed.
+#
+# Phase 24 wraps Phase 23 only to extend 11+ Trial access with the VR resources
+# belonging to the explicitly allowed Year 4/Year 5 English 11+ trial view.
+# Core Trial behaviour remains unchanged: lesson descriptions and the main lesson
+# video stay open, while non-VR worksheets/homework/answers remain restricted.
+# VR protected answers continue through the existing password, session, rate-limit
+# and protected-view controls; Phase 24 does not bypass those checks.
+#
+# Phase 23 wraps the current Change 20 production Worker only for protected
+# Answer Pack/Answer Key fetch stability. If an initial protected PDF request
+# races the existing short content-open window or repeats a single-use request,
+# Phase 23 retries it only while the original session-bound lease is still valid.
+# All password, session, entitlement, view, account and password-fingerprint
+# checks remain owned by the existing protected-answer Worker chain.
+#
+# Change 20 adds explicit, profile-configured locked upsell views through
+# `upsellViews`. When that field is present, those views are the student's exact
+# upsell set: they are visible immediately, even before a counterpart lesson or
+# batch release exists, and their lesson catalogues/descriptions are browseable
+# while every resource remains locked. An explicit empty array means no upsells.
+# Profiles without `upsellViews` retain the existing automatic cross-subject
+# preview behaviour for backwards compatibility.
+#
+# Change 20 delegates all non-upsell behaviour to Change 19. Change 19 retains
+# the authenticated Admin fast path, Change 18 retains Admin superuser access,
+# and the underlying Change 17/16 chain retains student navigation, Full Library,
+# trial, batch, lesson-release, PreLesson-only, Answer Pack and resource controls.
+#
+# The Admin Replace Resource route reuses the signed lesson-release-import Admin
+# session. It writes each replacement PDF to a fresh MATERIALS_R2 key, verifies
+# the uploaded bytes by SHA-256 read-back, checks optimistic concurrency against
+# the selected existing r2Key, then updates only that resource reference in the
+# canonical lesson KV record. The old R2 object is intentionally retained for
+# rollback; student entitlements are not modified.
+#
+# Production KV, D1, R2 bindings and secrets remain Cloudflare-managed. The
+# outbound EMAIL binding is declared here because Wrangler treats it as a Worker
+# binding and production deploys must carry it explicitly. `keep_vars = true`
+# preserves existing dashboard vars/secrets; deployment scripts separately
+# preserve the production KV, D1, R2 and EMAIL bindings.
+# Passwords, Answer Pack passwords, private student records, production allowlists
+# and Cloudflare credential values must never be committed to this repository.
