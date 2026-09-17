@@ -17,14 +17,27 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Trace Y4E1 source authority and PreLesson transformations
+        with:
+          fetch-depth: 1
+      - name: Locate API v2 / rebuilt Portal source across checkpoint branches
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== Y4E1 REPOSITORY OCCURRENCES ==='
-          grep -RIn --exclude-dir=.git --exclude='*.map' 'Y4E1' . | head -n 500 || true
-          echo '=== Y4T1E01 REPOSITORY OCCURRENCES ==='
-          grep -RIn --exclude-dir=.git --exclude='*.map' 'Y4T1E01' . | head -n 500 || true
-          echo '=== PRELESSON REFERENCES IN WORKER SOURCE ==='
-          grep -RInE 'preLessonSheets|prelessonSection|renderPreLesson|phase11Resources' worker/src assets | head -n 500 || true
+          branches=(
+            rebuild/checkpoint11-implementation-build-2026-09-14
+            rebuild/checkpoint11-reversible-cutover-2026-09-13
+            rebuild/checkpoint12-stabilisation-2026-09-14
+            rebuild/checkpoint13-legacy-retirement-2026-09-15
+            rebuild/post-cp13-entitlement-fix-2026-09-15
+            rebuild/portal-v2-performance-2026-09-13
+          )
+          for branch in "${branches[@]}"; do
+            echo "=== BRANCH ${branch} ==="
+            git fetch --depth=1 origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+            ref="refs/remotes/origin/${branch}"
+            echo '-- api/v2 matches --'
+            git grep -n -E '/api/v2|api/v2|resourcesIncluded|portal-card' "$ref" -- ':!*.map' | head -n 300 || true
+            echo '-- likely rebuild paths --'
+            git ls-tree -r --name-only "$ref" | grep -Ei '(^|/)(rebuild|frontend|portal|runtime|read.model|read-model|v2|dist|vite)' | head -n 300 || true
+          done
           echo 'SOURCE_CHAIN_DIAGNOSTIC_COMPLETE=true'
