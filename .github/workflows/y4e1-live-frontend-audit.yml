@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Trace actual live Vite resource-section data model without mutation
+      - name: Extract actual live Vite API contract and resource grouping without mutation
         shell: bash
         run: |
           set -euo pipefail
@@ -24,25 +24,22 @@ jobs:
           script="$(grep -oE 'src="\./assets/[^"]+\.js"' /tmp/root.html | head -n1 | sed -E 's/^src="\.([^\"]+)"$/\1/')"
           test -n "$script"
           curl -fsSL "https://lessons.futureperfect.education${script}" -o /tmp/live-bundle.js
-          echo "LIVE_BUNDLE_PATH=${script}"
-          sha256sum /tmp/live-bundle.js
           python3 - <<'PY'
           from pathlib import Path
+          import re
           text=Path('/tmp/live-bundle.js').read_text(errors='ignore')
-          needles=[
-            'core-prelesson','core-homework','verbal-reasoning',
-            '/api/v1/student/lessons/','resources','resourceGroups','sections',
-            'lesson.resources','s.resources','preLessonSheets','phase11Resources'
-          ]
-          for needle in needles:
-              print(f'COUNT {needle!r}={text.count(needle)}')
-          for needle in ['core-prelesson','/api/v1/student/lessons/','core-homework','verbal-reasoning']:
-              print(f'=== CONTEXTS FOR {needle} ===')
+          print('=== API-LIKE STRINGS ===')
+          vals=sorted(set(re.findall(r'["`\']([^"`\']*(?:/api/|api/v|student/)[^"`\']*)["`\']', text)))
+          for v in vals:
+              if len(v)<300: print(v)
+          print('=== CONTEXTS ===')
+          for needle in ['resourcesIncluded','function fe','fe=','section','fetch(','/student/','lesson-detail','lessonId','resources||[]']:
+              print(f'### {needle} count={text.count(needle)}')
               start=0; shown=0
-              while shown<20:
+              while shown<12:
                   i=text.find(needle,start)
                   if i<0: break
-                  print(f'--- occurrence {shown+1} @ {i} ---')
-                  print(text[max(0,i-1800):min(len(text),i+2600)].replace('\n',' '))
+                  print(f'--- {shown+1} @ {i} ---')
+                  print(text[max(0,i-2200):min(len(text),i+3200)].replace('\n',' '))
                   start=i+len(needle); shown+=1
           PY
