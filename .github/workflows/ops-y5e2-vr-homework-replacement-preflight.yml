@@ -1,0 +1,112 @@
+name: Ops Y5E2 VR homework replacement preflight
+
+on:
+  push:
+    branches:
+      - ops/y5e2-vr-homework-replace-2026-09-17
+    paths:
+      - '.github/workflows/ops-y5e2-vr-homework-replacement-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  AUTHORITY_BRANCH: fix/importer-publish-email-per-lesson-2026-09-16
+  AUTHORITY_SHA: 53c80f1ba68caabeb0da272c647b3dc1fbe48b0f
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_R2: fpt-materials-dev
+  OLD_NAME: FAR210225Y5T1EE01VRH01.pdf
+  NEW_NAME: FAR210225Y5E2.pdf
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fresh production read-only audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          actual="$(git ls-remote origin "refs/heads/${AUTHORITY_BRANCH}" | awk '{print $1}')"
+          test "$actual" = "$AUTHORITY_SHA"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const host=clean(process.env.PROD_HOST).toLowerCase(), legacy=clean(process.env.LEGACY_WORKER), browser=clean(process.env.BROWSER_WORKER), student=clean(process.env.STUDENT_WORKER);
+          const expectedLessons=clean(process.env.EXPECTED_LESSONS_KV), expectedRead=clean(process.env.EXPECTED_READ_MODELS_KV), expectedR2=clean(process.env.EXPECTED_R2);
+          const oldName=clean(process.env.OLD_NAME), newName=clean(process.env.NEW_NAME);
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`};
+          async function request(path, options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...headers,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{};return {r,text,body};}
+          async function cf(path,options={}){const o=await request(path,options);if(!o.r.ok||o.body?.success!==true)throw new Error(`Cloudflare ${o.r.status}: ${path}: ${clean(o.body?.errors?.[0]?.message||o.text).slice(0,220)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read ${o.r.status}: ${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unavailable');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase()===`${host}/*`);
+          if(hostRoutes.length!==1||clean(hostRoutes[0].script)!==browser)throw new Error(`Public route drift: ${JSON.stringify(hostRoutes)}`);
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);
+          const lb=Array.isArray(legacySettings?.bindings)?legacySettings.bindings:[], sb=Array.isArray(studentSettings?.bindings)?studentSettings.bindings:[];
+          const lessons=clean(lb.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          const r2Legacy=clean(lb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+          const read=clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id);
+          const r2Student=clean(sb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+          if(lessons!==expectedLessons||read!==expectedRead||r2Legacy!==expectedR2||r2Student!==expectedR2)throw new Error(`Binding drift lessons=${lessons} read=${read} r2Legacy=${r2Legacy} r2Student=${r2Student}`);
+          const source=await kvJson(lessons,'lesson:Y5E2');
+          if(!source||clean(source.lessonId)!=='Y5E2')throw new Error('lesson:Y5E2 missing');
+          const scan=(value,path='')=>{const out=[];if(Array.isArray(value)){value.forEach((v,i)=>out.push(...scan(v,`${path}[${i}]`)));}else if(value&&typeof value==='object'){for(const [k,v] of Object.entries(value)){const p=path?`${path}.${k}`:k;if(typeof v==='string'&&(v.includes(oldName)||v.includes(newName)))out.push({path:p,value:v});out.push(...scan(v,p));}}return out;};
+          const sourceMatches=scan(source);
+          const oldSource=sourceMatches.filter(x=>x.value.includes(oldName));
+          const newSource=sourceMatches.filter(x=>x.value.includes(newName));
+          if(oldSource.length<1)throw new Error(`Old source reference not found in Y5E2: ${JSON.stringify(sourceMatches)}`);
+          if(newSource.length)throw new Error(`New source reference already present; refusing ambiguous replacement: ${JSON.stringify(newSource)}`);
+          const scope='lesson:Y5E2', pKey=pointerKey(scope), pointer=await kvJson(read,pKey);
+          const ver=clean(pointer?.current?.version);if(!ver)throw new Error('Current Y5E2 prepared pointer missing');
+          const envelope=await kvJson(read,versionKey(scope,ver));if(!envelope?.payload)throw new Error('Current Y5E2 prepared payload missing');
+          const preparedMatches=scan(envelope.payload), oldPrepared=preparedMatches.filter(x=>x.value.includes(oldName)), newPrepared=preparedMatches.filter(x=>x.value.includes(newName));
+          if(oldPrepared.length<1)throw new Error(`Old prepared reference not found: ${JSON.stringify(preparedMatches)}`);
+          if(newPrepared.length)throw new Error(`New prepared reference already present: ${JSON.stringify(newPrepared)}`);
+          let cursor='', objects=[];
+          do{
+            const q=new URLSearchParams({per_page:'1000'});if(cursor)q.set('cursor',cursor);
+            const o=await request(`/accounts/${account}/r2/buckets/${encodeURIComponent(expectedR2)}/objects?${q}`);
+            if(!o.r.ok||o.body?.success!==true)throw new Error(`R2 list failed ${o.r.status}: ${clean(o.body?.errors?.[0]?.message||o.text).slice(0,220)}`);
+            objects.push(...(o.body.result||[]));cursor=clean(o.body.result_info?.cursor);
+          }while(cursor);
+          const relevant=objects.filter(o=>clean(o.key).includes(oldName)||clean(o.key).includes(newName)).map(o=>({key:clean(o.key),size:o.size,etag:o.etag,last_modified:o.last_modified}));
+          const oldObjects=relevant.filter(o=>o.key.includes(oldName)), newObjects=relevant.filter(o=>o.key.includes(newName));
+          if(oldObjects.length<1)throw new Error(`Old R2 object not found. relevant=${JSON.stringify(relevant)}`);
+          const browserDeploy=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/deployments`);
+          const studentDeploy=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`);
+          const active=x=>{const rows=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(rows[0]?.versions)?rows[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id)};
+          const report={marker:'Y5E2_VR_HOMEWORK_REPLACEMENT_PREFLIGHT_PASS',observedAt:new Date().toISOString(),authority:{branch:process.env.AUTHORITY_BRANCH,sha:process.env.AUTHORITY_SHA},topology:{route:hostRoutes[0],browserVersion:active(browserDeploy),studentVersion:active(studentDeploy),lessonsKv:lessons,readModelsKv:read,r2Bucket:expectedR2},source:{lessonId:source.lessonId,title:source.title,oldMatches:oldSource,newMatches:newSource},prepared:{version:ver,oldMatches:oldPrepared,newMatches:newPrepared},r2:{oldObjects,newObjects}};
+          fs.writeFileSync('/tmp/preflight.json',JSON.stringify(report,null,2)+'\n');
+          console.log('Y5E2_PREFLIGHT='+JSON.stringify(report));
+          NODE
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: y5e2-vr-homework-replacement-preflight
+          path: /tmp/preflight.json
+          retention-days: 30
