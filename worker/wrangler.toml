@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase23-protected-view-stability.js"
+main = "src/index-phase24-trial-vr.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -14,6 +14,13 @@ PARENT_EMAIL_TEST_TO = ""
 name = "EMAIL"
 
 # Canonical Portal V2 production entrypoint.
+# Phase 24 wraps Phase 23 only to extend 11+ Trial access with the VR resources
+# belonging to the explicitly allowed Year 4/Year 5 English 11+ trial view.
+# Core Trial behaviour remains unchanged: lesson descriptions and the main lesson
+# video stay open, while non-VR worksheets/homework/answers remain restricted.
+# VR protected answers continue through the existing password, session, rate-limit
+# and protected-view controls; Phase 24 does not bypass those checks.
+#
 # Phase 23 wraps the current Change 20 production Worker only for protected
 # Answer Pack/Answer Key fetch stability. If an initial protected PDF request
 # races the existing short content-open window or repeats a single-use request,
