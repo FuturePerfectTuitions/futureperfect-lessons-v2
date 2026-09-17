@@ -1,0 +1,59 @@
+name: Y4T1E01 live Worker PreLesson read-only audit
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/y4t1e01-live-worker-readonly.yml
+      - .github/y4t1e01-live-worker-readonly-trigger.txt
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect live worker bundle and Y4E1 canonical record without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          BASE="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          echo "LESSONS_KV=${ns}"
+
+          enc="$(python -c 'import urllib.parse; print(urllib.parse.quote("lesson:Y4E1", safe=""))')"
+          curl -fsS -H "$AUTH" "${BASE}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/y4e1.json
+          jq '{lessonId,title,displayIds,corePreLessonSheets:.core.preLessonSheets,phase11CorePreLessonPairs:.phase11Resources.core.preLessonPairs}' /tmp/y4e1.json
+          echo "LIVE_KV_SHA256=$(sha256sum /tmp/y4e1.json | awk '{print $1}')"
+
+          curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/content" -o /tmp/live-worker.bin
+          echo "LIVE_WORKER_BYTES=$(wc -c < /tmp/live-worker.bin)"
+          for needle in 'core.preLessonSheets' 'preLessonSheets' 'lessonCollections' 'phase11Resources'; do
+            if grep -aFq "$needle" /tmp/live-worker.bin; then
+              echo "BUNDLE_HAS_${needle//[^A-Za-z0-9]/_}=true"
+            else
+              echo "BUNDLE_HAS_${needle//[^A-Za-z0-9]/_}=false"
+            fi
+          done
+
+          deployments="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/deployments")"
+          jq -e '.success == true' <<<"$deployments" >/dev/null
+          echo 'LATEST_DEPLOYMENT:'
+          jq '.result.deployments[0] | {id,created_on,source,annotations}' <<<"$deployments"
+          echo 'READ_ONLY_COMPLETE=true'
