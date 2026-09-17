@@ -1,0 +1,39 @@
+name: Y4 PreLesson test-profile read-only audit
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/y4-prelesson-test-profile-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Read safe entitlement fields for controlled test personas
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
+          ns="$(jq -r '.result.bindings[]? | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+          for id in testy4em testy411m; do
+            enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "user:${id}")"
+            status="$(curl -sS -H "$AUTH" -o "/tmp/${id}.json" -w '%{http_code}' "${BASE}/storage/kv/namespaces/${ns}/values/${enc}")"
+            echo "=== ${id} HTTP ${status} ==="
+            if [ "$status" = 200 ]; then
+              jq '{firstName,name,status,schoolYear,vrEligible,batches,fullLibraries,trialViews,manualAccess,mathsYears,vrBuckets,entitlements,expires}' "/tmp/${id}.json"
+            fi
+          done
+          echo 'READ_ONLY_COMPLETE=true'
