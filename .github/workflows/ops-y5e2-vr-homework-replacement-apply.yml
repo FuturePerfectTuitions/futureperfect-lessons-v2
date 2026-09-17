@@ -1,0 +1,135 @@
+name: Ops Y5E2 VR homework replacement apply
+
+on:
+  push:
+    branches:
+      - ops/y5e2-vr-homework-replace-2026-09-17
+    paths:
+      - '.github/workflows/ops-y5e2-vr-homework-replacement-apply.yml'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  AUTHORITY_BRANCH: fix/importer-publish-email-per-lesson-2026-09-16
+  AUTHORITY_SHA: 53c80f1ba68caabeb0da272c647b3dc1fbe48b0f
+  PROD_BASE: https://lessons.futureperfect.education
+  PROD_HOST: lessons.futureperfect.education
+  LEGACY_WORKER: fpt-portal-v2-worker
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_R2: fpt-materials-dev
+  EXPECTED_PREPARED_VERSION: d102017895720-408100f905d1
+  OLD_NAME: FAR210225Y5T1EE01VRH01.pdf
+  OLD_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01.pdf
+  NEW_NAME: FAR210225Y5E2.pdf
+  NEW_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf
+  NEW_SIZE: '236797'
+  NEW_SHA256: 86288e1f40ef8b012ad791fc3be70026cd3d274c8a586e0188ca51867c1fdbd5
+  SOURCE_DOWNLOAD_URL: 'https://sdmntprnortheu.oaiusercontent.com/files/00000000-6738-81f4-b4aa-7849e4801b7c/raw?se=2026-09-17T07%3A20%3A38Z&sp=r&sv=2026-02-06&sr=b&scid=adca9aa3-325a-5aa9-aaff-198fb5f8be8a&skoid=002823aa-689d-47ca-9347-108c20f4f00d&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-17T03%3A07%3A25Z&ske=2026-09-18T03%3A07%3A25Z&sks=b&skv=2026-02-06&sig=PJbxP5blYXwvmylVusFbV0CPFUJND5i7OxX6m6UUWLo%3D'
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Acquire and verify exact replacement PDF
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fL --retry 2 --connect-timeout 10 --max-time 60 "$SOURCE_DOWNLOAD_URL" -o /tmp/FAR210225Y5E2.pdf
+          test "$(stat -c '%s' /tmp/FAR210225Y5E2.pdf)" = "$NEW_SIZE"
+          test "$(sha256sum /tmp/FAR210225Y5E2.pdf | awk '{print $1}')" = "$NEW_SHA256"
+          test "$(head -c 4 /tmp/FAR210225Y5E2.pdf)" = '%PDF'
+      - name: Guard, upload, publish source and prepared lesson
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          actual="$(git ls-remote origin "refs/heads/${AUTHORITY_BRANCH}" | awk '{print $1}')"
+          test "$actual" = "$AUTHORITY_SHA"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, sha256Hex, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const host=clean(process.env.PROD_HOST).toLowerCase(), legacy=clean(process.env.LEGACY_WORKER), browser=clean(process.env.BROWSER_WORKER), student=clean(process.env.STUDENT_WORKER);
+          const lessonsNsExpected=clean(process.env.EXPECTED_LESSONS_KV), readNs=clean(process.env.EXPECTED_READ_MODELS_KV), bucket=clean(process.env.EXPECTED_R2);
+          const oldName=clean(process.env.OLD_NAME), oldKey=clean(process.env.OLD_KEY), newName=clean(process.env.NEW_NAME), newKey=clean(process.env.NEW_KEY);
+          const expectedPrepared=clean(process.env.EXPECTED_PREPARED_VERSION), expectedSha=clean(process.env.NEW_SHA256), expectedSize=Number(process.env.NEW_SIZE);
+          const base='https://api.cloudflare.com/client/v4', auth={Authorization:`Bearer ${token}`};
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function request(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{};return{r,text,body};}
+          async function cf(path,options={}){const o=await request(path,options);if(!o.r.ok||o.body?.success!==true)throw new Error(`Cloudflare ${o.r.status}: ${path}: ${clean(o.body?.errors?.[0]?.message||o.text).slice(0,240)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read ${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          async function kvPut(ns,key,value){const o=await request(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{'content-type':'text/plain;charset=UTF-8'},body:value});if(!o.r.ok||o.body?.success!==true)throw new Error(`KV put ${o.r.status}:${key}:${clean(o.body?.errors?.[0]?.message||o.text).slice(0,200)}`);}
+          async function freshTopology(){
+            const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];if(!zone)throw new Error('Production zone unavailable');
+            const routes=await cf(`/zones/${zone.id}/workers/routes`);const hr=routes.filter(r=>clean(r.pattern).toLowerCase()===`${host}/*`);if(hr.length!==1||clean(hr[0].script)!==browser)throw new Error(`Public route drift:${JSON.stringify(hr)}`);
+            const bs=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);const bb=Array.isArray(bs?.bindings)?bs.bindings:[];const svc=bb.filter(b=>clean(b.type)==='service');if(svc.length!==1||clean(svc[0].service)!==student)throw new Error(`Browser service drift:${JSON.stringify(svc)}`);if(bb.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('Forbidden Browser Admin/AdminOps binding');
+            const ls=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);const lb=Array.isArray(ls?.bindings)?ls.bindings:[];const lessons=clean(lb.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id), lr2=clean(lb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+            const ss=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);const sb=Array.isArray(ss?.bindings)?ss.bindings:[];const read=clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id), sr2=clean(sb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+            if(lessons!==lessonsNsExpected||read!==readNs||lr2!==bucket||sr2!==bucket)throw new Error(`Binding drift lessons=${lessons} read=${read} lr2=${lr2} sr2=${sr2}`);
+            return {route:hr[0],lessons,read,bucket};
+          }
+          const topology=await freshTopology();
+          const sourceKey='lesson:Y5E2';const originalSourceText=await kvText(lessonsNsExpected,sourceKey);if(!originalSourceText)throw new Error('Y5E2 source missing');const original=JSON.parse(originalSourceText);if(clean(original.lessonId)!=='Y5E2')throw new Error('Y5E2 source identity mismatch');
+          const hw=original?.vr?.homeworks?.[0]?.homework;if(!hw||clean(hw.displayName)!==oldName||clean(hw.r2Key)!==oldKey)throw new Error(`Y5E2 source no longer at expected old resource:${JSON.stringify(hw)}`);
+          const pKey=pointerKey('lesson:Y5E2');const originalPointerText=await kvText(readNs,pKey);if(!originalPointerText)throw new Error('Y5E2 prepared pointer missing');const originalPointer=JSON.parse(originalPointerText);if(clean(originalPointer?.current?.version)!==expectedPrepared)throw new Error(`Prepared pointer drift:${clean(originalPointer?.current?.version)}`);
+          const oldEnvelope=await kvJson(readNs,versionKey('lesson:Y5E2',expectedPrepared));if(!oldEnvelope?.payload)throw new Error('Current Y5E2 prepared payload missing');const oldRows=oldEnvelope.payload.resources||[];if(!oldRows.some(r=>clean(r.objectKey)===oldKey)||oldRows.some(r=>clean(r.objectKey)===newKey))throw new Error('Prepared resource baseline drift');
+          const next=structuredClone(original);next.vr.homeworks[0].homework.displayName=newName;next.vr.homeworks[0].homework.r2Key=newKey;
+          const detail=await compileLessonDetail(next,{resourceExists:async()=>true});const rows=detail.resources||[];const newRow=rows.find(r=>clean(r.objectKey)===newKey);if(!newRow)throw new Error('Compiled replacement resource missing');if(rows.some(r=>clean(r.objectKey)===oldKey))throw new Error('Compiled old resource still present');if(JSON.stringify(newRow.presentationScopes)!==JSON.stringify(['vr']))throw new Error('Replacement VR presentation scope drift');
+          const oldOther=oldRows.filter(r=>clean(r.objectKey)!==oldKey).map(r=>stableStringify(r)).sort();const newOther=rows.filter(r=>clean(r.objectKey)!==newKey).map(r=>stableStringify(r)).sort();if(stableStringify(oldOther)!==stableStringify(newOther))throw new Error('Replacement would alter unrelated prepared resources');
+          const strip=p=>({schemaVersion:p.schemaVersion,kind:p.kind,lessonId:p.lessonId,title:p.title,description:p.description,videoVariants:p.videoVariants||null});if(stableStringify(strip(oldEnvelope.payload))!==stableStringify(strip(detail)))throw new Error('Replacement would alter non-resource lesson fields');
+          fs.writeFileSync('/tmp/source-original.json',originalSourceText);fs.writeFileSync('/tmp/pointer-original.json',originalPointerText);
+          fs.writeFileSync('/tmp/source-next.json',JSON.stringify(next));
+          const payloadText=stableStringify(detail), payloadSha=await sha256Hex(payloadText), runTag=clean(process.env.GITHUB_RUN_ID||Date.now()).replace(/[^A-Za-z0-9._-]+/g,'-');const version=`ops-y5e2-vr-${payloadSha.slice(0,16)}-${runTag}`;const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope:'lesson:Y5E2',version,sha256:payloadSha,payload:detail};const envelopeText=stableStringify(envelope), envelopeSha=await sha256Hex(envelopeText);fs.writeFileSync('/tmp/envelope-next.json',envelopeText);fs.writeFileSync('/tmp/candidate-meta.json',JSON.stringify({version,payloadSha,envelopeSha,topology,newRow,expectedSha,expectedSize},null,2));
+          NODE
+          # New key only: preserve old object for rollback until post-verification.
+          npx --yes wrangler@4.125.0 r2 object put "${EXPECTED_R2}/${NEW_KEY}" --file /tmp/FAR210225Y5E2.pdf --content-type application/pdf --remote
+          npx --yes wrangler@4.125.0 r2 object get "${EXPECTED_R2}/${NEW_KEY}" --file /tmp/r2-new.pdf --remote >/dev/null
+          test "$(stat -c '%s' /tmp/r2-new.pdf)" = "$NEW_SIZE"
+          test "$(sha256sum /tmp/r2-new.pdf | awk '{print $1}')" = "$NEW_SHA256"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { stableStringify, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim(), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), lessons=clean(process.env.EXPECTED_LESSONS_KV), read=clean(process.env.EXPECTED_READ_MODELS_KV);
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function req(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...headers,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{};return{r,text,body};}
+          async function put(ns,key,value){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{method:'PUT',headers:{'content-type':'text/plain;charset=UTF-8'},body:value});if(!o.r.ok||o.body?.success!==true)throw new Error(`KV put failed ${o.r.status}:${key}:${clean(o.body?.errors?.[0]?.message||o.text).slice(0,200)}`);}
+          async function get(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(!o.r.ok)throw new Error(`KV get failed ${o.r.status}:${key}`);return o.text;}
+          const originalSource=fs.readFileSync('/tmp/source-original.json','utf8'), nextSource=fs.readFileSync('/tmp/source-next.json','utf8'), originalPointer=fs.readFileSync('/tmp/pointer-original.json','utf8'), envelopeText=fs.readFileSync('/tmp/envelope-next.json','utf8'), meta=JSON.parse(fs.readFileSync('/tmp/candidate-meta.json','utf8'));
+          let sourceWritten=false,pointerWritten=false;
+          try{
+            await put(lessons,'lesson:Y5E2',nextSource);sourceWritten=true;if((await get(lessons,'lesson:Y5E2'))!==nextSource)throw new Error('Source readback mismatch');
+            await put(read,versionKey('lesson:Y5E2',meta.version),envelopeText);if((await get(read,versionKey('lesson:Y5E2',meta.version)))!==envelopeText)throw new Error('Prepared candidate readback mismatch');
+            const prior=JSON.parse(originalPointer);const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope:'lesson:Y5E2',current:{version:meta.version,sha256:meta.payloadSha,envelopeSha256:meta.envelopeSha},previous:prior.current||null,updatedAt:new Date().toISOString()};const pointerText=stableStringify(pointer);await put(read,pointerKey('lesson:Y5E2'),pointerText);pointerWritten=true;
+            const confirmed=JSON.parse(await get(read,pointerKey('lesson:Y5E2')););if(clean(confirmed?.current?.version)!==meta.version)throw new Error('Prepared pointer readback mismatch');
+            fs.writeFileSync('/tmp/apply-evidence.json',JSON.stringify({marker:'Y5E2_VR_HOMEWORK_REPLACEMENT_APPLY_PASS',observedAt:new Date().toISOString(),previousVersion:clean(prior?.current?.version),currentVersion:meta.version,newKey:process.env.NEW_KEY,newSha256:process.env.NEW_SHA256,newSize:Number(process.env.NEW_SIZE),sourceUpdated:true,preparedUpdated:true,oldR2RetainedForVerification:true},null,2));
+          }catch(e){
+            try{if(pointerWritten)await put(read,pointerKey('lesson:Y5E2'),originalPointer);}catch(rb){throw new Error(`ROLLBACK pointer failed:${clean(rb?.message||rb)}; original=${clean(e?.message||e)}`)}
+            try{if(sourceWritten)await put(lessons,'lesson:Y5E2',originalSource);}catch(rb){throw new Error(`ROLLBACK source failed:${clean(rb?.message||rb)}; original=${clean(e?.message||e)}`)}
+            throw e;
+          }
+          NODE
+      - name: Upload apply evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y5e2-vr-homework-replacement-apply
+          path: /tmp/apply-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
