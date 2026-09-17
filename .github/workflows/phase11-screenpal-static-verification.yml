@@ -7,6 +7,8 @@ on:
       - worker/src/index-phase11.js
       - worker/src/phase11-screenpal.js
       - worker/src/index-phase17.js
+      - worker/src/index-admin-tools.js
+      - worker/src/index-phase24-trial-vr.js
       - worker/wrangler.toml
       - tests/phase11-screenpal-static-verification.mjs
       - docs/data/PHASE11_SCREENPAL_URL_RULES.md
@@ -31,9 +33,13 @@ jobs:
           node --check worker/src/index-phase11.js
           node --check worker/src/phase11-screenpal.js
           node --experimental-default-type=module tests/phase11-screenpal-static-verification.mjs
-          if ! grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml && \
-             ! grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml && \
-             ! grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
+          if grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
+            node --check worker/src/index-admin-tools.js
+            node --check worker/src/index-phase24-trial-vr.js
+            grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          elif ! grep -Fq 'main = "src/index-phase10-history.js"' worker/wrangler.toml && \
+               ! grep -Fq 'main = "src/index-phase12.js"' worker/wrangler.toml && \
+               ! grep -Fq 'main = "src/index-phase17.js"' worker/wrangler.toml; then
             echo 'Unexpected checked-in Worker entrypoint.' >&2
             exit 1
           fi
