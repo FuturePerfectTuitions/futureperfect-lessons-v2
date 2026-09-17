@@ -7,14 +7,14 @@
   <link rel="icon" href="favicon-32.png">
   <meta name="fpt-worker-base" content="https://fpt-portal-v2-worker.futureperfectlessons.workers.dev">
   <style>
-    :root{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#172033;background:#f5f7fb}body{margin:0}main{max-width:1280px;margin:40px auto;padding:0 20px}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px rgba(20,35,60,.06);margin-bottom:18px}h1{margin:0 0 8px;font-size:28px}h2{margin:0 0 8px;font-size:22px}p{line-height:1.5}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{font-weight:650;display:block;margin-bottom:6px}input[type=password],input[type=file],input[type=text]{padding:10px;border:1px solid #b9c4d4;border-radius:9px;background:#fff;min-height:20px}input[type=text]{min-width:210px}button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1f4fd1;color:white}button.secondary{background:#e7ecf5;color:#26354d}button.ghost{background:#fff;color:#26354d;border:1px solid #cbd5e1}button.send,button.danger{background:#b42318;color:white}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#667085}.status{padding:12px 14px;border-radius:9px;background:#eef3fb;margin-top:12px}.bad{background:#fff0f0;color:#9f1d1d}.good{background:#eefaf1;color:#176532}.warn{background:#fff8e7;color:#785500}.state-title{font-weight:800;font-size:18px;margin-bottom:3px}.table-wrap{overflow:auto;max-height:560px;border:1px solid #e0e6ef;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#f7f9fc;z-index:1}.ok{color:#176532;font-weight:700}.err{color:#9f1d1d;font-weight:700}.summary{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.pill{background:#eef2f8;border-radius:999px;padding:6px 10px;font-weight:650}code{background:#f1f3f7;padding:2px 5px;border-radius:5px}.hidden{display:none}.source-box{border:1px solid #dfe5ef;border-radius:12px;padding:16px;margin-bottom:16px;background:#fbfcfe}.source-title{font-weight:750;margin-bottom:4px}.source-meta{font-size:14px;margin-bottom:12px}.send-box{border:1px solid #f0c6c2;background:#fff8f7;border-radius:12px;padding:16px;margin:16px 0}.fallback{margin-top:18px;padding-top:18px;border-top:1px solid #edf0f5}.admin-section{padding-bottom:24px;margin-bottom:24px;border-bottom:1px solid #e7ecf3}.admin-section:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}.trial-access-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:16px 0}.trial-access-group{border:1px solid #dfe5ef;border-radius:12px;padding:14px;background:#fbfcfe}.trial-access-group strong{display:block;margin-bottom:8px}.checkline{display:flex;align-items:center;gap:8px;margin:8px 0;font-weight:500}.checkline input{margin:0}.trial-credential-box{border:1px solid #b7dfc0;background:#f3fbf5;border-radius:12px;padding:16px;margin:16px 0}.credential-grid{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:8px 12px;margin:12px 0}.credential-grid div:nth-child(odd){font-weight:700}.credential-value{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}.trial-actions{display:flex;gap:7px;flex-wrap:wrap}.trial-actions button{padding:7px 9px;font-size:12px}.trial-list-wrap{margin-top:16px}.trial-note{font-size:14px;padding:10px 12px;background:#f8fafc;border-radius:9px;margin-top:10px}
+    :root{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#172033;background:#f5f7fb}body{margin:0}main{max-width:1280px;margin:40px auto;padding:0 20px}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px rgba(20,35,60,.06);margin-bottom:18px}h1{margin:0 0 8px;font-size:28px}h2{margin:0 0 8px;font-size:22px}h3{margin:0 0 6px;font-size:17px}p{line-height:1.5}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{font-weight:650;display:block;margin-bottom:6px}input[type=password],input[type=file],input[type=text],select{padding:10px;border:1px solid #b9c4d4;border-radius:9px;background:#fff;min-height:20px}input[type=text]{min-width:210px}select{min-width:300px;max-width:100%}button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1f4fd1;color:white}button.secondary{background:#e7ecf5;color:#26354d}button.ghost{background:#fff;color:#26354d;border:1px solid #cbd5e1}button.send,button.danger{background:#b42318;color:white}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#667085}.status{padding:12px 14px;border-radius:9px;background:#eef3fb;margin-top:12px}.bad{background:#fff0f0;color:#9f1d1d}.good{background:#eefaf1;color:#176532}.warn{background:#fff8e7;color:#785500}.state-title{font-weight:800;font-size:18px;margin-bottom:3px}.table-wrap{overflow:auto;max-height:560px;border:1px solid #e0e6ef;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#f7f9fc;z-index:1}.ok{color:#176532;font-weight:700}.err{color:#9f1d1d;font-weight:700}.summary{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.pill{background:#eef2f8;border-radius:999px;padding:6px 10px;font-weight:650}code{background:#f1f3f7;padding:2px 5px;border-radius:5px}.hidden{display:none}.source-box{border:1px solid #dfe5ef;border-radius:12px;padding:16px;margin-bottom:16px;background:#fbfcfe}.source-title{font-weight:750;margin-bottom:4px}.source-meta{font-size:14px;margin-bottom:12px}.send-box{border:1px solid #f0c6c2;background:#fff8f7;border-radius:12px;padding:16px;margin:16px 0}.fallback{margin-top:18px;padding-top:18px;border-top:1px solid #edf0f5}.admin-section{padding-bottom:24px;margin-bottom:24px;border-bottom:1px solid #e7ecf3;scroll-margin-top:20px}.admin-section:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}.trial-access-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:16px 0}.trial-access-group{border:1px solid #dfe5ef;border-radius:12px;padding:14px;background:#fbfcfe}.trial-access-group strong{display:block;margin-bottom:8px}.checkline{display:flex;align-items:center;gap:8px;margin:8px 0;font-weight:500}.checkline input{margin:0}.trial-credential-box{border:1px solid #b7dfc0;background:#f3fbf5;border-radius:12px;padding:16px;margin:16px 0}.credential-grid{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:8px 12px;margin:12px 0}.credential-grid div:nth-child(odd){font-weight:700}.credential-value{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}.trial-actions{display:flex;gap:7px;flex-wrap:wrap}.trial-actions button{padding:7px 9px;font-size:12px}.trial-list-wrap{margin-top:16px}.trial-note{font-size:14px;padding:10px 12px;background:#f8fafc;border-radius:9px;margin-top:10px}.admin-tools-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:16px}.admin-tool{border:1px solid #dfe5ef;border-radius:14px;padding:16px;background:#fbfcfe;display:flex;flex-direction:column;align-items:flex-start;gap:7px}.admin-tool p{margin:0 0 8px;font-size:14px;color:#667085;flex:1}.admin-tool button{width:100%}.resource-summary{display:grid;grid-template-columns:minmax(130px,180px) 1fr;gap:8px 12px;border:1px solid #dfe5ef;background:#fbfcfe;border-radius:12px;padding:14px;margin:14px 0}.resource-summary div:nth-child(odd){font-weight:700}.resource-file{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}.safety-note{font-size:14px;border-left:4px solid #d19b00;background:#fff8e7;padding:10px 12px;margin-top:14px}
   </style>
 </head>
 <body data-import-state="idle">
 <main>
   <div class="card">
     <h1>Portal Admin</h1>
-    <p class="muted">Create and manage Trial logins instantly, or process lesson-release CSV updates.</p>
+    <p class="muted">Admin tools for Trial access, lesson resources and lesson-release operations.</p>
   </div>
 
   <div class="card" id="loginCard">
@@ -26,104 +26,50 @@
   </div>
 
   <div class="card hidden" id="importCard">
-    <section class="admin-section" id="trialManagerSection">
-      <h2>Trial Login Manager</h2>
-      <p class="muted">Create a Trial account immediately. No GitHub workflow or Worker deployment is required. Any selected Year 4/Year 5 11+ English access automatically includes that year’s complete VR resources.</p>
-
-      <div class="row">
-        <div><label for="trialFirstName">Child first name</label><input id="trialFirstName" type="text" autocomplete="off" placeholder="Eva"></div>
-        <div><label for="trialPortalId">Trial ID</label><input id="trialPortalId" type="text" autocomplete="off" placeholder="TrialEva"></div>
-        <button id="trialPortalIdReset" type="button" class="ghost">Use suggested ID</button>
-      </div>
-
-      <div class="trial-access-grid">
-        <div class="trial-access-group">
-          <strong>Maths access</strong>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-year2"> Year 2 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-year3"> Year 3 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-year4"> Year 4 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-year5"> Year 5 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-year6"> Year 6 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-level1"> L1 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-level2"> L2 Maths</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="maths-level3"> L3 Maths</label>
-        </div>
-        <div class="trial-access-group">
-          <strong>English access</strong>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year2"> Year 2 English</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year3"> Year 3 English</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year4"> Year 4 English</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year5"> Year 5 English</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year6"> Year 6 English</label>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year4-11plus"> Year 4 11+ English <strong>+ all Year 4 VR</strong></label>
-          <label class="checkline"><input type="checkbox" data-trial-view="english-year5-11plus"> Year 5 11+ English <strong>+ all Year 5 VR</strong></label>
-        </div>
-      </div>
-
-      <div class="trial-note"><strong>Trial rule:</strong> each new or re-armed Trial ID has exactly one successful login. Login and Answer Pack passwords are generated separately, and <code>Csl1</code> is explicitly forbidden.</div>
-
-      <div class="row" style="margin-top:14px">
-        <button id="createTrialBtn" type="button">Create Trial Login</button>
-        <button id="refreshTrialsBtn" type="button" class="secondary">Refresh Existing Trials</button>
-      </div>
-      <div id="trialStatus" class="status hidden"></div>
-
-      <div id="trialCredentialBox" class="trial-credential-box hidden">
-        <div id="trialResultTitle" class="state-title">Trial login created</div>
-        <div class="credential-grid">
-          <div>Username</div><div id="trialResultUser" class="credential-value"></div>
-          <div>Login password</div><div id="trialResultLogin" class="credential-value"></div>
-          <div>Answer Pack password</div><div id="trialResultAnswer" class="credential-value"></div>
-          <div>Access</div><div id="trialResultAccess"></div>
-        </div>
-        <button id="copyTrialCredentialsBtn" type="button">Copy Details</button>
-      </div>
-
-      <div class="trial-list-wrap">
-        <div class="source-title">Existing Trial logins</div>
-        <div class="table-wrap" style="max-height:360px">
-          <table>
-            <thead><tr><th>Trial ID</th><th>Name</th><th>Access</th><th>State</th><th>Actions</th></tr></thead>
-            <tbody id="trialListBody"><tr><td colspan="5" class="muted">Use Refresh Existing Trials to load accounts.</td></tr></tbody>
-          </table>
-        </div>
+    <section class="admin-section" id="adminToolsHome">
+      <h2>Admin Tools</h2>
+      <p class="muted">Choose the job you want to do. Each tool uses the same signed Admin session.</p>
+      <div class="admin-tools-grid">
+        <div class="admin-tool"><h3>Create Trial ID</h3><p>Create, re-arm, disable or reset a Trial login and choose its Maths/English access.</p><button type="button" data-admin-target="trialManagerSection">Open Trial Login Manager</button></div>
+        <div class="admin-tool"><h3>Replace Resource</h3><p>Replace an existing lesson PDF without creating a one-off GitHub workflow.</p><button type="button" data-admin-target="replaceResourceSection">Open Replace Resource</button></div>
+        <div class="admin-tool"><h3>Lesson Release Import</h3><p>Process the latest FuturePerfectLive CSV and apply Portal lesson access changes.</p><button type="button" data-admin-target="lessonReleaseSection">Open Lesson Release Import</button></div>
       </div>
     </section>
 
-    <section class="admin-section">
+    <section class="admin-section" id="trialManagerSection">
+      <h2>Trial Login Manager</h2>
+      <p class="muted">Create a Trial account immediately. No GitHub workflow or Worker deployment is required. Any selected Year 4/Year 5 11+ English access automatically includes that year’s complete VR resources.</p>
+      <div class="row"><div><label for="trialFirstName">Child first name</label><input id="trialFirstName" type="text" autocomplete="off" placeholder="Eva"></div><div><label for="trialPortalId">Trial ID</label><input id="trialPortalId" type="text" autocomplete="off" placeholder="TrialEva"></div><button id="trialPortalIdReset" type="button" class="ghost">Use suggested ID</button></div>
+      <div class="trial-access-grid">
+        <div class="trial-access-group"><strong>Maths access</strong><label class="checkline"><input type="checkbox" data-trial-view="maths-year2"> Year 2 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-year3"> Year 3 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-year4"> Year 4 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-year5"> Year 5 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-year6"> Year 6 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-level1"> L1 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-level2"> L2 Maths</label><label class="checkline"><input type="checkbox" data-trial-view="maths-level3"> L3 Maths</label></div>
+        <div class="trial-access-group"><strong>English access</strong><label class="checkline"><input type="checkbox" data-trial-view="english-year2"> Year 2 English</label><label class="checkline"><input type="checkbox" data-trial-view="english-year3"> Year 3 English</label><label class="checkline"><input type="checkbox" data-trial-view="english-year4"> Year 4 English</label><label class="checkline"><input type="checkbox" data-trial-view="english-year5"> Year 5 English</label><label class="checkline"><input type="checkbox" data-trial-view="english-year6"> Year 6 English</label><label class="checkline"><input type="checkbox" data-trial-view="english-year4-11plus"> Year 4 11+ English <strong>+ all Year 4 VR</strong></label><label class="checkline"><input type="checkbox" data-trial-view="english-year5-11plus"> Year 5 11+ English <strong>+ all Year 5 VR</strong></label></div>
+      </div>
+      <div class="trial-note"><strong>Trial rule:</strong> each new or re-armed Trial ID has exactly one successful login. Login and Answer Pack passwords are generated separately, and <code>Csl1</code> is explicitly forbidden.</div>
+      <div class="row" style="margin-top:14px"><button id="createTrialBtn" type="button">Create Trial Login</button><button id="refreshTrialsBtn" type="button" class="secondary">Refresh Existing Trials</button></div>
+      <div id="trialStatus" class="status hidden"></div>
+      <div id="trialCredentialBox" class="trial-credential-box hidden"><div id="trialResultTitle" class="state-title">Trial login created</div><div class="credential-grid"><div>Username</div><div id="trialResultUser" class="credential-value"></div><div>Login password</div><div id="trialResultLogin" class="credential-value"></div><div>Answer Pack password</div><div id="trialResultAnswer" class="credential-value"></div><div>Access</div><div id="trialResultAccess"></div></div><button id="copyTrialCredentialsBtn" type="button">Copy Details</button></div>
+      <div class="trial-list-wrap"><div class="source-title">Existing Trial logins</div><div class="table-wrap" style="max-height:360px"><table><thead><tr><th>Trial ID</th><th>Name</th><th>Access</th><th>State</th><th>Actions</th></tr></thead><tbody id="trialListBody"><tr><td colspan="5" class="muted">Use Refresh Existing Trials to load accounts.</td></tr></tbody></table></div></div>
+    </section>
+
+    <section class="admin-section" id="replaceResourceSection">
+      <h2>Replace Resource</h2>
+      <p class="muted">Load a lesson, choose the existing PDF resource, choose its replacement file, then publish it. The student-facing resource name and all student entitlements stay unchanged.</p>
+      <div class="row"><div><label for="replaceLessonId">Lesson code</label><input id="replaceLessonId" type="text" autocomplete="off" placeholder="e.g. Y5T1M06 or L2T1M06"></div><button id="loadReplaceLessonBtn" type="button">Load Lesson</button></div>
+      <div id="replaceLessonSummary" class="resource-summary hidden"><div>Canonical lesson</div><div id="replaceLessonCode"></div><div>Title</div><div id="replaceLessonTitle"></div><div>Subject</div><div id="replaceLessonSubject"></div></div>
+      <div class="row" style="margin-top:14px"><div><label for="replaceResourceSelect">Existing resource</label><select id="replaceResourceSelect" disabled><option value="">Load a lesson first</option></select></div><div><label for="replacementFile">Replacement PDF</label><input id="replacementFile" type="file" accept=".pdf,application/pdf" disabled></div><button id="replaceResourceBtn" type="button" disabled>Replace Resource</button></div>
+      <div id="replaceResourceDetail" class="resource-summary hidden"><div>Resource</div><div id="replaceCurrentResourceName"></div><div>Type</div><div id="replaceCurrentResourceKind"></div><div>Current file</div><div id="replaceCurrentResourceFile" class="resource-file"></div></div>
+      <div class="safety-note"><strong>Safety:</strong> the replacement is written to a new R2 object and hash-verified before the lesson record is changed. The previous R2 object is deliberately retained for rollback.</div>
+      <div id="replaceResourceStatus" class="status hidden"></div>
+    </section>
+
+    <section class="admin-section" id="lessonReleaseSection">
       <h2>Lesson Release Import</h2>
       <p class="muted">FuturePerfectLive creates <code>workFP.csv</code>. Once the CSV folder has been authorised, this page automatically loads the current CSV, validates every row and imports the Portal access changes. <strong>Parent emails are not sent automatically.</strong> Email sending remains a separate manual action below.</p>
-
-      <div id="savedSourceBox" class="source-box">
-        <div class="source-title">Automatic CSV source</div>
-        <div id="sourceMeta" class="source-meta muted">Checking for the saved CSV folder…</div>
-        <div class="row">
-          <button id="setSourceBtn" type="button">Set CSV Source Folder</button>
-          <button id="loadLatestBtn" type="button" class="secondary" disabled>Process Latest CSV</button>
-          <button id="clearSourceBtn" type="button" class="ghost" disabled>Forget Source</button>
-        </div>
-        <div id="sourceStatus" class="status hidden"></div>
-      </div>
-
-      <div id="status" class="status hidden"></div>
-      <div id="summary" class="summary"></div>
-
-      <div class="send-box">
-        <div class="source-title">Manual parent email send</div>
-        <p class="muted">The CSV can be imported without sending any parent email. When you are satisfied with the imported rows, use this button to send the qualifying emails deliberately.</p>
-        <button id="sendEmailsBtn" type="button" class="send" disabled>Send Parent Emails</button>
-      </div>
-
+      <div id="savedSourceBox" class="source-box"><div class="source-title">Automatic CSV source</div><div id="sourceMeta" class="source-meta muted">Checking for the saved CSV folder…</div><div class="row"><button id="setSourceBtn" type="button">Set CSV Source Folder</button><button id="loadLatestBtn" type="button" class="secondary" disabled>Process Latest CSV</button><button id="clearSourceBtn" type="button" class="ghost" disabled>Forget Source</button></div><div id="sourceStatus" class="status hidden"></div></div>
+      <div id="status" class="status hidden"></div><div id="summary" class="summary"></div>
+      <div class="send-box"><div class="source-title">Manual parent email send</div><p class="muted">The CSV can be imported without sending any parent email. When you are satisfied with the imported rows, use this button to send the qualifying emails deliberately.</p><button id="sendEmailsBtn" type="button" class="send" disabled>Send Parent Emails</button></div>
       <div id="tableWrap" class="table-wrap hidden"><table><thead><tr><th>Row</th><th>Student</th><th>Name</th><th>Parent</th><th>Email</th><th>Batch</th><th>Lesson</th><th>Date</th><th>Status</th><th>Release</th><th>Portal action</th><th>Email action</th><th>Validation</th></tr></thead><tbody id="resultBody"></tbody></table></div>
-
-      <div class="fallback">
-        <div class="source-title">Manual CSV fallback</div>
-        <p class="muted">Use this only if Chrome cannot read the saved CSV folder.</p>
-        <div class="row">
-          <div><label for="csvFile">Choose CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"></div>
-          <button id="processSelectedBtn" type="button" class="secondary" disabled>Process Selected CSV</button>
-        </div>
-      </div>
+      <div class="fallback"><div class="source-title">Manual CSV fallback</div><p class="muted">Use this only if Chrome cannot read the saved CSV folder.</p><div class="row"><div><label for="csvFile">Choose CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"></div><button id="processSelectedBtn" type="button" class="secondary" disabled>Process Selected CSV</button></div></div>
     </section>
   </div>
 </main>
@@ -134,7 +80,6 @@
   const loginForm = document.getElementById('loginForm');
   let savedHandlePromise = Promise.resolve(null);
   window.FPTAdminSourcePermissionReady = Promise.resolve(false);
-
   if (sourceApi?.supported?.()) {
     savedHandlePromise = sourceApi.getSavedDirectory().catch(() => null);
     loginForm?.addEventListener('submit', () => {
@@ -149,5 +94,6 @@
 <script src="assets/admin-import-manual-email.js"></script>
 <script src="assets/admin-import.js"></script>
 <script src="assets/admin-trials.js"></script>
+<script src="assets/admin-replace-resource.js"></script>
 </body>
 </html>
