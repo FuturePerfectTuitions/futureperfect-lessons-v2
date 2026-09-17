@@ -1,0 +1,12 @@
+{
+  "capturedFrom": "https://lessons.futureperfect.education",
+  "jsRef": "",
+  "cssRef": "",
+  "jsSourcemapSources": [
+    "../../assets/fpt-logo.png",
+    "../../src/app.js"
+  ],
+  "appSourceMatch": [
+    "../../src/app.js"
+  ]
+}
