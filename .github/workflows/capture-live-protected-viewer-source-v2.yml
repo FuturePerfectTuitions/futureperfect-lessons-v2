@@ -1,0 +1,53 @@
+name: Capture live protected viewer source v2
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/capture-live-protected-viewer-source-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Recover exact protected-viewer source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE='https://lessons.futureperfect.education/assets/portal-protected-viewer-MQIf8meW.js'
+          curl --fail --silent --show-error "$BASE" -o /tmp/protected.js
+          curl --fail --silent --show-error "$BASE.map" -o /tmp/protected.js.map
+          python3 - <<'PY'
+          import json,pathlib
+          d=json.load(open('/tmp/protected.js.map',encoding='utf-8'))
+          sources=d.get('sources') or []
+          contents=d.get('sourcesContent') or []
+          print('SOURCES',sources)
+          out=pathlib.Path('rebuild/browser-ui/src/protected-viewer.js')
+          for src,content in zip(sources,contents):
+              if content and pathlib.PurePosixPath(src).name=='protected-viewer.js':
+                  out.write_text(content,encoding='utf-8')
+                  print('RECOVERED',src)
+                  break
+          else:
+              raise SystemExit('protected-viewer.js missing from sourcemap')
+          PY
+          test -s rebuild/browser-ui/src/protected-viewer.js
+          node --check rebuild/browser-ui/src/protected-viewer.js
+      - name: Commit recovered source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add rebuild/browser-ui/src/protected-viewer.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Recover exact live protected viewer source'
+          git push origin HEAD:feature/trial-ended-upsell-browser-2026-09-17
