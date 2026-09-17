@@ -1,0 +1,80 @@
+name: Capture live protected viewer source dependency
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/capture-live-protected-viewer-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Find dynamic chunk and recover protected-viewer.js
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          HOST='https://lessons.futureperfect.education'
+          curl --fail --silent --show-error "$HOST/assets/portal-Bn42oxXd.js" -o /tmp/portal.js
+
+          python3 - <<'PY'
+          import re, pathlib
+          text=pathlib.Path('/tmp/portal.js').read_text(encoding='utf-8')
+          refs=sorted(set(re.findall(r'assets/[A-Za-z0-9._-]+\.js', text)))
+          print('DYNAMIC_JS_REFS',refs)
+          pathlib.Path('/tmp/jsrefs.txt').write_text('\n'.join(refs)+'\n',encoding='utf-8')
+          PY
+
+          FOUND=''
+          while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            [ "$ref" = 'assets/portal-Bn42oxXd.js' ] && continue
+            code="$(curl --silent --show-error -o /tmp/chunk.js -w '%{http_code}' "$HOST/$ref")"
+            [ "$code" = '200' ] || continue
+            mapcode="$(curl --silent --show-error -o /tmp/chunk.js.map -w '%{http_code}' "$HOST/$ref.map")"
+            [ "$mapcode" = '200' ] || continue
+            if python3 - <<'PY'
+          import json,sys
+          d=json.load(open('/tmp/chunk.js.map',encoding='utf-8'))
+          sys.exit(0 if any(str(s).endswith('/protected-viewer.js') or str(s).endswith('protected-viewer.js') for s in d.get('sources',[])) else 1)
+          PY
+            then
+              FOUND="$ref"
+              break
+            fi
+          done < /tmp/jsrefs.txt
+
+          test -n "$FOUND"
+          echo "PROTECTED_VIEWER_CHUNK=$FOUND"
+          python3 - <<'PY'
+          import json,pathlib
+          d=json.load(open('/tmp/chunk.js.map',encoding='utf-8'))
+          sources=d.get('sources') or []
+          contents=d.get('sourcesContent') or []
+          for src,content in zip(sources,contents):
+              if content and pathlib.PurePosixPath(src).name=='protected-viewer.js':
+                  pathlib.Path('rebuild/browser-ui/src/protected-viewer.js').write_text(content,encoding='utf-8')
+                  print('RECOVERED_SOURCE',src)
+                  break
+          else:
+              raise SystemExit('protected-viewer.js source content not found')
+          PY
+          test -s rebuild/browser-ui/src/protected-viewer.js
+
+      - name: Commit recovered dependency
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add rebuild/browser-ui/src/protected-viewer.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Recover live protected viewer source dependency'
+          git push origin HEAD:feature/trial-ended-upsell-browser-2026-09-17
