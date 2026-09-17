@@ -16,24 +16,32 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Compare live portal HTML and lesson renderer with repository
+      - name: Inspect live portal frontend paths and renderer without mutation
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL -D /tmp/html.headers https://lessons.futureperfect.education/ -o /tmp/live.html
-          curl -fsSL -D /tmp/js.headers 'https://lessons.futureperfect.education/assets/phase7.js?v=20260907-prelesson-empty-1' -o /tmp/live-phase7.js
-          echo '=== LIVE HTML HASH / HEADERS ==='
-          sha256sum /tmp/live.html
-          grep -Ei '^(cache-control|etag|last-modified|cf-cache-status|age|content-type):' /tmp/html.headers || true
-          echo '=== LIVE PHASE7 HASH / HEADERS ==='
-          sha256sum /tmp/live-phase7.js
-          grep -Ei '^(cache-control|etag|last-modified|cf-cache-status|age|content-type):' /tmp/js.headers || true
-          echo '=== REPOSITORY HASHES ==='
-          sha256sum phase11.html assets/phase7.js
-          echo '=== PRELESSON RENDERER IN LIVE ASSET ==='
-          grep -n -A8 -B2 'function renderPreLesson' /tmp/live-phase7.js || true
-          echo '=== SCRIPT REFERENCES IN LIVE HTML ==='
-          grep -oE '<script[^>]+src="[^"]+"' /tmp/live.html | tail -n 30 || true
-          echo '=== COMPARISON ==='
-          cmp -s /tmp/live-phase7.js assets/phase7.js && echo 'LIVE_PHASE7_EQUALS_REPO=true' || echo 'LIVE_PHASE7_EQUALS_REPO=false'
-          cmp -s /tmp/live.html phase11.html && echo 'LIVE_HTML_EQUALS_PHASE11=true' || echo 'LIVE_HTML_EQUALS_PHASE11=false'
+          for path in '/' '/index.html' '/phase11.html' '/config.js' '/assets/phase7.js' '/assets/phase7.js?v=20260907-prelesson-empty-1'; do
+            safe="$(printf '%s' "$path" | tr '/?=&' '____')"
+            code="$(curl -sSL -D "/tmp/${safe}.headers" -o "/tmp/${safe}.body" -w '%{http_code}' "https://lessons.futureperfect.education${path}")"
+            echo "=== ${path} status=${code} ==="
+            grep -Ei '^(location|cache-control|etag|last-modified|cf-cache-status|age|content-type|server):' "/tmp/${safe}.headers" || true
+            wc -c "/tmp/${safe}.body"
+            sha256sum "/tmp/${safe}.body"
+          done
+
+          live=/tmp/_assets_phase7.js.body
+          if [ -s "$live" ]; then
+            echo '=== PRELESSON RENDERER IN LIVE /assets/phase7.js ==='
+            grep -n -A8 -B2 'function renderPreLesson' "$live" || true
+            echo '=== REPOSITORY PHASE7 HASH ==='
+            sha256sum assets/phase7.js
+            cmp -s "$live" assets/phase7.js && echo 'LIVE_PHASE7_EQUALS_REPO=true' || echo 'LIVE_PHASE7_EQUALS_REPO=false'
+          fi
+
+          for candidate in /tmp/_.body /tmp/_index.html.body /tmp/_phase11.html.body; do
+            [ -s "$candidate" ] || continue
+            if grep -q '<script' "$candidate"; then
+              echo "=== SCRIPT REFERENCES: ${candidate} ==="
+              grep -oE '<script[^>]+src="[^"]+"' "$candidate" | tail -n 40 || true
+            fi
+          done
