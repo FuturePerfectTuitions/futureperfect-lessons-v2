@@ -4,8 +4,6 @@ import { canonicalCatalogueRowsForView } from './index-phase12.js';
 import { classifyPhase11AnswerIndex } from './phase11-resources.js';
 
 const TRIAL_VR_MESSAGE = 'Trial access includes lesson descriptions, lesson videos and all VR resources for this 11+ year.';
-const PROVISION_TOKEN_SHA256 = '7a3e3457252ef0150f546eceea08e33af743ff82c34c543f5065b12e006250d3';
-const PROVISION_PATH = '/__ops/provision-trialeva';
 
 const TRIAL_VR_RULES = Object.freeze({
   'english-year4-11plus': Object.freeze({
@@ -43,133 +41,6 @@ function jsonLike(response, body) {
     status: response.status,
     statusText: response.statusText,
     headers
-  });
-}
-
-async function sha256Hex(value) {
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value))));
-  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function timingSafeHexEqual(left, right) {
-  const a = String(left || '');
-  const b = String(right || '');
-  if (a.length !== b.length) return false;
-  let difference = 0;
-  for (let i = 0; i < a.length; i += 1) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return difference === 0;
-}
-
-function randomChoice(chars) {
-  const values = new Uint32Array(1);
-  crypto.getRandomValues(values);
-  return chars[values[0] % chars.length];
-}
-
-function randomPassword(exclude = new Set()) {
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  const lower = 'abcdefghijkmnopqrstuvwxyz';
-  const digits = '23456789';
-  const all = `${upper}${lower}${digits}`;
-  for (;;) {
-    const chars = [randomChoice(upper), randomChoice(lower), randomChoice(digits), randomChoice(all)];
-    for (let i = chars.length - 1; i > 0; i -= 1) {
-      const values = new Uint32Array(1);
-      crypto.getRandomValues(values);
-      const j = values[0] % (i + 1);
-      [chars[i], chars[j]] = [chars[j], chars[i]];
-    }
-    const candidate = chars.join('');
-    if (candidate !== 'Csl1' && !exclude.has(candidate)) return candidate;
-  }
-}
-
-async function cleanStaleTrialState(env, portalUserIdNorm) {
-  if (!env?.DB) return;
-  const sessions = await env.DB.prepare(
-    `SELECT token_hash FROM student_sessions WHERE portal_user_id_norm = ?`
-  ).bind(portalUserIdNorm).all();
-  const tokenHashes = Array.isArray(sessions?.results)
-    ? sessions.results.map(row => clean(row?.token_hash)).filter(Boolean)
-    : [];
-  for (const tokenHash of tokenHashes) {
-    await env.DB.prepare(`DELETE FROM student_session_profiles WHERE token_hash = ?`).bind(tokenHash).run();
-    await env.DB.prepare(`DELETE FROM student_session_windows WHERE token_hash = ?`).bind(tokenHash).run();
-  }
-  await env.DB.prepare(`DELETE FROM student_sessions WHERE portal_user_id_norm = ?`).bind(portalUserIdNorm).run();
-  await env.DB.prepare(`DELETE FROM trial_login_consumptions WHERE portal_user_id_norm = ?`).bind(portalUserIdNorm).run();
-}
-
-async function provisionTrialEva(request, env) {
-  if (request.method !== 'GET') return json({ error: 'METHOD_NOT_ALLOWED' }, 405);
-  if (!env?.STUDENTS_KV || !env?.DB) return json({ error: 'BINDINGS_UNAVAILABLE' }, 503);
-  const url = new URL(request.url);
-  const supplied = clean(url.searchParams.get('token'));
-  const digest = await sha256Hex(supplied);
-  if (!supplied || !timingSafeHexEqual(digest, PROVISION_TOKEN_SHA256)) {
-    return json({ error: 'NOT_FOUND' }, 404);
-  }
-
-  const portalUserId = 'TrialEva';
-  const portalUserIdNorm = 'trialeva';
-  const key = `user:${portalUserIdNorm}`;
-  const existing = await env.STUDENTS_KV.get(key, { type: 'json' });
-  if (existing) {
-    return json({ error: 'ACCOUNT_ALREADY_EXISTS', portalUserId }, 409);
-  }
-
-  const loginPassword = randomPassword();
-  const answerPassword = randomPassword(new Set([loginPassword]));
-  const record = {
-    schemaVersion: 1,
-    portalUserId,
-    firstName: 'Eva',
-    name: 'Eva',
-    p: loginPassword,
-    loginPassword,
-    answerPassword,
-    status: 'active',
-    accountStatus: 'active',
-    expires: '',
-    expiresOn: null,
-    schoolYear: 4,
-    vrEligible: true,
-    mathsYears: [],
-    vrBuckets: [],
-    entitlements: {},
-    batches: [],
-    fullLibraries: [],
-    manualAccess: { coreLessons: [], vrLessons: [], specialBuckets: [] },
-    manualLessonAccess: {},
-    specialAccess: [],
-    trialViews: ['maths-level1', 'maths-level2', 'english-year4-11plus']
-  };
-
-  await cleanStaleTrialState(env, portalUserIdNorm);
-  await env.STUDENTS_KV.put(key, JSON.stringify(record));
-  const readback = await env.STUDENTS_KV.get(key, { type: 'json' });
-  const consumption = await env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM trial_login_consumptions WHERE portal_user_id_norm = ?`
-  ).bind(portalUserIdNorm).first();
-
-  const verified = Boolean(
-    readback &&
-    readback.portalUserId === portalUserId &&
-    readback.p === loginPassword &&
-    readback.answerPassword === answerPassword &&
-    Array.isArray(readback.trialViews) &&
-    readback.trialViews.join('|') === 'maths-level1|maths-level2|english-year4-11plus' &&
-    Number(consumption?.count || 0) === 0
-  );
-  if (!verified) return json({ error: 'PROVISION_VERIFY_FAILED' }, 500);
-
-  return json({
-    ok: true,
-    portalUserId,
-    loginPassword,
-    answerPassword,
-    trialViews: readback.trialViews,
-    oneLoginUnused: true
   });
 }
 
@@ -346,10 +217,6 @@ export {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-
-    if (url.pathname === PROVISION_PATH) {
-      return provisionTrialEva(request, env);
-    }
 
     if (!url.pathname.startsWith('/api/v1/student/')) {
       return currentWorker.fetch(request, env, ctx);
