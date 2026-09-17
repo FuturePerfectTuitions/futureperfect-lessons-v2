@@ -1,0 +1,343 @@
+name: Y4E1 PreLesson production apply
+
+on:
+  push:
+    branches:
+      - fix/y4e1-prelesson-readmodel-20260917
+    paths:
+      - '.github/workflows/y4e1-prelesson-production-apply.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_HOST: lessons.futureperfect.education
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_R2_BUCKET: fpt-materials-dev
+      EXPECTED_STUDENT_VERSION: b2e8bebb-1a18-4fc0-8dbc-ae9763ced1b4
+      EXPECTED_CURRENT_READMODEL_VERSION: cp11-l-fc49d6f75d7f14d5-34970938223
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fresh guarded preflight and extract exact target R2 key
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          import { resourceVisibleForView } from './rebuild/shared/read-models/resource-visibility.mjs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const legacy=clean(process.env.LEGACY_WORKER),browser=clean(process.env.BROWSER_WORKER),student=clean(process.env.STUDENT_WORKER);
+          const expectedLessons=clean(process.env.EXPECTED_LESSONS_KV_ID),expectedRead=clean(process.env.EXPECTED_READ_MODELS_KV_ID),expectedBucket=clean(process.env.EXPECTED_R2_BUCKET);
+          const expectedStudent=clean(process.env.EXPECTED_STUDENT_VERSION),expectedCurrent=clean(process.env.EXPECTED_CURRENT_READMODEL_VERSION);
+          const base='https://api.cloudflare.com/client/v4',auth={Authorization:`Bearer ${token}`};
+          async function req(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}return{r,text,body};}
+          async function cf(path){const o=await req(path);if(!o.r.ok||o.body?.success!==true)throw new Error(`CF read failed ${o.r.status}: ${path}: ${clean(o.body?.errors?.[0]?.message||o.text).slice(0,180)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read failed ${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unavailable');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser)throw new Error(`Public route drift:${JSON.stringify(hostRoutes)}`);
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+          const browserBindings=Array.isArray(browserSettings?.bindings)?browserSettings.bindings:[];
+          const services=browserBindings.filter(b=>clean(b.type)==='service');
+          if(services.length!==1||clean(services[0].service)!==student)throw new Error(`Browser service topology drift:${JSON.stringify(services.map(b=>({name:b.name,service:b.service})))}`);
+          if(browserBindings.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('Browser has forbidden Admin/AdminOps binding');
+
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);
+          const sb=Array.isArray(studentSettings?.bindings)?studentSettings.bindings:[];
+          const readNs=clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id);
+          const r2Bucket=clean(sb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+          if(readNs!==expectedRead)throw new Error(`READ_MODELS_KV drift:${readNs}`);
+          if(r2Bucket!==expectedBucket)throw new Error(`MATERIALS_R2 drift:${r2Bucket}`);
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`);
+          const drows=Array.isArray(deployments?.deployments)?deployments.deployments:Array.isArray(deployments)?deployments:[];
+          const activeVersions=Array.isArray(drows[0]?.versions)?drows[0].versions:[];
+          const studentVersion=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
+          if(studentVersion!==expectedStudent)throw new Error(`Student version drift:${studentVersion}`);
+
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const lb=Array.isArray(legacySettings?.bindings)?legacySettings.bindings:[];
+          const lessonsNs=clean(lb.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==expectedLessons)throw new Error(`LESSONS_KV drift:${lessonsNs}`);
+
+          const id='Y4E1',scope=`lesson:${id}`;
+          const source=await kvJson(lessonsNs,scope);
+          if(!source||clean(source.lessonId)!==id)throw new Error('Authoritative Y4E1 source missing');
+          const sourcePre=Array.isArray(source.preLessonSheets)?source.preLessonSheets:(Array.isArray(source?.core?.preLessonSheets)?source.core.preLessonSheets:[]);
+          if(sourcePre.length!==1)throw new Error(`Expected exactly one source PreLesson; found ${sourcePre.length}`);
+          const expectedName='Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf';
+          const pre=sourcePre[0];
+          const targetKey=clean(pre.r2Key||pre.r2);
+          if(clean(pre.displayName||pre.name)!==expectedName||!targetKey)throw new Error('Source PreLesson identity drift');
+
+          const pointerRaw=await kvText(readNs,pointerKey(scope));
+          if(!pointerRaw)throw new Error('Current pointer missing');
+          const pointer=JSON.parse(pointerRaw);
+          const currentVersion=clean(pointer?.current?.version);
+          if(currentVersion!==expectedCurrent)throw new Error(`Prepared read-model version drift:${currentVersion}`);
+          const currentEnvelopeRaw=await kvText(readNs,versionKey(scope,currentVersion));
+          if(!currentEnvelopeRaw)throw new Error('Current prepared envelope missing');
+          const currentEnvelope=JSON.parse(currentEnvelopeRaw);
+          const current=currentEnvelope?.payload;
+          if(current?.kind!=='prepared-lesson-detail'||clean(current.lessonId)!==id)throw new Error('Current prepared lesson invalid');
+          if((current.resources||[]).some(r=>clean(r.objectKey)===targetKey))throw new Error('Target PreLesson is already present; refusing duplicate apply');
+
+          const candidate=await compileLessonDetail(source,{resourceExists:async()=>true});
+          const strip=p=>({schemaVersion:p.schemaVersion,kind:p.kind,lessonId:p.lessonId,title:p.title,description:p.description,videoVariants:p.videoVariants||null});
+          if(stableStringify(strip(current))!==stableStringify(strip(candidate)))throw new Error('Candidate changes non-resource fields');
+          const currentByKey=new Map((current.resources||[]).map(r=>[clean(r.objectKey),r]));
+          const candidateByKey=new Map((candidate.resources||[]).map(r=>[clean(r.objectKey),r]));
+          for(const [key,row] of currentByKey){
+            if(!candidateByKey.has(key))throw new Error(`Candidate removes resource:${key}`);
+            if(stableStringify(row)!==stableStringify(candidateByKey.get(key)))throw new Error(`Candidate modifies existing resource:${key}`);
+          }
+          const added=(candidate.resources||[]).filter(r=>!currentByKey.has(clean(r.objectKey)));
+          if(added.length!==1)throw new Error(`Expected one added resource; found ${added.length}`);
+          const delta=added[0];
+          const explicitScopes=Array.isArray(delta.presentationScopes)?delta.presentationScopes:null;
+          if(clean(delta.objectKey)!==targetKey||delta.type!=='prelesson'||delta.presentationGroup!=='core-prelesson'||(explicitScopes&&JSON.stringify(explicitScopes)!==JSON.stringify(['core']))||delta.protected===true)throw new Error(`Unexpected delta:${JSON.stringify(delta)}`);
+          if(!resourceVisibleForView(delta,'english-year4-11plus',{vrAvailable:true})||!resourceVisibleForView(delta,'english-year4',{vrAvailable:false}))throw new Error('Candidate PreLesson is not visible in both required English presentations');
+
+          fs.writeFileSync('/tmp/y4e1-prelesson-object-key.txt',targetKey+'\n');
+          fs.writeFileSync('/tmp/y4e1-preflight.json',JSON.stringify({marker:'Y4E1_PRELESSON_APPLY_PREFLIGHT_PASS',observedAt:new Date().toISOString(),studentVersion,currentVersion,targetKey,currentResourceCount:(current.resources||[]).length,candidateResourceCount:(candidate.resources||[]).length},null,2)+'\n');
+          console.log(JSON.stringify({marker:'Y4E1_PRELESSON_APPLY_PREFLIGHT_PASS',studentVersion,currentVersion,targetKey,currentResourceCount:(current.resources||[]).length,candidateResourceCount:(candidate.resources||[]).length}));
+          NODE
+
+      - name: Verify target PDF exists in production R2 before mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          object_key="$(cat /tmp/y4e1-prelesson-object-key.txt)"
+          test -n "$object_key"
+          npx --yes wrangler@latest r2 object get "${EXPECTED_R2_BUCKET}/${object_key}" --remote --pipe >/dev/null
+          echo 'Y4E1_PRELESSON_R2_PREFLIGHT_PASS=true'
+
+      - name: Atomically publish only lesson:Y4E1 prepared read model
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, sha256Hex, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          import { resourceVisibleForView } from './rebuild/shared/read-models/resource-visibility.mjs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const legacy=clean(process.env.LEGACY_WORKER),browser=clean(process.env.BROWSER_WORKER),student=clean(process.env.STUDENT_WORKER);
+          const expectedLessons=clean(process.env.EXPECTED_LESSONS_KV_ID),expectedRead=clean(process.env.EXPECTED_READ_MODELS_KV_ID),expectedBucket=clean(process.env.EXPECTED_R2_BUCKET);
+          const expectedStudent=clean(process.env.EXPECTED_STUDENT_VERSION),expectedCurrent=clean(process.env.EXPECTED_CURRENT_READMODEL_VERSION);
+          const runTag=clean(process.env.GITHUB_RUN_ID||Date.now()).replace(/[^A-Za-z0-9._-]+/g,'-').slice(0,40);
+          const base='https://api.cloudflare.com/client/v4',auth={Authorization:`Bearer ${token}`};
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function req(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}return{r,text,body};}
+          async function cf(path,options={}){const o=await req(path,options);if(!o.r.ok||o.body?.success!==true)throw new Error(`CF request failed ${o.r.status}: ${path}: ${clean(o.body?.errors?.[0]?.message||o.text).slice(0,180)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read failed ${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+          async function kvBulk(ns,items){const result=await cf(`/accounts/${account}/storage/kv/namespaces/${ns}/bulk`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(items)});if((result?.unsuccessful_keys||[]).length)throw new Error(`KV bulk incomplete:${JSON.stringify(result.unsuccessful_keys)}`);}
+
+          // Re-run all mutable-boundary guards immediately before the write.
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unavailable');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser)throw new Error('Public route drift before write');
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+          const browserBindings=Array.isArray(browserSettings?.bindings)?browserSettings.bindings:[];
+          const services=browserBindings.filter(b=>clean(b.type)==='service');
+          if(services.length!==1||clean(services[0].service)!==student||browserBindings.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('Browser topology drift before write');
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);
+          const sb=Array.isArray(studentSettings?.bindings)?studentSettings.bindings:[];
+          const readNs=clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id);
+          const r2Bucket=clean(sb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+          if(readNs!==expectedRead||r2Bucket!==expectedBucket)throw new Error('Student binding drift before write');
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`);
+          const drows=Array.isArray(deployments?.deployments)?deployments.deployments:Array.isArray(deployments)?deployments:[];
+          const activeVersions=Array.isArray(drows[0]?.versions)?drows[0].versions:[];
+          const studentVersion=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
+          if(studentVersion!==expectedStudent)throw new Error(`Student version drift before write:${studentVersion}`);
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const lb=Array.isArray(legacySettings?.bindings)?legacySettings.bindings:[];
+          const lessonsNs=clean(lb.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==expectedLessons)throw new Error('LESSONS_KV drift before write');
+
+          const id='Y4E1',scope=`lesson:${id}`;
+          const source=await kvJson(lessonsNs,scope);
+          if(!source||clean(source.lessonId)!==id)throw new Error('Authoritative Y4E1 source missing before write');
+          const sourcePre=Array.isArray(source.preLessonSheets)?source.preLessonSheets:(Array.isArray(source?.core?.preLessonSheets)?source.core.preLessonSheets:[]);
+          const expectedName='Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf';
+          if(sourcePre.length!==1)throw new Error('Source PreLesson count drift before write');
+          const targetKey=clean(sourcePre[0]?.r2Key||sourcePre[0]?.r2);
+          if(clean(sourcePre[0]?.displayName||sourcePre[0]?.name)!==expectedName||targetKey!==clean(fs.readFileSync('/tmp/y4e1-prelesson-object-key.txt','utf8')))throw new Error('Source PreLesson identity drift before write');
+
+          const pKey=pointerKey(scope);
+          const pointerRaw=await kvText(readNs,pKey);
+          if(!pointerRaw)throw new Error('Current pointer missing before write');
+          const pointer=JSON.parse(pointerRaw);
+          const currentVersion=clean(pointer?.current?.version);
+          if(currentVersion!==expectedCurrent)throw new Error(`Prepared pointer drift before write:${currentVersion}`);
+          const currentEnvelopeKey=versionKey(scope,currentVersion);
+          const currentEnvelopeRaw=await kvText(readNs,currentEnvelopeKey);
+          if(!currentEnvelopeRaw)throw new Error('Current envelope missing before write');
+          const currentEnvelope=JSON.parse(currentEnvelopeRaw);
+          const current=currentEnvelope?.payload;
+          if(current?.kind!=='prepared-lesson-detail'||clean(current.lessonId)!==id)throw new Error('Current prepared lesson invalid before write');
+          if((current.resources||[]).some(r=>clean(r.objectKey)===targetKey))throw new Error('Target already present before write; refusing duplicate apply');
+
+          const candidate=await compileLessonDetail(source,{resourceExists:async()=>true});
+          const strip=p=>({schemaVersion:p.schemaVersion,kind:p.kind,lessonId:p.lessonId,title:p.title,description:p.description,videoVariants:p.videoVariants||null});
+          if(stableStringify(strip(current))!==stableStringify(strip(candidate)))throw new Error('Candidate changes non-resource fields before write');
+          const currentByKey=new Map((current.resources||[]).map(r=>[clean(r.objectKey),r]));
+          const candidateByKey=new Map((candidate.resources||[]).map(r=>[clean(r.objectKey),r]));
+          for(const [key,row] of currentByKey){
+            if(!candidateByKey.has(key))throw new Error(`Candidate removes existing resource:${key}`);
+            if(stableStringify(row)!==stableStringify(candidateByKey.get(key)))throw new Error(`Candidate modifies existing resource:${key}`);
+          }
+          const added=(candidate.resources||[]).filter(r=>!currentByKey.has(clean(r.objectKey)));
+          if(added.length!==1)throw new Error(`Unexpected candidate delta count:${added.length}`);
+          const delta=added[0];
+          const explicitScopes=Array.isArray(delta.presentationScopes)?delta.presentationScopes:null;
+          if(clean(delta.objectKey)!==targetKey||delta.type!=='prelesson'||delta.presentationGroup!=='core-prelesson'||(explicitScopes&&JSON.stringify(explicitScopes)!==JSON.stringify(['core']))||delta.protected===true)throw new Error(`Unexpected delta before write:${JSON.stringify(delta)}`);
+          if(!resourceVisibleForView(delta,'english-year4-11plus',{vrAvailable:true})||!resourceVisibleForView(delta,'english-year4',{vrAvailable:false}))throw new Error('Target not visible in required views before write');
+
+          const payloadText=stableStringify(candidate);
+          const payloadSha256=await sha256Hex(payloadText);
+          const version=`y4e1-pre-${payloadSha256.slice(0,16)}-${runTag}`;
+          const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha256,payload:candidate};
+          const envelopeText=stableStringify(envelope);
+          const envelopeSha256=await sha256Hex(envelopeText);
+          const candidateKey=versionKey(scope,version);
+          const backup={createdAt:new Date().toISOString(),scope,pointerRaw,currentVersion,currentEnvelopeKey,currentEnvelopeSha256:await sha256Hex(currentEnvelopeRaw),targetKey,studentVersion};
+          fs.writeFileSync('/tmp/y4e1-prelesson-production-backup.json',JSON.stringify(backup,null,2)+'\n');
+          const evidence={marker:'Y4E1_PRELESSON_PRODUCTION_APPLY',startedAt:new Date().toISOString(),scope,previousVersion:currentVersion,newVersion:version,targetKey,payloadSha256,envelopeSha256,rollbackPerformed:false,success:false};
+          let pointerWritten=false;
+          try{
+            await kvBulk(readNs,[{key:candidateKey,value:envelopeText}]);
+            const storedCandidate=await kvText(readNs,candidateKey);
+            if(storedCandidate!==envelopeText)throw new Error('Candidate envelope readback mismatch');
+
+            const newPointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope,current:{version,sha256:payloadSha256,envelopeSha256},previous:pointer.current||null,updatedAt:new Date().toISOString()};
+            const newPointerRaw=stableStringify(newPointer);
+            await kvBulk(readNs,[{key:pKey,value:newPointerRaw}]);
+            pointerWritten=true;
+
+            const deadline=Date.now()+90000;
+            let confirmed=null;
+            while(Date.now()<deadline){
+              confirmed=await kvJson(readNs,pKey);
+              if(clean(confirmed?.current?.version)===version&&clean(confirmed?.current?.sha256)===payloadSha256)break;
+              await sleep(1200);
+            }
+            if(clean(confirmed?.current?.version)!==version||clean(confirmed?.current?.sha256)!==payloadSha256)throw new Error('Production pointer did not converge to candidate');
+            const verifiedEnvelopeRaw=await kvText(readNs,candidateKey);
+            if(verifiedEnvelopeRaw!==envelopeText)throw new Error('Published envelope changed after pointer flip');
+            const verifiedEnvelope=JSON.parse(verifiedEnvelopeRaw);
+            const published=verifiedEnvelope?.payload;
+            const target=(published?.resources||[]).find(r=>clean(r.objectKey)===targetKey);
+            if(!target||target.type!=='prelesson'||target.presentationGroup!=='core-prelesson'||target.protected===true)throw new Error('Published target resource verification failed');
+            if((published.resources||[]).length!==(current.resources||[]).length+1)throw new Error('Published resource count boundary failed');
+            for(const [key,row] of currentByKey){
+              const next=(published.resources||[]).find(r=>clean(r.objectKey)===key);
+              if(!next||stableStringify(next)!==stableStringify(row))throw new Error(`Published existing resource changed:${key}`);
+            }
+            if(!resourceVisibleForView(target,'english-year4-11plus',{vrAvailable:true})||!resourceVisibleForView(target,'english-year4',{vrAvailable:false}))throw new Error('Published target visibility verification failed');
+
+            evidence.success=true;
+            evidence.completedAt=new Date().toISOString();
+            evidence.resourceCountBefore=(current.resources||[]).length;
+            evidence.resourceCountAfter=(published.resources||[]).length;
+            evidence.target={type:target.type,displayName:target.displayName,objectKey:target.objectKey,presentationGroup:target.presentationGroup,presentationScopes:target.presentationScopes??['core'],protected:target.protected===true};
+            fs.writeFileSync('/tmp/y4e1-prelesson-production-apply.json',JSON.stringify(evidence,null,2)+'\n');
+            console.log(JSON.stringify({marker:'Y4E1_PRELESSON_PRODUCTION_APPLY_PASS',scope,previousVersion:currentVersion,newVersion:version,resourceCountBefore:evidence.resourceCountBefore,resourceCountAfter:evidence.resourceCountAfter,target:evidence.target}));
+          }catch(error){
+            if(pointerWritten){
+              await kvBulk(readNs,[{key:pKey,value:pointerRaw}]);
+              const deadline=Date.now()+90000;
+              let restored=null;
+              while(Date.now()<deadline){
+                restored=await kvJson(readNs,pKey);
+                if(clean(restored?.current?.version)===currentVersion)break;
+                await sleep(1200);
+              }
+              if(clean(restored?.current?.version)!==currentVersion)throw new Error(`ROLLBACK_FAILED:${clean(error?.message||error)}`);
+              evidence.rollbackPerformed=true;
+            }
+            evidence.error=clean(error?.message||error);
+            evidence.completedAt=new Date().toISOString();
+            fs.writeFileSync('/tmp/y4e1-prelesson-production-apply.json',JSON.stringify(evidence,null,2)+'\n');
+            throw error;
+          }
+          NODE
+
+      - name: Post-apply read-only verification of source and live prepared pointer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import { pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          import { resourceVisibleForView } from './rebuild/shared/read-models/resource-visibility.mjs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const base='https://api.cloudflare.com/client/v4',auth={Authorization:`Bearer ${token}`};
+          async function req(path){const r=await fetch(`${base}${path}`,{headers:auth});const text=await r.text();if(!r.ok)throw new Error(`Read failed ${r.status}:${path}`);return text;}
+          async function settings(worker){const text=await req(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/settings`);const body=JSON.parse(text);if(body?.success!==true)throw new Error('Worker settings read failed');return body.result;}
+          async function kv(ns,key){return req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);}
+          const studentSettings=await settings(process.env.STUDENT_WORKER);
+          const readNs=clean((studentSettings.bindings||[]).find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id);
+          if(readNs!==clean(process.env.EXPECTED_READ_MODELS_KV_ID))throw new Error('READ_MODELS_KV drift after apply');
+          const legacySettings=await settings(process.env.LEGACY_WORKER);
+          const lessonsNs=clean((legacySettings.bindings||[]).find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==clean(process.env.EXPECTED_LESSONS_KV_ID))throw new Error('LESSONS_KV drift after apply');
+          const scope='lesson:Y4E1';
+          const source=JSON.parse(await kv(lessonsNs,scope));
+          const sourcePre=Array.isArray(source.preLessonSheets)?source.preLessonSheets:(Array.isArray(source?.core?.preLessonSheets)?source.core.preLessonSheets:[]);
+          if(sourcePre.length!==1)throw new Error('Source PreLesson changed after apply');
+          const targetKey=clean(sourcePre[0]?.r2Key||sourcePre[0]?.r2);
+          const pointer=JSON.parse(await kv(readNs,pointerKey(scope)));
+          const currentVersion=clean(pointer?.current?.version);
+          if(!currentVersion||currentVersion===clean(process.env.EXPECTED_CURRENT_READMODEL_VERSION))throw new Error(`New prepared pointer not active:${currentVersion}`);
+          const envelope=JSON.parse(await kv(readNs,versionKey(scope,currentVersion)));
+          const payload=envelope?.payload;
+          const target=(payload?.resources||[]).find(r=>clean(r.objectKey)===targetKey);
+          if(!target||target.type!=='prelesson'||target.presentationGroup!=='core-prelesson'||target.protected===true)throw new Error('Live prepared PreLesson missing after apply');
+          if(!resourceVisibleForView(target,'english-year4-11plus',{vrAvailable:true})||!resourceVisibleForView(target,'english-year4',{vrAvailable:false}))throw new Error('Live prepared PreLesson visibility failed after apply');
+          console.log(JSON.stringify({marker:'Y4E1_PRELESSON_POST_APPLY_VERIFY_PASS',currentVersion,resourceCount:(payload.resources||[]).length,target:{type:target.type,displayName:target.displayName,objectKey:target.objectKey,presentationGroup:target.presentationGroup,presentationScopes:target.presentationScopes??['core']}}));
+          NODE
+
+      - name: Upload apply and rollback evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y4e1-prelesson-production-apply
+          path: |
+            /tmp/y4e1-preflight.json
+            /tmp/y4e1-prelesson-production-backup.json
+            /tmp/y4e1-prelesson-production-apply.json
+          if-no-files-found: warn
+          retention-days: 30
