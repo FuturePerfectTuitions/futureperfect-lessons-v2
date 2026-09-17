@@ -1,0 +1,39 @@
+name: Y4E1 live frontend read-only audit
+
+on:
+  push:
+    branches:
+      - diag/y4e1-live-api-20260917
+    paths:
+      - .github/workflows/y4e1-live-frontend-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare live portal HTML and lesson renderer with repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -D /tmp/html.headers https://lessons.futureperfect.education/ -o /tmp/live.html
+          curl -fsSL -D /tmp/js.headers 'https://lessons.futureperfect.education/assets/phase7.js?v=20260907-prelesson-empty-1' -o /tmp/live-phase7.js
+          echo '=== LIVE HTML HASH / HEADERS ==='
+          sha256sum /tmp/live.html
+          grep -Ei '^(cache-control|etag|last-modified|cf-cache-status|age|content-type):' /tmp/html.headers || true
+          echo '=== LIVE PHASE7 HASH / HEADERS ==='
+          sha256sum /tmp/live-phase7.js
+          grep -Ei '^(cache-control|etag|last-modified|cf-cache-status|age|content-type):' /tmp/js.headers || true
+          echo '=== REPOSITORY HASHES ==='
+          sha256sum phase11.html assets/phase7.js
+          echo '=== PRELESSON RENDERER IN LIVE ASSET ==='
+          grep -n -A8 -B2 'function renderPreLesson' /tmp/live-phase7.js || true
+          echo '=== SCRIPT REFERENCES IN LIVE HTML ==='
+          grep -oE '<script[^>]+src="[^"]+"' /tmp/live.html | tail -n 30 || true
+          echo '=== COMPARISON ==='
+          cmp -s /tmp/live-phase7.js assets/phase7.js && echo 'LIVE_PHASE7_EQUALS_REPO=true' || echo 'LIVE_PHASE7_EQUALS_REPO=false'
+          cmp -s /tmp/live.html phase11.html && echo 'LIVE_HTML_EQUALS_PHASE11=true' || echo 'LIVE_HTML_EQUALS_PHASE11=false'
