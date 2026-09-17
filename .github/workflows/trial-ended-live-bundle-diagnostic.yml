@@ -1,0 +1,53 @@
+name: Trial ended upsell - live rebuilt bundle diagnostic
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/trial-ended-live-bundle-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect live rebuilt bundle without mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          HOST='https://lessons.futureperfect.education'
+          curl --fail --silent --show-error "$HOST/" -o /tmp/index.html
+          JSREF="$(grep -oE '\./assets/portal-[A-Za-z0-9_-]+\.js' /tmp/index.html | head -n1)"
+          CSSREF="$(grep -oE '\./assets/portal-[A-Za-z0-9_-]+\.css' /tmp/index.html | head -n1)"
+          test -n "$JSREF"
+          echo "JSREF=$JSREF"
+          echo "CSSREF=$CSSREF"
+          curl --fail --silent --show-error "$HOST/${JSREF#./}" -o /tmp/portal.js
+          echo "JS_SHA256=$(sha256sum /tmp/portal.js | awk '{print $1}')"
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('/tmp/portal.js').read_text(encoding='utf-8')
+          needles=[
+            'This part of the portal could not be loaded. Please try again.',
+            'TRIAL_ACCESS_ENDED',
+            'Trial access ended',
+            'Invalid login'
+          ]
+          for needle in needles:
+            print(f'NEEDLE={needle!r} COUNT={text.count(needle)}')
+            i=text.find(needle)
+            if i>=0:
+              a=max(0,i-700); b=min(len(text),i+len(needle)+900)
+              print('CONTEXT_BEGIN')
+              print(text[a:b])
+              print('CONTEXT_END')
+          print('TAIL_BEGIN')
+          print(text[-500:])
+          print('TAIL_END')
+          PY
+          MAP="$(grep -oE 'sourceMappingURL=[^[:space:]]+' /tmp/portal.js | tail -n1 | cut -d= -f2- || true)"
+          echo "SOURCEMAP_REF=${MAP:-ABSENT}"
