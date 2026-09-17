@@ -83,21 +83,35 @@ jobs:
           if(services.length!==1||services[0].service!==student)throw new Error(`Browser service drift: ${JSON.stringify(services)}`);
           if((browserSettings.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Forbidden Browser Admin binding');
           const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
           async function snapshotWorker(name){
             const s=await settings(name),oldVersion=await active(name);
             if(!oldVersion)throw new Error(`Active version unresolved for ${name}`);
             const unsupported=(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))&&!supported.has(b.type));
             if(unsupported.length)throw new Error(`Unsupported live binding types for ${name}: ${JSON.stringify(unsupported.map(b=>({name:b.name,type:b.type})))}`);
-            const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
             return {oldVersion,nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};
           }
           const legacySnap=await snapshotWorker(legacy),studentSnap=await snapshotWorker(student);
-          for(const name of ['STUDENTS_KV','LESSONS_KV','REBUILD_SHADOW_KV','DB'])if(!legacySnap.nonSecret.some(b=>b.name===name))throw new Error(`Operational Worker missing ${name}`);
+          for(const name of ['STUDENTS_KV','LESSONS_KV','DB'])if(!legacySnap.nonSecret.some(b=>b.name===name))throw new Error(`Operational Worker missing ${name}`);
           for(const name of ['READ_MODELS_KV','STUDENTS_KV','DB','MATERIALS_R2'])if(!studentSnap.nonSecret.some(b=>b.name===name))throw new Error(`Student Worker missing ${name}`);
           for(const name of ['AUTH_SIGNING_SECRET','ACCESS_SCOPE_SECRET'])if(!studentSnap.secretNames.includes(name))throw new Error(`Student Worker missing secret ${name}`);
+
+          const studentReadModels=studentSnap.nonSecret.find(b=>b.name==='READ_MODELS_KV'&&b.type==='kv_namespace');
+          if(!studentReadModels?.namespace_id)throw new Error('Student READ_MODELS_KV namespace unresolved');
+          const existingRebuild=legacySnap.nonSecret.find(b=>b.name==='REBUILD_SHADOW_KV');
+          if(existingRebuild && (existingRebuild.type!=='kv_namespace'||existingRebuild.namespace_id!==studentReadModels.namespace_id))throw new Error('Operational REBUILD_SHADOW_KV points to the wrong namespace');
+          const legacyDesired={
+            ...legacySnap,
+            nonSecret:[
+              ...legacySnap.nonSecret.filter(b=>b.name!=='REBUILD_SHADOW_KV'),
+              {name:'REBUILD_SHADOW_KV',type:'kv_namespace',namespace_id:studentReadModels.namespace_id}
+            ].sort((a,b)=>String(a.name).localeCompare(String(b.name)))
+          };
+
           const topology={route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},browserVersion:await active(browser),service:{name:services[0].name,service:services[0].service}};
           fs.writeFileSync('/tmp/trial-topology-before.json',JSON.stringify(topology,null,2));
           fs.writeFileSync('/tmp/trial-legacy-before.json',JSON.stringify(legacySnap,null,2),{mode:0o600});
+          fs.writeFileSync('/tmp/trial-legacy-desired.json',JSON.stringify(legacyDesired,null,2),{mode:0o600});
           fs.writeFileSync('/tmp/trial-student-before.json',JSON.stringify(studentSnap,null,2),{mode:0o600});
           function q(v){return JSON.stringify(String(v??''));}
           async function writeConfig(path,name,main,snap){
@@ -110,9 +124,9 @@ jobs:
             for(const b of snap.nonSecret.filter(b=>b.type==='send_email'))toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
             fs.writeFileSync(path,toml);
           }
-          await writeConfig('worker/wrangler.rebuilt-trial-admin.toml',legacy,'src/index-phase23-protected-view-stability.js',legacySnap);
+          await writeConfig('worker/wrangler.rebuilt-trial-admin.toml',legacy,'src/index-phase23-protected-view-stability.js',legacyDesired);
           await writeConfig('rebuild/student/wrangler.rebuilt-trial-prod.toml',student,'src/index.js',studentSnap);
-          console.log(JSON.stringify({marker:'REBUILT_TRIAL_PRODUCTION_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,topology,legacyOldVersion:legacySnap.oldVersion,studentOldVersion:studentSnap.oldVersion,legacyBindingNames:legacySnap.nonSecret.map(b=>`${b.name}:${b.type}`),studentBindingNames:studentSnap.nonSecret.map(b=>`${b.name}:${b.type}`),studentSecretNames:studentSnap.secretNames},null,2));
+          console.log(JSON.stringify({marker:'REBUILT_TRIAL_PRODUCTION_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,topology,legacyOldVersion:legacySnap.oldVersion,studentOldVersion:studentSnap.oldVersion,adminPreparedModelBinding:{name:'REBUILD_SHADOW_KV',namespaceMatchesStudentReadModels:true,added:!existingRebuild},studentSecretNames:studentSnap.secretNames},null,2));
           NODE
           npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/trial-admin-dryrun --config worker/wrangler.rebuilt-trial-admin.toml >/tmp/trial-admin-dryrun.log
           npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/trial-student-dryrun --config rebuild/student/wrangler.rebuilt-trial-prod.toml >/tmp/trial-student-dryrun.log
@@ -155,25 +169,28 @@ jobs:
           async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
           async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
           const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
-          async function parity(name,beforePath){const before=JSON.parse(fs.readFileSync(beforePath,'utf8'));const s=await settings(name);const now={nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};if(JSON.stringify(now)!==JSON.stringify({nonSecret:before.nonSecret,secretNames:before.secretNames}))throw new Error(`${name} bindings changed`);const version=await active(name);if(!version||version===before.oldVersion)throw new Error(`${name} version did not advance`);return {oldVersion:before.oldVersion,newVersion:version,bindingParity:true};}
-          const legacyResult=await parity(legacy,'/tmp/trial-legacy-before.json'),studentResult=await parity(student,'/tmp/trial-student-before.json');
+          async function currentSnapshot(name){const s=await settings(name);return {nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};}
+          const desiredLegacy=JSON.parse(fs.readFileSync('/tmp/trial-legacy-desired.json','utf8'));
+          const beforeStudent=JSON.parse(fs.readFileSync('/tmp/trial-student-before.json','utf8'));
+          const legacyNow=await currentSnapshot(legacy),studentNow=await currentSnapshot(student);
+          if(JSON.stringify(legacyNow)!==JSON.stringify({nonSecret:desiredLegacy.nonSecret,secretNames:desiredLegacy.secretNames}))throw new Error('Operational Admin Worker bindings differ from the exact desired additive state');
+          if(JSON.stringify(studentNow)!==JSON.stringify({nonSecret:beforeStudent.nonSecret,secretNames:beforeStudent.secretNames}))throw new Error('Student Worker bindings changed');
+          const legacyVersion=await active(legacy),studentVersion=await active(student);
+          if(!legacyVersion||legacyVersion===desiredLegacy.oldVersion)throw new Error('Operational Admin Worker version did not advance');
+          if(!studentVersion||studentVersion===beforeStudent.oldVersion)throw new Error('Student Worker version did not advance');
           const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`),zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0],routes=await cf(`/zones/${zone.id}/workers/routes`),hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
           const bs=await settings(browser),services=(bs.bindings||[]).filter(b=>b.type==='service');
           const after={route:{pattern:hostRoutes[0]?.pattern,script:hostRoutes[0]?.script},browserVersion:await active(browser),service:{name:services[0]?.name,service:services[0]?.service}};
           const before=JSON.parse(fs.readFileSync('/tmp/trial-topology-before.json','utf8'));
           if(JSON.stringify(after)!==JSON.stringify(before))throw new Error(`Public Browser topology changed: ${JSON.stringify({before,after})}`);
-          fs.writeFileSync('/tmp/trial-deploy-result.json',JSON.stringify({marker:'REBUILT_TRIAL_WORKERS_DEPLOYED',sourceSha:process.env.GITHUB_SHA,legacy:legacyResult,student:studentResult,topology:after},null,2));
+          fs.writeFileSync('/tmp/trial-deploy-result.json',JSON.stringify({marker:'REBUILT_TRIAL_WORKERS_DEPLOYED',sourceSha:process.env.GITHUB_SHA,adminWorker:{oldVersion:desiredLegacy.oldVersion,newVersion:legacyVersion,bindingChange:'added REBUILD_SHADOW_KV -> live Student READ_MODELS_KV namespace only'},studentWorker:{oldVersion:beforeStudent.oldVersion,newVersion:studentVersion,bindingParity:true},topology:after},null,2));
           console.log(fs.readFileSync('/tmp/trial-deploy-result.json','utf8'));
           NODE
 
-          # The Trial Admin route must be present and protected; no Admin secret
-          # is duplicated into GitHub Actions merely to exercise it.
           code="$(curl --silent --show-error -o /tmp/trial-admin-negative.json -w '%{http_code}' -X POST 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/admin/trials/list' -H 'Origin: https://futureperfecttuitions.github.io' -H 'Content-Type: application/json' --data '{}')"
           test "$code" = '401'
           jq -e '.error=="UNAUTHORISED"' /tmp/trial-admin-negative.json >/dev/null
 
-          # Use Cloudflare's protected data APIs directly for migration and the
-          # live smoke. Password values are never printed by the script.
           node scripts/rebuilt-trial-production-smoke.mjs
           jq -e '.marker=="REBUILT_TRIAL_LIVE_SMOKE_PASS" and .trialSej.firstLoginPassed==true and .trialSej.secondLoginBlocked==true and .trialSej.finalUnused==true and .trialEva.finalUnused==true and .passwordsLogged==false' /tmp/rebuilt-trial-live-smoke.json >/dev/null
 
