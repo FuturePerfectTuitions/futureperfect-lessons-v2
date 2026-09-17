@@ -11,6 +11,7 @@ on:
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
+      - '.github/workflows/admin-superuser-production-deploy.yml'
       - '.github/workflows/admin-tools-replace-resource-static-verification.yml'
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
+      - '.github/workflows/admin-superuser-production-deploy.yml'
       - '.github/workflows/admin-tools-replace-resource-static-verification.yml'
 
 permissions:
