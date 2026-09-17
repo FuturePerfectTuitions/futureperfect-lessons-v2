@@ -1,0 +1,34 @@
+name: Y4T1E01 Drive download read-only probe
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/y4t1e01-drive-download-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe source PDF without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE_ID='19Eurg8xpq_2nQYfD9OS-GP1oM20-p2cS'
+          URL="https://drive.google.com/uc?export=download&id=${FILE_ID}"
+          curl -L --fail --silent --show-error --max-time 30 "$URL" -o /tmp/source.bin
+          echo "BYTES=$(wc -c < /tmp/source.bin)"
+          echo "SHA256=$(sha256sum /tmp/source.bin | awk '{print $1}')"
+          python3 - <<'PY'
+          data=open('/tmp/source.bin','rb').read(16)
+          print('MAGIC=',repr(data))
+          if not data.startswith(b'%PDF-'):
+              raise SystemExit('NOT_A_PDF')
+          PY
+          test "$(sha256sum /tmp/source.bin | awk '{print $1}')" = 'd57553a947ef785213b9305c4453d7f39ccd2c2be225eb53f3febe106e0b6c0f'
+          echo 'PASS: unauthenticated Drive download matches authoritative source PDF.'
