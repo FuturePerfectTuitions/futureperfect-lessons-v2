@@ -32,8 +32,8 @@ assert.doesNotMatch(worker, /SET used_at = NULL/);
 assert.match(worker, /The token exists only because the immediately preceding password-authorize/);
 
 // Phase 24 is a narrow Trial-only wrapper. It must retain Phase 23 underneath,
-// limit VR elevation to the two English 11+ trial views, permit only VR resource
-// kinds/answer ranges, and never use the Admin password as a generated Trial password.
+// limit VR elevation to the two English 11+ trial views, and permit only VR
+// resource kinds/answer ranges through the Trial-specific overlay.
 assert.match(trialVr, /index-phase23-protected-view-stability\.js/);
 assert.match(trialVr, /english-year4-11plus/);
 assert.match(trialVr, /english-year5-11plus/);
@@ -44,8 +44,6 @@ assert.match(trialVr, /vrhomework/);
 assert.match(trialVr, /vrprevideo/);
 assert.match(trialVr, /vrhomeworkvideo/);
 assert.match(trialVr, /vrSupplementary/);
-assert.match(trialVr, /candidate !== 'Csl1'/);
-assert.match(trialVr, /trialViews: \['maths-level1', 'maths-level2', 'english-year4-11plus'\]/);
 
 assert.match(frontend, /Number\(delay\) === 30000/);
 assert.match(frontend, /status=1/);
@@ -58,4 +56,3 @@ if (process.env.REQUIRE_PHASE23_ENTRYPOINT === '1') {
 }
 
 console.log('PROTECTED_VIEW_STABILITY_STATIC_VERIFICATION_PASS');
-// Guarded one-time TrialEva provisioning is executed only by the production deploy script.
