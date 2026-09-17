@@ -33,9 +33,12 @@ jobs:
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/step10-settings.json
           jq -e '.success == true' /tmp/step10-settings.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/step10-settings.json >/dev/null
-          jq -e '.result.bindings[] | select(.name=="DB" and .database_name=="fpt_portal_v2_db")' /tmp/step10-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="DB")' /tmp/step10-settings.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/step10-settings.json >/dev/null
-          jq -c '.result.bindings[] | select(.name=="ENVIRONMENT" or .name=="DB" or .name=="QUIZ_BRIDGE_SECRET") | if ((.type//"")|test("secret";"i")) then {name,type} elif .name=="DB" then {name,type,database_name,id,database_id} else {name,type,text} end' /tmp/step10-settings.json
+          DBID="$(jq -r '[.result.bindings[] | select(.name=="DB") | (.id // .database_id // "")][0]' /tmp/step10-settings.json)"
+          test -n "$DBID"
+          echo "PORTAL_D1_BINDING=DB DATABASE_ID=$DBID"
+          jq -c '.result.bindings[] | select(.name=="ENVIRONMENT" or .name=="DB" or .name=="QUIZ_BRIDGE_SECRET") | if ((.type//"")|test("secret";"i")) then {name,type} elif .name=="DB" then {name,type,id,database_id} else {name,type,text} end' /tmp/step10-settings.json
           echo 'PORTAL_WORKER_IDENTITY_AND_BINDINGS_PASS'
       - name: Capture current Worker deployment state read-only
         shell: bash
@@ -48,6 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 info fpt_portal_v2_db --json | tee /tmp/step10-d1-info.json
           npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_launch_codes'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_quiz_launch_expiry','idx_quiz_launch_user') ORDER BY name; SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;" --yes | tee /tmp/step10-d1-schema.txt
           grep -Fq 'quiz_launch_codes' /tmp/step10-d1-schema.txt
           grep -Fq 'idx_quiz_launch_expiry' /tmp/step10-d1-schema.txt
