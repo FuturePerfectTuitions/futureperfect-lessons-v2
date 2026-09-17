@@ -21,7 +21,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      ADMIN_IMPORT_PASSWORD: ${{ secrets.ADMIN_IMPORT_PASSWORD }}
       LEGACY_WORKER: fpt-portal-v2-worker
       STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
       BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
@@ -44,14 +43,13 @@ jobs:
           test "$GITHUB_REF_NAME" = 'feature/rebuilt-trial-manager-2026-09-17'
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test -n "$ADMIN_IMPORT_PASSWORD"
-          echo "::add-mask::$ADMIN_IMPORT_PASSWORD"
           node --check worker/src/admin-prepared-access-publisher.js
           node --check worker/src/admin-trial-manager.js
           node --check worker/src/index-phase20-change17-parent-email.js
           node --check rebuild/student/src/lib/trial-runtime.mjs
           node --check rebuild/student/src/index.js
           node --check assets/admin-trials.js
+          node --check scripts/rebuilt-trial-production-smoke.mjs
           node tests/rebuilt-trial-manager-verification.mjs
           node tests/admin-prepared-access-publisher-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
@@ -94,10 +92,8 @@ jobs:
             return {oldVersion,nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};
           }
           const legacySnap=await snapshotWorker(legacy),studentSnap=await snapshotWorker(student);
-          const requiredLegacy=new Set(['STUDENTS_KV','LESSONS_KV','REBUILD_SHADOW_KV','DB']);
-          for(const name of requiredLegacy)if(!legacySnap.nonSecret.some(b=>b.name===name))throw new Error(`Operational Worker missing ${name}`);
-          const requiredStudent=new Set(['READ_MODELS_KV','STUDENTS_KV','DB','MATERIALS_R2']);
-          for(const name of requiredStudent)if(!studentSnap.nonSecret.some(b=>b.name===name))throw new Error(`Student Worker missing ${name}`);
+          for(const name of ['STUDENTS_KV','LESSONS_KV','REBUILD_SHADOW_KV','DB'])if(!legacySnap.nonSecret.some(b=>b.name===name))throw new Error(`Operational Worker missing ${name}`);
+          for(const name of ['READ_MODELS_KV','STUDENTS_KV','DB','MATERIALS_R2'])if(!studentSnap.nonSecret.some(b=>b.name===name))throw new Error(`Student Worker missing ${name}`);
           for(const name of ['AUTH_SIGNING_SECRET','ACCESS_SCOPE_SECRET'])if(!studentSnap.secretNames.includes(name))throw new Error(`Student Worker missing secret ${name}`);
           const topology={route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},browserVersion:await active(browser),service:{name:services[0].name,service:services[0].service}};
           fs.writeFileSync('/tmp/trial-topology-before.json',JSON.stringify(topology,null,2));
@@ -170,99 +166,25 @@ jobs:
           console.log(fs.readFileSync('/tmp/trial-deploy-result.json','utf8'));
           NODE
 
-          ADMIN_BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
-          ADMIN_ORIGIN='https://futureperfecttuitions.github.io'
-          PROD_ORIGIN='https://lessons.futureperfect.education'
+          # The Trial Admin route must be present and protected; no Admin secret
+          # is duplicated into GitHub Actions merely to exercise it.
+          code="$(curl --silent --show-error -o /tmp/trial-admin-negative.json -w '%{http_code}' -X POST 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/admin/trials/list' -H 'Origin: https://futureperfecttuitions.github.io' -H 'Content-Type: application/json' --data '{}')"
+          test "$code" = '401'
+          jq -e '.error=="UNAUTHORISED"' /tmp/trial-admin-negative.json >/dev/null
 
-          # Authenticate to the retained operational Admin Worker using the
-          # existing protected admin secret. Never print the password or token.
-          jq -n --arg p "$ADMIN_IMPORT_PASSWORD" '{password:$p}' >/tmp/trial-admin-login-request.json
-          code="$(curl --silent --show-error -o /tmp/trial-admin-login.json -w '%{http_code}' -X POST "$ADMIN_BASE/api/v1/admin/lesson-releases/login" -H "Origin: $ADMIN_ORIGIN" -H 'Content-Type: application/json' --data-binary @/tmp/trial-admin-login-request.json)"
-          test "$code" = '200'
-          ADMIN_TOKEN="$(jq -r '.token // empty' /tmp/trial-admin-login.json)"
-          test -n "$ADMIN_TOKEN"
-          echo "::add-mask::$ADMIN_TOKEN"
-          rm -f /tmp/trial-admin-login-request.json /tmp/trial-admin-login.json
-
-          admin_post(){
-            local path="$1" body="$2" out="$3"
-            curl --fail --silent --show-error -o "$out" -X POST "$ADMIN_BASE$path" \
-              -H "Origin: $ADMIN_ORIGIN" -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN_TOKEN" \
-              --data-binary "$body"
-          }
-
-          admin_post '/api/v1/admin/trials/list' '{}' /tmp/trials-before.json
-          TRIAL_SEJ_PASSWORD="$(jq -r '.trials[] | select(.portalUserId=="TrialSej") | .loginPassword' /tmp/trials-before.json)"
-          TRIAL_EVA_PRESENT="$(jq -r '[.trials[] | select(.portalUserId=="TrialEva")] | length' /tmp/trials-before.json)"
-          test -n "$TRIAL_SEJ_PASSWORD"
-          test "$TRIAL_EVA_PRESENT" = '1'
-          echo "::add-mask::$TRIAL_SEJ_PASSWORD"
-
-          # Re-arm republishes each existing Trial through the rebuilt compiler,
-          # thereby migrating older Admin-created Trial profiles to a valid
-          # prepared-access scope without recreating the account.
-          admin_post '/api/v1/admin/trials/rearm' '{"portalUserId":"TrialSej"}' /tmp/rearm-sej-before-smoke.json
-          admin_post '/api/v1/admin/trials/rearm' '{"portalUserId":"TrialEva"}' /tmp/rearm-eva.json
-          jq -e '.ok==true and .oneLoginUnused==true and (.preparedAccessVersion|length)>0' /tmp/rearm-sej-before-smoke.json >/dev/null
-          jq -e '.ok==true and .oneLoginUnused==true and (.preparedAccessVersion|length)>0' /tmp/rearm-eva.json >/dev/null
-
-          # Real public first login through Browser -> rebuilt Student Worker.
-          jq -n --arg u 'TrialSej' --arg p "$TRIAL_SEJ_PASSWORD" '{username:$u,password:$p}' >/tmp/trial-public-login-request.json
-          code="$(curl --silent --show-error -o /tmp/trial-first-login.json -w '%{http_code}' -c /tmp/trial-cookie.jar -X POST "https://$PROD_HOST/api/v2/auth/login" -H "Origin: $PROD_ORIGIN" -H 'Content-Type: application/json' --data-binary @/tmp/trial-public-login-request.json)"
-          test "$code" = '200'
-          jq -e '.ok==true and .account.trial==true and (.account.trialViews|sort)==(["english-year4-11plus","maths-level1","maths-level2"]|sort)' /tmp/trial-first-login.json >/dev/null
-
-          curl --fail --silent --show-error -o /tmp/trial-home.json -b /tmp/trial-cookie.jar "https://$PROD_HOST/api/v2/student/home"
-          jq -e '.ok==true and ([.views[].viewId]|sort)==(["english-year4-11plus","maths-level1","maths-level2"]|sort)' /tmp/trial-home.json >/dev/null
-
-          curl --fail --silent --show-error -o /tmp/trial-l1-list.json -b /tmp/trial-cookie.jar "https://$PROD_HOST/api/v2/student/views/maths-level1/lessons"
-          L1_LESSON="$(jq -r '.lessons[0].lessonId // empty' /tmp/trial-l1-list.json)"
-          test -n "$L1_LESSON"
-          curl --fail --silent --show-error -o /tmp/trial-l1-detail.json -b /tmp/trial-cookie.jar "https://$PROD_HOST/api/v2/student/lessons/$L1_LESSON?viewId=maths-level1"
-          jq -e '[.resources[] | select(.type != "video")] | length == 0' /tmp/trial-l1-detail.json >/dev/null
-
-          curl --fail --silent --show-error -o /tmp/trial-y4e-list.json -b /tmp/trial-cookie.jar "https://$PROD_HOST/api/v2/student/views/english-year4-11plus/lessons"
-          mapfile -t Y4E_LESSONS < <(jq -r '.lessons[].lessonId' /tmp/trial-y4e-list.json)
-          FOUND_VR=0
-          for lesson in "${Y4E_LESSONS[@]}"; do
-            safe="$(printf '%s' "$lesson" | tr -cd 'A-Za-z0-9_-')"
-            curl --fail --silent --show-error -o "/tmp/trial-y4e-$safe.json" -b /tmp/trial-cookie.jar "https://$PROD_HOST/api/v2/student/lessons/$lesson?viewId=english-year4-11plus"
-            if jq -e '[.resources[] | select((.presentationScopes // []) | index("vr"))] | length > 0' "/tmp/trial-y4e-$safe.json" >/dev/null; then
-              cp "/tmp/trial-y4e-$safe.json" /tmp/trial-y4e-vr-detail.json
-              FOUND_VR=1
-              break
-            fi
-          done
-          test "$FOUND_VR" = '1'
-          jq -e '[.resources[] | select(.type != "video" and (((.presentationScopes // []) | index("vr")) == null))] | length == 0' /tmp/trial-y4e-vr-detail.json >/dev/null
-          jq -e '[.resources[] | select((.presentationScopes // []) | index("vr"))] | length > 0' /tmp/trial-y4e-vr-detail.json >/dev/null
-
-          # The same credentials must now be blocked as a second successful
-          # Trial login. This is the rebuilt Trial-only D1 check, not the old
-          # phase/window-session mechanism.
-          code="$(curl --silent --show-error -o /tmp/trial-second-login.json -w '%{http_code}' -X POST "https://$PROD_HOST/api/v2/auth/login" -H "Origin: $PROD_ORIGIN" -H 'Content-Type: application/json' --data-binary @/tmp/trial-public-login-request.json)"
-          test "$code" = '403'
-          jq -e '.error=="TRIAL_ACCESS_ENDED"' /tmp/trial-second-login.json >/dev/null
-
-          # Return TrialSej to the user's preferred ready-to-test state.
-          admin_post '/api/v1/admin/trials/rearm' '{"portalUserId":"TrialSej"}' /tmp/rearm-sej-final.json
-          jq -e '.ok==true and .oneLoginUnused==true and (.preparedAccessVersion|length)>0' /tmp/rearm-sej-final.json >/dev/null
-          admin_post '/api/v1/admin/trials/list' '{}' /tmp/trials-final.json
-          jq -e '.trials[] | select(.portalUserId=="TrialSej") | .oneLoginUnused==true' /tmp/trials-final.json >/dev/null
-          jq -e '.trials[] | select(.portalUserId=="TrialEva") | .oneLoginUnused==true' /tmp/trials-final.json >/dev/null
+          # Use Cloudflare's protected data APIs directly for migration and the
+          # live smoke. Password values are never printed by the script.
+          node scripts/rebuilt-trial-production-smoke.mjs
+          jq -e '.marker=="REBUILT_TRIAL_LIVE_SMOKE_PASS" and .trialSej.firstLoginPassed==true and .trialSej.secondLoginBlocked==true and .trialSej.finalUnused==true and .trialEva.finalUnused==true and .passwordsLogged==false' /tmp/rebuilt-trial-live-smoke.json >/dev/null
 
           jq -n \
             --arg marker 'REBUILT_TRIAL_MANAGER_PRODUCTION_PASS' \
             --arg sourceSha "$GITHUB_SHA" \
-            --arg adminOld "$OLD_LEGACY" \
-            --arg studentOld "$OLD_STUDENT" \
-            --arg adminNew "$(jq -r .legacy.newVersion /tmp/trial-deploy-result.json)" \
-            --arg studentNew "$(jq -r .student.newVersion /tmp/trial-deploy-result.json)" \
-            '{marker:$marker,sourceSha:$sourceSha,adminWorker:{oldVersion:$adminOld,newVersion:$adminNew},studentWorker:{oldVersion:$studentOld,newVersion:$studentNew},publicTopologyPreserved:true,trialSej:{firstLoginPassed:true,homeViews:["maths-level1","maths-level2","english-year4-11plus"],mathsNonVideoResourcesBlocked:true,year4VrResourcesVisible:true,secondLoginBlocked:true,rearmedAfterTest:true},trialEva:{preparedAccessPublished:true,unused:true}}' \
+            --slurpfile deploy /tmp/trial-deploy-result.json \
+            --slurpfile smoke /tmp/rebuilt-trial-live-smoke.json \
+            '{marker:$marker,sourceSha:$sourceSha,deploy:$deploy[0],smoke:$smoke[0],adminRouteProtected:true}' \
             >/tmp/rebuilt-trial-production-result.json
           cat /tmp/rebuilt-trial-production-result.json
-
-          rm -f /tmp/trial-public-login-request.json /tmp/trial-cookie.jar /tmp/trials-before.json /tmp/trials-final.json
           trap - ERR
 
       - name: Upload redacted deployment evidence
