@@ -86,31 +86,44 @@ jobs:
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
           ORIGIN='https://lessons.futureperfect.education'
 
-          code="$(curl --silent --show-error \
-            --request POST \
-            --header "Origin: $ORIGIN" \
-            --header 'Content-Type: application/json' \
-            --data '{}' \
-            --output /tmp/admin-trial-body.json \
-            --write-out '%{http_code}' \
-            "$BASE/api/v1/admin/trials/list")"
-          cat /tmp/admin-trial-body.json
-          test "$code" = '401'
-          grep -Fq 'UNAUTHORISED' /tmp/admin-trial-body.json
-          echo 'ADMIN_TRIAL_ROUTE_PROTECTED_LIVE_PASS'
+          for attempt in $(seq 1 12); do
+            trial_code="$(curl --silent --show-error \
+              --request POST \
+              --header "Origin: $ORIGIN" \
+              --header 'Content-Type: application/json' \
+              --data '{}' \
+              --output /tmp/admin-trial-body.json \
+              --write-out '%{http_code}' \
+              "$BASE/api/v1/admin/trials/list")"
 
-          code="$(curl --silent --show-error \
-            --request POST \
-            --header "Origin: $ORIGIN" \
-            --header 'Content-Type: application/json' \
-            --data '{"lessonId":"Y5M1"}' \
-            --output /tmp/admin-resource-body.json \
-            --write-out '%{http_code}' \
-            "$BASE/api/v1/admin/resources/lesson")"
-          cat /tmp/admin-resource-body.json
-          test "$code" = '401'
-          grep -Fq 'UNAUTHORISED' /tmp/admin-resource-body.json
-          echo 'ADMIN_RESOURCE_ROUTE_PROTECTED_LIVE_PASS'
+            resource_code="$(curl --silent --show-error \
+              --request POST \
+              --header "Origin: $ORIGIN" \
+              --header 'Content-Type: application/json' \
+              --data '{"lessonId":"Y5M1"}' \
+              --output /tmp/admin-resource-body.json \
+              --write-out '%{http_code}' \
+              "$BASE/api/v1/admin/resources/lesson")"
+
+            echo "Admin live verification attempt $attempt: trials=$trial_code resources=$resource_code"
+            cat /tmp/admin-trial-body.json || true
+            cat /tmp/admin-resource-body.json || true
+
+            if test "$trial_code" = '401' \
+              && grep -Fq 'UNAUTHORISED' /tmp/admin-trial-body.json \
+              && test "$resource_code" = '401' \
+              && grep -Fq 'UNAUTHORISED' /tmp/admin-resource-body.json; then
+              echo 'ADMIN_TRIAL_ROUTE_PROTECTED_LIVE_PASS'
+              echo 'ADMIN_RESOURCE_ROUTE_PROTECTED_LIVE_PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo 'Live Admin route verification did not converge.' >&2
+          cat /tmp/admin-trial-body.json >&2 || true
+          cat /tmp/admin-resource-body.json >&2 || true
+          exit 1
       - name: Verify live protected viewer wrapper
         run: |
           set -euo pipefail
