@@ -1,4 +1,4 @@
-name: Y4E1 deployed renderer read-only audit
+name: Y4E1 PreLesson guarded production repair
 
 on:
   push:
@@ -11,35 +11,78 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  repair:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
+      LESSON_ID: Y4E1
+      EXPECTED_NAME: Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf
+      EXPECTED_R2: english/year4/Y4T1E01/prelesson/sheets/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf
     steps:
-      - name: Inspect deployed Worker source without mutation
+      - name: Guard, patch only PreLesson compatibility field, and verify
         shell: bash
         run: |
           set -euo pipefail
           BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/content" -o /tmp/worker-content
-          echo '=== DEPLOYED CONTENT SIZE ==='
-          wc -c /tmp/worker-content
-          echo '=== CORE PRELESSON FALLBACK SIGNATURES ==='
-          python - <<'PY'
-          from pathlib import Path
-          text = Path('/tmp/worker-content').read_text('utf-8', errors='ignore')
-          checks = {
-              'lessonCollections': 'function lessonCollections(record)' in text,
-              'corePreLessonFallback': 'Array.isArray(core.preLessonSheets)' in text,
-              'safeLessonModel': 'async function safeLessonModel' in text,
-              'renderPreLessonPayload': 'preLessonSheets: await Promise.all(packageData.preLessonSheets.map(safeFile))' in text,
-              'step10Bridge': "import currentWorker from './index-admin-tools.js'" in text or '/api/v1/student/quiz/eligibility' in text,
-          }
-          for key, value in checks.items():
-              print(f'{key}={str(value).lower()}')
-          PY
-          echo 'READ_ONLY_COMPLETE=true'
+          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+
+          key="lesson:${LESSON_ID}"
+          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+          value_url="${BASE}/storage/kv/namespaces/${ns}/values/${enc}"
+
+          curl -fsS -H "$AUTH" "$value_url" -o /tmp/before.json
+          jq -e --arg lesson "$LESSON_ID" '.lessonId == $lesson and .active != false' /tmp/before.json >/dev/null
+          jq -e --arg name "$EXPECTED_NAME" --arg r2 "$EXPECTED_R2" '
+            (.core.preLessonSheets | type == "array" and length == 1) and
+            (.core.preLessonSheets[0].displayName == $name) and
+            (.core.preLessonSheets[0].r2Key == $r2)
+          ' /tmp/before.json >/dev/null
+
+          before_hash="$(sha256sum /tmp/before.json | awk '{print $1}')"
+          echo "BEFORE_SHA256=${before_hash}"
+          echo 'BEFORE_SHAPE:'
+          jq '{lessonId,topPreLessonSheets:.preLessonSheets,corePreLessonSheets:.core.preLessonSheets}' /tmp/before.json
+
+          if jq -e '.preLessonSheets == .core.preLessonSheets and (.preLessonSheets|type=="array" and length==1)' /tmp/before.json >/dev/null; then
+            echo 'ALREADY_REPAIRED=true'
+            exit 0
+          fi
+
+          jq '.preLessonSheets = .core.preLessonSheets' /tmp/before.json > /tmp/after.json
+          jq -S 'del(.preLessonSheets)' /tmp/before.json > /tmp/before_without_target.json
+          jq -S 'del(.preLessonSheets)' /tmp/after.json > /tmp/after_without_target.json
+          cmp /tmp/before_without_target.json /tmp/after_without_target.json
+
+          curl -fsS -H "$AUTH" "$value_url" -o /tmp/recheck.json
+          recheck_hash="$(sha256sum /tmp/recheck.json | awk '{print $1}')"
+          test "$recheck_hash" = "$before_hash"
+
+          curl -fsS -X PUT -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/after.json "$value_url" -o /tmp/write.json
+          jq -e '.success == true' /tmp/write.json >/dev/null
+
+          for attempt in $(seq 1 8); do
+            curl -fsS -H "$AUTH" "$value_url" -o /tmp/readback.json
+            if jq -e --arg name "$EXPECTED_NAME" --arg r2 "$EXPECTED_R2" '
+              (.preLessonSheets | type == "array" and length == 1) and
+              (.preLessonSheets[0].displayName == $name) and
+              (.preLessonSheets[0].r2Key == $r2) and
+              (.preLessonSheets == .core.preLessonSheets)
+            ' /tmp/readback.json >/dev/null; then
+              break
+            fi
+            test "$attempt" != 8
+            sleep 2
+          done
+
+          after_hash="$(sha256sum /tmp/readback.json | awk '{print $1}')"
+          echo "AFTER_SHA256=${after_hash}"
+          echo 'AFTER_SHAPE:'
+          jq '{lessonId,topPreLessonSheets:.preLessonSheets,corePreLessonSheets:.core.preLessonSheets}' /tmp/readback.json
+          echo 'Y4E1_PRELESSON_GUARDED_REPAIR_PASS=true'
