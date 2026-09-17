@@ -1,0 +1,172 @@
+name: Answer Pack production frontend deploy 2026-09-17 v2
+
+on:
+  push:
+    branches:
+      - ops/answer-pack-production-deploy-2026-09-17
+    paths:
+      - .github/workflows/answer-pack-production-deploy-20260917-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fpt-answer-pack-production-frontend-deploy
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  PROD_ZONE: futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_PRIVATE: https://fpt-portal-v2-rebuild-browser-prod.futureperfectlessons.workers.dev
+  FRONTEND_SHA: 1b911253463796b9011b1a45909f67c6395b752f
+  WRANGLER_VERSION: 4.129.0
+
+jobs:
+  production-frontend-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout closed rebuilt runtime source
+        uses: actions/checkout@v4
+        with:
+          ref: c05ebcc3cf9d856da4c42fe3b5472974e6d582d3
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read-only preflight and rollback anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API=https://api.cloudflare.com/client/v4
+          AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          curl -fsS "${API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/before-list.json
+          jq -e '.success==true' /tmp/before-list.json >/dev/null
+          jq -c '(.result.deployments // .result // []) | sort_by(.created_on) | last' /tmp/before-list.json > /tmp/before.json
+          BEFORE_DEPLOYMENT="$(jq -r '.id // empty' /tmp/before.json)"
+          BEFORE_VERSION="$(jq -r '(.versions // []) | map(select((.percentage // 0)==100)) | .[0].version_id // (.versions[0].version_id // empty)' /tmp/before.json)"
+          test -n "$BEFORE_DEPLOYMENT" && test -n "$BEFORE_VERSION"
+          echo "BEFORE_DEPLOYMENT=$BEFORE_DEPLOYMENT" >> "$GITHUB_ENV"
+          echo "BEFORE_VERSION=$BEFORE_VERSION" >> "$GITHUB_ENV"
+          curl -fsS "${API}/zones?name=${PROD_ZONE}&account.id=${CLOUDFLARE_ACCOUNT_ID}" "${AUTH[@]}" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[0].id // empty' /tmp/zones.json)"; test -n "$ZONE_ID"
+          curl -fsS "${API}/zones/${ZONE_ID}/workers/routes" "${AUTH[@]}" -o /tmp/routes.json
+          jq -e --arg p "${PROD_HOST}/*" --arg w "$BROWSER_WORKER" '[.result[]|select(.pattern==$p and .script==$w)]|length==1' /tmp/routes.json >/dev/null
+          ROOT="$(curl -sSL -o /tmp/pre-root.html -w '%{http_code}' "https://${PROD_HOST}/")"
+          API_CODE="$(curl -sS -D /tmp/pre-api.h -o /tmp/pre-api.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/home")"
+          test "$ROOT" = 200 && test "$API_CODE" = 401
+          grep -F 'Future Perfect Tuitions' /tmp/pre-root.html >/dev/null
+          grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/pre-api.h
+          echo "PREDEPLOY_PASS deployment=$BEFORE_DEPLOYMENT version=$BEFORE_VERSION"
+
+      - name: Checkout exact validated frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: 1b911253463796b9011b1a45909f67c6395b752f
+          path: frontend
+          persist-credentials: false
+
+      - name: Regress and build exact frontend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_SHA"
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run test:static | tee /tmp/static.log
+          grep -F '"protectedViewerOpenSequencing":true' /tmp/static.log >/dev/null
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          npm run build
+          VIEWER="$(find dist -type f -name 'portal-protected-viewer-*.js' | head -n1)"
+          test -n "$VIEWER"
+          VIEWER_REL="${VIEWER#dist/}"
+          VIEWER_SHA="$(sha256sum "$VIEWER" | awk '{print $1}')"
+          echo "VIEWER_REL=$VIEWER_REL" >> "$GITHUB_ENV"
+          echo "VIEWER_SHA=$VIEWER_SHA" >> "$GITHUB_ENV"
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public && mkdir -p rebuild/browser-staging/public
+          cp -a frontend/dist/. rebuild/browser-staging/public/
+          echo "FRONTEND_GATE_PASS sha=$FRONTEND_SHA viewer=$VIEWER_REL hash=$VIEWER_SHA"
+
+      - name: Install pinned Wrangler
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+
+      - name: Deploy Browser frontend only and verify exact live asset
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API=https://api.cloudflare.com/client/v4
+          AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          DEPLOYED=0
+          rollback() {
+            rc=$?; trap - ERR
+            if [ "$DEPLOYED" = 1 ]; then
+              jq -n --arg v "$BEFORE_VERSION" '{strategy:"percentage",versions:[{version_id:$v,percentage:100}],annotations:{"workers/message":"Automatic rollback after Answer Pack frontend deploy gate failure","workers/triggered_by":"answer-pack-production-deploy"}}' >/tmp/rollback.json
+              curl -fsS -X POST "${API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${BROWSER_WORKER}/deployments?force=true" "${AUTH[@]}" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json -o /tmp/rollback-result.json || true
+              jq -e '.success==true' /tmp/rollback-result.json >/dev/null 2>&1 && echo "AUTO_ROLLBACK_PASS version=$BEFORE_VERSION" || echo "AUTO_ROLLBACK_NOT_CONFIRMED"
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+          cat > rebuild/browser-staging/wrangler.answerpack.toml <<TOML
+          name = "${BROWSER_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+          [[services]]
+          binding = "STAGING_API"
+          service = "${STUDENT_WORKER}"
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+          npx wrangler deploy --config rebuild/browser-staging/wrangler.answerpack.toml
+          DEPLOYED=1
+          for i in $(seq 1 30); do
+            PR="$(curl -sSL -o /tmp/private-root.html -w '%{http_code}' "${BROWSER_PRIVATE}/" || true)"
+            PA="$(curl -sS -D /tmp/private-api.h -o /tmp/private-api.json -w '%{http_code}' "${BROWSER_PRIVATE}/api/v2/student/home" || true)"
+            LR="$(curl -sSL -o /tmp/live-root.html -w '%{http_code}' "https://${PROD_HOST}/" || true)"
+            LA="$(curl -sS -D /tmp/live-api.h -o /tmp/live-api.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/home" || true)"
+            if [ "$PR" = 200 ] && [ "$PA" = 401 ] && [ "$LR" = 200 ] && [ "$LA" = 401 ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/private-api.h && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/live-api.h; then break; fi
+            [ "$i" != 30 ] || { echo 'Facade smoke failed'; exit 1; }
+            sleep 2
+          done
+          curl -fsS "${BROWSER_PRIVATE}/${VIEWER_REL}" -o /tmp/private-viewer.js
+          curl -fsS "https://${PROD_HOST}/${VIEWER_REL}" -o /tmp/live-viewer.js
+          test "$(sha256sum /tmp/private-viewer.js|awk '{print $1}')" = "$VIEWER_SHA"
+          test "$(sha256sum /tmp/live-viewer.js|awk '{print $1}')" = "$VIEWER_SHA"
+          curl -fsS "${API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/after-list.json
+          jq -c '(.result.deployments // .result // []) | sort_by(.created_on) | last' /tmp/after-list.json > /tmp/after.json
+          AFTER_DEPLOYMENT="$(jq -r '.id // empty' /tmp/after.json)"
+          AFTER_VERSION="$(jq -r '(.versions // []) | map(select((.percentage // 0)==100)) | .[0].version_id // (.versions[0].version_id // empty)' /tmp/after.json)"
+          test -n "$AFTER_DEPLOYMENT" && test -n "$AFTER_VERSION"
+          test "$AFTER_DEPLOYMENT" != "$BEFORE_DEPLOYMENT" && test "$AFTER_VERSION" != "$BEFORE_VERSION"
+          jq -n --arg marker ANSWER_PACK_PRODUCTION_DEPLOY_PASS --arg frontend "$FRONTEND_SHA" --arg beforeDeployment "$BEFORE_DEPLOYMENT" --arg beforeVersion "$BEFORE_VERSION" --arg afterDeployment "$AFTER_DEPLOYMENT" --arg afterVersion "$AFTER_VERSION" --arg viewer "$VIEWER_REL" --arg hash "$VIEWER_SHA" '{marker:$marker,frontendSha:$frontend,browserWorker:"fpt-portal-v2-rebuild-browser-prod",studentWorkerChanged:false,before:{deploymentId:$beforeDeployment,versionId:$beforeVersion},after:{deploymentId:$afterDeployment,versionId:$afterVersion},viewer:{path:$viewer,sha256:$hash,privateExact:true,productionExact:true},smoke:{root200:true,unauthenticatedApi401:true,serviceBinding:true}}' >/tmp/deploy-evidence.json
+          cat /tmp/deploy-evidence.json
+          echo "AFTER_DEPLOYMENT=$AFTER_DEPLOYMENT" >> "$GITHUB_ENV"
+          echo "AFTER_VERSION=$AFTER_VERSION" >> "$GITHUB_ENV"
+          trap - ERR
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: answer-pack-production-deploy-v2-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/deploy-evidence.json
+            /tmp/before.json
+            /tmp/after.json
+
+      - name: Final marker
+        run: echo "ANSWER_PACK_PRODUCTION_DEPLOY_COMPLETE frontend=$FRONTEND_SHA deployment=$AFTER_DEPLOYMENT version=$AFTER_VERSION"
