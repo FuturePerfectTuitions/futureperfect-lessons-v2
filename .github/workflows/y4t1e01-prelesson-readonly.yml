@@ -80,4 +80,5 @@ jobs:
           }' /tmp/y4e1.json
 
       - name: Confirm read-only completion
-        run: echo 'PASS: Y4E1 preflight was read-only; no production data was changed.'
+        run: |
+          echo 'PASS: Y4E1 preflight was read-only; no production data was changed.'
