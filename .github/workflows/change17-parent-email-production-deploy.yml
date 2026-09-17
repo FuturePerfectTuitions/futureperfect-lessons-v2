@@ -13,6 +13,8 @@ on:
       - 'worker/src/parent-email.js'
       - 'worker/src/parent-email-signature.js'
       - 'worker/src/parent-email-signature-clean*.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/src/index-phase20-change13.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
       - 'worker/src/index-phase20-change18-admin-superuser.js'
@@ -26,7 +28,6 @@ on:
       - 'tests/parent-email-import-verification.mjs'
       - 'tests/parent-email-completed-status-verification.mjs'
       - 'tests/parent-email-test-routing-verification.mjs'
-      - 'ops/deploy_change17_parent_email_preserve.sh'
       - 'ops/deploy_current_worker_preserve.sh'
 
 permissions:
@@ -41,11 +42,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      WORKER_ENTRYPOINT: src/index-phase23-protected-view-stability.js
       WRANGLER_VERSION: 4.125.0
-      PARENT_EMAIL_LIVE: '1'
-      PARENT_EMAIL_TEST_TO: ''
-      DEPLOY_MESSAGE: Portal V2 parent transactional emails LIVE on Phase 23
+      DEPLOY_MESSAGE: Portal V2 parent transactional emails LIVE on current production wrapper
 
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +64,8 @@ jobs:
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
           node --check worker/src/parent-email-signature-clean.js
+          node --check worker/src/index-admin-tools.js
+          node --check worker/src/index-phase24-trial-vr.js
           node --check worker/src/index-phase20-change13.js
           node --check worker/src/index-phase20-change17-parent-email.js
           node --check worker/src/index-phase20-change18-admin-superuser.js
@@ -104,10 +104,13 @@ jobs:
           grep -Fq 'LIVE_CURRICULUM_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           grep -Fq 'LIVE_LESSON_METADATA_AUTHORITY_V1' worker/src/phase11-navigation-cache.js
           grep -Fq 'LIVE_STUDENT_CATALOGUE_OVERLAY_V1' worker/src/live-student-catalogue-overlay.js
-          test -f "worker/$WORKER_ENTRYPOINT"
-          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.toml
+          CURRENT_ENTRYPOINT="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' worker/wrangler.toml | head -n 1)"
+          test "$CURRENT_ENTRYPOINT" = 'src/index-admin-tools.js'
+          test -f "worker/$CURRENT_ENTRYPOINT"
           grep -Fq '[[send_email]]' worker/wrangler.toml
           grep -Fq 'name = "EMAIL"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          grep -Fq "import currentWorker from './index-phase23-protected-view-stability.js';" worker/src/index-phase24-trial-vr.js
           grep -Fq "import currentWorker from './index-phase20-change20-configured-upsell.js';" worker/src/index-phase23-protected-view-stability.js
           grep -Fq "import productionWorker from './index-phase20-change19-admin-fast.js';" worker/src/index-phase20-change20-configured-upsell.js
           grep -Fq "import adminSuperuserWorker from './index-phase20-change18-admin-superuser.js';" worker/src/index-phase20-change19-admin-fast.js
@@ -115,9 +118,6 @@ jobs:
           grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'handleAdminLessonReleaseImport' worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'repairLiveStudentCatalogueResponse' worker/src/index-phase20-change17-parent-email.js
-          grep -Fq 'PARENT_EMAIL_LIVE' ops/deploy_change17_parent_email_preserve.sh
-          grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
-          grep -Fq '[[send_email]]' ops/deploy_change17_parent_email_preserve.sh
           grep -Fq '[[send_email]]' ops/deploy_current_worker_preserve.sh
           echo 'PARENT_EMAIL_STATIC_PASS'
 
@@ -127,15 +127,15 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test "$PARENT_EMAIL_LIVE" = '1'
-          test -z "$PARENT_EMAIL_TEST_TO"
-          test "$WORKER_ENTRYPOINT" = 'src/index-phase23-protected-view-stability.js'
+          CURRENT_ENTRYPOINT="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' worker/wrangler.toml | head -n 1)"
+          test "$CURRENT_ENTRYPOINT" = 'src/index-admin-tools.js'
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/change17-settings-before.json
           jq -e '.success == true' /tmp/change17-settings-before.json >/dev/null
-          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
+          jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/change17-settings-before.json >/dev/null
+          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB EMAIL; do
             jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/change17-settings-before.json >/dev/null
           done
           for required in ADMIN_IMPORT_PASSWORD ADMIN_IMPORT_SESSION_SECRET EXCEL_SYNC_TOKEN; do
@@ -147,7 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash ops/deploy_change17_parent_email_preserve.sh
+          bash ops/deploy_current_worker_preserve.sh
 
       - name: Verify live parent email mode and security boundary
         shell: bash
@@ -168,6 +168,7 @@ jobs:
             --output /tmp/change17-worker-after.bin
           grep -aFq 'phase23-protected-view-stability-v3' /tmp/change17-worker-after.bin
           grep -aFq 'live-kv-v1' /tmp/change17-worker-after.bin
+          grep -aFq 'Completed Lesson:' /tmp/change17-worker-after.bin
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
           ORIGIN='https://lessons.futureperfect.education'
           code="$(curl --silent --show-error --output /tmp/change17-home.json --write-out '%{http_code}' \
