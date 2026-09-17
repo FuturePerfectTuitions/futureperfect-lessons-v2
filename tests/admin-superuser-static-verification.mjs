@@ -4,12 +4,14 @@ const wrapperPath = 'worker/src/index-phase20-change18-admin-superuser.js';
 const fastPathPath = 'worker/src/index-phase20-change19-admin-fast.js';
 const configuredUpsellPath = 'worker/src/index-phase20-change20-configured-upsell.js';
 const protectedStabilityPath = 'worker/src/index-phase23-protected-view-stability.js';
+const trialVrPath = 'worker/src/index-phase24-trial-vr.js';
 const change16Path = 'worker/src/index-phase20-change16.js';
 const wranglerPath = 'worker/wrangler.toml';
 const wrapper = fs.readFileSync(wrapperPath, 'utf8');
 const fastPath = fs.readFileSync(fastPathPath, 'utf8');
 const configuredUpsell = fs.readFileSync(configuredUpsellPath, 'utf8');
 const protectedStability = fs.readFileSync(protectedStabilityPath, 'utf8');
+const trialVr = fs.readFileSync(trialVrPath, 'utf8');
 const change16 = fs.readFileSync(change16Path, 'utf8');
 const wrangler = fs.readFileSync(wranglerPath, 'utf8');
 
@@ -63,6 +65,9 @@ if (!protectedStability.includes("import currentWorker from './index-phase20-cha
 if (!protectedStability.includes('ANSWER_VIEW_EXPIRED') || !protectedStability.includes('ANSWER_VIEW_ALREADY_OPENED')) {
   throw new Error('Protected-view stability wrapper is missing the narrow retry gates.');
 }
+if (!trialVr.includes("import currentWorker from './index-phase23-protected-view-stability.js'")) {
+  throw new Error('Trial VR wrapper does not preserve the protected-view stability production chain.');
+}
 
 const requiredAdminHomeMarkers = [
   "import { kvCatalogueCountsForViews } from './index-phase20-change13.js';",
@@ -92,8 +97,8 @@ for (const viewId of requiredDirectAdminViews) {
   }
 }
 
-if (!wrangler.includes('main = "src/index-phase23-protected-view-stability.js"')) {
-  throw new Error('Production entrypoint is not the protected-view stability wrapper.');
+if (!wrangler.includes('main = "src/index-phase24-trial-vr.js"')) {
+  throw new Error('Production entrypoint is not the Phase 24 Trial VR wrapper.');
 }
 
 console.log('ADMIN_SUPERUSER_STATIC_VERIFICATION_PASS');
