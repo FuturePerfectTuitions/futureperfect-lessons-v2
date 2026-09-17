@@ -1,0 +1,178 @@
+name: Step 10 Gate C Quiz bridge correction
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+    paths:
+      - ops/step10-gate-c-quiz-copy/**
+      - .github/workflows/step10-gate-c-quiz-bridge-correction.yml
+
+permissions:
+  contents: read
+
+jobs:
+  correct-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+      EXPECTED_BRIDGE_URL: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      PRIOR_BRIDGE_URL: https://lessons.futureperfect.education
+      WRANGLER_VERSION: 4.134.0
+    defaults:
+      run:
+        working-directory: ops/step10-gate-c-quiz-copy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove staged source is byte-identical to reviewed standalone PR source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object src/index.js)" = 'e7a5c0fb704d17eddf108f817cf5f3df89f496ff'
+          test "$(git hash-object src/remediation.js)" = '030692e4c0d6a318dcf3bdded5750234e39c271c'
+          test "$(git hash-object src/selector.js)" = '2082299d1bc513a5076bc1f9c7f1d06b653d235d'
+          node --check src/index.js
+          node --check src/remediation.js
+          node --check src/selector.js
+          echo 'REVIEWED_QUIZ_SOURCE_IDENTITY_PASS'
+
+      - name: Preflight live Quiz Worker and capture rollback anchor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings-before.json
+          jq -e '.success == true' /tmp/quiz-settings-before.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-settings-before.json >/dev/null
+          CURRENT_URL="$(jq -r '[.result.bindings[] | select(.name=="PORTAL_BRIDGE_URL" and .type=="plain_text") | .text][0] // ""' /tmp/quiz-settings-before.json)"
+          test -n "$CURRENT_URL"
+          if test "$CURRENT_URL" != "$PRIOR_BRIDGE_URL" && test "$CURRENT_URL" != "$EXPECTED_BRIDGE_URL"; then
+            echo 'Unexpected live PORTAL_BRIDGE_URL; refusing mutation.' >&2
+            exit 1
+          fi
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-before.json
+          OLD_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-before.json | head -n1)"
+          test -n "$OLD_VERSION"
+          echo "OLD_VERSION=$OLD_VERSION" >> "$GITHUB_ENV"
+          if test "$CURRENT_URL" = "$EXPECTED_BRIDGE_URL"; then
+            echo 'ALREADY_CORRECT=true' >> "$GITHUB_ENV"
+          else
+            echo 'ALREADY_CORRECT=false' >> "$GITHUB_ENV"
+          fi
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-versions-before.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-versions-before.json | sort -u > /tmp/quiz-version-ids-before.txt
+          health_code="$(curl --silent --show-error --output /tmp/quiz-health-before.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+          test "$health_code" = '200'
+          echo "QUIZ_ROLLBACK_VERSION=$OLD_VERSION"
+          echo "CURRENT_BRIDGE_URL=$CURRENT_URL"
+          echo 'QUIZ_D1_SECRET_AND_CUSTOM_HOSTNAME_PREFLIGHT_PASS'
+
+      - name: Verify isolated Gate C configuration contract
+        if: env.ALREADY_CORRECT != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'name = "futureperfect-11plus-practice-step10-preview"' wrangler.toml
+          grep -Fq 'keep_vars = true' wrangler.toml
+          grep -Fq 'PORTAL_BRIDGE_URL = "https://fpt-portal-v2-worker.futureperfectlessons.workers.dev"' wrangler.toml
+          grep -Fq 'database_id = "5b988d3d-341a-492d-8e40-8d4efa66150e"' wrangler.toml
+          ! grep -Fq 'QUIZ_BRIDGE_SECRET =' wrangler.toml
+          echo 'ISOLATED_GATE_C_CONFIG_PASS'
+
+      - name: Upload corrected Quiz Worker version without changing triggers
+        if: env.ALREADY_CORRECT != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions upload src/index.js \
+            --config wrangler.toml \
+            --keep-vars \
+            --message 'Step 10 Gate C bridge URL correction' \
+            | tee /tmp/quiz-version-upload.txt
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-versions-after.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-versions-after.json | sort -u > /tmp/quiz-version-ids-after.txt
+          NEW_VERSION="$(comm -13 /tmp/quiz-version-ids-before.txt /tmp/quiz-version-ids-after.txt | head -n1)"
+          test -n "$NEW_VERSION"
+          test "$NEW_VERSION" != "$OLD_VERSION"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "QUIZ_CANDIDATE_VERSION=$NEW_VERSION"
+
+      - name: Inspect candidate version before promotion
+        if: env.ALREADY_CORRECT != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/versions/${NEW_VERSION}" -H "$AUTH" -o /tmp/quiz-candidate.json
+          jq -e '.success == true' /tmp/quiz-candidate.json >/dev/null
+          jq -e --arg url "$EXPECTED_BRIDGE_URL" '.result.resources.bindings[] | select(.name=="PORTAL_BRIDGE_URL" and .type=="plain_text" and .text==$url)' /tmp/quiz-candidate.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.resources.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-candidate.json >/dev/null
+          jq -e '.result.resources.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-candidate.json >/dev/null
+          echo 'QUIZ_CANDIDATE_BINDINGS_AND_SECRET_PRESERVATION_PASS'
+
+      - name: Promote corrected candidate only
+        if: env.ALREADY_CORRECT != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$NEW_VERSION@100%" \
+            --name "$QUIZ_WORKER" \
+            --message 'Step 10 Gate C bridge URL correction' \
+            -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-after.json
+          jq -e --arg id "$NEW_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy-after.json >/dev/null
+          echo 'QUIZ_CORRECTED_VERSION_PROMOTED_WITHOUT_TRIGGER_MUTATION'
+
+      - name: Require the shared-secret invalid-code handshake
+        shell: bash
+        run: |
+          set -euo pipefail
+          passed=false
+          last_code='000'
+          for attempt in $(seq 1 12); do
+            last_code="$(curl --silent --show-error --max-redirs 0 --output /tmp/gate-c-invalid.html --write-out '%{http_code}' 'https://quiz.futureperfect.education/launch?code=gate-c-invalid-shared-secret-probe')"
+            if test "$last_code" = '410' && grep -Fqi 'practice link is no longer valid' /tmp/gate-c-invalid.html; then
+              passed=true
+              break
+            fi
+            sleep 5
+          done
+          if test "$passed" != 'true'; then
+            echo "Gate C handshake failed with final HTTP $last_code." >&2
+            if test "${ALREADY_CORRECT:-false}" != 'true'; then
+              echo "Rolling Quiz Worker back to captured version $OLD_VERSION." >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD_VERSION@100%" --name "$QUIZ_WORKER" --message 'Rollback failed Gate C bridge URL correction' -y
+            fi
+            exit 1
+          fi
+          echo 'STEP10_SHARED_SECRET_HANDSHAKE_PASS'
+
+      - name: Verify live Quiz settings and custom hostname after promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings-after.json
+          jq -e --arg url "$EXPECTED_BRIDGE_URL" '.result.bindings[] | select(.name=="PORTAL_BRIDGE_URL" and .type=="plain_text" and .text==$url)' /tmp/quiz-settings-after.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-settings-after.json >/dev/null
+          health_code="$(curl --silent --show-error --output /tmp/quiz-health-after.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+          test "$health_code" = '200'
+          echo 'STEP10_GATE_C_QUIZ_BRIDGE_CORRECTION_PASS'
