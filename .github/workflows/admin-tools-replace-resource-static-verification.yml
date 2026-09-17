@@ -1,0 +1,55 @@
+name: Admin Tools Replace Resource static verification
+
+on:
+  push:
+    paths:
+      - 'admin-import.html'
+      - 'assets/admin-replace-resource.js'
+      - 'worker/src/admin-resource-replace.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'worker/wrangler.toml'
+      - 'tests/admin-resource-replace-verification.mjs'
+      - 'tests/admin-tools-ui-verification.mjs'
+      - 'tests/admin-superuser-static-verification.mjs'
+      - '.github/workflows/admin-superuser-production-deploy.yml'
+      - '.github/workflows/admin-tools-replace-resource-static-verification.yml'
+  pull_request:
+    paths:
+      - 'admin-import.html'
+      - 'assets/admin-replace-resource.js'
+      - 'worker/src/admin-resource-replace.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'worker/wrangler.toml'
+      - 'tests/admin-resource-replace-verification.mjs'
+      - 'tests/admin-tools-ui-verification.mjs'
+      - 'tests/admin-superuser-static-verification.mjs'
+      - '.github/workflows/admin-superuser-production-deploy.yml'
+      - '.github/workflows/admin-tools-replace-resource-static-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check worker/src/admin-resource-replace.js
+          node --check worker/src/index-admin-tools.js
+          node --check assets/admin-replace-resource.js
+          node --check assets/admin-trials.js
+      - name: Replace Resource verification
+        run: node tests/admin-resource-replace-verification.mjs
+      - name: Admin Tools UI verification
+        run: node tests/admin-tools-ui-verification.mjs
+      - name: Existing Admin regressions
+        run: |
+          node --experimental-default-type=module tests/admin-trial-manager-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-superuser-static-verification.mjs

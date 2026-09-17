@@ -15,6 +15,8 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
+      - worker/src/index-admin-tools.js
+      - worker/wrangler.toml
       - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
@@ -39,6 +41,8 @@ on:
       - worker/src/index-phase20-change7.js
       - worker/src/index-phase20-change8.js
       - worker/src/index-phase20-change17-parent-email.js
+      - worker/src/index-admin-tools.js
+      - worker/wrangler.toml
       - tests/admin-import-auto-process-static-verification.mjs
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
@@ -73,6 +77,7 @@ jobs:
           node --check worker/src/index-phase20-change7.js
           node --check worker/src/index-phase20-change8.js
           node --check worker/src/index-phase20-change17-parent-email.js
+          node --check worker/src/index-admin-tools.js
           node --check assets/admin-import.js
           node --check assets/admin-import-manual-email.js
       - name: Importer verification
@@ -91,4 +96,5 @@ jobs:
           set -euo pipefail
           node tests/lesson-release-navigation-verification.mjs
           test -f worker/src/index-phase20-change17-parent-email.js
-          grep -Fq 'main = "src/index-phase23-protected-view-stability.js"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js

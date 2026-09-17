@@ -5,6 +5,7 @@ const fastPathPath = 'worker/src/index-phase20-change19-admin-fast.js';
 const configuredUpsellPath = 'worker/src/index-phase20-change20-configured-upsell.js';
 const protectedStabilityPath = 'worker/src/index-phase23-protected-view-stability.js';
 const trialVrPath = 'worker/src/index-phase24-trial-vr.js';
+const adminToolsPath = 'worker/src/index-admin-tools.js';
 const change16Path = 'worker/src/index-phase20-change16.js';
 const wranglerPath = 'worker/wrangler.toml';
 const wrapper = fs.readFileSync(wrapperPath, 'utf8');
@@ -12,6 +13,7 @@ const fastPath = fs.readFileSync(fastPathPath, 'utf8');
 const configuredUpsell = fs.readFileSync(configuredUpsellPath, 'utf8');
 const protectedStability = fs.readFileSync(protectedStabilityPath, 'utf8');
 const trialVr = fs.readFileSync(trialVrPath, 'utf8');
+const adminTools = fs.readFileSync(adminToolsPath, 'utf8');
 const change16 = fs.readFileSync(change16Path, 'utf8');
 const wrangler = fs.readFileSync(wranglerPath, 'utf8');
 
@@ -68,6 +70,12 @@ if (!protectedStability.includes('ANSWER_VIEW_EXPIRED') || !protectedStability.i
 if (!trialVr.includes("import currentWorker from './index-phase23-protected-view-stability.js'")) {
   throw new Error('Trial VR wrapper does not preserve the protected-view stability production chain.');
 }
+if (!adminTools.includes("import currentWorker from './index-phase24-trial-vr.js'")) {
+  throw new Error('Admin Tools wrapper does not preserve the Phase 24 Trial VR production chain.');
+}
+if (!adminTools.includes("url.pathname.startsWith('/api/v1/admin/resources/')")) {
+  throw new Error('Admin Tools wrapper is not narrowly scoped to Admin resource routes.');
+}
 
 const requiredAdminHomeMarkers = [
   "import { kvCatalogueCountsForViews } from './index-phase20-change13.js';",
@@ -97,8 +105,8 @@ for (const viewId of requiredDirectAdminViews) {
   }
 }
 
-if (!wrangler.includes('main = "src/index-phase24-trial-vr.js"')) {
-  throw new Error('Production entrypoint is not the Phase 24 Trial VR wrapper.');
+if (!wrangler.includes('main = "src/index-admin-tools.js"')) {
+  throw new Error('Production entrypoint is not the Admin Tools wrapper.');
 }
 
 console.log('ADMIN_SUPERUSER_STATIC_VERIFICATION_PASS');

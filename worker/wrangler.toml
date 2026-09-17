@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-phase24-trial-vr.js"
+main = "src/index-admin-tools.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -14,6 +14,10 @@ PARENT_EMAIL_TEST_TO = ""
 name = "EMAIL"
 
 # Canonical Portal V2 production entrypoint.
+# Admin Tools wraps Phase 24 only to add authenticated operational routes such as
+# Replace Resource. Every non-admin-resource request is delegated unchanged to
+# Phase 24. Production KV, D1, R2 bindings and secrets remain Cloudflare-managed.
+#
 # Phase 24 wraps Phase 23 only to extend 11+ Trial access with the VR resources
 # belonging to the explicitly allowed Year 4/Year 5 English 11+ trial view.
 # Core Trial behaviour remains unchanged: lesson descriptions and the main lesson
@@ -40,6 +44,13 @@ name = "EMAIL"
 # the authenticated Admin fast path, Change 18 retains Admin superuser access,
 # and the underlying Change 17/16 chain retains student navigation, Full Library,
 # trial, batch, lesson-release, PreLesson-only, Answer Pack and resource controls.
+#
+# The Admin Replace Resource route reuses the signed lesson-release-import Admin
+# session. It writes each replacement PDF to a fresh MATERIALS_R2 key, verifies
+# the uploaded bytes by SHA-256 read-back, checks optimistic concurrency against
+# the selected existing r2Key, then updates only that resource reference in the
+# canonical lesson KV record. The old R2 object is intentionally retained for
+# rollback; student entitlements are not modified.
 #
 # Production KV, D1, R2 bindings and secrets remain Cloudflare-managed. The
 # outbound EMAIL binding is declared here because Wrangler treats it as a Worker
