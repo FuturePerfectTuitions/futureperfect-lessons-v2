@@ -1,0 +1,134 @@
+name: Y4E1 PreLesson production preview
+
+on:
+  push:
+    branches:
+      - fix/y4e1-prelesson-readmodel-20260917
+    paths:
+      - '.github/workflows/y4e1-prelesson-production-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_HOST: lessons.futureperfect.education
+      LEGACY_WORKER: fpt-portal-v2-worker
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_R2_BUCKET: fpt-materials-dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fresh topology and exact Y4E1 prepared-model preview
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { compileLessonDetail } from './rebuild/adminops/src/lib/compiler.mjs';
+          import { stableStringify, pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const legacy=clean(process.env.LEGACY_WORKER),browser=clean(process.env.BROWSER_WORKER),student=clean(process.env.STUDENT_WORKER);
+          const expectedLessons=clean(process.env.EXPECTED_LESSONS_KV_ID),expectedRead=clean(process.env.EXPECTED_READ_MODELS_KV_ID),expectedBucket=clean(process.env.EXPECTED_R2_BUCKET);
+          const base='https://api.cloudflare.com/client/v4',auth={Authorization:`Bearer ${token}`};
+          async function req(path,options={}){const r=await fetch(`${base}${path}`,{...options,headers:{...auth,...(options.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text);}catch{}return{r,text,body};}
+          async function cf(path){const o=await req(path);if(!o.r.ok||o.body?.success!==true)throw new Error(`CF read failed ${o.r.status}: ${path}: ${clean(o.body?.errors?.[0]?.message||o.text).slice(0,180)}`);return o.body.result;}
+          async function kvText(ns,key){const o=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(o.r.status===404)return null;if(!o.r.ok)throw new Error(`KV read failed ${o.r.status}:${key}`);return o.text;}
+          async function kvJson(ns,key){const t=await kvText(ns,key);return t==null?null:JSON.parse(t);}
+
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unavailable');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0].pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0].script)!==browser)throw new Error(`Public route drift:${JSON.stringify(hostRoutes)}`);
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`);
+          const browserBindings=Array.isArray(browserSettings?.bindings)?browserSettings.bindings:[];
+          const services=browserBindings.filter(b=>clean(b.type)==='service');
+          if(services.length!==1||clean(services[0].service)!==student)throw new Error(`Browser service topology drift:${JSON.stringify(services.map(b=>({name:b.name,service:b.service})))}`);
+          if(browserBindings.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`)))throw new Error('Browser has forbidden Admin/AdminOps binding');
+
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/settings`);
+          const sb=Array.isArray(studentSettings?.bindings)?studentSettings.bindings:[];
+          const readNs=clean(sb.find(b=>clean(b.name)==='READ_MODELS_KV')?.namespace_id);
+          const r2Bucket=clean(sb.find(b=>clean(b.name)==='MATERIALS_R2')?.bucket_name);
+          const d1Id=clean(sb.find(b=>clean(b.name)==='DB')?.database_id||sb.find(b=>clean(b.name)==='DB')?.id);
+          if(readNs!==expectedRead)throw new Error(`READ_MODELS_KV drift:${readNs}`);
+          if(r2Bucket!==expectedBucket)throw new Error(`MATERIALS_R2 drift:${r2Bucket}`);
+          if(!d1Id)throw new Error('Production D1 binding missing');
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(student)}/deployments`);
+          const drows=Array.isArray(deployments?.deployments)?deployments.deployments:Array.isArray(deployments)?deployments:[];
+          const activeVersions=Array.isArray(drows[0]?.versions)?drows[0].versions:[];
+          const studentVersion=clean((activeVersions.find(v=>Number(v.percentage||0)===100)||activeVersions[0])?.version_id);
+          if(!studentVersion)throw new Error('Student active version unavailable');
+
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(legacy)}/settings`);
+          const lb=Array.isArray(legacySettings?.bindings)?legacySettings.bindings:[];
+          const lessonsNs=clean(lb.find(b=>clean(b.name)==='LESSONS_KV')?.namespace_id);
+          if(lessonsNs!==expectedLessons)throw new Error(`LESSONS_KV drift:${lessonsNs}`);
+
+          const id='Y4E1', scope=`lesson:${id}`;
+          const source=await kvJson(lessonsNs,scope);
+          if(!source||clean(source.lessonId)!==id)throw new Error('Authoritative Y4E1 source missing');
+          const sourcePre=Array.isArray(source.preLessonSheets)?source.preLessonSheets:(Array.isArray(source?.core?.preLessonSheets)?source.core.preLessonSheets:[]);
+          if(sourcePre.length!==1)throw new Error(`Expected exactly one core PreLesson in source; found ${sourcePre.length}`);
+          const expectedName='Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf';
+          const pre=sourcePre[0];
+          if(clean(pre.displayName||pre.name)!==expectedName)throw new Error(`Unexpected source PreLesson name:${clean(pre.displayName||pre.name)}`);
+          const targetKey=clean(pre.r2Key||pre.r2);
+          if(!targetKey)throw new Error('Source PreLesson R2 key missing');
+
+          const candidate=await compileLessonDetail(source,{resourceExists:async()=>true});
+          const pointer=await kvJson(readNs,pointerKey(scope));
+          const currentVersion=clean(pointer?.current?.version);
+          if(!currentVersion)throw new Error('Current Y4E1 prepared pointer missing');
+          const currentEnvelope=await kvJson(readNs,versionKey(scope,currentVersion));
+          const current=currentEnvelope?.payload;
+          if(current?.kind!=='prepared-lesson-detail'||clean(current.lessonId)!==id)throw new Error('Current Y4E1 prepared lesson invalid');
+          const strip=p=>({schemaVersion:p.schemaVersion,kind:p.kind,lessonId:p.lessonId,title:p.title,description:p.description,videoVariants:p.videoVariants||null});
+          if(stableStringify(strip(current))!==stableStringify(strip(candidate)))throw new Error('Candidate would alter non-resource Y4E1 lesson fields');
+          const currentKeys=new Set((current.resources||[]).map(r=>clean(r.objectKey)).filter(Boolean));
+          const candidateKeys=new Set((candidate.resources||[]).map(r=>clean(r.objectKey)).filter(Boolean));
+          const added=(candidate.resources||[]).filter(r=>!currentKeys.has(clean(r.objectKey)));
+          const removed=(current.resources||[]).filter(r=>!candidateKeys.has(clean(r.objectKey)));
+          if(removed.length)throw new Error(`Candidate would remove resources:${JSON.stringify(removed.map(r=>r.objectKey))}`);
+          if(added.length!==1)throw new Error(`Expected exactly one prepared-model delta; found ${added.length}:${JSON.stringify(added.map(r=>r.objectKey))}`);
+          const delta=added[0];
+          if(clean(delta.objectKey)!==targetKey||delta.type!=='prelesson'||delta.presentationGroup!=='core-prelesson'||JSON.stringify(delta.presentationScopes)!==JSON.stringify(['core']))throw new Error(`Unexpected candidate delta:${JSON.stringify(delta)}`);
+          if(delta.protected===true)throw new Error('Core PreLesson must not be protected');
+
+          fs.writeFileSync('/tmp/y4e1-prelesson-object-key.txt',targetKey+'\n');
+          const report={marker:'Y4E1_PRELESSON_PRODUCTION_PREVIEW_PASS',observedAt:new Date().toISOString(),topology:{route:hostRoutes[0],browserWorker:browser,studentWorker:student,studentVersion,readModelsKvId:readNs,d1Id,r2Bucket},source:{lessonId:id,preLesson:{displayName:expectedName,objectKey:targetKey}},current:{version:currentVersion,resourceCount:(current.resources||[]).length,resources:(current.resources||[]).map(r=>({type:r.type,displayName:r.displayName,objectKey:r.objectKey,presentationGroup:r.presentationGroup,presentationScopes:r.presentationScopes}))},candidate:{resourceCount:(candidate.resources||[]).length,added:[{type:delta.type,displayName:delta.displayName,objectKey:delta.objectKey,presentationGroup:delta.presentationGroup,presentationScopes:delta.presentationScopes,protected:delta.protected===true}]}};
+          fs.writeFileSync('/tmp/y4e1-prelesson-production-preview.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report));
+          NODE
+      - name: Verify exact PreLesson object exists in production R2
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          object_key="$(cat /tmp/y4e1-prelesson-object-key.txt)"
+          test -n "$object_key"
+          npx --yes wrangler@latest r2 object get "${EXPECTED_R2_BUCKET}/${object_key}" --remote --pipe >/dev/null
+          echo 'Y4E1_PRELESSON_R2_OBJECT_EXISTS=true'
+      - name: Upload preview evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: y4e1-prelesson-production-preview
+          path: /tmp/y4e1-prelesson-production-preview.json
+          if-no-files-found: error
+          retention-days: 30
