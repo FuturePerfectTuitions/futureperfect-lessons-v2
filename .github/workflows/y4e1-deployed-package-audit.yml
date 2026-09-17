@@ -20,7 +20,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
     steps:
-      - name: Inspect current production deployment and compiled worker text without mutation
+      - name: Inspect current production deployment, package and Y4E1 record without mutation
         shell: bash
         run: |
           set -euo pipefail
@@ -32,8 +32,16 @@ jobs:
           echo '=== CURRENT DEPLOYMENT ==='
           jq '.result.deployments[0] | {id,created_on,source,annotations,versions}' <<<"$deployments"
 
-          curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}" \
-            -D /tmp/headers -o /tmp/package
+          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+          enc="$(python -c 'import urllib.parse; print(urllib.parse.quote("lesson:Y4E1",safe=""))')"
+          curl -fsS -H "$AUTH" "${BASE}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/y4e1.json
+          echo '=== CURRENT Y4E1 RECORD ==='
+          jq '{lessonId,topPreLessonSheets:.preLessonSheets,corePreLessonSheets:.core.preLessonSheets,homeworks:(.homeworks // .core.homeworks),vrPresent:(.vr!=null)}' /tmp/y4e1.json
+
+          curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}" -D /tmp/headers -o /tmp/package
           echo '=== PACKAGE ==='
           wc -c /tmp/package
           sha256sum /tmp/package
@@ -44,7 +52,6 @@ jobs:
           raw = Path('/tmp/package').read_bytes()
           text = raw.decode('utf-8', 'ignore')
           needles = {
-            'Y4E1_literal': 'Y4E1',
             'standard_prelesson_fallback': 'Array.isArray(core.preLessonSheets)',
             'standard_prelesson_payload': 'preLessonSheets: await Promise.all(packageData.preLessonSheets.map(safeFile))',
             'lessonCollections': 'function lessonCollections(record)',
@@ -54,11 +61,5 @@ jobs:
           for name, needle in needles.items():
             print(f'{name}={str(needle in text).lower()}')
           print('Y4E1_occurrences=', text.count('Y4E1'))
-          # Print bounded snippets only around renderer signatures, never secrets/bindings.
-          for needle in ['function lessonCollections(record)', 'preLessonSheets: await Promise.all(packageData.preLessonSheets.map(safeFile))']:
-            i = text.find(needle)
-            if i >= 0:
-              print('--- SNIPPET', needle)
-              print(text[max(0,i-500):i+1200])
           PY
-          echo 'DEPLOYED_PACKAGE_AUDIT_COMPLETE=true'
+          echo 'DEPLOYED_PACKAGE_AND_KV_AUDIT_COMPLETE=true'
