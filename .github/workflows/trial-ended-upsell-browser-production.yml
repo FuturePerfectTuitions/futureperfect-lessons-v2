@@ -1,0 +1,180 @@
+name: Trial ended upsell - guarded Browser production deploy
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/trial-ended-upsell-browser-production.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trial-ended-upsell-browser-production-2026-09-17
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  ADMIN_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  FRONTEND_REPO: https://github.com/FuturePerfectTuitions/futureperfect-lessons-test.git
+  FRONTEND_BASE_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  FRONTEND_CHANGE_SHA: 7f7e5eaad94d7023364c1f65ebc6d5179563ad85
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Materialise and verify exact frontend delta
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          rm -rf /tmp/fpt-frontend
+          git init -q /tmp/fpt-frontend
+          git -C /tmp/fpt-frontend remote add origin "$FRONTEND_REPO"
+          git -C /tmp/fpt-frontend fetch -q --depth=20 origin "$FRONTEND_BASE_SHA" "$FRONTEND_CHANGE_SHA"
+          git -C /tmp/fpt-frontend checkout -q "$FRONTEND_CHANGE_SHA"
+
+          mapfile -t CHANGED < <(git -C /tmp/fpt-frontend diff --name-only "$FRONTEND_BASE_SHA" "$FRONTEND_CHANGE_SHA")
+          test "${#CHANGED[@]}" = '1'
+          test "${CHANGED[0]}" = 'assets/phase19-access-ui.js'
+
+          node --check /tmp/fpt-frontend/assets/phase19-access-ui.js
+          grep -Fq 'Your Future Perfect trial has now ended.' /tmp/fpt-frontend/assets/phase19-access-ui.js
+          grep -Fq 'To continue accessing lessons and resources, please contact us to discuss the right programme for your child.' /tmp/fpt-frontend/assets/phase19-access-ui.js
+          grep -Fq "body?.error !== 'TRIAL_ACCESS_ENDED'" /tmp/fpt-frontend/assets/phase19-access-ui.js
+          grep -Fq 'phase19-trial-ended' /tmp/fpt-frontend/assets/phase19-access-ui.js
+
+          MAIN_SHA="$(curl --fail --silent --show-error -H 'User-Agent: fpt-trial-ended-deploy' https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-test/branches/main | jq -r '.commit.sha')"
+          test "$MAIN_SHA" = "$FRONTEND_BASE_SHA"
+
+          curl --fail --silent --show-error -H 'Cache-Control: no-cache' \
+            "https://${PROD_HOST}/assets/phase19-access-ui.js?preflight=20260917" -o /tmp/live-before-phase19.js
+          git -C /tmp/fpt-frontend show "$FRONTEND_BASE_SHA:assets/phase19-access-ui.js" > /tmp/canonical-before-phase19.js
+          cmp -s /tmp/live-before-phase19.js /tmp/canonical-before-phase19.js
+
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          rsync -a --delete --exclude='.git' --exclude='.github' /tmp/fpt-frontend/ rebuild/browser-staging/public/
+          cmp -s rebuild/browser-staging/public/assets/phase19-access-ui.js /tmp/fpt-frontend/assets/phase19-access-ui.js
+          echo FRONTEND_EXACT_DELTA_PASS
+
+      - name: Fresh production topology and rollback preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, admin=process.env.ADMIN_WORKER, host=process.env.PROD_HOST;
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const matches=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(matches.length!==1||String(matches[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||matches[0].script!==browser)throw new Error(`Public route drift: ${JSON.stringify(matches)}`);
+
+          const bs=await settings(browser);
+          const services=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].name!=='STAGING_API'||services[0].service!==student)throw new Error(`Browser service drift: ${JSON.stringify(services)}`);
+          if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Forbidden Browser Admin binding');
+
+          const before={
+            browserVersion:await active(browser),
+            studentVersion:await active(student),
+            adminVersion:await active(admin),
+            route:{pattern:matches[0].pattern,script:matches[0].script},
+            service:{name:services[0].name,service:services[0].service}
+          };
+          if(!before.browserVersion||!before.studentVersion||!before.adminVersion)throw new Error('Rollback/version anchors unresolved');
+          fs.writeFileSync('/tmp/trial-ended-before.json',JSON.stringify(before,null,2));
+
+          const toml=`name = "${browser}"\nmain = "src/index.js"\ncompatibility_date = "2026-08-20"\nworkers_dev = true\n\n[[services]]\nbinding = "STAGING_API"\nservice = "${student}"\n\n[assets]\ndirectory = "./public"\nbinding = "ASSETS"\nrun_worker_first = true\n`;
+          fs.writeFileSync('rebuild/browser-staging/wrangler.trial-ended-prod.toml',toml);
+          console.log(JSON.stringify({marker:'TRIAL_ENDED_BROWSER_PREFLIGHT_PASS',...before},null,2));
+          NODE
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/trial-ended-browser-dryrun --config rebuild/browser-staging/wrangler.trial-ended-prod.toml >/tmp/trial-ended-browser-dryrun.log
+          grep -R -Fq 'Your Future Perfect trial has now ended.' /tmp/trial-ended-browser-dryrun
+          grep -R -Fq 'phase19-trial-ended' /tmp/trial-ended-browser-dryrun
+
+      - name: Deploy Browser assets and verify with automatic rollback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_BROWSER="$(jq -r .browserVersion /tmp/trial-ended-before.json)"
+          DEPLOYED=0
+          rollback(){
+            rc=$?
+            set +e
+            if [ "$DEPLOYED" = '1' ]; then
+              echo "Rolling Browser Worker back to $OLD_BROWSER" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" rollback "$OLD_BROWSER" --name "$BROWSER_WORKER" --message 'Automatic rollback: Trial ended upsell verification failed'
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config rebuild/browser-staging/wrangler.trial-ended-prod.toml --message 'Friendly exhausted-Trial upsell message'
+          DEPLOYED=1
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const browser=process.env.BROWSER_WORKER,student=process.env.STUDENT_WORKER,admin=process.env.ADMIN_WORKER,host=process.env.PROD_HOST;
+          const before=JSON.parse(fs.readFileSync('/tmp/trial-ended-before.json','utf8'));
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const browserVersion=await active(browser),studentVersion=await active(student),adminVersion=await active(admin);
+          if(!browserVersion||browserVersion===before.browserVersion)throw new Error('Browser version did not advance');
+          if(studentVersion!==before.studentVersion)throw new Error('Student Worker changed unexpectedly');
+          if(adminVersion!==before.adminVersion)throw new Error('Admin Worker changed unexpectedly');
+          const bs=await settings(browser),services=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].name!=='STAGING_API'||services[0].service!==student)throw new Error('Browser Student service changed');
+          if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`)))throw new Error('Browser gained forbidden Admin binding');
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`),zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0],routes=await cf(`/zones/${zone.id}/workers/routes`),matches=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(matches.length!==1||matches[0].script!==browser)throw new Error('Public route changed');
+          fs.writeFileSync('/tmp/trial-ended-deploy.json',JSON.stringify({marker:'TRIAL_ENDED_BROWSER_DEPLOY_PASS',frontendSourceSha:process.env.FRONTEND_CHANGE_SHA,browser:{oldVersion:before.browserVersion,newVersion:browserVersion},studentVersion,adminVersion,topology:{route:matches[0],service:{name:services[0].name,service:services[0].service}}},null,2));
+          NODE
+
+          sleep 3
+          curl --fail --silent --show-error -H 'Cache-Control: no-cache' \
+            "https://${PROD_HOST}/assets/phase19-access-ui.js?v=20260909-l3-stable-core-1" -o /tmp/live-after-phase19.js
+          cmp -s /tmp/live-after-phase19.js /tmp/fpt-frontend/assets/phase19-access-ui.js
+          grep -Fq 'Your Future Perfect trial has now ended.' /tmp/live-after-phase19.js
+          grep -Fq 'To continue accessing lessons and resources, please contact us to discuss the right programme for your child.' /tmp/live-after-phase19.js
+          grep -Fq 'phase19-trial-ended' /tmp/live-after-phase19.js
+          jq -e '.marker=="TRIAL_ENDED_BROWSER_DEPLOY_PASS"' /tmp/trial-ended-deploy.json >/dev/null
+          cat /tmp/trial-ended-deploy.json
+          trap - ERR
+
+      - name: Upload redacted deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: trial-ended-upsell-browser-production-evidence
+          path: /tmp/trial-ended-deploy.json
+          retention-days: 14
+          if-no-files-found: error
