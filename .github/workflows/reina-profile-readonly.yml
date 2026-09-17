@@ -1,0 +1,54 @@
+name: Reina profile read-only audit
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/reina-profile-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Locate matching student profile and print only non-secret access fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
+          ns="$(jq -r '.result.bindings[]? | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+
+          cursor=''
+          found=0
+          while :; do
+            url="${BASE}/storage/kv/namespaces/${ns}/keys?limit=1000&prefix=user%3A"
+            if [ -n "$cursor" ]; then url="${url}&cursor=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$cursor")"; fi
+            page="$(curl -fsS -H "$AUTH" "$url")"
+            jq -e '.success == true' <<<"$page" >/dev/null
+            while IFS= read -r key; do
+              [ -n "$key" ] || continue
+              enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
+              curl -fsS -H "$AUTH" "${BASE}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/profile.json || continue
+              match="$(jq -r '[(.firstName // ""),(.name // "")] | map(ascii_downcase) | any(. == "reina")' /tmp/profile.json 2>/dev/null || echo false)"
+              if [ "$match" = true ]; then
+                found=$((found+1))
+                echo "MATCH_KEY=${key}"
+                jq '{firstName,name,status,schoolYear,vrEligible,batches,fullLibraries,trialViews,manualAccess,mathsYears,vrBuckets,entitlements,expires,upsellViews}' /tmp/profile.json
+              fi
+            done < <(jq -r '.result[]?.name' <<<"$page")
+            cursor="$(jq -r '.result_info.cursor // ""' <<<"$page")"
+            [ -n "$cursor" ] || break
+          done
+          echo "MATCH_COUNT=${found}"
+          echo 'READ_ONLY_COMPLETE=true'
