@@ -1,4 +1,4 @@
-name: Y4E1 PreLesson record read-only audit
+name: Y4E1 deployed renderer read-only audit
 
 on:
   push:
@@ -18,21 +18,28 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      LESSON_ID: Y4E1
     steps:
-      - name: Inspect production Y4E1 lesson record without mutation
+      - name: Inspect deployed Worker source without mutation
         shell: bash
         run: |
           set -euo pipefail
           BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          settings="$(curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/settings")"
-          jq -e '.success == true' <<<"$settings" >/dev/null
-          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
-          test -n "$ns"; test "$ns" != null
-          key="lesson:${LESSON_ID}"
-          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
-          curl -fsS -H "$AUTH" "${BASE}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/lesson.json
-          echo '=== Y4E1 PRELESSON SHAPE ==='
-          jq '{lessonId, topPreLessonPresent:has("preLessonSheets"), topPreLessonLength:(.preLessonSheets|if type=="array" then length else null end), topPreLessonSheets:.preLessonSheets, corePreLessonPresent:(.core|type=="object" and has("preLessonSheets")), corePreLessonLength:(.core.preLessonSheets|if type=="array" then length else null end), corePreLessonSheets:.core.preLessonSheets, topHomeworkLength:(.homeworks|if type=="array" then length else null end), coreHomeworkLength:(.core.homeworks|if type=="array" then length else null end)}' /tmp/lesson.json
+          curl -fsS -H "$AUTH" "${BASE}/workers/scripts/${WORKER_NAME}/content" -o /tmp/worker-content
+          echo '=== DEPLOYED CONTENT SIZE ==='
+          wc -c /tmp/worker-content
+          echo '=== CORE PRELESSON FALLBACK SIGNATURES ==='
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('/tmp/worker-content').read_text('utf-8', errors='ignore')
+          checks = {
+              'lessonCollections': 'function lessonCollections(record)' in text,
+              'corePreLessonFallback': 'Array.isArray(core.preLessonSheets)' in text,
+              'safeLessonModel': 'async function safeLessonModel' in text,
+              'renderPreLessonPayload': 'preLessonSheets: await Promise.all(packageData.preLessonSheets.map(safeFile))' in text,
+              'step10Bridge': "import currentWorker from './index-admin-tools.js'" in text or '/api/v1/student/quiz/eligibility' in text,
+          }
+          for key, value in checks.items():
+              print(f'{key}={str(value).lower()}')
+          PY
           echo 'READ_ONLY_COMPLETE=true'
