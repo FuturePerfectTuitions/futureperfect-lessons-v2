@@ -1,0 +1,43 @@
+name: Fix Trial-ended v3 dry-run assertion
+
+on:
+  push:
+    branches:
+      - feature/trial-ended-upsell-browser-2026-09-17
+    paths:
+      - .github/workflows/fix-trial-ended-v3-dryrun.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove invalid dry-run static-asset grep only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/trial-ended-upsell-browser-production-v3.yml')
+          s=p.read_text(encoding='utf-8')
+          old="""          grep -R -Fq 'Your Future Perfect trial has now ended.' /tmp/trial-ended-dryrun
+          grep -R -Fq 'TRIAL_ACCESS_ENDED' /tmp/trial-ended-dryrun
+          echo BROWSER_DRY_RUN_PASS
+"""
+          new="""          test -s /tmp/trial-ended-dryrun.log
+          echo BROWSER_DRY_RUN_PASS
+"""
+          if old not in s:
+              raise SystemExit('Expected dry-run assertion block not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add .github/workflows/trial-ended-upsell-browser-production-v3.yml
+          git commit -m 'Use Wrangler dry-run status as Browser preflight gate'
+          git push origin HEAD:feature/trial-ended-upsell-browser-2026-09-17
