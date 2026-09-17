@@ -1,0 +1,20 @@
+name = "futureperfect-11plus-practice-step10-preview"
+main = "src/index.js"
+compatibility_date = "2026-09-17"
+keep_vars = true
+
+[vars]
+ENVIRONMENT = "preview"
+PORTAL_BRIDGE_URL = "https://fpt-portal-v2-worker.futureperfectlessons.workers.dev"
+PORTAL_LOGIN_URL = "https://lessons.futureperfect.education/"
+QUIZ_ORIGIN = "https://quiz.futureperfect.education"
+QUIZ_SESSION_TTL_SECONDS = "21600"
+LAUNCH_REDEEM_TIMEOUT_MS = "5000"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fpt-11plus-practice"
+database_id = "5b988d3d-341a-492d-8e40-8d4efa66150e"
+
+# Gate C recovery-only staging config. Never contains QUIZ_BRIDGE_SECRET.
+# Promotion uses Worker Versions; triggers/custom hostname are not modified.
