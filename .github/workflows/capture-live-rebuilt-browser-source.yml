@@ -1,0 +1,145 @@
+name: Capture live rebuilt Browser UI source
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/capture-live-rebuilt-browser-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Capture exact source from live production sourcemaps
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          HOST='https://lessons.futureperfect.education'
+          OUT='rebuild/browser-ui'
+          rm -rf "$OUT"
+          mkdir -p "$OUT/src"
+
+          curl --fail --silent --show-error "$HOST/" -o "$OUT/live-index.html"
+          JSREF="$(grep -oE '\./assets/portal-[A-Za-z0-9_-]+\.js' "$OUT/live-index.html" | head -n1)"
+          CSSREF="$(grep -oE '\./assets/portal-[A-Za-z0-9_-]+\.css' "$OUT/live-index.html" | head -n1)"
+          test -n "$JSREF"
+          test -n "$CSSREF"
+          JSNAME="${JSREF##*/}"
+          CSSNAME="${CSSREF##*/}"
+
+          curl --fail --silent --show-error "$HOST/${JSREF#./}" -o "/tmp/$JSNAME"
+          curl --fail --silent --show-error "$HOST/${JSREF#./}.map" -o /tmp/portal.js.map
+          curl --fail --silent --show-error "$HOST/${CSSREF#./}" -o "/tmp/$CSSNAME"
+          CSS_MAP_HTTP="$(curl --silent --show-error -o /tmp/portal.css.map -w '%{http_code}' "$HOST/${CSSREF#./}.map")"
+
+          python3 - <<'PY'
+          import json, pathlib, os
+          out=pathlib.Path('rebuild/browser-ui')
+          data=json.load(open('/tmp/portal.js.map',encoding='utf-8'))
+          sources=data.get('sources') or []
+          contents=data.get('sourcesContent') or []
+          matched=[]
+          for src,content in zip(sources,contents):
+              if not content:
+                  continue
+              name=pathlib.PurePosixPath(src).name
+              if name=='app.js':
+                  (out/'src'/'app.js').write_text(content,encoding='utf-8')
+                  matched.append(src)
+          if not (out/'src'/'app.js').exists():
+              raise SystemExit(f'app.js not found in JS sourcemap: {sources}')
+          meta={
+              'capturedFrom':'https://lessons.futureperfect.education',
+              'jsRef':os.environ.get('JSREF',''),
+              'cssRef':os.environ.get('CSSREF',''),
+              'jsSourcemapSources':sources,
+              'appSourceMatch':matched,
+          }
+          (out/'LIVE_SOURCE_CAPTURE.json').write_text(json.dumps(meta,indent=2)+'\n',encoding='utf-8')
+          PY
+
+          if [ "$CSS_MAP_HTTP" = '200' ]; then
+            python3 - <<'PY'
+          import json, pathlib
+          out=pathlib.Path('rebuild/browser-ui')
+          data=json.load(open('/tmp/portal.css.map',encoding='utf-8'))
+          sources=data.get('sources') or []
+          contents=data.get('sourcesContent') or []
+          chosen=None
+          for src,content in zip(sources,contents):
+              if content and pathlib.PurePosixPath(src).suffix=='.css':
+                  chosen=(src,content)
+                  break
+          if chosen:
+              (out/'src'/'styles.css').write_text(chosen[1],encoding='utf-8')
+          PY
+          fi
+
+          if [ ! -f "$OUT/src/styles.css" ]; then
+            cp "/tmp/$CSSNAME" "$OUT/src/styles.css"
+          fi
+
+          cp "$OUT/live-index.html" "$OUT/index.html"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('rebuild/browser-ui/index.html')
+          text=p.read_text(encoding='utf-8')
+          import re
+          text=re.sub(r'<script[^>]+src="\./assets/portal-[^"]+\.js"[^>]*></script>', '<script type="module" src="/src/app.js"></script>', text)
+          text=re.sub(r'<link[^>]+href="\./assets/portal-[^"]+\.css"[^>]*>', '', text)
+          p.write_text(text,encoding='utf-8')
+          PY
+
+          # The recovered app is plain browser JavaScript. Vite is used only to
+          # reproduce the same hashed-asset production packaging and sourcemaps.
+          cat > "$OUT/package.json" <<'JSON'
+          {
+            "name": "fpt-portal-v2-rebuilt-browser-ui",
+            "private": true,
+            "version": "1.0.0",
+            "type": "module",
+            "scripts": {"build":"vite build"},
+            "devDependencies": {"vite":"7.1.5"}
+          }
+          JSON
+          cat > "$OUT/vite.config.js" <<'JS'
+          import { defineConfig } from 'vite';
+          export default defineConfig({
+            build: { sourcemap: true },
+          });
+          JS
+
+          # Ensure styles load from the recovered source exactly once.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('rebuild/browser-ui/src/app.js')
+          s=p.read_text(encoding='utf-8')
+          if "import './styles.css';" not in s:
+              s="import './styles.css';\n"+s
+          p.write_text(s,encoding='utf-8')
+          PY
+
+          grep -Fq 'This part of the portal could not be loaded. Please try again.' "$OUT/src/app.js"
+          grep -Fq 'function friendlyError' "$OUT/src/app.js"
+          echo "LIVE_JS_SHA256=$(sha256sum "/tmp/$JSNAME" | awk '{print $1}')" >> "$OUT/LIVE_SOURCE_CAPTURE.txt"
+          echo "LIVE_CSS_SHA256=$(sha256sum "/tmp/$CSSNAME" | awk '{print $1}')" >> "$OUT/LIVE_SOURCE_CAPTURE.txt"
+          echo "LIVE_JS_REF=$JSREF" >> "$OUT/LIVE_SOURCE_CAPTURE.txt"
+          echo "LIVE_CSS_REF=$CSSREF" >> "$OUT/LIVE_SOURCE_CAPTURE.txt"
+
+      - name: Commit recovered source to feature branch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add rebuild/browser-ui
+          git diff --cached --quiet && exit 0
+          git commit -m 'Capture exact live rebuilt Browser UI source authority'
+          git push origin HEAD:feature/trial-ended-upsell-browser-2026-09-17
