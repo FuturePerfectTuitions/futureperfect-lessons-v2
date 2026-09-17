@@ -1,0 +1,84 @@
+name: Ops Y5E2 VR homework replacement close
+
+on:
+  push:
+    branches:
+      - ops/y5e2-vr-homework-replace-2026-09-17
+    paths:
+      - '.github/workflows/ops-y5e2-vr-homework-replacement-close.yml'
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  AUTHORITY_BRANCH: fix/importer-publish-email-per-lesson-2026-09-16
+  AUTHORITY_SHA: 53c80f1ba68caabeb0da272c647b3dc1fbe48b0f
+  LESSONS_KV: 49619b1a24b244bc8aaa6223fcd24e80
+  READ_MODELS_KV: 77b35165c8694087bc1b0515c35a7e89
+  MATERIALS_R2: fpt-materials-dev
+  OLD_NAME: FAR210225Y5T1EE01VRH01.pdf
+  OLD_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01.pdf
+  NEW_NAME: FAR210225Y5E2.pdf
+  NEW_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf
+  NEW_SIZE: '236797'
+  NEW_SHA256: 86288e1f40ef8b012ad791fc3be70026cd3d274c8a586e0188ca51867c1fdbd5
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Global current-reference audit before deletion
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git ls-remote origin "refs/heads/${AUTHORITY_BRANCH}" | awk '{print $1}')" = "$AUTHORITY_SHA"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { pointerKey, versionKey } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const c=v=>String(v??'').trim(),account=c(process.env.CLOUDFLARE_ACCOUNT_ID),token=c(process.env.CLOUDFLARE_API_TOKEN),lessons=c(process.env.LESSONS_KV),read=c(process.env.READ_MODELS_KV),oldName=c(process.env.OLD_NAME),oldKey=c(process.env.OLD_KEY),newName=c(process.env.NEW_NAME),newKey=c(process.env.NEW_KEY),base='https://api.cloudflare.com/client/v4',H={Authorization:`Bearer ${token}`};
+          async function req(path){const r=await fetch(`${base}${path}`,{headers:H}),text=await r.text();let body=null;try{body=JSON.parse(text)}catch{}return{r,text,body}}async function val(ns,key){const x=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);if(!x.r.ok)throw new Error(`KV value ${x.r.status}:${key}`);return x.text}async function list(ns,prefix){let cursor='',out=[];do{const q=new URLSearchParams({limit:'1000',prefix});if(cursor)q.set('cursor',cursor);const x=await req(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);if(!x.r.ok||x.body?.success!==true)throw new Error(`KV list ${x.r.status}:${prefix}`);out.push(...(x.body.result||[]).map(x=>x.name));cursor=c(x.body.result_info?.cursor)}while(cursor);return out}async function mapLimit(items,n,fn){const out=[];let i=0;async function worker(){while(i<items.length){const j=i++;out[j]=await fn(items[j],j)}}await Promise.all(Array.from({length:Math.min(n,items.length||1)},worker));return out}
+          const lessonKeys=await list(lessons,'lesson:');const sourceRows=await mapLimit(lessonKeys,20,async key=>({key,text:await val(lessons,key)}));const oldSource=sourceRows.filter(x=>x.text.includes(oldKey)||x.text.includes(oldName)).map(x=>x.key),newSource=sourceRows.filter(x=>x.text.includes(newKey)||x.text.includes(newName)).map(x=>x.key);if(oldSource.length)throw new Error(`Old source refs remain:${JSON.stringify(oldSource)}`);if(newSource.length!==1||newSource[0]!=='lesson:Y5E2')throw new Error(`Unexpected new source refs:${JSON.stringify(newSource)}`);
+          const pointerKeys=(await list(read,'rm:v1:scope:lesson_3A')).filter(k=>k.endsWith(':current'));const pointerRows=await mapLimit(pointerKeys,20,async key=>({key,p:JSON.parse(await val(read,key))}));const currentEnvelopes=await mapLimit(pointerRows,20,async row=>{const scope=c(row.p?.scope);const ver=c(row.p?.current?.version);if(!scope.startsWith('lesson:')||!ver)throw new Error(`Invalid lesson pointer:${row.key}`);return{scope,version:ver,text:await val(read,versionKey(scope,ver))}});const oldPrepared=currentEnvelopes.filter(x=>x.text.includes(oldKey)||x.text.includes(oldName)).map(x=>x.scope),newPrepared=currentEnvelopes.filter(x=>x.text.includes(newKey)||x.text.includes(newName)).map(x=>x.scope);if(oldPrepared.length)throw new Error(`Old current prepared refs remain:${JSON.stringify(oldPrepared)}`);if(newPrepared.length!==1||newPrepared[0]!=='lesson:Y5E2')throw new Error(`Unexpected new current prepared refs:${JSON.stringify(newPrepared)}`);
+          const y5p=JSON.parse(await val(read,pointerKey('lesson:Y5E2'))),y5e=JSON.parse(await val(read,versionKey('lesson:Y5E2',y5p.current.version))),rows=y5e?.payload?.resources||[];if(rows.filter(r=>c(r.objectKey)===newKey&&c(r.displayName)===newName&&r.type==='homework'&&JSON.stringify(r.presentationScopes)===JSON.stringify(['vr'])).length!==1||rows.some(r=>c(r.objectKey)===oldKey||c(r.displayName)===oldName))throw new Error('Y5E2 current row closure check failed');
+          const report={marker:'Y5E2_VR_HOMEWORK_REPLACEMENT_GLOBAL_AUDIT_PASS',observedAt:new Date().toISOString(),sourceLessonsScanned:lessonKeys.length,currentLessonModelsScanned:pointerKeys.length,oldSourceReferences:0,oldCurrentPreparedReferences:0,newSourceReferences:newSource,newCurrentPreparedReferences:newPrepared,y5e2CurrentVersion:c(y5p.current.version)};fs.writeFileSync('/tmp/global-audit.json',JSON.stringify(report,null,2)+'\n');console.log('GLOBAL_AUDIT='+JSON.stringify(report));
+          NODE
+      - name: Verify new object, delete obsolete object, verify closure
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@4.125.0 r2 object get "${MATERIALS_R2}/${NEW_KEY}" --file /tmp/new-final.pdf --remote >/dev/null
+          test "$(stat -c '%s' /tmp/new-final.pdf)" = "$NEW_SIZE"
+          test "$(sha256sum /tmp/new-final.pdf | awk '{print $1}')" = "$NEW_SHA256"
+          npx --yes wrangler@4.125.0 r2 object get "${MATERIALS_R2}/${OLD_KEY}" --file /tmp/old-before-delete.pdf --remote >/dev/null
+          npx --yes wrangler@4.125.0 r2 object delete "${MATERIALS_R2}/${OLD_KEY}" --remote
+          rm -f /tmp/old-after-delete.pdf
+          set +e
+          npx --yes wrangler@4.125.0 r2 object get "${MATERIALS_R2}/${OLD_KEY}" --file /tmp/old-after-delete.pdf --remote >/tmp/old-get.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          test ! -s /tmp/old-after-delete.pdf
+          npx --yes wrangler@4.125.0 r2 object get "${MATERIALS_R2}/${NEW_KEY}" --file /tmp/new-after-delete.pdf --remote >/dev/null
+          test "$(stat -c '%s' /tmp/new-after-delete.pdf)" = "$NEW_SIZE"
+          test "$(sha256sum /tmp/new-after-delete.pdf | awk '{print $1}')" = "$NEW_SHA256"
+          python3 - <<'PY'
+          import json,os
+          p='/tmp/global-audit.json'; d=json.load(open(p)); d.update({'marker':'Y5E2_VR_HOMEWORK_REPLACEMENT_CLOSED_PASS','obsoleteR2Deleted':True,'newR2RetainedAndHashVerified':True,'newR2Key':os.environ['NEW_KEY'],'newSha256':os.environ['NEW_SHA256'],'newSize':int(os.environ['NEW_SIZE'])}); open('/tmp/closure.json','w').write(json.dumps(d,indent=2)+'\n')
+          PY
+      - name: Upload closure evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: y5e2-vr-homework-replacement-closure
+          path: |
+            /tmp/global-audit.json
+            /tmp/closure.json
+          retention-days: 30
