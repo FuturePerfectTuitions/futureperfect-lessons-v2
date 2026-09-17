@@ -1,0 +1,34 @@
+name: Trial ended upsell - source locator
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/trial-ended-source-locator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Locate exact source in repository
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo 'APP_JS_CANDIDATES_BEGIN'
+          find . -type f -path '*/src/app.js' -print | sort
+          echo 'APP_JS_CANDIDATES_END'
+          echo 'GENERIC_ERROR_MATCHES_BEGIN'
+          grep -R -n -F --exclude='*.map' --exclude-dir=.git 'This part of the portal could not be loaded. Please try again.' . || true
+          echo 'GENERIC_ERROR_MATCHES_END'
+          echo 'VITE_PACKAGE_CANDIDATES_BEGIN'
+          find . -type f -name package.json -print | sort | while read -r f; do
+            if grep -q 'vite' "$f"; then echo "$f"; fi
+          done
+          echo 'VITE_PACKAGE_CANDIDATES_END'
