@@ -44,6 +44,7 @@ assert.match(trialVr, /vrhomework/);
 assert.match(trialVr, /vrprevideo/);
 assert.match(trialVr, /vrhomeworkvideo/);
 assert.match(trialVr, /vrSupplementary/);
+assert.doesNotMatch(trialVr, /PROVISION_PATH|provisionTrialEva|__ops\/provision-trialeva/);
 
 assert.match(frontend, /Number\(delay\) === 30000/);
 assert.match(frontend, /status=1/);
