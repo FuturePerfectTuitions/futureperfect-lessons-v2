@@ -1,0 +1,213 @@
+name: Trial ended upsell - guarded Browser production v3
+
+on:
+  push:
+    branches:
+      - feature/trial-ended-upsell-browser-2026-09-17
+    paths:
+      - .github/workflows/trial-ended-upsell-browser-production-v3.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trial-ended-upsell-browser-production-v3
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  ADMIN_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  deploy-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build rebuilt Browser UI and preserve exact live protected-viewer assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f rebuild/browser-ui/src/app.js
+          grep -Fq 'Your Future Perfect trial has now ended.' rebuild/browser-ui/src/app.js
+          grep -Fq 'TRIAL_ACCESS_ENDED' rebuild/browser-ui/src/app.js
+
+          cd rebuild/browser-ui
+          npm ci --no-audit --no-fund
+          npm run build
+
+          bundle=$(find dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*.map' | head -n1)
+          style=$(find dist/assets -maxdepth 1 -type f -name 'portal-*.css' ! -name '*.map' | head -n1)
+          test -n "$bundle"; test -n "$style"
+          grep -Fq 'Your Future Perfect trial has now ended.' "$bundle"
+          grep -Fq 'right programme for your child.' "$bundle"
+          grep -Fq 'This part of the portal could not be loaded. Please try again.' "$bundle"
+          grep -Fq 'TRIAL_ACCESS_ENDED' "$bundle"
+          grep -Fq 'eef8f3' "$style"
+          grep -Fq 'protected-viewer.js' "$bundle"
+
+          curl --fail --silent --show-error \
+            https://lessons.futureperfect.education/assets/portal-protected-viewer-MQIf8meW.js \
+            -o dist/assets/protected-viewer.js
+          test -s dist/assets/protected-viewer.js
+          grep -Fq 'pdf.worker-BQQyum15.mjs' dist/assets/protected-viewer.js
+
+          curl --fail --silent --show-error \
+            https://lessons.futureperfect.education/assets/pdf.worker-BQQyum15.mjs \
+            -o dist/assets/pdf.worker-BQQyum15.mjs
+          test -s dist/assets/pdf.worker-BQQyum15.mjs
+          echo BROWSER_UI_BUILD_PASS
+
+      - name: Fresh Cloudflare topology and rollback preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, admin=process.env.ADMIN_WORKER, host=process.env.PROD_HOST;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||[])}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const matches=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(matches.length!==1 || String(matches[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*` || matches[0].script!==browser) throw new Error(`Public route drift: ${JSON.stringify(matches)}`);
+
+          const bs=await settings(browser), services=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1 || services[0].name!=='STAGING_API' || services[0].service!==student) throw new Error(`Browser service drift: ${JSON.stringify(services)}`);
+          if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`))) throw new Error('Forbidden Browser Admin binding');
+
+          const before={
+            browserVersion:await active(browser),
+            studentVersion:await active(student),
+            adminVersion:await active(admin),
+            route:{pattern:matches[0].pattern,script:matches[0].script},
+            service:{name:services[0].name,service:services[0].service}
+          };
+          if(!before.browserVersion||!before.studentVersion||!before.adminVersion) throw new Error('Version anchor unresolved');
+          fs.writeFileSync('/tmp/trial-ended-before.json',JSON.stringify(before,null,2));
+          console.log(JSON.stringify({marker:'TRIAL_ENDED_BROWSER_PREFLIGHT_PASS',...before},null,2));
+          NODE
+
+          cat > rebuild/browser-staging/wrangler.trial-ended-prod.toml <<'TOML'
+          name = "fpt-portal-v2-rebuild-browser-prod"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [[services]]
+          binding = "STAGING_API"
+          service = "fpt-portal-v2-rebuild-student-prod"
+
+          [assets]
+          directory = "../browser-ui/dist"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/trial-ended-dryrun --config rebuild/browser-staging/wrangler.trial-ended-prod.toml >/tmp/trial-ended-dryrun.log
+          grep -R -Fq 'Your Future Perfect trial has now ended.' /tmp/trial-ended-dryrun
+          grep -R -Fq 'TRIAL_ACCESS_ENDED' /tmp/trial-ended-dryrun
+          echo BROWSER_DRY_RUN_PASS
+
+      - name: Deploy Browser only and verify live
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_BROWSER=$(jq -r .browserVersion /tmp/trial-ended-before.json)
+          DEPLOYED=0
+          rollback(){
+            rc=$?
+            set +e
+            if [ "$DEPLOYED" = '1' ]; then
+              npx --yes wrangler@"$WRANGLER_VERSION" rollback "$OLD_BROWSER" --name "$BROWSER_WORKER" --message 'Automatic rollback: Trial ended Browser UX gate failed'
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config rebuild/browser-staging/wrangler.trial-ended-prod.toml --message 'Friendly exhausted-Trial informational message'
+          DEPLOYED=1
+          sleep 4
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const browser=process.env.BROWSER_WORKER, student=process.env.STUDENT_WORKER, admin=process.env.ADMIN_WORKER, host=process.env.PROD_HOST;
+          const before=JSON.parse(fs.readFileSync('/tmp/trial-ended-before.json','utf8'));
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+
+          const browserVersion=await active(browser), studentVersion=await active(student), adminVersion=await active(admin);
+          if(!browserVersion||browserVersion===before.browserVersion) throw new Error('Browser version did not advance');
+          if(studentVersion!==before.studentVersion) throw new Error('Student Worker changed unexpectedly');
+          if(adminVersion!==before.adminVersion) throw new Error('Admin Worker changed unexpectedly');
+
+          const bs=await settings(browser), services=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].name!=='STAGING_API'||services[0].service!==student) throw new Error('Browser service changed');
+          if((bs.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`))) throw new Error('Browser gained Admin binding');
+
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const matches=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(matches.length!==1||matches[0].script!==browser) throw new Error('Public route changed');
+
+          fs.writeFileSync('/tmp/trial-ended-deploy.json',JSON.stringify({
+            marker:'TRIAL_ENDED_BROWSER_PRODUCTION_PASS',
+            sourceSha:process.env.GITHUB_SHA,
+            browser:{oldVersion:before.browserVersion,newVersion:browserVersion},
+            studentVersion,
+            adminVersion,
+            topology:{route:matches[0],service:{name:services[0].name,service:services[0].service}}
+          },null,2));
+          NODE
+
+          curl --fail --silent --show-error -H 'Cache-Control: no-cache' "https://${PROD_HOST}/?trial-ended-check=20260917v3" -o /tmp/live-index.html
+          JSREF=$(grep -oE '\./assets/portal-[A-Za-z0-9_-]+\.js' /tmp/live-index.html | head -n1)
+          CSSREF=$(grep -oE '\./assets/portal-[A-Za-z0-9_-]+\.css' /tmp/live-index.html | head -n1)
+          test -n "$JSREF"; test -n "$CSSREF"
+
+          curl --fail --silent --show-error "https://${PROD_HOST}/${JSREF#./}?v=20260917v3" -o /tmp/live-main.js
+          curl --fail --silent --show-error "https://${PROD_HOST}/${CSSREF#./}?v=20260917v3" -o /tmp/live-main.css
+          grep -Fq 'Your Future Perfect trial has now ended.' /tmp/live-main.js
+          grep -Fq 'right programme for your child.' /tmp/live-main.js
+          grep -Fq 'This part of the portal could not be loaded. Please try again.' /tmp/live-main.js
+          grep -Fq 'TRIAL_ACCESS_ENDED' /tmp/live-main.js
+          grep -Fq 'eef8f3' /tmp/live-main.css
+
+          curl --fail --silent --show-error "https://${PROD_HOST}/assets/protected-viewer.js?v=20260917v3" -o /tmp/live-viewer.js
+          curl --fail --silent --show-error "https://${PROD_HOST}/assets/pdf.worker-BQQyum15.mjs?v=20260917v3" -o /tmp/live-pdf-worker.mjs
+          test -s /tmp/live-viewer.js
+          test -s /tmp/live-pdf-worker.mjs
+          grep -Fq 'pdf.worker-BQQyum15.mjs' /tmp/live-viewer.js
+
+          jq -e '.marker=="TRIAL_ENDED_BROWSER_PRODUCTION_PASS"' /tmp/trial-ended-deploy.json >/dev/null
+          cat /tmp/trial-ended-deploy.json
+          trap - ERR
+
+      - name: Upload redacted evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: trial-ended-upsell-browser-production-evidence-v3
+          path: /tmp/trial-ended-deploy.json
+          retention-days: 14
+          if-no-files-found: error
