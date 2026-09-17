@@ -74,7 +74,9 @@
   }
 
   function selectedResource() {
-    const index = Number($('replaceResourceSelect').value);
+    const raw = $('replaceResourceSelect').value;
+    if (raw === '') return null;
+    const index = Number(raw);
     return Number.isInteger(index) && index >= 0 ? resources[index] || null : null;
   }
 
@@ -193,13 +195,13 @@
       form.append('expectedR2Key', resource.r2Key);
       form.append('file', file, file.name);
       const data = await formApi('/api/v1/admin/resources/replace', form);
+      $('replacementFile').value = '';
+      await loadLesson(resource.resourceId);
       setStatus(
         `Replacement published for ${data.lessonId}: ${data.displayName || resource.displayName}. ` +
         `The uploaded PDF was hash-verified in R2; the previous object remains available for rollback.`,
         'good'
       );
-      $('replacementFile').value = '';
-      await loadLesson(resource.resourceId);
     } catch (error) {
       if (error.code === 'RESOURCE_CHANGED') {
         setStatus('This resource changed after you loaded the lesson. Reload the lesson and check the current resource before trying again.', 'bad');
