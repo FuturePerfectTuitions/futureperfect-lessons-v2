@@ -1,0 +1,37 @@
+name: Step 10 Gate C failure diagnostic
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe deployed hidden bridge and Quiz handshake without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          PORTAL='https://lessons.futureperfect.education'
+          ORIGIN='https://lessons.futureperfect.education'
+          probe() {
+            label="$1"; shift
+            code="$(curl --silent --show-error --max-redirs 0 --dump-header "/tmp/${label}.headers" --output "/tmp/${label}.body" --write-out '%{http_code}' "$@" || true)"
+            echo "${label}_HTTP=${code}"
+            echo "${label}_BODY_BEGIN"
+            head -c 1000 "/tmp/${label}.body" || true
+            echo
+            echo "${label}_BODY_END"
+          }
+          probe eligibility --header "Origin: $ORIGIN" "$BASE/api/v1/student/quiz/eligibility"
+          probe launch --request POST --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --data '{}' "$BASE/api/v1/student/quiz/launch"
+          probe redeem_workers --request POST --header 'Content-Type: application/json' --data '{"code":"gate-c-public-unauthorised-probe"}' "$BASE/api/v1/quiz-bridge/redeem"
+          probe redeem_portal --request POST --header 'Content-Type: application/json' --data '{"code":"gate-c-public-unauthorised-probe"}' "$PORTAL/api/v1/quiz-bridge/redeem"
+          probe quiz_invalid 'https://quiz.futureperfect.education/launch?code=gate-c-invalid-shared-secret-probe'
+          echo 'STEP10_GATE_C_DIAGNOSTIC_COMPLETE'
