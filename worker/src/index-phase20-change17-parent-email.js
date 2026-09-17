@@ -1,5 +1,6 @@
 import fastNavigationWorker from './index-phase20-change17.js';
 import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-manual-email.js';
+import { handleAdminTrialManager } from './admin-trial-manager.js';
 import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
 import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
 
@@ -49,19 +50,20 @@ function envWithPermanentParentEmailBcc(env) {
   });
 }
 
-// Parent transactional email remains the outermost production layer. Student
-// requests now pass through the lightweight Change 17 navigation wrapper before
-// the existing Change 16 access-control chain. The fast navigation endpoint does
-// not weaken lesson/resource gates; all non-navigation requests delegate through
-// the established Worker exactly as before.
-// Student catalogue-list responses are repaired last so stale bundled catalogue
-// overlays cannot re-introduce retired lessons or shift live Drive/KV display IDs.
+// Parent transactional email remains the outermost production layer. Authenticated
+// Admin Trial operations are handled here before lesson-release import processing,
+// so creating/re-arming a Trial is an immediate KV/D1 operation and never needs a
+// deployment. Student requests then pass through the established navigation and
+// access-control chain unchanged.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === EMAIL_SIGNATURE_PATH && (request.method === 'GET' || request.method === 'HEAD')) {
       return emailSignatureResponse(request);
     }
+
+    const trialAdminResponse = await handleAdminTrialManager(request, env);
+    if (trialAdminResponse) return trialAdminResponse;
 
     const adminResponse = await handleAdminLessonReleaseImport(request, envWithPermanentParentEmailBcc(env));
     if (adminResponse) return adminResponse;
