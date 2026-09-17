@@ -1,0 +1,115 @@
+name: Step 10 Gate C final acceptance
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+    paths:
+      - .github/workflows/step10-gate-c-final-acceptance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PORTAL_WORKER: fpt-portal-v2-worker
+      PORTAL_VERSION: aed647e8-1798-4271-babc-0147a5c16cf2
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+      QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+      EXPECTED_BRIDGE_URL: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      WRANGLER_VERSION: 4.134.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify final Portal and Quiz Worker identities and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${PORTAL_WORKER}/settings" -H "$AUTH" -o /tmp/portal-settings.json
+          jq -e '.success == true' /tmp/portal-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/portal-settings.json >/dev/null
+          jq -e --arg id "$PORTAL_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/portal-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/portal-settings.json >/dev/null
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings.json
+          jq -e '.success == true' /tmp/quiz-settings.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings.json >/dev/null
+          jq -e --arg url "$EXPECTED_BRIDGE_URL" '.result.bindings[] | select(.name=="PORTAL_BRIDGE_URL" and .type=="plain_text" and .text==$url)' /tmp/quiz-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-settings.json >/dev/null
+          echo 'FINAL_WORKER_BINDINGS_AND_SECRET_PRESERVATION_PASS'
+
+      - name: Verify final Worker versions at 100 percent
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$PORTAL_WORKER" --json > /tmp/portal-deploy.json
+          jq -e --arg id "$PORTAL_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/portal-deploy.json >/dev/null
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy.json
+          jq -e --arg id "$QUIZ_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy.json >/dev/null
+          echo 'FINAL_WORKER_VERSIONS_PASS'
+
+      - name: Verify Portal launch-code schema remains empty and unchanged by acceptance read
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_launch_codes'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_quiz_launch_expiry','idx_quiz_launch_user') ORDER BY name; SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;" --yes | tee /tmp/gate-c-final-d1.txt
+          grep -Fq 'quiz_launch_codes' /tmp/gate-c-final-d1.txt
+          grep -Fq 'idx_quiz_launch_expiry' /tmp/gate-c-final-d1.txt
+          grep -Fq 'idx_quiz_launch_user' /tmp/gate-c-final-d1.txt
+          grep -Eq '"launch_code_rows"[[:space:]]*:[[:space:]]*0' /tmp/gate-c-final-d1.txt
+          if grep -Eq '"rows_written"[[:space:]]*:[[:space:]]*[1-9]' /tmp/gate-c-final-d1.txt; then
+            echo 'Unexpected D1 write during final schema/count verification.' >&2
+            exit 1
+          fi
+          echo 'FINAL_PORTAL_D1_ZERO_LAUNCH_ROWS_PASS'
+
+      - name: Verify established Portal regressions and fail-closed hidden routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --request POST --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --data '{}' --output /tmp/admin.json --write-out '%{http_code}' "$BASE/api/v1/admin/trials/list")"
+          test "$code" = '401'; grep -Fq 'UNAUTHORISED' /tmp/admin.json
+          code="$(curl --silent --show-error --header "Origin: $ORIGIN" --dump-header /tmp/protected.headers --output /tmp/protected.json --write-out '%{http_code}' "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+          test "$code" = '410'; grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/protected.headers; grep -Fq 'ANSWER_VIEW_INVALID' /tmp/protected.json
+          code="$(curl --silent --show-error --header "Origin: $ORIGIN" --output /tmp/eligibility.json --write-out '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
+          test "$code" = '401'; grep -Fq '"eligible":false' /tmp/eligibility.json
+          code="$(curl --silent --show-error --request POST --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --data '{}' --output /tmp/launch.json --write-out '%{http_code}' "$BASE/api/v1/student/quiz/launch")"
+          test "$code" = '401'; grep -Fq 'SESSION_INVALID' /tmp/launch.json
+          code="$(curl --silent --show-error --request POST --header 'Content-Type: application/json' --data '{"code":"gate-c-final-unauthorised-probe"}' --output /tmp/redeem.json --write-out '%{http_code}' "$BASE/api/v1/quiz-bridge/redeem")"
+          test "$code" = '401'; grep -Fq 'UNAUTHORIZED' /tmp/redeem.json
+          echo 'FINAL_PORTAL_REGRESSION_AND_FAIL_CLOSED_PASS'
+
+      - name: Require final Quiz to Portal invalid-code handshake
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-invalid.html --write-out '%{http_code}' 'https://quiz.futureperfect.education/launch?code=gate-c-final-invalid-shared-secret-probe')"
+          test "$code" = '410'
+          grep -Fqi 'practice link is no longer valid' /tmp/quiz-invalid.html
+          health="$(curl --silent --show-error --output /tmp/quiz-health.json --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+          test "$health" = '200'
+          echo 'FINAL_SHARED_SECRET_HANDSHAKE_AND_QUIZ_HOST_PASS'
+
+      - name: Reconfirm no launch row was created by invalid-code handshake
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;" --yes | tee /tmp/gate-c-final-d1-after-handshake.txt
+          grep -Eq '"launch_code_rows"[[:space:]]*:[[:space:]]*0' /tmp/gate-c-final-d1-after-handshake.txt
+          echo 'FINAL_NO_LAUNCH_DATA_MUTATION_PASS'
+
+      - name: Complete Gate C final acceptance
+        run: echo 'STEP10_GATE_C_FINAL_ACCEPTANCE_PASS'
