@@ -19,7 +19,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
     steps:
-      - name: Inspect matching user profiles and Y4E1 access without mutation
+      - name: Resolve current Reina profile and Y4E1 access without mutation
         shell: bash
         run: |
           set -euo pipefail
@@ -32,25 +32,35 @@ jobs:
           test -n "$student_ns"; test "$student_ns" != null
           test -n "$dbid"; test "$dbid" != null
 
-          echo '=== MATCHING USER KEYS ==='
-          keys="$(curl -fsS -G -H "$AUTH" --data-urlencode 'prefix=user:rei' --data-urlencode 'limit=1000' "${BASE}/storage/kv/namespaces/${student_ns}/keys")"
-          jq -e '.success == true' <<<"$keys" >/dev/null
-          jq -r '.result[]?.name | select(test("^user:reina";"i"))' <<<"$keys" | tee /tmp/reina-keys.txt
+          echo '=== ACTIVE/CACHED REINA SESSION PROFILES (NO TOKEN HASHES) ==='
+          payload='{"sql":"SELECT DISTINCT portal_user_id_norm, json_extract(user_json, \"$.firstName\") AS first_name, json_extract(user_json, \"$.name\") AS profile_name FROM student_session_profiles WHERE lower(coalesce(json_extract(user_json, \"$.firstName\"), \"\")) = \"reina\" OR lower(coalesce(json_extract(user_json, \"$.name\"), \"\")) LIKE \"reina%\" ORDER BY portal_user_id_norm"}'
+          curl -fsS -H "$AUTH" -H 'Content-Type: application/json' --data "$payload" "${BASE}/d1/database/${dbid}/query" -o /tmp/profile-query.json
+          jq '{success,errors,result:[.result[]? | {results,success}]}' /tmp/profile-query.json
+          jq -r '.result[]?.results[]?.portal_user_id_norm // empty' /tmp/profile-query.json | sort -u > /tmp/reina-ids.txt
 
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
+          echo '=== SANITISED STUDENTS_KV PROFILE(S) ==='
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            key="user:${id}"
             enc="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")"
-            curl -fsS -H "$AUTH" "${BASE}/storage/kv/namespaces/${student_ns}/values/${enc}" -o /tmp/user.json
-            echo "--- ${key} (sanitised) ---"
-            jq 'del(.p,.password,.answerPassword,.answer_password,.loginPassword,.login_password) | {firstName,name,schoolYear,accountStatus,batches,fullLibraries,blockedLessons,manualAccess,trial}' /tmp/user.json
-          done < /tmp/reina-keys.txt
+            if curl -fsS -H "$AUTH" "${BASE}/storage/kv/namespaces/${student_ns}/values/${enc}" -o /tmp/user.json; then
+              echo "--- ${key} (sanitised) ---"
+              jq 'del(.p,.password,.answerPassword,.answer_password,.loginPassword,.login_password) | {firstName,name,schoolYear,accountStatus,batches,fullLibraries,blockedLessons,manualAccess,trial}' /tmp/user.json
+            fi
+          done < /tmp/reina-ids.txt
 
-          echo '=== Y4E1 FULL ENTITLEMENTS FOR REINA PREFIX ==='
-          payload='{"sql":"SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source, source_batch_code, source_lesson_date, first_granted_at, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm LIKE ? AND lesson_id = ? ORDER BY portal_user_id_norm","params":["reina%","Y4E1"]}'
-          curl -fsS -H "$AUTH" -H 'Content-Type: application/json' --data "$payload" "${BASE}/d1/database/${dbid}/query" | jq '{success,errors,result:[.result[]? | {results,success}]}'
+          echo '=== Y4E1 FULL ENTITLEMENTS FOR RESOLVED REINA IDS ==='
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            payload="$(jq -nc --arg id "$id" '{sql:"SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source, source_batch_code, source_lesson_date, first_granted_at, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ?",params:[$id,"Y4E1"]}')"
+            curl -fsS -H "$AUTH" -H 'Content-Type: application/json' --data "$payload" "${BASE}/d1/database/${dbid}/query" | jq '{success,errors,result:[.result[]? | {results,success}]}'
+          done < /tmp/reina-ids.txt
 
-          echo '=== Y4E1 PRELESSON ENTITLEMENTS FOR REINA PREFIX ==='
-          payload='{"sql":"SELECT portal_user_id_norm, lesson_id, vr_access, batch_key, lesson_date, first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm LIKE ? AND lesson_id = ? ORDER BY portal_user_id_norm","params":["reina%","Y4E1"]}'
-          curl -fsS -H "$AUTH" -H 'Content-Type: application/json' --data "$payload" "${BASE}/d1/database/${dbid}/query" | jq '{success,errors,result:[.result[]? | {results,success}]}'
+          echo '=== Y4E1 PRELESSON ENTITLEMENTS FOR RESOLVED REINA IDS ==='
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            payload="$(jq -nc --arg id "$id" '{sql:"SELECT portal_user_id_norm, lesson_id, vr_access, batch_key, lesson_date, first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ?",params:[$id,"Y4E1"]}')"
+            curl -fsS -H "$AUTH" -H 'Content-Type: application/json' --data "$payload" "${BASE}/d1/database/${dbid}/query" | jq '{success,errors,result:[.result[]? | {results,success}]}'
+          done < /tmp/reina-ids.txt
 
           echo 'REINA_ACCESS_AUDIT_COMPLETE=true'
