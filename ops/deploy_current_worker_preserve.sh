@@ -74,5 +74,4 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 cmp -s /tmp/fpt-secrets-before.json /tmp/fpt-secrets-after.json
 jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-worker-settings-after.json >/dev/null
 jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/fpt-worker-settings-after.json >/dev/null
-node ops/provision_trialeva_once.mjs
 echo 'PRODUCTION_BINDINGS_PRESERVED_WITH_EMAIL'
