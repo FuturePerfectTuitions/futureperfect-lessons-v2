@@ -66,7 +66,7 @@ jobs:
             .displayIds["english-year4-11plus"] == "Y4T1EE01" and
             .video == null and
             .presentation == null and
-            ((.homeworks // []) | length) == 1 and
+            ((.homeworks // .core.homeworks // []) | length) == 1 and
             ((.phase11Resources.core.preLessonPairs // []) | length) == 0
           ' /tmp/lesson-before.json >/dev/null
           echo 'Exact lesson-state guard: PASS'
