@@ -1,0 +1,154 @@
+name: Repair Y4T1E01 ordinary core PreLesson mapping
+
+on:
+  push:
+    branches:
+      - ops/y4t1e01-core-prelesson-repair-20260917
+    paths:
+      - .github/workflows/y4t1e01-core-prelesson-repair-20260917.yml
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  TARGET_KV_KEY: lesson:Y4E1
+  EXPECTED_BEFORE_SHA256: f11a27d069b475ef54663a5259485436d08abeaa85b228857b6a0bdaea5852ef
+  SOURCE_SHA256: d57553a947ef785213b9305c4453d7f39ccd2c2be225eb53f3febe106e0b6c0f
+  SOURCE_R2_KEY: english/year4/Y4T1E01/prelesson/sheets/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf
+  SOURCE_DISPLAY_NAME: Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Resolve live production bindings and guard exact current state
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          ns="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' <<<"$settings")"
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$ns"; test "$ns" != null
+          test -n "$bucket"; test "$bucket" != null
+          echo "ns=$ns" >> "$GITHUB_OUTPUT"
+          echo "bucket=$bucket" >> "$GITHUB_OUTPUT"
+          echo "Production guard: Worker=${WORKER_NAME}; LESSONS_KV=${ns}; MATERIALS_R2=${bucket}"
+
+          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$TARGET_KV_KEY")"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${ns}/values/${enc}" -o /tmp/lesson-before.json
+          before_sha="$(sha256sum /tmp/lesson-before.json | awk '{print $1}')"
+          echo "Current lesson snapshot SHA256=${before_sha}"
+          test "$before_sha" = "$EXPECTED_BEFORE_SHA256"
+
+          jq -e --arg name "$SOURCE_DISPLAY_NAME" --arg key "$SOURCE_R2_KEY" '
+            .lessonId == "Y4E1" and
+            .title == "Transitioning from Year 3 to Year 4" and
+            .displayIds["english-year4"] == "Y4T1E01" and
+            .displayIds["english-year4-11plus"] == "Y4T1EE01" and
+            ((.core.preLessonSheets // []) | length) == 0 and
+            ((.phase11Resources.core.preLessonPairs // []) | length) == 1 and
+            .phase11Resources.core.preLessonPairs[0].sheet.displayName == $name and
+            .phase11Resources.core.preLessonPairs[0].sheet.r2Key == $key
+          ' /tmp/lesson-before.json >/dev/null
+          echo 'Exact current lesson-state guard: PASS'
+
+      - name: Verify authoritative PDF in production R2
+        shell: bash
+        env:
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          npm install -g wrangler@4.134.0 >/dev/null
+          wrangler r2 object get "${BUCKET}/${SOURCE_R2_KEY}" --file=/tmp/source.pdf --remote >/dev/null
+          head -c 5 /tmp/source.pdf | grep -q '%PDF-'
+          sha="$(sha256sum /tmp/source.pdf | awk '{print $1}')"
+          echo "Source R2 SHA256=${sha}"
+          test "$sha" = "$SOURCE_SHA256"
+          echo 'Authoritative source R2 object: PASS'
+
+      - name: Build corrected ordinary-core mapping and prove isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq --arg name "$SOURCE_DISPLAY_NAME" --arg key "$SOURCE_R2_KEY" '
+            .core.preLessonSheets = [{displayName:$name,r2Key:$key}] |
+            .phase11Resources.core.preLessonPairs = []
+          ' /tmp/lesson-before.json > /tmp/lesson-after.json
+
+          jq -S 'del(.core.preLessonSheets) | del(.phase11Resources.core.preLessonPairs)' /tmp/lesson-before.json > /tmp/before-nontarget.json
+          jq -S 'del(.core.preLessonSheets) | del(.phase11Resources.core.preLessonPairs)' /tmp/lesson-after.json > /tmp/after-nontarget.json
+          cmp -s /tmp/before-nontarget.json /tmp/after-nontarget.json
+
+          jq -e --arg name "$SOURCE_DISPLAY_NAME" --arg key "$SOURCE_R2_KEY" '
+            ((.core.preLessonSheets // []) | length) == 1 and
+            .core.preLessonSheets[0].displayName == $name and
+            .core.preLessonSheets[0].r2Key == $key and
+            ((.phase11Resources.core.preLessonPairs // []) | length) == 0
+          ' /tmp/lesson-after.json >/dev/null
+          echo 'Mutation plan: PASS — standard core.preLessonSheets restored and erroneous supplementary mapping removed; all other data unchanged.'
+
+      - name: Apply guarded production KV correction with rollback
+        shell: bash
+        env:
+          NS: ${{ steps.guard.outputs.ns }}
+        run: |
+          set -euo pipefail
+          enc="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$TARGET_KV_KEY")"
+          endpoint="${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${NS}/values/${enc}"
+          mutated=0
+          rollback() {
+            rc=$?
+            if [ "$mutated" -eq 1 ]; then
+              echo 'Post-write verification failed; restoring exact pre-correction lesson snapshot.' >&2
+              curl -fsS -X PUT -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/lesson-before.json "$endpoint" >/tmp/rollback.json || true
+              jq -e '.success == true' /tmp/rollback.json >/dev/null 2>&1 && echo 'Rollback PUT accepted.' >&2 || echo 'WARNING: rollback acceptance could not be confirmed.' >&2
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          resp="$(curl -fsS -X PUT -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/lesson-after.json "$endpoint")"
+          jq -e '.success == true' <<<"$resp" >/dev/null
+          mutated=1
+          echo 'KV PUT accepted.'
+
+          verified=0
+          for i in $(seq 1 20); do
+            curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$endpoint" -o /tmp/lesson-final.json
+            if jq -e --arg name "$SOURCE_DISPLAY_NAME" --arg key "$SOURCE_R2_KEY" '
+              ((.core.preLessonSheets // []) | length) == 1 and
+              .core.preLessonSheets[0].displayName == $name and
+              .core.preLessonSheets[0].r2Key == $key and
+              ((.phase11Resources.core.preLessonPairs // []) | length) == 0
+            ' /tmp/lesson-final.json >/dev/null; then
+              jq -S 'del(.core.preLessonSheets) | del(.phase11Resources.core.preLessonPairs)' /tmp/lesson-final.json > /tmp/final-nontarget.json
+              if cmp -s /tmp/before-nontarget.json /tmp/final-nontarget.json; then verified=1; break; fi
+            fi
+            sleep 2
+          done
+          test "$verified" -eq 1
+          trap - ERR
+          echo "FINAL_LESSON_SHA256=$(sha256sum /tmp/lesson-final.json | awk '{print $1}')"
+          echo 'FINAL PASS: standard Y4T1E01 PreLesson mapping restored and previous wrong supplementary mapping removed.'
+
+      - name: Final R2 integrity check
+        shell: bash
+        env:
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          wrangler r2 object get "${BUCKET}/${SOURCE_R2_KEY}" --file=/tmp/source-final.pdf --remote >/dev/null
+          test "$(sha256sum /tmp/source-final.pdf | awk '{print $1}')" = "$SOURCE_SHA256"
+          echo 'FINAL R2 PASS: source PDF unchanged and hash-verified.'
+          echo 'No Worker deployment, frontend code, student profile, entitlement, batch, release, password, homework or VR data was changed.'
