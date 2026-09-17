@@ -1,0 +1,77 @@
+name: Y4T1E01 PreLesson R2 read-only probe
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-audit
+    paths:
+      - .github/workflows/y4t1e01-prelesson-r2-readonly.yml
+      - .github/y4t1e01-prelesson-r2-readonly-trigger.txt
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  WORKER_NAME: fpt-portal-v2-worker
+  SOURCE_SHA256: d57553a947ef785213b9305c4453d7f39ccd2c2be225eb53f3febe106e0b6c0f
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Probe plausible existing R2 keys without changing anything
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          settings="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings")"
+          jq -e '.success == true' <<<"$settings" >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' <<<"$settings" >/dev/null
+          bucket="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' <<<"$settings")"
+          test -n "$bucket"; test "$bucket" != null
+          echo "MATERIALS_R2=${bucket}"
+          npm install -g wrangler@4.134.0 >/dev/null
+
+          candidates=(
+            'english/year4/Y4T1E01/prelesson/sheets/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1E01/prelesson/sheets/Y4T1E01 PreLesson Sheets Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1E01/prelesson/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1E01/prelesson/Y4T1E01 PreLesson Sheets Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1E01/PreLesson/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4E1/prelesson/sheets/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1EE01/prelesson/sheets/Y4T1E01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1EE01/prelesson/sheets/Y4T1EE01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+            'english/year4/Y4T1E01/prelesson/sheets/Y4T1EE01 PreLesson Sheet Transitioning from Year 3 to Year 4.pdf'
+          )
+
+          found=0
+          i=0
+          for key in "${candidates[@]}"; do
+            i=$((i+1))
+            out="/tmp/candidate-${i}.bin"
+            if wrangler r2 object get "${bucket}/${key}" --file="$out" --remote >/tmp/get-${i}.log 2>&1; then
+              size="$(wc -c < "$out")"
+              sha="$(sha256sum "$out" | awk '{print $1}')"
+              magic="$(head -c 5 "$out" | tr -cd '[:print:]')"
+              echo "FOUND key=${key} size=${size} sha256=${sha} magic=${magic}"
+              if [ "$sha" = "$SOURCE_SHA256" ]; then
+                echo "EXACT_SOURCE_MATCH=${key}"
+                found=1
+              fi
+            else
+              echo "ABSENT key=${key}"
+            fi
+          done
+          if [ "$found" -eq 1 ]; then
+            echo 'PASS: exact source PDF already exists in R2.'
+          else
+            echo 'PASS: no exact source match among plausible canonical/legacy keys.'
+          fi
+          echo 'READ_ONLY_COMPLETE=true'
