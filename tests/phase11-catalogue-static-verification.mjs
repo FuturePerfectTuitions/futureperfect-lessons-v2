@@ -58,14 +58,19 @@ assert.ok(!phase10.includes('assets/phase11-resources.js'));
 assert.ok(!phase10.includes('assets/phase11-other.js'));
 assert.ok(!phase10.includes('assets/phase11-protected-bridge.js'));
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
+const usesAdminTools = wrangler.includes('main = "src/index-admin-tools.js"');
 assert.ok(
-  wrangler.includes('main = "src/index-phase10-history.js"') ||
+  usesAdminTools ||
+    wrangler.includes('main = "src/index-phase10-history.js"') ||
     wrangler.includes('main = "src/index-phase12.js"') ||
     wrangler.includes('main = "src/index-phase13.js"') ||
     wrangler.includes('main = "src/index-phase17.js"'),
-  'catalogue lock verification must run against an approved Phase 10/12/13 entrypoint or the frozen Phase 17 wrapper'
+  'catalogue lock verification must run against the current Admin Tools wrapper or an approved earlier Phase 10/12/13/17 entrypoint'
 );
-if (wrangler.includes('main = "src/index-phase17.js"')) {
+if (usesAdminTools) {
+  const adminTools = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
+  assert.ok(adminTools.includes("import currentWorker from './index-phase24-trial-vr.js';"), 'Admin Tools wrapper must preserve the current Phase 24 production chain.');
+} else if (wrangler.includes('main = "src/index-phase17.js"')) {
   const phase17 = fs.readFileSync('worker/src/index-phase17.js', 'utf8');
   assert.ok(phase17.includes("import phase13Worker from './index-phase13.js';"), 'Frozen Phase 17 wrapper must inherit the approved Phase 13 Worker.');
 }
