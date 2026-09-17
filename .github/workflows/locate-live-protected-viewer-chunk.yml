@@ -1,0 +1,36 @@
+name: Locate live protected viewer chunk
+
+on:
+  push:
+    branches:
+      - 'feature/trial-ended-upsell-browser-2026-09-17'
+    paths:
+      - '.github/workflows/locate-live-protected-viewer-chunk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract dynamic import targets from live main bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error 'https://lessons.futureperfect.education/assets/portal-Bn42oxXd.js' -o /tmp/portal.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text=Path('/tmp/portal.js').read_text(encoding='utf-8')
+          for pattern in [r'import\(([^)]{1,300})\)', r'__vite__mapDeps[^;]{0,600}', r'protected[^,;)]{0,300}']:
+              print('PATTERN',pattern)
+              matches=list(re.finditer(pattern,text,re.I))
+              print('COUNT',len(matches))
+              for m in matches[:30]:
+                  a=max(0,m.start()-350); b=min(len(text),m.end()+450)
+                  print('CONTEXT_BEGIN')
+                  print(text[a:b])
+                  print('CONTEXT_END')
+          PY
