@@ -1,0 +1,194 @@
+name: Ops update Y2T1E05 recap conjunctions punctuation video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-update-y2t1e05-recap-conjunctions-punctuation-video.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production target, update Y2T1E05, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const valuesBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const keysBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const DISPLAY_ID = 'Y2T1E05';
+          const TARGET = 'cOQbiKnwRQF';
+          const description = [
+            'In this special Year 2 English recap and catch-up lesson, pupils revisit conjunctions and punctuation through a series of interactive challenges led by Commander Connor and Miss Beehive.',
+            '',
+            'This lesson includes:',
+            '✔ Revisiting what conjunctions are and how they link words, phrases and clauses',
+            '✔ Distinguishing between coordinating and subordinating conjunctions',
+            '✔ Recognising coordinating conjunctions that join equally important clauses',
+            '✔ Recognising subordinating conjunctions that introduce dependent clauses',
+            '✔ Choosing suitable conjunctions such as and, but, or and so to complete sentences',
+            '✔ Identifying subordinating conjunctions including because, although, even though, so that and even if',
+            '✔ Deciding whether conjunctions in context are coordinating or subordinating',
+            '✔ Writing statements that end with full stops',
+            '✔ Writing questions using who, what, where, when and why and ending them with question marks',
+            '✔ Writing sentences that show strong feeling and end with exclamation marks',
+            '✔ Choosing between full stops, question marks and exclamation marks according to sentence purpose',
+            '✔ Creating original sentences from themes while applying the correct end punctuation',
+            '',
+            'The lesson begins with a recap of conjunctions and the difference between coordinating and subordinating conjunctions. Pupils then complete a sequence of sentence challenges, selecting the most suitable conjunction and classifying conjunctions by type.',
+            '',
+            'The second half of the lesson focuses on punctuation. Pupils practise writing statements, questions and exclamations, before choosing the correct punctuation mark for different sentence types and creating their own examples.',
+            '',
+            'By the end of the lesson, learners will have consolidated their understanding of conjunctions and end punctuation and applied both skills accurately in context.'
+          ].join('\n');
+
+          function video(code) {
+            return {
+              screenpal: code,
+              contentUrl: `https://screenpal.com/content/video/${code}`,
+              embedUrl: `https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+              watchUrl: `https://go.screenpal.com/watch/${code}`
+            };
+          }
+
+          async function getJson(key) {
+            const r = await fetch(valuesBase + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            const text = await r.text();
+            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
+          }
+
+          async function putJson(key, value) {
+            const r = await fetch(valuesBase + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+
+          async function listLessonKeys() {
+            const names = [];
+            let cursor = '';
+            do {
+              const u = new URL(keysBase);
+              u.searchParams.set('prefix', 'lesson:');
+              u.searchParams.set('limit', '1000');
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const r = await fetch(u, { headers: auth });
+              if (!r.ok) throw new Error(`LIST lesson keys failed HTTP ${r.status}`);
+              const body = await r.json();
+              if (!body?.success || !Array.isArray(body?.result)) throw new Error('LIST lesson keys returned unexpected payload');
+              for (const item of body.result) if (item?.name) names.push(item.name);
+              cursor = String(body?.result_info?.cursor || '');
+            } while (cursor);
+            return names;
+          }
+
+          function hasExpectedDisplayId(r) {
+            return Object.values(r?.displayIds || {}).includes(DISPLAY_ID);
+          }
+
+          function guardLesson(r) {
+            if (r?.subject !== 'english' || r?.active !== true) throw new Error('Y2T1E05 state mismatch');
+            if (!hasExpectedDisplayId(r)) throw new Error(`Display ID mismatch for ${r?.lessonId}`);
+            const title = String(r?.title || '').toLowerCase();
+            if (!(title.includes('recap') || title.includes('catchup') || title.includes('conjunction'))) {
+              throw new Error(`Y2T1E05 title guard failed: ${r?.title}`);
+            }
+            if (!r?.core || !Object.prototype.hasOwnProperty.call(r.core, 'video')) throw new Error('Y2T1E05 core.video missing');
+          }
+
+          (async () => {
+            const lessonKeys = await listLessonKeys();
+            if (!lessonKeys.length) throw new Error('No lesson keys found in production LESSONS_KV');
+
+            const matches = [];
+            const batchSize = 25;
+            for (let i = 0; i < lessonKeys.length; i += batchSize) {
+              const batch = lessonKeys.slice(i, i + batchSize);
+              const records = await Promise.all(batch.map(async key => ({ key, rec: await getJson(key) })));
+              for (const item of records) if (hasExpectedDisplayId(item.rec)) matches.push(item);
+            }
+            if (matches.length !== 1) {
+              console.log('MATCH_DEBUG=' + JSON.stringify(matches.map(x => ({ key: x.key, lessonId: x.rec?.lessonId, title: x.rec?.title, displayIds: x.rec?.displayIds }))));
+              throw new Error(`Expected exactly one Y2T1E05 lesson; found ${matches.length}`);
+            }
+
+            const lessonKey = matches[0].key;
+            const before = matches[0].rec;
+            guardLesson(before);
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.description = description;
+            next.core.video = video(TARGET);
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson(lessonKey, next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson(lessonKey);
+              const ok = verified?.core?.video?.screenpal === TARGET &&
+                verified?.description === description &&
+                verified?.contentStatus?.description === 'available' &&
+                verified?.contentStatus?.mainVideo === 'available' &&
+                verified?.contentStatus?.ownerConfirmedPending === false;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guardLesson(verified);
+            if (verified?.core?.video?.screenpal !== TARGET) throw new Error('Y2T1E05 ScreenPal verification failed');
+            if (verified?.description !== description) throw new Error('Y2T1E05 description verification failed');
+            if (verified?.contentStatus?.description !== 'available' || verified?.contentStatus?.mainVideo !== 'available' || verified?.contentStatus?.ownerConfirmedPending !== false) {
+              throw new Error('Y2T1E05 content status verification failed');
+            }
+
+            console.log('Y2T1E05_VERIFIED=' + JSON.stringify({
+              lessonKey,
+              lessonId: verified.lessonId,
+              displayId: Object.entries(verified?.displayIds || {}).find(([,v]) => v === DISPLAY_ID)?.[1] || null,
+              title: verified.title,
+              screenpal: verified.core.video.screenpal,
+              contentStatus: verified.contentStatus
+            }));
+            console.log('OPS_UPDATE_Y2T1E05_RECAP_CONJUNCTIONS_PUNCTUATION_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
