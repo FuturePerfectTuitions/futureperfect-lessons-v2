@@ -16,39 +16,33 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect actual live Vite bundle and PreLesson handling without mutation
+      - name: Trace actual live Vite resource-section data model without mutation
         shell: bash
         run: |
           set -euo pipefail
-          curl -sSL -D /tmp/root.headers -o /tmp/root.html https://lessons.futureperfect.education/
-          echo '=== LIVE ROOT HTML ==='
-          cat /tmp/root.html
+          curl -sSL -o /tmp/root.html https://lessons.futureperfect.education/
           script="$(grep -oE 'src="\./assets/[^"]+\.js"' /tmp/root.html | head -n1 | sed -E 's/^src="\.([^\"]+)"$/\1/')"
-          if [ -z "$script" ]; then
-            echo 'No live JS bundle reference found' >&2
-            exit 1
-          fi
+          test -n "$script"
+          curl -fsSL "https://lessons.futureperfect.education${script}" -o /tmp/live-bundle.js
           echo "LIVE_BUNDLE_PATH=${script}"
-          curl -fsSL -D /tmp/bundle.headers "https://lessons.futureperfect.education${script}" -o /tmp/live-bundle.js
-          echo '=== LIVE BUNDLE META ==='
-          wc -c /tmp/live-bundle.js
           sha256sum /tmp/live-bundle.js
-          grep -Ei '^(cache-control|etag|last-modified|cf-cache-status|age|content-type|server):' /tmp/bundle.headers || true
-          echo '=== PRELESSON STRING COUNTS ==='
           python3 - <<'PY'
           from pathlib import Path
           text=Path('/tmp/live-bundle.js').read_text(errors='ignore')
-          for needle in ['preLessonSheets','PreLesson Sheets','PreLesson Sheet','prelesson','Before the lesson','phase11Resources','Verbal Reasoning']:
-              print(f'{needle}={text.count(needle)}')
-          print('=== BOUNDED PRELESSONSHEET CONTEXTS ===')
-          for needle in ['preLessonSheets','PreLesson Sheets','Before the lesson']:
+          needles=[
+            'core-prelesson','core-homework','verbal-reasoning',
+            '/api/v1/student/lessons/','resources','resourceGroups','sections',
+            'lesson.resources','s.resources','preLessonSheets','phase11Resources'
+          ]
+          for needle in needles:
+              print(f'COUNT {needle!r}={text.count(needle)}')
+          for needle in ['core-prelesson','/api/v1/student/lessons/','core-homework','verbal-reasoning']:
+              print(f'=== CONTEXTS FOR {needle} ===')
               start=0; shown=0
-              while shown < 12:
+              while shown<20:
                   i=text.find(needle,start)
                   if i<0: break
-                  print(f'--- {needle} occurrence {shown+1} @ {i} ---')
-                  print(text[max(0,i-500):min(len(text),i+1200)].replace('\n',' '))
+                  print(f'--- occurrence {shown+1} @ {i} ---')
+                  print(text[max(0,i-1800):min(len(text),i+2600)].replace('\n',' '))
                   start=i+len(needle); shown+=1
           PY
-          echo '=== SEARCH REPOSITORY FOR LIVE UI SOURCE TEXT ==='
-          grep -RIn --exclude-dir=.git -E 'PreLesson Sheets|preLessonSheets|Before the lesson' . | head -n 300 || true
