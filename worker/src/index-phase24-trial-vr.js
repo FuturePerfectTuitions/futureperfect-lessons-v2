@@ -206,6 +206,31 @@ async function handleTrialAnswerView(request, env, ctx, context) {
   return currentWorker.fetch(request, overlayEnv, ctx);
 }
 
+async function handleAdminTrialList(request, env, ctx) {
+  const response = await currentWorker.fetch(request, env, ctx);
+  if (!response.ok || !env?.STUDENTS_KV) return response;
+
+  const body = await response.clone().json().catch(() => null);
+  if (!body?.ok || !Array.isArray(body.trials)) return response;
+
+  body.trials = await Promise.all(body.trials.map(async trial => {
+    const portalUserId = clean(trial?.portalUserId);
+    const portalUserIdNorm = norm(portalUserId);
+    if (!isTrialId(portalUserIdNorm)) return trial;
+
+    const user = await env.STUDENTS_KV.get(`user:${portalUserIdNorm}`, { type:'json' });
+    if (!user) return trial;
+
+    return {
+      ...trial,
+      loginPassword: clean(user.loginPassword || user.p),
+      answerPassword: clean(user.answerPassword)
+    };
+  }));
+
+  return jsonLike(response, body);
+}
+
 export {
   TRIAL_VR_RULES,
   isVrAnswerIndex,
@@ -217,6 +242,10 @@ export {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === '/api/v1/admin/trials/list' && request.method === 'POST') {
+      return handleAdminTrialList(request, env, ctx);
+    }
 
     if (!url.pathname.startsWith('/api/v1/student/')) {
       return currentWorker.fetch(request, env, ctx);
