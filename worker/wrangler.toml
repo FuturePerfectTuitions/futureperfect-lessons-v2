@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-step10-quiz-bridge.js"
+main = "src/index-admin-tools.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -13,23 +13,7 @@ PARENT_EMAIL_TEST_TO = ""
 [[send_email]]
 name = "EMAIL"
 
-# Canonical Portal V2 production configuration preserved on this isolated Step 10 branch.
-# Step 10 changes only the Worker entrypoint above: index-step10-quiz-bridge.js wraps
-# index-admin-tools.js to add the minimal standalone 11+ Practice launch bridge.
-# Every non-quiz request is delegated unchanged to the established production chain.
-#
-# Step 10 bridge responsibilities are limited to:
-# - authenticated current L3 Maths 11+ eligibility for the Portal top link;
-# - a short-lived, single-use launch code bound to the live Portal session;
-# - a server-to-server redemption endpoint protected by QUIZ_BRIDGE_SECRET;
-# - a release-context snapshot containing inherited L2 plus currently released L3 lessons.
-# Portal cookies are never shared with quiz.futureperfect.education and production
-# question-bank content is never stored in or served by this Portal Worker.
-#
-# QUIZ_BRIDGE_SECRET must be configured as a Cloudflare secret and must never be
-# committed. Migration 0011_quiz_launch_codes.sql must be applied before activation.
-# No production deployment is authorised by this branch change alone.
-#
+# Canonical Portal V2 production entrypoint.
 # Admin Tools wraps Phase 24 only to add authenticated operational routes such as
 # Replace Resource. Every non-admin-resource request is delegated unchanged to
 # Phase 24. Production KV, D1, R2 bindings and secrets remain Cloudflare-managed.
