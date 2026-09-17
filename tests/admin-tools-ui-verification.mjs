@@ -24,6 +24,8 @@ assert.match(browser, /\/api\/v1\/admin\/resources\/replace/);
 assert.match(browser, /expectedR2Key/);
 assert.match(browser, /resourcePath/);
 assert.match(browser, /window\.confirm/);
+assert.match(browser, /if \(raw === ''\) return null/);
+assert.match(browser, /await loadLesson\(resource\.resourceId\);[\s\S]*Replacement published for/);
 assert.doesNotMatch(browser, /Csl1/);
 
 assert.match(wrapper, /index-phase24-trial-vr\.js/);
