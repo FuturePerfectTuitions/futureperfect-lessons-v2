@@ -1,5 +1,6 @@
 name: Step 10 Gate C final acceptance
 
+# Gate D boundary recheck trigger: 2026-09-17 continuation in same chat.
 on:
   push:
     branches:
