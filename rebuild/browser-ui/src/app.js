@@ -156,7 +156,7 @@ function renderLogin(message = '') {
     event.preventDefault();
     const button = document.querySelector('#login-submit');
     const error = document.querySelector('#login-error');
-    button.disabled = true; button.textContent = 'Logging in…'; error.hidden = true;
+    button.disabled = true; button.textContent = 'Logging in…'; error.hidden = true; error.classList.remove('trial-ended');
     try {
       const payload = await requestJson('/api/v2/auth/login', { method: 'POST', body: { username: document.querySelector('#username').value, password: password.value } });
       if (payload.accountLocked) return renderLogin('Your access to Future Perfect Material has now been withdrawn.');
@@ -164,6 +164,7 @@ function renderLogin(message = '') {
       await bootstrapHome();
     } catch (err) {
       error.textContent = err.status === 401 ? 'Invalid username or password.' : friendlyError(err);
+      error.classList.toggle('trial-ended', isTrialEndedError(err));
       error.hidden = false;
     } finally {
       button.disabled = false; button.textContent = 'Log in';
@@ -171,9 +172,14 @@ function renderLogin(message = '') {
   });
 }
 
+function isTrialEndedError(error) {
+  return error?.message === 'TRIAL_ACCESS_ENDED' || error?.payload?.error === 'TRIAL_ACCESS_ENDED';
+}
+
 function friendlyError(error) {
   if (error?.name === 'AbortError') return 'This is taking longer than expected. Please try again.';
   if (error?.message === 'ACCOUNT_LOCKED') return 'Your access to Future Perfect Material has now been withdrawn.';
+  if (isTrialEndedError(error)) return 'Your Future Perfect trial has now ended.\nTo continue accessing lessons and resources, please contact us to discuss the right programme for your child.';
   return 'This part of the portal could not be loaded. Please try again.';
 }
 
@@ -192,7 +198,8 @@ async function bootstrapHome() {
 }
 
 function renderPortalError(title, error, retry) {
-  root.innerHTML = shell(`<section class="card"><p class="eyebrow">Student Portal</p><h1>${escapeHtml(title)}</h1><div class="error-box" role="alert">${escapeHtml(friendlyError(error))}</div><p><button id="retry" class="button button-primary" type="button">Try again</button></p></section>`, { portal: true });
+  const errorClass = isTrialEndedError(error) ? 'error-box trial-ended' : 'error-box';
+  root.innerHTML = shell(`<section class="card"><p class="eyebrow">Student Portal</p><h1>${escapeHtml(title)}</h1><div class="${errorClass}" role="alert">${escapeHtml(friendlyError(error))}</div><p><button id="retry" class="button button-primary" type="button">Try again</button></p></section>`, { portal: true });
   bindShell(); document.querySelector('#retry')?.addEventListener('click', retry);
 }
 
