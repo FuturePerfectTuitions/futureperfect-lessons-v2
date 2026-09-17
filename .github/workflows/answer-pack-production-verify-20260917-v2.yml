@@ -1,0 +1,90 @@
+name: Answer Pack production exact-asset verification 2026-09-17
+
+on:
+  push:
+    branches:
+      - ops/answer-pack-production-deploy-2026-09-17
+    paths:
+      - .github/workflows/answer-pack-production-verify-20260917-v2.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BROWSER_PRIVATE: https://fpt-portal-v2-rebuild-browser-prod.futureperfectlessons.workers.dev
+  FRONTEND_SHA: 1b911253463796b9011b1a45909f67c6395b752f
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: 1b911253463796b9011b1a45909f67c6395b752f
+          path: frontend
+          persist-credentials: false
+      - name: Build expected exact assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run test:static | tee /tmp/static.log
+          grep -F '"protectedViewerOpenSequencing":true' /tmp/static.log >/dev/null
+          npm run build >/tmp/build.log
+          MAIN_FILE="$(find dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name 'portal-protected-viewer-*.js' | head -n1)"
+          VIEWER_FILE="$(find dist/assets -maxdepth 1 -type f -name 'portal-protected-viewer-*.js' | head -n1)"
+          test -n "$MAIN_FILE" && test -n "$VIEWER_FILE"
+          MAIN_REL="${MAIN_FILE#dist/}"; VIEWER_REL="${VIEWER_FILE#dist/}"
+          MAIN_SHA="$(sha256sum "$MAIN_FILE"|awk '{print $1}')"; VIEWER_SHA="$(sha256sum "$VIEWER_FILE"|awk '{print $1}')"
+          echo "MAIN_REL=$MAIN_REL" >> "$GITHUB_ENV"; echo "VIEWER_REL=$VIEWER_REL" >> "$GITHUB_ENV"
+          echo "MAIN_SHA=$MAIN_SHA" >> "$GITHUB_ENV"; echo "VIEWER_SHA=$VIEWER_SHA" >> "$GITHUB_ENV"
+          echo "EXPECTED main=$MAIN_REL main_sha=$MAIN_SHA viewer=$VIEWER_REL viewer_sha=$VIEWER_SHA"
+      - name: Read-only live verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API=https://api.cloudflare.com/client/v4
+          AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          curl -fsS "${API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${BROWSER_WORKER}/deployments" "${AUTH[@]}" -o /tmp/deployments.json
+          jq -c '(.result.deployments // .result // []) | sort_by(.created_on) | last' /tmp/deployments.json >/tmp/current.json
+          DEPLOYMENT="$(jq -r '.id // empty' /tmp/current.json)"
+          VERSION="$(jq -r '(.versions // []) | map(select((.percentage // 0)==100)) | .[0].version_id // (.versions[0].version_id // empty)' /tmp/current.json)"
+          test -n "$DEPLOYMENT" && test -n "$VERSION"
+          echo "CURRENT deployment=$DEPLOYMENT version=$VERSION"
+          ok=0
+          for i in $(seq 1 30); do
+            PM="$(curl -sS -o /tmp/private-main.js -w '%{http_code}' "${BROWSER_PRIVATE}/${MAIN_REL}" || true)"
+            LM="$(curl -sS -o /tmp/live-main.js -w '%{http_code}' "https://${PROD_HOST}/${MAIN_REL}" || true)"
+            PV="$(curl -sS -o /tmp/private-viewer.js -w '%{http_code}' "${BROWSER_PRIVATE}/${VIEWER_REL}" || true)"
+            LV="$(curl -sS -o /tmp/live-viewer.js -w '%{http_code}' "https://${PROD_HOST}/${VIEWER_REL}" || true)"
+            PR="$(curl -sSL -o /tmp/private-root.html -w '%{http_code}' "${BROWSER_PRIVATE}/" || true)"
+            LR="$(curl -sSL -o /tmp/live-root.html -w '%{http_code}' "https://${PROD_HOST}/" || true)"
+            PA="$(curl -sS -D /tmp/private-api.h -o /tmp/private-api.json -w '%{http_code}' "${BROWSER_PRIVATE}/api/v2/student/home" || true)"
+            LA="$(curl -sS -D /tmp/live-api.h -o /tmp/live-api.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/home" || true)"
+            if [ "$PM" = 200 ] && [ "$LM" = 200 ] && [ "$PV" = 200 ] && [ "$LV" = 200 ] && [ "$PR" = 200 ] && [ "$LR" = 200 ] && [ "$PA" = 401 ] && [ "$LA" = 401 ] && [ "$(sha256sum /tmp/private-main.js|awk '{print $1}')" = "$MAIN_SHA" ] && [ "$(sha256sum /tmp/live-main.js|awk '{print $1}')" = "$MAIN_SHA" ] && [ "$(sha256sum /tmp/private-viewer.js|awk '{print $1}')" = "$VIEWER_SHA" ] && [ "$(sha256sum /tmp/live-viewer.js|awk '{print $1}')" = "$VIEWER_SHA" ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/private-api.h && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/live-api.h; then ok=1; break; fi
+            echo "attempt=$i private_main=$PM live_main=$LM private_viewer=$PV live_viewer=$LV private_root=$PR live_root=$LR private_api=$PA live_api=$LA"
+            sleep 2
+          done
+          test "$ok" = 1
+          jq -n --arg marker ANSWER_PACK_PRODUCTION_EXACT_ASSET_VERIFY_PASS --arg frontend "$FRONTEND_SHA" --arg deployment "$DEPLOYMENT" --arg version "$VERSION" --arg main "$MAIN_REL" --arg mainSha "$MAIN_SHA" --arg viewer "$VIEWER_REL" --arg viewerSha "$VIEWER_SHA" '{marker:$marker,frontendSha:$frontend,deploymentId:$deployment,versionId:$version,main:{path:$main,sha256:$mainSha,privateExact:true,productionExact:true},viewer:{path:$viewer,sha256:$viewerSha,privateExact:true,productionExact:true},root200:true,api401:true,serviceBinding:true,readOnly:true}' >/tmp/verify.json
+          cat /tmp/verify.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: answer-pack-production-exact-asset-verification
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/current.json
+            /tmp/verify.json
