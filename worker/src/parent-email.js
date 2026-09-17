@@ -34,11 +34,11 @@ function partialProgressFromRemarks(value) {
 
 function emailTypeForItem(item) {
   const status = clean(item?.lessonStatus);
+  // The explicit lesson status is authoritative. Once Excel marks a lesson
+  // Completed, stale progress text in Remarks must never downgrade the parent
+  // email back to ONGOING.
+  if (completedStatus(status)) return 'COMPLETED';
   if (/\bslide\b/i.test(status)) return 'ONGOING';
-  if (completedStatus(status)) {
-    if (partialProgressFromRemarks(item?.remarks)) return 'ONGOING';
-    return 'COMPLETED';
-  }
   if (norm(status) === 'ready' && onlineMode(item?.batchKey)) {
     // A Ready row such as "Start from 10" is the next session of a lesson that
     // is already in progress. It is not a new upcoming lesson, so it does not

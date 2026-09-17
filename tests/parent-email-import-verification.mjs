@@ -113,7 +113,8 @@ assert.equal(emailTypeForItem({ lessonStatus:'something COMPLETED today', batchK
 assert.equal(partialProgressFromRemarks('Completed till slide 10'), true);
 assert.equal(partialProgressFromRemarks('Completed up to slide 18'), true);
 assert.equal(partialProgressFromRemarks('Completed the lesson'), false);
-assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Completed till slide 10', batchKey:'Y6FM' }), 'ONGOING');
+assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Completed till slide 10', batchKey:'Y6FM' }), 'COMPLETED');
+assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Start from slide 1', batchKey:'Y4FM' }), 'COMPLETED');
 assert.equal(emailTypeForItem({ lessonStatus:'Completed', remarks:'Homework uploaded', batchKey:'Y6FM' }), 'COMPLETED');
 
 // A Ready online row with "Start from ..." is a continuation of the previous
@@ -189,20 +190,19 @@ assert.match(ongoingMail.html, /we will start from Slide 25 next session/);
 assert.match(ongoingMail.html, /color:#ff0000/);
 assert.match(ongoingMail.html, /Ava must have them handy for next lesson as well/);
 
-const aaravOngoingRow = {
+const aaravCompletedRow = {
   Name:'Aarav', Year:'Year 6', Subject:'Maths',
   Lesson:'Y6MS1 SATs Preparation Measurement',
   LessonDated:'12 September 2026', LessonStatus:'Completed',
   Remarks:'Completed till slide 10', Mode:'Y611FM', Parent:'Shyna',
   Email:'aa.aroraschools@gmail.com', Student:'Aar1811'
 };
-const aaravOngoing = emailItemFromRow(aaravOngoingRow, 4);
-assert.equal(aaravOngoing.emailType, 'ONGOING');
-assert.equal(ongoingSlideText(aaravOngoing), 'Slide 10');
-const aaravMail = buildParentEmail(aaravOngoing);
-assert.equal(aaravMail.subject, "Ongoing Lesson: Update on Aarav's Lesson and its homework, for the session on 12 September 2026.");
-assert.match(aaravMail.html, /we will start from Slide 10 next session/);
-assert.doesNotMatch(aaravMail.html, /We have completed the lesson/);
+const aaravCompleted = emailItemFromRow(aaravCompletedRow, 4);
+assert.equal(aaravCompleted.emailType, 'COMPLETED');
+const aaravMail = buildParentEmail(aaravCompleted);
+assert.equal(aaravMail.subject, "Completed Lesson: Update on Aarav's Lesson and its homework, for the session on 12 September 2026.");
+assert.match(aaravMail.html, /We have completed the lesson/);
+assert.doesNotMatch(aaravMail.html, /we will start from Slide 10 next session/);
 
 // The preview exposes the intended parent email action but performs no send.
 const preview = decoratePreview({
@@ -262,4 +262,4 @@ assert.equal(failed.ok, false);
 assert.equal(failed.status, 'DELIVERY_FAILURE');
 assert.match(failed.message, /Synthetic delivery failure/);
 
-console.log('Parent CSV email triggers, continuation handling, formatting, locked clean signature bytes, Workers contentId linkage, L-prefix normalisation and Cloudflare delivery: PASS');
+console.log('Parent CSV email triggers, completed-status precedence, continuation handling, formatting, locked clean signature bytes, Workers contentId linkage, L-prefix normalisation and Cloudflare delivery: PASS');
