@@ -67,7 +67,7 @@ function preflight(request, env) {
 }
 
 function requireSecret(env, key) {
-  const value = clean(env?.[key]);
+  const value = String(env?.[key] ?? '');
   if (!value) throw new Error(`${key}_UNAVAILABLE`);
   return value;
 }
