@@ -1,0 +1,68 @@
+name: v3.2 runtime read-only audit
+
+on:
+  push:
+    branches:
+      - fix/y4e1-prelesson-readmodel-20260917
+    paths:
+      - '.github/workflows/v32-runtime-readonly-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HOST: lessons.futureperfect.education
+      BROWSER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT: fpt-portal-v2-rebuild-student-prod
+      LEGACY: fpt-portal-v2-worker
+    steps:
+      - name: Read current production topology and safe binding metadata only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const base='https://api.cloudflare.com/client/v4';
+          const auth={Authorization:`Bearer ${token}`};
+          const clean=v=>String(v??'').trim();
+          async function cf(path){
+            const r=await fetch(base+path,{headers:auth}); const b=await r.json();
+            if(!r.ok||b.success!==true) throw new Error(`CF ${r.status} ${path}`); return b.result;
+          }
+          function safeBinding(b){
+            const o={name:clean(b.name),type:clean(b.type)};
+            for(const k of ['namespace_id','database_id','bucket_name','service','environment']) if(clean(b[k])) o[k]=clean(b[k]);
+            return o;
+          }
+          async function activeVersion(worker){
+            const d=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/deployments`);
+            const rows=Array.isArray(d?.deployments)?d.deployments:(Array.isArray(d)?d:[]);
+            const vs=Array.isArray(rows[0]?.versions)?rows[0].versions:[];
+            return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);
+          }
+          const host=process.env.HOST.toLowerCase();
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('zone not found');
+          const routes=(await cf(`/zones/${zone.id}/workers/routes`)).filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          const browserSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.BROWSER)}/settings`);
+          const studentSettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.STUDENT)}/settings`);
+          const legacySettings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.LEGACY)}/settings`);
+          const report={
+            observedAt:new Date().toISOString(),
+            routes:routes.map(r=>({pattern:r.pattern,script:r.script})),
+            browser:{worker:process.env.BROWSER,activeVersion:await activeVersion(process.env.BROWSER),bindings:(browserSettings.bindings||[]).map(safeBinding)},
+            student:{worker:process.env.STUDENT,activeVersion:await activeVersion(process.env.STUDENT),bindings:(studentSettings.bindings||[]).map(safeBinding)},
+            legacy:{worker:process.env.LEGACY,activeVersion:await activeVersion(process.env.LEGACY),bindings:(legacySettings.bindings||[]).map(safeBinding)}
+          };
+          console.log('V32_RUNTIME_AUDIT='+JSON.stringify(report));
+          NODE
