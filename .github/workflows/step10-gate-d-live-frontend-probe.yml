@@ -15,34 +15,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe live Portal frontend origin, configuration and auth client
+      - name: Probe exact live compiled Portal bundle
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://lessons.futureperfect.education'
-          probe() {
-            label="$1"; url="$2"
-            code="$(curl --silent --show-error --location --max-time 20 --dump-header "/tmp/${label}.headers" --output "/tmp/${label}.body" --write-out '%{http_code}' "$url" || true)"
-            echo "${label}_HTTP=${code}"
-            echo "${label}_HEADERS_BEGIN"
-            sed -n '1,35p' "/tmp/${label}.headers" || true
-            echo "${label}_HEADERS_END"
-            echo "${label}_BODY_BEGIN"
-            head -c 3000 "/tmp/${label}.body" || true
-            echo
-            echo "${label}_BODY_END"
-          }
-          probe root "$BASE/?gate_d_probe=20260918b"
-          probe config "$BASE/config.js?gate_d_probe=20260918b"
-          probe phase7 "$BASE/assets/phase7.js?gate_d_probe=20260918b"
-          echo 'ROOT_SCRIPT_REFERENCES'
-          grep -oE '<script[^>]+src="[^"]+"' /tmp/root.body || true
-          echo 'CONFIG_WORKER_REFERENCE'
-          grep -F 'workerBaseUrl' /tmp/config.body || true
-          echo 'PHASE7_AUTH_MARKERS'
-          grep -F "credentials: 'include'" /tmp/phase7.body | head -n 2 || true
-          grep -F "api('/api/v1/student/session'" /tmp/phase7.body | head -n 2 || true
-          grep -F "api('/api/v1/student/auth/login'" /tmp/phase7.body | head -n 2 || true
-          echo 'LIVE_BODY_HASHES'
-          sha256sum /tmp/root.body /tmp/config.body /tmp/phase7.body
-          echo 'GATE_D_LIVE_FRONTEND_ORIGIN_PROBE_COMPLETE'
+          ASSET='portal-CeIaLZ5y.js'
+          code="$(curl --silent --show-error --location --max-time 30 --dump-header /tmp/bundle.headers --output /tmp/bundle.js --write-out '%{http_code}' "$BASE/assets/$ASSET?gate_d_probe=20260918c" || true)"
+          echo "BUNDLE_HTTP=$code"
+          sed -n '1,30p' /tmp/bundle.headers || true
+          test "$code" = '200'
+          echo "BUNDLE_BYTES=$(wc -c </tmp/bundle.js)"
+          echo 'WORKER_URLS_BEGIN'
+          grep -oE 'https://[^"'"'[:space:]<>)]+' /tmp/bundle.js | grep -E 'workers\.dev|futureperfect' | sort -u | head -n 100 || true
+          echo 'WORKER_URLS_END'
+          echo 'API_PATHS_BEGIN'
+          grep -oE '/api/[A-Za-z0-9_./?&=:-]+' /tmp/bundle.js | sort -u | head -n 200 || true
+          echo 'API_PATHS_END'
+          echo 'AUTH_MARKERS_BEGIN'
+          grep -oE '.{0,180}(student/session|auth/login|credentials.{0,30}include|fpt_v2_session).{0,220}' /tmp/bundle.js | head -n 80 || true
+          echo 'AUTH_MARKERS_END'
+          echo 'BUNDLE_HASH'
+          sha256sum /tmp/bundle.js
+          map_code="$(curl --silent --show-error --location --max-time 20 --output /tmp/bundle.map --write-out '%{http_code}' "$BASE/assets/$ASSET.map?gate_d_probe=20260918c" || true)"
+          echo "SOURCE_MAP_HTTP=$map_code SOURCE_MAP_BYTES=$(wc -c </tmp/bundle.map)"
+          echo 'GATE_D_COMPILED_FRONTEND_PROBE_PASS'
