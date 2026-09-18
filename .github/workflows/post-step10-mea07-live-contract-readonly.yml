@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - shell: bash
         run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
-      - name: Export MEA-07 LIVE contract metadata only
+      - name: Export MEA-07 deployed contract metadata only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -41,14 +41,18 @@ jobs:
           database_name = "${QUIZ_D1_NAME}"
           database_id = "${QUIZ_D1_ID}"
           TOML
-          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,difficulty_band,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,correct_option,correct_display,earliest_release_point,prerequisite_lessons,lifecycle_status,deployment_status FROM question_instance WHERE family_id='MEA-07' AND lifecycle_status='LIVE' ORDER BY question_id;" --json >/tmp/live.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,difficulty_band,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,correct_option,correct_display,earliest_release_point,prerequisite_lessons,lifecycle_status,deployment_status FROM question_instance WHERE family_id='MEA-07' ORDER BY question_id;" --json >/tmp/live.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           rows=json.loads(Path('/tmp/live.json').read_text())[0]['results']
           assert len(rows)==6, len(rows)
           Path('/tmp/mea07_live_contract.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
-          print(json.dumps({'marker':'POST_STEP10_MEA07_LIVE_CONTRACT_READONLY_PASS','rows':len(rows),'stem_or_source_text_exported':False},indent=2))
+          status={}
+          for r in rows:
+              key=f"{r.get('lifecycle_status')}|{r.get('deployment_status')}"
+              status[key]=status.get(key,0)+1
+          print(json.dumps({'marker':'POST_STEP10_MEA07_LIVE_CONTRACT_READONLY_PASS','rows':len(rows),'status_counts':status,'stem_or_source_text_exported':False},indent=2))
           PY
           rm -f /tmp/live.json
       - uses: actions/upload-artifact@v4
