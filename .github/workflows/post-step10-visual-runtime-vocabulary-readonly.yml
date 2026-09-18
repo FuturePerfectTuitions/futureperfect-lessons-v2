@@ -1,0 +1,73 @@
+name: Post-Step-10 visual runtime vocabulary read-only
+
+on:
+  push:
+    branches:
+      - mastery/post-step10-expansion-planning-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-visual-runtime-vocabulary-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  vocabulary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Extract non-text runtime vocabulary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-visual-runtime-vocabulary-readonly"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT family_id,diagram_spec_json,validation_spec_json,correct_display FROM question_instance WHERE family_id IN ('GEO-10','DAT-07','GEO-12','GEO-05') AND lifecycle_status='Live' ORDER BY family_id,question_id;" --json >/tmp/raw.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=json.loads(Path('/tmp/raw.json').read_text())[0]['results']
+          out={}
+          for r in rows:
+              fid=r['family_id']; d=json.loads(r['diagram_spec_json']) if r.get('diagram_spec_json') else {}; v=json.loads(r['validation_spec_json']) if r.get('validation_spec_json') else {}
+              f=out.setdefault(fid,{'shape_tokens':set(),'solid_tokens':set(),'render_profiles':set(),'validation_contracts':set(),'correct_display_values':set(),'left_value_types':set(),'right_value_types':set(),'angle_lengths':set()})
+              if 'shape' in d: f['shape_tokens'].add(str(d['shape']))
+              if 'solid' in d: f['solid_tokens'].add(str(d['solid']))
+              if 'render_contract' in d: f['render_profiles'].add(json.dumps(d['render_contract'],sort_keys=True))
+              contract=';'.join(f'{k}:{type(val).__name__}' for k,val in sorted(v.items()))
+              f['validation_contracts'].add(contract)
+              f['correct_display_values'].add(str(r.get('correct_display')))
+              if 'left' in d: f['left_value_types'].add(type(d['left']).__name__)
+              if 'right' in d: f['right_value_types'].add(type(d['right']).__name__)
+              if isinstance(d.get('angles'),list): f['angle_lengths'].add(len(d['angles']))
+          serial={}
+          for fid,f in out.items(): serial[fid]={k:sorted(v) for k,v in f.items()}
+          payload={'marker':'POST_STEP10_VISUAL_RUNTIME_VOCABULARY_READONLY_PASS','families':serial,'question_text_exported':False,'raw_source_stems_exported':False}
+          Path('/tmp/visual_runtime_vocabulary.json').write_text(json.dumps(payload,indent=2),encoding='utf-8')
+          print(json.dumps({'marker':payload['marker'],'families':sorted(serial),'question_text_exported':False},indent=2))
+          PY
+          rm -f /tmp/raw.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-step10-visual-runtime-vocabulary-readonly
+          path: /tmp/visual_runtime_vocabulary.json
+          retention-days: 30
