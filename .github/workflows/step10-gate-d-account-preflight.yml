@@ -1,6 +1,6 @@
 name: Step 10 Gate D account preflight
 
-# Gate D live-site asset/session diagnostic: 2026-09-18.
+# Gate D live bundled-frontend/session diagnostic: 2026-09-18.
 on:
   push:
     branches:
@@ -26,34 +26,55 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Inspect live Portal frontend bootstrap paths independently
+      - name: Inspect actual live bundled Portal frontend
         shell: bash
         run: |
           set -euo pipefail
-          ROOT_STATUS="$(curl --silent --show-error --location -o /tmp/live-index.html -w '%{http_code}' 'https://lessons.futureperfect.education/' || true)"
-          CONFIG_STATUS="$(curl --silent --show-error --location -o /tmp/live-config.js -w '%{http_code}' 'https://lessons.futureperfect.education/config.js' || true)"
-          PHASE7_STATUS="$(curl --silent --show-error --location -o /tmp/live-phase7.js -w '%{http_code}' 'https://lessons.futureperfect.education/assets/phase7.js?v=20260912-y6-sats-section-1' || true)"
+          ROOT='https://lessons.futureperfect.education/'
+          ROOT_STATUS="$(curl --silent --show-error --location -o /tmp/live-index.html -w '%{http_code}' "$ROOT" || true)"
           echo "LIVE_ROOT_STATUS=${ROOT_STATUS}"
-          echo "LIVE_CONFIG_STATUS=${CONFIG_STATUS}"
-          echo "LIVE_PHASE7_STATUS=${PHASE7_STATUS}"
           echo "LIVE_ROOT_BYTES=$(wc -c </tmp/live-index.html 2>/dev/null || echo 0)"
-          echo "LIVE_CONFIG_BYTES=$(wc -c </tmp/live-config.js 2>/dev/null || echo 0)"
-          echo "LIVE_PHASE7_BYTES=$(wc -c </tmp/live-phase7.js 2>/dev/null || echo 0)"
-          if [ "$ROOT_STATUS" = "200" ]; then
-            echo '--- ROOT BOOTSTRAP REFERENCES ---'
-            grep -Eo '(<script[^>]+src="[^"]+"|<link[^>]+href="[^"]+")' /tmp/live-index.html | grep -E 'config\.js|phase7\.js|assets/' | tail -n 30 || true
-          fi
-          if [ "$CONFIG_STATUS" = "200" ]; then
-            grep -Fq 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' /tmp/live-config.js && echo 'LIVE_CONFIG_WORKER_TARGET_PASS' || echo 'LIVE_CONFIG_WORKER_TARGET_MISMATCH'
-            echo "LIVE_CONFIG_SHA256=$(sha256sum /tmp/live-config.js | awk '{print $1}')"
-          fi
-          if [ "$PHASE7_STATUS" = "200" ]; then
-            grep -Fq '/api/v1/student/session' /tmp/live-phase7.js && echo 'LIVE_PHASE7_SESSION_ROUTE_PASS' || echo 'LIVE_PHASE7_SESSION_ROUTE_MISSING'
-            grep -Fq "credentials: 'include'" /tmp/live-phase7.js && echo 'LIVE_PHASE7_CREDENTIALS_PASS' || echo 'LIVE_PHASE7_CREDENTIALS_MISSING'
-            grep -Fq 'readSession();' /tmp/live-phase7.js && echo 'LIVE_PHASE7_BOOT_READSESSION_PASS' || echo 'LIVE_PHASE7_BOOT_READSESSION_MISSING'
-            echo "LIVE_PHASE7_SHA256=$(sha256sum /tmp/live-phase7.js | awk '{print $1}')"
-          fi
-          echo 'LIVE_PORTAL_FRONTEND_HTTP_DIAGNOSTIC_COMPLETE'
+          [ "$ROOT_STATUS" = '200' ]
+          BUNDLE_REL="$(grep -Eo 'src="\./assets/portal-[^"]+\.js"' /tmp/live-index.html | head -n1 | sed -E 's/^src="\.\///; s/"$//')"
+          echo "LIVE_BUNDLE_PATH=${BUNDLE_REL}"
+          [ -n "$BUNDLE_REL" ]
+          BUNDLE_STATUS="$(curl --silent --show-error --location -o /tmp/live-portal.js -w '%{http_code}' "https://lessons.futureperfect.education/${BUNDLE_REL}" || true)"
+          echo "LIVE_BUNDLE_STATUS=${BUNDLE_STATUS}"
+          echo "LIVE_BUNDLE_BYTES=$(wc -c </tmp/live-portal.js 2>/dev/null || echo 0)"
+          [ "$BUNDLE_STATUS" = '200' ]
+          echo "LIVE_BUNDLE_SHA256=$(sha256sum /tmp/live-portal.js | awk '{print $1}')"
+          node <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('/tmp/live-portal.js', 'utf8');
+          const markers = [
+            'fpt-portal-v2-worker.futureperfectlessons.workers.dev',
+            '/api/v1/student/session',
+            '/api/v1/student/auth/login',
+            '/api/v1/student/home',
+            'credentials',
+            'include',
+            'localStorage',
+            'sessionStorage',
+            'fpt_v2_session',
+            '/api/'
+          ];
+          for (const m of markers) console.log(`BUNDLE_HAS_${m.replace(/[^A-Za-z0-9]+/g,'_').toUpperCase()}=${s.includes(m)}`);
+          const urls = [...new Set((s.match(/https:\/\/[^"'`\\\s)]+/g) || []))]
+            .filter(x => /futureperfect|workers\.dev|pages\.dev|github\.io/i.test(x));
+          console.log('BUNDLE_FPT_URLS=' + JSON.stringify(urls.slice(0,40)));
+          const routeMatches = s.match(/\/api\/[A-Za-z0-9_./:-]+/g) || [];
+          const routes = [...new Set(routeMatches)].sort();
+          console.log('BUNDLE_API_ROUTES=' + JSON.stringify(routes.slice(0,120)));
+          const needle = '/api/v1/student/session';
+          const i = s.indexOf(needle);
+          if (i >= 0) {
+            const context = s.slice(Math.max(0,i-350), Math.min(s.length,i+550))
+              .replace(/[\r\n\t]+/g,' ')
+              .replace(/\s+/g,' ');
+            console.log('BUNDLE_SESSION_CONTEXT=' + context);
+          }
+          NODE
+          echo 'LIVE_PORTAL_BUNDLE_DIAGNOSTIC_PASS'
 
       - name: Verify authorised account currently has active L3 Maths 11plus assignment
         shell: bash
