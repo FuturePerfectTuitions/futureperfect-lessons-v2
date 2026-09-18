@@ -1,0 +1,50 @@
+name: Post-Step-10 bank label audit
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-bank-label-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Read non-sensitive labels and source filenames only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-label-audit"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          q(){ echo "===== $1 ====="; npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "$2" --json; }
+          q presentation_types "SELECT presentation_type,COUNT(*) AS n FROM question_instance WHERE lifecycle_status='Live' GROUP BY presentation_type ORDER BY n DESC,presentation_type;"
+          q diagram_types "SELECT diagram_type,COUNT(*) AS n FROM question_instance WHERE lifecycle_status='Live' GROUP BY diagram_type ORDER BY n DESC,diagram_type;"
+          q origin_types "SELECT origin_type,COUNT(*) AS n FROM question_instance WHERE lifecycle_status='Live' GROUP BY origin_type ORDER BY n DESC,origin_type;"
+          q deployment_statuses "SELECT deployment_status,COUNT(*) AS n FROM question_instance WHERE lifecycle_status='Live' GROUP BY deployment_status ORDER BY n DESC,deployment_status;"
+          q source_files "SELECT corpus_series,COALESCE(source_file,'') AS source_file,COUNT(*) AS n FROM gl_source_question GROUP BY corpus_series,source_file ORDER BY corpus_series,source_file;"
+          echo 'POST_STEP10_BANK_LABEL_AUDIT_PASS'
