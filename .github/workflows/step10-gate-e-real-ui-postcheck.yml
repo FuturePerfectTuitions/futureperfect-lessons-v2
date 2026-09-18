@@ -1,0 +1,77 @@
+name: Step 10 Gate E real UI acceptance postcheck
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_GATE_E_REAL_UI_POSTCHECK_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+      TEST_USER: kiaan1312
+      BASELINE_CAPTURED_AT: 2026-09-18T10:04:05.489Z
+      BASELINE_LAUNCH_COUNT: '2'
+      BASELINE_USED_LAUNCH_COUNT: '1'
+      BASELINE_AUTH_COUNT: '1'
+      BASELINE_LOGIN_AUDIT_COUNT: '1'
+      BASELINE_QUIZ_TEST_COUNT: '0'
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      EXPECTED_BROWSER_VERSION: 359ec0ec-6b22-4679-aa25-2151f4ebf9b4
+      EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+      EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+      EXPECTED_LIVE_BUNDLE: assets/portal-BloPjI-K.js
+      EXPECTED_LIVE_BUNDLE_SHA256: 4674f7652c110c982a01a47d18456499785b7fbf282ac22756ed6d5ead9a9495
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Gate E real UI launch and unchanged production anchors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'; import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim(); const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN); const base='https://api.cloudflare.com/client/v4';
+          async function cf(path,opts={}){const r=await fetch(base+path,{...opts,headers:{Authorization:`Bearer ${token}`,'content-type':'application/json',...(opts.headers||{})}});const text=await r.text();let j;try{j=JSON.parse(text)}catch{};if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j?.errors||text)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const workers={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          if(workers.browser!==process.env.EXPECTED_BROWSER_VERSION||workers.student!==process.env.EXPECTED_STUDENT_VERSION||workers.quiz!==process.env.EXPECTED_QUIZ_VERSION) throw new Error(`Worker drift ${JSON.stringify(workers)}`);
+
+          const root=await fetch('https://lessons.futureperfect.education/',{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-postcheck'}}); if(!root.ok)throw new Error(`Portal root ${root.status}`); const html=await root.text(); const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]); const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0]; if(!bundle)throw new Error('Live bundle missing'); const norm=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0]; const br=await fetch(new URL(bundle,'https://lessons.futureperfect.education/'),{headers:{'cache-control':'no-store'}}); const bytes=Buffer.from(await br.arrayBuffer()); const hash=crypto.createHash('sha256').update(bytes).digest('hex'); if(norm!==process.env.EXPECTED_LIVE_BUNDLE||hash!==process.env.EXPECTED_LIVE_BUNDLE_SHA256)throw new Error(`Gate E bundle drift ${norm} ${hash}`); const text=bytes.toString('utf8'); for(const s of ['11+ Practice','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'])if(!text.includes(s))throw new Error(`Gate E bundle missing ${s}`);
+
+          async function d1(id,sql){const result=await cf(`/accounts/${account}/d1/database/${id}/query`,{method:'POST',body:JSON.stringify({sql})}); for(const b of result||[])if(Number(b?.meta?.rows_written||0)!==0||b?.meta?.changed_db===true)throw new Error('Postcheck unexpectedly wrote D1'); return (result||[]).map(x=>x.results||[]);}
+          const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+          const portalSql=`SELECT a.portal_user_id_norm,a.batch_key,b.subject,b.stream,b.maths_level,b.school_year,a.effective_from,a.effective_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm='${process.env.TEST_USER}' AND lower(b.subject)='maths' AND lower(b.stream)='11plus' AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END)=3 AND a.effective_from<='${today}' AND (a.effective_to IS NULL OR '${today}'<a.effective_to) AND (b.active_from IS NULL OR b.active_from<='${today}') AND (b.active_to IS NULL OR '${today}'<b.active_to); SELECT code_hash,created_at,expires_at,used_at,release_context_json FROM quiz_launch_codes WHERE portal_user_id_norm='${process.env.TEST_USER}' ORDER BY created_at;`;
+          const portal=await d1(process.env.PORTAL_D1_ID,portalSql); const assignment=portal[0]; const launches=portal[1]; if(assignment.length!==1||assignment[0].batch_key!=='Y511FM')throw new Error(`Assignment drift ${JSON.stringify(assignment)}`);
+          const baseLaunch=Number(process.env.BASELINE_LAUNCH_COUNT), baseUsed=Number(process.env.BASELINE_USED_LAUNCH_COUNT); const used=launches.filter(r=>r.used_at); const newRows=launches.filter(r=>Date.parse(r.created_at)>Date.parse(process.env.BASELINE_CAPTURED_AT));
+          if(launches.length!==baseLaunch+1)throw new Error(`Expected exactly one Gate E UI launch: baseline=${baseLaunch}, now=${launches.length}`); if(used.length!==baseUsed+1)throw new Error(`Expected exactly one additional redeemed launch: baseline=${baseUsed}, now=${used.length}`); if(newRows.length!==1||!newRows[0].used_at)throw new Error(`Expected one new used launch after baseline: ${JSON.stringify(newRows)}`);
+          const newest=newRows[0]; if(!/^[0-9a-f]{64}$/.test(newest.code_hash))throw new Error('Launch code was not stored hashed'); const context=JSON.parse(newest.release_context_json); if(context.source!=='portal-api-v2-live-l3-view-v1'||context.portalSessionIssuer!=='fpt-portal-v2'||context.l3Eligible!==true||context.l2Inherited!==true||context.portalViewId!=='maths-level3')throw new Error(`Release context drift ${JSON.stringify(context)}`);
+
+          const quizSql=`SELECT token_hash,created_at,expires_at,release_context_json FROM quiz_auth_session WHERE portal_user_id='${process.env.TEST_USER}' ORDER BY created_at; SELECT event_type,event_at,detail_json FROM quiz_audit_event WHERE portal_user_id='${process.env.TEST_USER}' AND event_type='QUIZ_LOGIN_CREATED' ORDER BY event_at; SELECT COUNT(*) AS count FROM quiz_session WHERE portal_user_id='${process.env.TEST_USER}';`;
+          const quiz=await d1(process.env.QUIZ_D1_ID,quizSql); const auth=quiz[0], audits=quiz[1], tests=Number(quiz[2]?.[0]?.count||0); if(auth.length!==Number(process.env.BASELINE_AUTH_COUNT)+1)throw new Error(`Expected one new Quiz auth session: ${auth.length}`); if(audits.length!==Number(process.env.BASELINE_LOGIN_AUDIT_COUNT)+1)throw new Error(`Expected one new Quiz login audit: ${audits.length}`); if(tests!==Number(process.env.BASELINE_QUIZ_TEST_COUNT))throw new Error(`A quiz test was started during Gate E UI acceptance: ${tests}`); const newAuth=auth.filter(r=>Date.parse(r.created_at)>Date.parse(process.env.BASELINE_CAPTURED_AT)); if(newAuth.length!==1)throw new Error(`Expected exactly one new Quiz auth row ${JSON.stringify(newAuth)}`); const qctx=JSON.parse(newAuth[0].release_context_json); if(qctx.l3Eligible!==true||qctx.l2Inherited!==true||qctx.source!=='portal-api-v2-live-l3-view-v1')throw new Error(`Quiz auth release context drift ${JSON.stringify(qctx)}`);
+
+          const direct=await fetch('https://quiz.futureperfect.education/',{redirect:'manual'}); if(direct.status!==303||!String(direct.headers.get('location')||'').startsWith('https://lessons.futureperfect.education/'))throw new Error(`Direct Quiz return drift ${direct.status} ${direct.headers.get('location')}`);
+          const out={marker:'STEP10_GATE_E_REAL_UI_POSTCHECK_PASS',testUser:process.env.TEST_USER,workers,liveBundle:{path:norm,sha256:hash},assignment:assignment[0],baseline:{launchCount:baseLaunch,usedLaunchCount:baseUsed,authCount:Number(process.env.BASELINE_AUTH_COUNT),loginAuditCount:Number(process.env.BASELINE_LOGIN_AUDIT_COUNT),quizTestCount:Number(process.env.BASELINE_QUIZ_TEST_COUNT)},after:{launchCount:launches.length,usedLaunchCount:used.length,authCount:auth.length,loginAuditCount:audits.length,quizTestCount:tests},exactlyOneUiLaunch:true,launchRedeemed:true,noQuizTestStarted:true,directUnauthenticatedQuizReturnsPortal:true,productionAnchorsStable:true,checkedAt:new Date().toISOString()}; fs.writeFileSync('/tmp/gate-e-real-ui-postcheck.json',JSON.stringify(out,null,2)); console.log(JSON.stringify(out,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step10-gate-e-real-ui-postcheck
+          path: /tmp/gate-e-real-ui-postcheck.json
+          retention-days: 30
