@@ -41,7 +41,7 @@ jobs:
           database_name = "${QUIZ_D1_NAME}"
           database_id = "${QUIZ_D1_ID}"
           TOML
-          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT family_id,question_id,presentation_type,diagram_type,diagram_spec_json,validation_spec_json FROM question_instance WHERE family_id IN ('GEO-10','DAT-07','GEO-12','GEO-05') AND lifecycle_status='Live' ORDER BY family_id,question_id;" --json >/tmp/raw.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT family_id,question_id,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,lifecycle_status,deployment_status FROM question_instance WHERE family_id IN ('ALG-02','COO-01','GEO-10','DAT-07','GEO-12','GEO-05') AND lifecycle_status='Live' ORDER BY family_id,question_id;" --json >/tmp/raw.json
           python3 - <<'PY'
           import csv,json
           from pathlib import Path
@@ -59,18 +59,19 @@ jobs:
               return out
           families={}
           for r in rows:
-              f=families.setdefault(r['family_id'],{'presentation_types':set(),'diagram_types':set(),'diagram_shapes':set(),'validation_types':set(),'count':0})
-              f['count']+=1; f['presentation_types'].add(r['presentation_type']); f['diagram_types'].add(r['diagram_type'])
+              f=families.setdefault(r['family_id'],{'presentation_types':set(),'diagram_types':set(),'diagram_shapes':set(),'validation_types':set(),'validation_shapes':set(),'deployments':set(),'count':0})
+              f['count']+=1; f['presentation_types'].add(str(r['presentation_type'])); f['diagram_types'].add(str(r['diagram_type'])); f['deployments'].add(str(r['deployment_status']))
               d=json.loads(r['diagram_spec_json']) if r.get('diagram_spec_json') else None
               v=json.loads(r['validation_spec_json']) if r.get('validation_spec_json') else None
               f['diagram_shapes'].add('; '.join(f'{p}:{t}' for p,t in shape(d)))
+              f['validation_shapes'].add('; '.join(f'{p}:{t}' for p,t in shape(v)))
               if isinstance(v,dict) and 'type' in v: f['validation_types'].add(str(v['type']))
           out=[]
           for family_id,f in sorted(families.items()):
-              out.append({'family_id':family_id,'live_count':f['count'],'presentation_types':' | '.join(sorted(f['presentation_types'])),'diagram_types':' | '.join(sorted(f['diagram_types'])),'validation_types':' | '.join(sorted(f['validation_types'])),'diagram_contract_variants':len(f['diagram_shapes']),'diagram_contracts':' || '.join(sorted(f['diagram_shapes']))})
+              out.append({'family_id':family_id,'live_count':f['count'],'presentation_types':' | '.join(sorted(f['presentation_types'])),'diagram_types':' | '.join(sorted(f['diagram_types'])),'validation_types':' | '.join(sorted(f['validation_types'])),'deployment_statuses':' | '.join(sorted(f['deployments'])),'diagram_contract_variants':len(f['diagram_shapes']),'diagram_contracts':' || '.join(sorted(f['diagram_shapes'])),'validation_contract_variants':len(f['validation_shapes']),'validation_contracts':' || '.join(sorted(f['validation_shapes']))})
           with open('/tmp/visual_family_contracts.csv','w',newline='',encoding='utf-8') as h:
               w=csv.DictWriter(h,fieldnames=out[0].keys());w.writeheader();w.writerows(out)
-          print(json.dumps({'marker':'POST_STEP10_VISUAL_FAMILY_CONTRACTS_READONLY_PASS','families':[x['family_id'] for x in out],'live_rows':len(rows),'raw_question_text_exported':False,'raw_diagram_values_exported':False},indent=2))
+          print(json.dumps({'marker':'POST_STEP10_VISUAL_FAMILY_CONTRACTS_READONLY_PASS','families':[x['family_id'] for x in out],'live_rows':len(rows),'summary':out,'raw_question_text_exported':False,'raw_diagram_values_exported':False},indent=2))
           PY
           rm -f /tmp/raw.json
       - uses: actions/upload-artifact@v4
