@@ -1,0 +1,162 @@
+name: Step 10 Gate E copy-only production deploy
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_GATE_E_COPY_PRODUCTION_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-gate-e-copy-production-deploy
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  PRE_BROWSER_VERSION: 359ec0ec-6b22-4679-aa25-2151f4ebf9b4
+  EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+  EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+  EXPECTED_PRE_BUNDLE: assets/portal-BloPjI-K.js
+  EXPECTED_PRE_BUNDLE_SHA256: 4674f7652c110c982a01a47d18456499785b7fbf282ac22756ed6d5ead9a9495
+  FRONTEND_SHA: 62ca3762c6cb87efcf76e6daed37eaebb7ed2bfd
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+
+      - uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.FRONTEND_SHA }}
+          path: frontend
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify exact copy-only source and build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_SHA"
+          grep -Fq 'Take a real exam style GL quiz' frontend/src/app.js
+          ! grep -Fq 'Take a Maths quiz' frontend/src/app.js
+          grep -Fq "requestJson('/api/v2/student/quiz/eligibility')" frontend/src/app.js
+          grep -Fq "requestJson('/api/v2/student/quiz/launch', { method: 'POST' })" frontend/src/app.js
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          node tests/step10-v2-maths-practice-static.mjs
+          npm run build
+          grep -R -Fq 'Take a real exam style GL quiz' dist
+          ! grep -R -Fq 'Take a Maths quiz' dist
+          grep -R -Fq '/api/v2/student/quiz/eligibility' dist
+          grep -R -Fq '/api/v2/student/quiz/launch' dist
+          ! grep -R -Fq '/api/v1/student/quiz/' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf control/rebuild/browser-staging/public
+          mkdir -p control/rebuild/browser-staging/public
+          cp -a frontend/dist/. control/rebuild/browser-staging/public/
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto';
+          const html=fs.readFileSync('frontend/dist/index.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map(m=>m[1]);
+          const main=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];
+          if(!main) throw new Error('Built main bundle not found');
+          const rel=main.replace(/^\.\//,'').replace(/^\//,'');
+          const bytes=fs.readFileSync(path.join('frontend/dist',rel));
+          const sha=crypto.createHash('sha256').update(bytes).digest('hex');
+          const text=bytes.toString('utf8');
+          if(!text.includes('Take a real exam style GL quiz')) throw new Error('Approved copy missing from build');
+          if(text.includes('Take a Maths quiz')) throw new Error('Old copy remains in build');
+          fs.appendFileSync(process.env.GITHUB_ENV,`GATE_E_BUNDLE_PATH=${rel}\nGATE_E_BUNDLE_SHA256=${sha}\n`);
+          console.log(JSON.stringify({marker:'STEP10_GATE_E_COPY_BUILD_PASS',bundlePath:rel,bundleSha256:sha},null,2));
+          NODE
+
+      - name: Install pinned Wrangler and verify pre-mutation anchors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          npx wrangler rollback --help >/tmp/rollback-help.txt
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim(), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), base='https://api.cloudflare.com/client/v4';
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${p}: ${JSON.stringify(j?.errors||j)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const workers={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          if(workers.browser!==process.env.PRE_BROWSER_VERSION||workers.student!==process.env.EXPECTED_STUDENT_VERSION||workers.quiz!==process.env.EXPECTED_QUIZ_VERSION)throw new Error(`Worker drift ${JSON.stringify(workers)}`);
+          const root=await fetch(`https://${process.env.PROD_HOST}/`,{headers:{'cache-control':'no-store'}});if(!root.ok)throw new Error(`Root ${root.status}`);const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];const rel=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];const br=await fetch(new URL(bundle,`https://${process.env.PROD_HOST}/`),{headers:{'cache-control':'no-store'}});const bytes=Buffer.from(await br.arrayBuffer());const sha=crypto.createHash('sha256').update(bytes).digest('hex');if(rel!==process.env.EXPECTED_PRE_BUNDLE||sha!==process.env.EXPECTED_PRE_BUNDLE_SHA256)throw new Error(`Pre-bundle drift ${rel} ${sha}`);if(bytes.toString('utf8').includes('Take a real exam style GL quiz'))throw new Error('New copy unexpectedly already live');
+          console.log(JSON.stringify({marker:'STEP10_GATE_E_COPY_PREMUTATION_PASS',workers,liveBundle:{path:rel,sha256:sha}},null,2));
+          NODE
+
+      - name: Write exact Browser Worker config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > control/rebuild/browser-staging/wrangler.gatee-copy.toml <<TOML
+          name = "${BROWSER_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+          [[services]]
+          binding = "STAGING_API"
+          service = "${STUDENT_WORKER}"
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+
+      - name: Deploy copy-only Browser Worker assets
+        id: deploy
+        working-directory: control
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler deploy --config rebuild/browser-staging/wrangler.gatee-copy.toml | tee /tmp/gate-e-copy-deploy.txt
+          echo deployed=true >> "$GITHUB_OUTPUT"
+
+      - name: Verify production copy and unchanged backend anchors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim(), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), base='https://api.cloudflare.com/client/v4';
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${p}: ${JSON.stringify(j?.errors||j)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const workers={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          if(!workers.browser||workers.browser===process.env.PRE_BROWSER_VERSION)throw new Error(`Browser did not advance ${JSON.stringify(workers)}`);if(workers.student!==process.env.EXPECTED_STUDENT_VERSION||workers.quiz!==process.env.EXPECTED_QUIZ_VERSION)throw new Error(`Backend changed ${JSON.stringify(workers)}`);
+          let observed=null;for(let i=0;i<30;i++){const root=await fetch(`https://${process.env.PROD_HOST}/`,{headers:{'cache-control':'no-store'}});if(root.ok){const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];if(bundle){const rel=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];const br=await fetch(new URL(bundle,`https://${process.env.PROD_HOST}/`),{headers:{'cache-control':'no-store'}});if(br.ok){const bytes=Buffer.from(await br.arrayBuffer());const sha=crypto.createHash('sha256').update(bytes).digest('hex');observed={path:rel,sha256:sha,text:bytes.toString('utf8')};if(rel===process.env.GATE_E_BUNDLE_PATH&&sha===process.env.GATE_E_BUNDLE_SHA256)break;}}}await new Promise(r=>setTimeout(r,1000));}
+          if(!observed||observed.path!==process.env.GATE_E_BUNDLE_PATH||observed.sha256!==process.env.GATE_E_BUNDLE_SHA256)throw new Error(`Production bundle mismatch ${JSON.stringify(observed&&{path:observed.path,sha256:observed.sha256})}`);if(!observed.text.includes('Take a real exam style GL quiz')||observed.text.includes('Take a Maths quiz'))throw new Error('Production copy verification failed');
+          const eligibility=await fetch(`https://${process.env.PROD_HOST}/api/v2/student/quiz/eligibility`,{redirect:'manual'});if(eligibility.status!==401)throw new Error(`Eligibility auth regression ${eligibility.status}`);
+          console.log(JSON.stringify({marker:'STEP10_GATE_E_COPY_PRODUCTION_PASS',workers,bundle:{path:observed.path,sha256:observed.sha256},copy:'Take a real exam style GL quiz',studentWorkerUnchanged:true,quizWorkerUnchanged:true},null,2));
+          NODE
+
+      - name: Automatic rollback on post-deploy failure
+        if: ${{ failure() && steps.deploy.outputs.deployed == 'true' }}
+        working-directory: control
+        shell: bash
+        run: |
+          set +e
+          npx wrangler rollback "$PRE_BROWSER_VERSION" --name "$BROWSER_WORKER" --message "Step 10 Gate E copy amendment automatic rollback" --yes
+          exit $?
