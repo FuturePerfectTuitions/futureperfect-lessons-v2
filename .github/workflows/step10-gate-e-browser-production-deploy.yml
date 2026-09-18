@@ -122,6 +122,7 @@ jobs:
           NODE
 
       - name: Install pinned Wrangler and verify rollback command availability
+        working-directory: control
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -214,7 +215,7 @@ jobs:
         run: |
           set +e
           echo 'Gate E post-deploy verification failed; rolling Browser Worker back to the exact pre-Gate-E version.'
-          npx wrangler rollback "$PRE_BROWSER_VERSION" --name "$BROWSER_WORKER" --message "Step 10 Gate E automatic rollback" --yes
+          npx wrangler rollback "$PRE_BROWSER_VERSION" --name "$BROWSER_WORKER" --message "Step 10 Gate E automatic rollback"
           ROLLBACK_CODE=$?
           sleep 3
           node --input-type=module <<'NODE'
