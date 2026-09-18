@@ -1,0 +1,122 @@
+name: Step 10 Gate D real acceptance baseline
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-d-v2-backend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_GATE_D_REAL_ACCEPTANCE_BASELINE_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: 4.134.0
+      PORTAL_DB: fpt_portal_v2_db
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      QUIZ_ORIGIN: https://quiz.futureperfect.education
+      PORTAL_ORIGIN: https://lessons.futureperfect.education
+      TEST_USER: kiaan1312
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fresh Worker and HTTP boundary verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const worker=process.env.QUIZ_WORKER, d1Expected=process.env.QUIZ_D1_ID;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);return j.result;}
+          const deployments=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/deployments`);
+          const ds=Array.isArray(deployments?.deployments)?deployments.deployments:Array.isArray(deployments)?deployments:[];
+          const versions=Array.isArray(ds[0]?.versions)?ds[0].versions:[];
+          const active=String((versions.find(v=>Number(v.percentage||0)===100)||versions[0])?.version_id||'');
+          if(!active) throw new Error('Quiz Worker active version unresolved');
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(worker)}/settings`);
+          const d1=(settings.bindings||[]).find(b=>b.type==='d1');
+          if(!d1 || String(d1.id||d1.database_id)!==d1Expected) throw new Error(`Quiz D1 binding drift: ${JSON.stringify(d1)}`);
+          const secretNames=(settings.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort();
+          if(!secretNames.includes('QUIZ_BRIDGE_SECRET')) throw new Error('QUIZ_BRIDGE_SECRET missing');
+          fs.writeFileSync('/tmp/quiz-worker.json',JSON.stringify({activeVersion:active,d1Id:d1Expected,secretNames},null,2));
+          console.log(JSON.stringify({marker:'STEP10_GATE_D_QUIZ_WORKER_FRESH_PASS',activeVersion:active,d1Id:d1Expected,secretNames},null,2));
+          NODE
+
+          curl --silent --show-error --max-redirs 0 -D /tmp/root.headers -o /tmp/root.body "$QUIZ_ORIGIN/" || test $? -eq 0
+          grep -Eq '^HTTP/.* 303' /tmp/root.headers
+          grep -Eqi '^location: https://lessons\.futureperfect\.education/' /tmp/root.headers
+          ! grep -Eqi '^set-cookie:.*fpt_session' /tmp/root.headers
+
+          curl --silent --show-error --max-redirs 0 -D /tmp/root-portal-cookie.headers -o /tmp/root-portal-cookie.body \
+            -H 'Cookie: fpt_session=gate-d-sentinel-not-a-real-token' "$QUIZ_ORIGIN/" || test $? -eq 0
+          grep -Eq '^HTTP/.* 303' /tmp/root-portal-cookie.headers
+          grep -Eqi '^location: https://lessons\.futureperfect\.education/' /tmp/root-portal-cookie.headers
+
+          curl --silent --show-error -D /tmp/health.headers -o /tmp/health.body "$QUIZ_ORIGIN/health"
+          grep -Eq '^HTTP/.* 200' /tmp/health.headers
+          jq -e '.ok==true and .service=="futureperfect-11plus-practice"' /tmp/health.body >/dev/null
+
+          curl --silent --show-error --max-redirs 0 -D /tmp/launch-empty.headers -o /tmp/launch-empty.body "$QUIZ_ORIGIN/launch" || test $? -eq 0
+          grep -Eq '^HTTP/.* 303' /tmp/launch-empty.headers
+          grep -Eqi '^location: https://lessons\.futureperfect\.education/' /tmp/launch-empty.headers
+          echo STEP10_GATE_D_DIRECT_QUIZ_RETURN_AND_COOKIE_ISOLATION_BASELINE_PASS
+
+      - name: Capture exact Portal and Quiz D1 baseline read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TODAY="$(TZ=Europe/London date +%F)"
+          PORTAL_SQL="SELECT a.portal_user_id_norm,a.batch_key,b.subject,b.stream,b.maths_level,b.school_year,a.effective_from,a.effective_to,b.active_from,b.active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm='${TEST_USER}' AND lower(b.subject)='maths' AND lower(b.stream)='11plus' AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END)=3 AND a.effective_from<='${TODAY}' AND (a.effective_to IS NULL OR '${TODAY}'<a.effective_to) AND (b.active_from IS NULL OR b.active_from<='${TODAY}') AND (b.active_to IS NULL OR '${TODAY}'<b.active_to); SELECT COUNT(*) AS launch_rows FROM quiz_launch_codes; SELECT COUNT(*) AS kiaan_launch_rows FROM quiz_launch_codes WHERE portal_user_id_norm='${TEST_USER}';"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$PORTAL_DB" --remote --command "$PORTAL_SQL" --yes > /tmp/portal-baseline.json
+          grep -Fq '"portal_user_id_norm": "kiaan1312"' /tmp/portal-baseline.json || grep -Fq '"portal_user_id_norm":"kiaan1312"' /tmp/portal-baseline.json
+          grep -Fq '"batch_key": "Y511FM"' /tmp/portal-baseline.json || grep -Fq '"batch_key":"Y511FM"' /tmp/portal-baseline.json
+          grep -Eq '"launch_rows"[[:space:]]*:[[:space:]]*0' /tmp/portal-baseline.json
+          grep -Eq '"kiaan_launch_rows"[[:space:]]*:[[:space:]]*0' /tmp/portal-baseline.json
+
+          QUIZ_SQL="SELECT COUNT(*) AS kiaan_auth_sessions FROM quiz_auth_session WHERE portal_user_id='${TEST_USER}'; SELECT COUNT(*) AS kiaan_audit_events FROM quiz_audit_event WHERE portal_user_id='${TEST_USER}'; SELECT COUNT(*) AS kiaan_quiz_sessions FROM quiz_session WHERE portal_user_id='${TEST_USER}'; SELECT COUNT(*) AS all_auth_sessions FROM quiz_auth_session; SELECT COUNT(*) AS all_quiz_sessions FROM quiz_session;"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, id=process.env.QUIZ_D1_ID;
+          const sql=process.env.QUIZ_SQL_VALUE;
+          const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${id}/query`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({sql})});
+          const j=await r.json(); if(!r.ok||j.success!==true) throw new Error(JSON.stringify(j.errors||j));
+          for(const block of j.result||[]){if(Number(block?.meta?.rows_written||0)!==0 || block?.meta?.changed_db===true) throw new Error('Baseline query wrote Quiz D1');}
+          fs.writeFileSync('/tmp/quiz-baseline.json',JSON.stringify(j.result,null,2));
+          console.log(JSON.stringify({marker:'STEP10_GATE_D_QUIZ_D1_BASELINE_PASS',results:(j.result||[]).map(x=>x.results)},null,2));
+          NODE
+        env:
+          QUIZ_SQL_VALUE: "SELECT COUNT(*) AS kiaan_auth_sessions FROM quiz_auth_session WHERE portal_user_id='kiaan1312'; SELECT COUNT(*) AS kiaan_audit_events FROM quiz_audit_event WHERE portal_user_id='kiaan1312'; SELECT COUNT(*) AS kiaan_quiz_sessions FROM quiz_session WHERE portal_user_id='kiaan1312'; SELECT COUNT(*) AS all_auth_sessions FROM quiz_auth_session; SELECT COUNT(*) AS all_quiz_sessions FROM quiz_session;"
+
+      - name: Emit formal baseline marker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const worker=JSON.parse(fs.readFileSync('/tmp/quiz-worker.json','utf8'));
+          const quiz=JSON.parse(fs.readFileSync('/tmp/quiz-baseline.json','utf8'));
+          const out={marker:'STEP10_GATE_D_REAL_ACCEPTANCE_BASELINE_PASS',capturedAt:new Date().toISOString(),testUser:process.env.TEST_USER,quizWorker:worker,portalAssignment:'Y511FM / maths / 11plus / L3',portalLaunchRows:0,kiaanPortalLaunchRows:0,quizCounts:quiz.map(x=>x.results),directQuizUnauthRedirectsPortal:true,portalCookieSentinelIgnoredByQuiz:true};
+          fs.writeFileSync('/tmp/step10-gate-d-real-baseline.json',JSON.stringify(out,null,2));
+          console.log(JSON.stringify(out,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step10-gate-d-real-acceptance-baseline
+          path: /tmp/step10-gate-d-real-baseline.json
+          retention-days: 30
