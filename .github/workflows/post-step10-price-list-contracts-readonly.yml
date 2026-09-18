@@ -1,4 +1,4 @@
-name: Post-Step-10 price-list contracts read-only
+name: Post-Step-10 money-menu contracts read-only
 
 on:
   push:
@@ -29,40 +29,40 @@ jobs:
           node-version: '22'
       - shell: bash
         run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
-      - name: Export deployed price-list contract metadata only
+      - name: Export LIVE Money/menu contract metadata only
         shell: bash
         run: |
           set -Eeuo pipefail
           cat >/tmp/w.toml <<TOML
-          name = "post-step10-price-list-contracts-readonly"
+          name = "post-step10-money-menu-contracts-readonly"
           compatibility_date = "2026-09-18"
           [[d1_databases]]
           binding = "DB"
           database_name = "${QUIZ_D1_NAME}"
           database_id = "${QUIZ_D1_ID}"
           TOML
-          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,family_id,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,difficulty_band,earliest_release_point,lifecycle_status,deployment_status FROM question_instance WHERE diagram_type='price_list' AND lifecycle_status='Live' AND deployment_status='AVAILABLE' ORDER BY family_id,question_id;" --json >/tmp/rows.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,family_id,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,difficulty_band,earliest_release_point,lifecycle_status,deployment_status FROM question_instance WHERE diagram_type='Money/menu' AND lifecycle_status='Live' ORDER BY family_id,question_id;" --json >/tmp/rows.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           rows=json.loads(Path('/tmp/rows.json').read_text())[0]['results']
-          Path('/tmp/price_list_contracts.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
-          types={}
-          families={}
-          item_counts={}
+          Path('/tmp/money_menu_contracts.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+          types={}; families={}; item_counts={}; presentations={}; deployments={}
           for r in rows:
               v=json.loads(r['validation_spec_json']) if r.get('validation_spec_json') else {}
               d=json.loads(r['diagram_spec_json']) if r.get('diagram_spec_json') else {}
               t=v.get('type','<none>')
               types[t]=types.get(t,0)+1
               families[r['family_id']]=families.get(r['family_id'],0)+1
+              presentations[r['presentation_type']]=presentations.get(r['presentation_type'],0)+1
+              deployments[r['deployment_status']]=deployments.get(r['deployment_status'],0)+1
               n=len(d.get('items',[])) if isinstance(d.get('items'),list) else -1
               item_counts[str(n)]=item_counts.get(str(n),0)+1
-          print(json.dumps({'marker':'POST_STEP10_PRICE_LIST_CONTRACTS_READONLY_PASS','rows':len(rows),'validation_types':types,'families':families,'item_counts':item_counts,'stem_or_source_text_exported':False},indent=2))
+          print(json.dumps({'marker':'POST_STEP10_MONEY_MENU_CONTRACTS_READONLY_PASS','rows':len(rows),'validation_types':types,'families':families,'presentations':presentations,'deployment_statuses':deployments,'item_counts':item_counts,'stem_or_source_text_exported':False},indent=2))
           PY
           rm -f /tmp/rows.json
       - uses: actions/upload-artifact@v4
         with:
-          name: post-step10-price-list-contracts-readonly
-          path: /tmp/price_list_contracts.json
+          name: post-step10-money-menu-contracts-readonly
+          path: /tmp/money_menu_contracts.json
           retention-days: 30
