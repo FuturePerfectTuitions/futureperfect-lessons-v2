@@ -1,0 +1,267 @@
+name: Step 10 final Quiz production promotion
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-final-quiz-production-promote.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-final-quiz-production-promotion
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  EXPECTED_OLD_QUIZ_VERSION: 13eda650-d06c-4a60-a8f6-7f36969498bd
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_STUDENT_VERSION: f26167b1-2b8d-4252-a47a-a248409b3d7a
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  HISTORICAL_SOURCE_BRANCH: ops/step10-gate-c-readonly-20260917-2012
+  OLD_INDEX_BLOB: e7a5c0fb704d17eddf108f817cf5f3df89f496ff
+  FINAL_INDEX_BLOB: 48c2bacdae41392de76c82bf49e490303d3cb768
+  SELECTOR_BLOB: 2082299d1bc513a5076bc1f9c7f1d06b653d235d
+  REMEDIATION_BLOB: 030692e4c0d6a318dcf3bdded5750234e39c271c
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Reconstruct exact green Quiz candidate from reviewed source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin "${HISTORICAL_SOURCE_BRANCH}:refs/remotes/origin/${HISTORICAL_SOURCE_BRANCH}"
+          rm -rf /tmp/step10-final-quiz
+          mkdir -p /tmp/step10-final-quiz/src
+          git show "origin/${HISTORICAL_SOURCE_BRANCH}:ops/step10-gate-c-quiz-copy/src/index.js" > /tmp/step10-final-quiz/src/index.js
+          git show "origin/${HISTORICAL_SOURCE_BRANCH}:ops/step10-gate-c-quiz-copy/src/selector.js" > /tmp/step10-final-quiz/src/selector.js
+          git show "origin/${HISTORICAL_SOURCE_BRANCH}:ops/step10-gate-c-quiz-copy/src/remediation.js" > /tmp/step10-final-quiz/src/remediation.js
+          test "$(git hash-object /tmp/step10-final-quiz/src/index.js)" = "$OLD_INDEX_BLOB"
+          test "$(git hash-object /tmp/step10-final-quiz/src/selector.js)" = "$SELECTOR_BLOB"
+          test "$(git hash-object /tmp/step10-final-quiz/src/remediation.js)" = "$REMEDIATION_BLOB"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/step10-final-quiz/src/index.js')
+          s=p.read_text()
+          replacements=[
+            ("const TIMED_MS = 25 * 60 * 1000;\nconst LOCK_MS = 15_000;",
+             "const TIMED_MS = 25 * 60 * 1000;\nconst FINAL_MINUTE_MS = 60 * 1000;\nconst LOCK_MS = 15_000;"),
+            ("  const timedOut = session.mode === 'TIMED' && deadlineMs != null && now.getTime() >= deadlineMs;\n  const effectiveReason = timedOut ? 'TIMEOUT' : reason;",
+             "  const timedOut = session.mode === 'TIMED' && deadlineMs != null && now.getTime() >= deadlineMs;\n  const manualSubmitLocked = session.mode === 'TIMED' && deadlineMs != null\n    && now.getTime() >= deadlineMs - FINAL_MINUTE_MS\n    && now.getTime() < deadlineMs;\n  if (reason === 'MANUAL' && manualSubmitLocked) {\n    return { ok: false, status: 409, error: 'MANUAL_SUBMIT_LOCKED_FINAL_MINUTE' };\n  }\n  const effectiveReason = timedOut ? 'TIMEOUT' : reason;"),
+            ("el.classList.toggle('danger',remain<=300);if(ms<=0){",
+             "el.classList.toggle('danger',remain<=300);const submitBtn=document.getElementById('submit');const manualLocked=remain<=60;if(submitBtn){submitBtn.disabled=manualLocked;submitBtn.textContent=manualLocked?'Submission locked · time will auto-submit':'Submit whole test';submitBtn.title=manualLocked?'Manual submission is disabled in the final 60 seconds.':''}if(ms<=0){"),
+            ("if(e.body?.error==='ALL_ANSWERS_REQUIRED'){alert('Please answer every question before submitting.')}else err(e)",
+             "if(e.body?.error==='ALL_ANSWERS_REQUIRED'){alert('Please answer every question before submitting.')}else if(e.body?.error==='MANUAL_SUBMIT_LOCKED_FINAL_MINUTE'){alert('Manual submission is disabled in the final 60 seconds. Your test will submit automatically when time expires.')}else err(e)")
+          ]
+          for old,new in replacements:
+              if s.count(old)!=1:
+                  raise SystemExit(f'Expected exactly one patch target, found {s.count(old)}: {old[:80]}')
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          test "$(git hash-object /tmp/step10-final-quiz/src/index.js)" = "$FINAL_INDEX_BLOB"
+          node --check /tmp/step10-final-quiz/src/index.js
+          node --check /tmp/step10-final-quiz/src/selector.js
+          node --check /tmp/step10-final-quiz/src/remediation.js
+          grep -Fq 'FINAL_MINUTE_MS = 60 * 1000' /tmp/step10-final-quiz/src/index.js
+          grep -Fq 'MANUAL_SUBMIT_LOCKED_FINAL_MINUTE' /tmp/step10-final-quiz/src/index.js
+          grep -Fq 'manualLocked=remain<=60' /tmp/step10-final-quiz/src/index.js
+          echo 'STEP10_FINAL_QUIZ_EXACT_GREEN_SOURCE_RECONSTRUCTED'
+
+      - name: Write minimal keep-vars deployment config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/step10-final-quiz/wrangler.toml <<TOML
+          name = "${QUIZ_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-09-17"
+          keep_vars = true
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt-11plus-practice"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+
+      - name: Immediate pre-mutation live anchor and binding capture
+        id: pre
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings-before.json
+          jq -e '.success == true' /tmp/quiz-settings-before.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-settings-before.json >/dev/null
+          for n in PORTAL_BRIDGE_URL PORTAL_LOGIN_URL QUIZ_ORIGIN QUIZ_SESSION_TTL_SECONDS LAUNCH_REDEEM_TIMEOUT_MS; do
+            jq -e --arg n "$n" '.result.bindings[] | select(.name==$n and .type=="plain_text" and (.text|length)>0)' /tmp/quiz-settings-before.json >/dev/null
+          done
+          unknown="$(jq -r '[.result.bindings[] | select(.name as $n | ["DB","QUIZ_BRIDGE_SECRET","PORTAL_BRIDGE_URL","PORTAL_LOGIN_URL","QUIZ_ORIGIN","QUIZ_SESSION_TTL_SECONDS","LAUNCH_REDEEM_TIMEOUT_MS"] | index($n) | not) | .name] | join(",")' /tmp/quiz-settings-before.json)"
+          test -z "$unknown" || { echo "Unexpected Quiz bindings: $unknown" >&2; exit 1; }
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-before.json
+          OLD_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-before.json | head -n1)"
+          test "$OLD_VERSION" = "$EXPECTED_OLD_QUIZ_VERSION"
+          echo "OLD_VERSION=$OLD_VERSION" >> "$GITHUB_ENV"
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-versions-before.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-versions-before.json | sort -u > /tmp/quiz-version-ids-before.txt
+          node --input-type=module <<'NODE'
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),base='https://api.cloudflare.com/client/v4';
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(JSON.stringify(j.errors||j));return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:x;const d=ds[0],vs=d.versions||[];return (vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'';}
+          const b=await active(process.env.BROWSER_WORKER),s=await active(process.env.STUDENT_WORKER);
+          if(b!==process.env.EXPECTED_BROWSER_VERSION) throw new Error(`Browser drift ${b}`);
+          if(s!==process.env.EXPECTED_STUDENT_VERSION) throw new Error(`Student drift ${s}`);
+          console.log(JSON.stringify({marker:'STEP10_FINAL_QUIZ_PREMUTATION_ANCHORS_PASS',browser:b,student:s,quiz:process.env.OLD_VERSION},null,2));
+          NODE
+          code="$(curl --silent --show-error --output /tmp/quiz-health-before.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+          test "$code" = '200'
+          code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-root-before.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/')"
+          test "$code" = '303'
+          echo 'STEP10_FINAL_QUIZ_PREMUTATION_PASS'
+
+      - name: Upload exact candidate version without changing triggers
+        id: upload
+        working-directory: /tmp/step10-final-quiz
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions upload src/index.js --config wrangler.toml --keep-vars --message 'Step 10 final tested Quiz engine' | tee /tmp/quiz-final-upload.txt
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-versions-after.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-versions-after.json | sort -u > /tmp/quiz-version-ids-after.txt
+          NEW_VERSION="$(comm -13 /tmp/quiz-version-ids-before.txt /tmp/quiz-version-ids-after.txt | head -n1)"
+          test -n "$NEW_VERSION"
+          test "$NEW_VERSION" != "$OLD_VERSION"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "STEP10_FINAL_QUIZ_CANDIDATE_VERSION=$NEW_VERSION"
+
+      - name: Inspect unpromoted candidate and require exact live bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/versions/${NEW_VERSION}" -H "$AUTH" -o /tmp/quiz-candidate.json
+          jq -e '.success == true' /tmp/quiz-candidate.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.resources.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-candidate.json >/dev/null
+          jq -e '.result.resources.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-candidate.json >/dev/null
+          for n in PORTAL_BRIDGE_URL PORTAL_LOGIN_URL QUIZ_ORIGIN QUIZ_SESSION_TTL_SECONDS LAUNCH_REDEEM_TIMEOUT_MS; do
+            before="$(jq -r --arg n "$n" '[.result.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/quiz-settings-before.json)"
+            after="$(jq -r --arg n "$n" '[.result.resources.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/quiz-candidate.json)"
+            test -n "$before"
+            test "$after" = "$before"
+          done
+          echo 'STEP10_FINAL_QUIZ_UNPROMOTED_CANDIDATE_BINDINGS_PASS'
+
+      - name: Promote exact candidate at 100 percent
+        id: promote
+        working-directory: /tmp/step10-final-quiz
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$NEW_VERSION@100%" --name "$QUIZ_WORKER" --message 'Step 10 final tested Quiz engine promotion' -y
+          echo 'promoted=true' >> "$GITHUB_OUTPUT"
+          echo 'STEP10_FINAL_QUIZ_PROMOTED'
+
+      - name: Verify promoted Quiz publicly and preserve surrounding workers
+        id: verify
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-after.json
+          jq -e --arg id "$NEW_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy-after.json >/dev/null
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings-after.json
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-settings-after.json >/dev/null
+          for n in PORTAL_BRIDGE_URL PORTAL_LOGIN_URL QUIZ_ORIGIN QUIZ_SESSION_TTL_SECONDS LAUNCH_REDEEM_TIMEOUT_MS; do
+            before="$(jq -r --arg n "$n" '[.result.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/quiz-settings-before.json)"
+            after="$(jq -r --arg n "$n" '[.result.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/quiz-settings-after.json)"
+            test "$after" = "$before"
+          done
+          passed=false
+          for attempt in $(seq 1 12); do
+            health="$(curl --silent --show-error --output /tmp/quiz-health-after.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+            invalid="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-invalid-after.html --write-out '%{http_code}' 'https://quiz.futureperfect.education/launch?code=step10-final-invalid-shared-secret-probe')"
+            root="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-root-after.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/')"
+            if test "$health" = '200' && test "$invalid" = '410' && grep -Fqi 'practice link is no longer valid' /tmp/quiz-invalid-after.html && test "$root" = '303'; then passed=true; break; fi
+            sleep 5
+          done
+          test "$passed" = 'true'
+          node --input-type=module <<'NODE'
+          const clean=v=>String(v??'').trim(); const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),base='https://api.cloudflare.com/client/v4';
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(JSON.stringify(j.errors||j));return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:x;const d=ds[0],vs=d.versions||[];return (vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'';}
+          const b=await active(process.env.BROWSER_WORKER),s=await active(process.env.STUDENT_WORKER);
+          if(b!==process.env.EXPECTED_BROWSER_VERSION) throw new Error(`Browser changed ${b}`);
+          if(s!==process.env.EXPECTED_STUDENT_VERSION) throw new Error(`Student changed ${s}`);
+          console.log(JSON.stringify({marker:'STEP10_FINAL_QUIZ_POSTPROMOTION_PASS',browser:b,student:s,quiz:process.env.NEW_VERSION},null,2));
+          NODE
+
+      - name: Roll back Quiz automatically if post-promotion verification failed
+        if: steps.promote.outputs.promoted == 'true' && steps.verify.outcome == 'failure'
+        working-directory: /tmp/step10-final-quiz
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "Verification failed; rolling Quiz Worker back to $OLD_VERSION" >&2
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD_VERSION@100%" --name "$QUIZ_WORKER" --message 'Rollback failed Step 10 final Quiz promotion' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-rollback.json
+          jq -e --arg id "$OLD_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy-rollback.json >/dev/null
+          curl --fail --silent --show-error 'https://quiz.futureperfect.education/health' >/dev/null
+          echo 'STEP10_FINAL_QUIZ_AUTOROLLBACK_PASS'
+
+      - name: Require final Quiz verification success
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.verify.outcome }}' = 'success'
+          echo "STEP10_FINAL_QUIZ_PRODUCTION_PASS new_version=${NEW_VERSION} rollback_version=${OLD_VERSION}"
+
+      - name: Record evidence
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/step10-final-quiz-production-evidence.json <<JSON
+          {
+            "marker": "STEP10_FINAL_QUIZ_PRODUCTION_EVIDENCE",
+            "expectedSourceBlob": "${FINAL_INDEX_BLOB}",
+            "rollbackVersion": "${OLD_VERSION:-}",
+            "candidateVersion": "${NEW_VERSION:-}",
+            "verificationOutcome": "${{ steps.verify.outcome }}"
+          }
+          JSON
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: step10-final-quiz-production-evidence
+          path: /tmp/step10-final-quiz-production-evidence.json
+          retention-days: 90
