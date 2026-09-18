@@ -1,0 +1,154 @@
+name: Step 10 Gate D real acceptance postcheck
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-d-v2-backend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_GATE_D_REAL_ACCEPTANCE_POSTCHECK_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: 4.134.0
+      PORTAL_DB: fpt_portal_v2_db
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+      TEST_USER: kiaan1312
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+      EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+      EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+      QUIZ_ORIGIN: https://quiz.futureperfect.education
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify production Worker anchors did not drift
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(base+path,{headers});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          const actual={student:await active(process.env.STUDENT_WORKER),browser:await active(process.env.BROWSER_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          const expected={student:process.env.EXPECTED_STUDENT_VERSION,browser:process.env.EXPECTED_BROWSER_VERSION,quiz:process.env.EXPECTED_QUIZ_VERSION};
+          if(JSON.stringify(actual)!==JSON.stringify(expected)) throw new Error(`Worker drift: ${JSON.stringify({expected,actual})}`);
+          console.log(JSON.stringify({marker:'STEP10_GATE_D_WORKER_ANCHORS_STABLE_PASS',actual},null,2));
+          NODE
+
+      - name: Verify Portal launch-code semantics and entitlement immutability
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TODAY="$(TZ=Europe/London date +%F)"
+          SQL="SELECT a.portal_user_id_norm,a.batch_key,b.subject,b.stream,b.maths_level,b.school_year,a.effective_from,a.effective_to,b.active_from,b.active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm='${TEST_USER}' AND lower(b.subject)='maths' AND lower(b.stream)='11plus' AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END)=3 AND a.effective_from<='${TODAY}' AND (a.effective_to IS NULL OR '${TODAY}'<a.effective_to) AND (b.active_from IS NULL OR b.active_from<='${TODAY}') AND (b.active_to IS NULL OR '${TODAY}'<b.active_to); SELECT COUNT(*) AS all_launch_rows FROM quiz_launch_codes; SELECT COUNT(*) AS kiaan_launch_rows FROM quiz_launch_codes WHERE portal_user_id_norm='${TEST_USER}'; SELECT code_hash,portal_user_id_norm,release_context_json,created_at,expires_at,used_at FROM quiz_launch_codes WHERE portal_user_id_norm='${TEST_USER}' ORDER BY created_at;"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$PORTAL_DB" --remote --command "$SQL" --yes > /tmp/portal-post.json
+          grep -Fq '"batch_key": "Y511FM"' /tmp/portal-post.json || grep -Fq '"batch_key":"Y511FM"' /tmp/portal-post.json
+          grep -Eq '"all_launch_rows"[[:space:]]*:[[:space:]]*2' /tmp/portal-post.json
+          grep -Eq '"kiaan_launch_rows"[[:space:]]*:[[:space:]]*2' /tmp/portal-post.json
+
+          python3 - <<'PY'
+          import json,re,datetime
+          text=open('/tmp/portal-post.json',encoding='utf-8').read()
+          start=text.find('[')
+          data=json.loads(text[start:])
+          blocks=[b.get('results',[]) for b in data if isinstance(b,dict)]
+          rows=blocks[-1]
+          assert len(rows)==2, rows
+          used=[r for r in rows if r.get('used_at')]
+          unused=[r for r in rows if not r.get('used_at')]
+          assert len(used)==1 and len(unused)==1, rows
+          now=datetime.datetime.now(datetime.timezone.utc)
+          exp=datetime.datetime.fromisoformat(unused[0]['expires_at'].replace('Z','+00:00'))
+          assert exp < now, (exp,now)
+          for r in rows:
+              assert re.fullmatch(r'[0-9a-f]{64}',r['code_hash'])
+              c=json.loads(r['release_context_json'])
+              assert c['source']=='portal-api-v2-live-l3-view-v1'
+              assert c['portalSessionIssuer']=='fpt-portal-v2'
+              assert c['portalSessionKind']=='session'
+              assert c['l3Eligible'] is True and c['l2Inherited'] is True
+              assert c['portalViewId']=='maths-level3'
+              assert isinstance(c['releasedL3LessonCodes'],list)
+              assert all(re.fullmatch(r'L3T\dM\d+',x) for x in c['releasedL3LessonCodes'])
+          print(json.dumps({'marker':'STEP10_GATE_D_PORTAL_POSTCHECK_PASS','launchRows':2,'usedOnce':1,'expiredUnused':1,'assignment':'Y511FM / maths / 11plus / L3','releaseContextValid':True},indent=2))
+          PY
+
+      - name: Verify Quiz redemption, replay and expiry outcomes
+        shell: bash
+        env:
+          QUIZ_SQL_VALUE: "SELECT created_at,last_seen_at,expires_at,revoked_at,release_context_json FROM quiz_auth_session WHERE portal_user_id='kiaan1312' ORDER BY created_at; SELECT event_type,event_at,detail_json FROM quiz_audit_event WHERE portal_user_id='kiaan1312' ORDER BY event_at; SELECT COUNT(*) AS kiaan_quiz_sessions FROM quiz_session WHERE portal_user_id='kiaan1312'; SELECT COUNT(*) AS all_auth_sessions FROM quiz_auth_session; SELECT COUNT(*) AS all_quiz_sessions FROM quiz_session;"
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, id=process.env.QUIZ_D1_ID;
+          const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${id}/query`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({sql:process.env.QUIZ_SQL_VALUE})});
+          const j=await r.json(); if(!r.ok||j.success!==true) throw new Error(JSON.stringify(j.errors||j));
+          for(const b of j.result||[]) if(Number(b?.meta?.rows_written||0)!==0||b?.meta?.changed_db===true) throw new Error('Postcheck query wrote Quiz D1');
+          const blocks=(j.result||[]).map(x=>x.results||[]);
+          const auth=blocks[0], audit=blocks[1], quizCount=Number(blocks[2]?.[0]?.kiaan_quiz_sessions), allAuth=Number(blocks[3]?.[0]?.all_auth_sessions), allQuiz=Number(blocks[4]?.[0]?.all_quiz_sessions);
+          if(auth.length!==1) throw new Error(`Expected exactly one successful Quiz auth session, got ${auth.length}`);
+          if(audit.length!==1 || audit[0].event_type!=='QUIZ_LOGIN_CREATED') throw new Error(`Expected exactly one QUIZ_LOGIN_CREATED audit, got ${JSON.stringify(audit)}`);
+          if(quizCount!==0 || allQuiz!==0) throw new Error(`No quiz test should have been created: kiaan=${quizCount}, all=${allQuiz}`);
+          if(allAuth!==1) throw new Error(`Replay/expiry must not create extra auth sessions: allAuth=${allAuth}`);
+          const context=JSON.parse(auth[0].release_context_json);
+          if(context.source!=='portal-api-v2-live-l3-view-v1'||context.portalSessionIssuer!=='fpt-portal-v2'||context.l3Eligible!==true||context.l2Inherited!==true) throw new Error('Quiz auth release context drift');
+          fs.writeFileSync('/tmp/quiz-post.json',JSON.stringify({auth,audit,quizCount,allAuth,allQuiz},null,2));
+          console.log(JSON.stringify({marker:'STEP10_GATE_D_QUIZ_POSTCHECK_PASS',successfulAuthSessions:1,loginAudits:1,quizTestsCreated:0,replayCreatedExtraSession:false,expiredCodeCreatedExtraSession:false},null,2));
+          NODE
+
+      - name: Reconfirm direct unauthenticated return and cookie isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --silent --show-error --max-redirs 0 -D /tmp/direct.headers -o /tmp/direct.body "$QUIZ_ORIGIN/" || test $? -eq 0
+          grep -Eq '^HTTP/.* 303' /tmp/direct.headers
+          grep -Eqi '^location: https://lessons\.futureperfect\.education/' /tmp/direct.headers
+          curl --silent --show-error --max-redirs 0 -D /tmp/sentinel.headers -o /tmp/sentinel.body -H 'Cookie: fpt_session=gate-d-sentinel-not-a-real-token' "$QUIZ_ORIGIN/" || test $? -eq 0
+          grep -Eq '^HTTP/.* 303' /tmp/sentinel.headers
+          grep -Eqi '^location: https://lessons\.futureperfect\.education/' /tmp/sentinel.headers
+          echo STEP10_GATE_D_DIRECT_RETURN_COOKIE_ISOLATION_POSTCHECK_PASS
+
+      - name: Record formal server-side Gate D acceptance evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/step10-gate-d-real-postcheck.json <<JSON
+          {
+            "marker": "STEP10_GATE_D_REAL_SERVER_POSTCHECK_PASS",
+            "testUser": "kiaan1312",
+            "eligibleLaunchRows": 2,
+            "successfulRedeems": 1,
+            "replayProducedExtraAuth": false,
+            "expiredLaunchProducedAuth": false,
+            "expiredLaunchRowRemainedUnused": true,
+            "directUnauthQuizReturnsPortal": true,
+            "portalCookieSentinelIgnoredByQuiz": true,
+            "portalAssignmentUnchanged": "Y511FM / maths / 11plus / L3",
+            "quizTestsCreated": 0,
+            "productionWorkerAnchorsStable": true
+          }
+          JSON
+          cat /tmp/step10-gate-d-real-postcheck.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step10-gate-d-real-acceptance-postcheck
+          path: /tmp/step10-gate-d-real-postcheck.json
+          retention-days: 30
