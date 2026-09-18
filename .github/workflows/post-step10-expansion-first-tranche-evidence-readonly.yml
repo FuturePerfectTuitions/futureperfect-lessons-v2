@@ -1,0 +1,73 @@
+name: Post-Step-10 first tranche evidence links read-only
+
+on:
+  push:
+    branches:
+      - mastery/post-step10-expansion-planning-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-expansion-first-tranche-evidence-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Export first-tranche evidence identifiers only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-expansion-evidence-readonly"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT e.family_id,e.golden_source_id,s.corpus_series FROM gl_evidence_link e JOIN gl_source_question s ON s.golden_source_id=e.golden_source_id WHERE e.family_id IN ('MEA-07','MEA-01','MEA-02','COO-01','GEO-10','DAT-07','MEA-03','GEO-12','ALG-02','GEO-05','FRA-03','FRA-12') ORDER BY e.family_id,s.corpus_series,e.golden_source_id;" --json >/tmp/evidence.json
+          python3 - <<'PY'
+          import csv,json
+          from pathlib import Path
+          data=json.loads(Path('/tmp/evidence.json').read_text())
+          rows=data[0]['results']
+          with open('/tmp/post_step10_first_tranche_evidence_ids.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=['family_id','golden_source_id','corpus_series'])
+              w.writeheader(); w.writerows(rows)
+          legacy=[r for r in rows if r['corpus_series']=='Legacy GL/CGP Published Corpus']
+          fams=sorted({r['family_id'] for r in legacy})
+          assert len(fams)==12, f'Expected legacy evidence for all 12 families, got {len(fams)}: {fams}'
+          summary={
+              'marker':'POST_STEP10_FIRST_TRANCHE_EVIDENCE_IDS_READONLY_PASS',
+              'families':12,
+              'linked_ids':len(rows),
+              'legacy_linked_ids':len(legacy),
+              'legacy_family_coverage':len(fams),
+              'contains_source_question_text':False
+          }
+          Path('/tmp/post_step10_first_tranche_evidence_ids_summary.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-step10-first-tranche-evidence-ids-readonly
+          path: |
+            /tmp/post_step10_first_tranche_evidence_ids.csv
+            /tmp/post_step10_first_tranche_evidence_ids_summary.json
+          retention-days: 90
