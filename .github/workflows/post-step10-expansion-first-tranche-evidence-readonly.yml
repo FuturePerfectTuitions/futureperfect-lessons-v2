@@ -41,23 +41,31 @@ jobs:
           database_name = "${QUIZ_D1_NAME}"
           database_id = "${QUIZ_D1_ID}"
           TOML
-          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT e.family_id,e.golden_source_id,s.corpus_series FROM gl_evidence_link e JOIN gl_source_question s ON s.golden_source_id=e.golden_source_id WHERE e.family_id IN ('MEA-07','MEA-01','MEA-02','COO-01','GEO-10','DAT-07','MEA-03','GEO-12','ALG-02','GEO-05','FRA-03','FRA-12') ORDER BY e.family_id,s.corpus_series,e.golden_source_id;" --json >/tmp/evidence.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT DISTINCT e.family_id,e.golden_source_id,s.corpus_series FROM gl_evidence_link e JOIN gl_source_question s ON s.golden_source_id=e.golden_source_id WHERE e.family_id IN ('MEA-07','MEA-01','MEA-02','COO-01','GEO-10','DAT-07','MEA-03','GEO-12','ALG-02','GEO-05','FRA-03','FRA-12') ORDER BY e.family_id,s.corpus_series,e.golden_source_id;" --json >/tmp/evidence.json
           python3 - <<'PY'
           import csv,json
           from pathlib import Path
           data=json.loads(Path('/tmp/evidence.json').read_text())
           rows=data[0]['results']
+          legacy=[r for r in rows if r['corpus_series']=='Legacy GL/CGP Published Corpus']
+          series12=[r for r in rows if r['corpus_series']=='GL/CGP 12-Paper Series']
+          familiarisation=[r for r in rows if r['corpus_series']=='GL Familiarisation Published Corpus']
+          fams=sorted({r['family_id'] for r in legacy})
+          assert len(rows)==332, f'Expected 332 distinct evidence links, got {len(rows)}'
+          assert len(legacy)==167, f'Expected 167 legacy links, got {len(legacy)}'
+          assert len(series12)==133, f'Expected 133 12-paper links, got {len(series12)}'
+          assert len(familiarisation)==32, f'Expected 32 familiarisation links, got {len(familiarisation)}'
+          assert len(fams)==12, f'Expected legacy evidence for all 12 families, got {len(fams)}: {fams}'
           with open('/tmp/post_step10_first_tranche_evidence_ids.csv','w',newline='',encoding='utf-8') as f:
               w=csv.DictWriter(f,fieldnames=['family_id','golden_source_id','corpus_series'])
               w.writeheader(); w.writerows(rows)
-          legacy=[r for r in rows if r['corpus_series']=='Legacy GL/CGP Published Corpus']
-          fams=sorted({r['family_id'] for r in legacy})
-          assert len(fams)==12, f'Expected legacy evidence for all 12 families, got {len(fams)}: {fams}'
           summary={
               'marker':'POST_STEP10_FIRST_TRANCHE_EVIDENCE_IDS_READONLY_PASS',
               'families':12,
-              'linked_ids':len(rows),
+              'distinct_linked_ids':len(rows),
               'legacy_linked_ids':len(legacy),
+              'twelve_paper_linked_ids':len(series12),
+              'familiarisation_linked_ids':len(familiarisation),
               'legacy_family_coverage':len(fams),
               'contains_source_question_text':False
           }
