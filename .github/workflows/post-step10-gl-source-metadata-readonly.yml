@@ -1,0 +1,52 @@
+name: Post-Step-10 GL source metadata read-only
+
+on:
+  push:
+    branches:
+      - mastery/post-step10-expansion-planning-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-gl-source-metadata-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Inspect source table schema only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-source-metadata-readonly"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "PRAGMA table_info(gl_source_question);" --json >/tmp/schema.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=json.loads(Path('/tmp/schema.json').read_text())[0]['results']
+          print('POST_STEP10_GL_SOURCE_SCHEMA_READONLY_PASS')
+          for r in rows:
+              print(r['name'], r['type'])
+          PY
