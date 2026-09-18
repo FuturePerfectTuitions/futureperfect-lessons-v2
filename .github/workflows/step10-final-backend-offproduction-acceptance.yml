@@ -1,0 +1,62 @@
+name: Step 10 final backend off-production acceptance
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-d-v2-backend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_FINAL_BACKEND_ACCEPTANCE_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate Gate D v2 quiz runtime syntax
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check tests/step10-gate-d-v2-quiz-runtime.mjs
+      - name: Run fail-closed eligibility and launch contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/step10-gate-d-v2-quiz-runtime.mjs | tee /tmp/step10-final-backend-acceptance.log
+          grep -Fq 'STEP10_GATE_D_V2_QUIZ_RUNTIME_TEST_PASS' /tmp/step10-final-backend-acceptance.log
+          grep -Fq '"englishOnlyExcluded": true' /tmp/step10-final-backend-acceptance.log
+          grep -Fq '"trialExcluded": true' /tmp/step10-final-backend-acceptance.log
+          grep -Fq '"lockedPreviewExcluded": true' /tmp/step10-final-backend-acceptance.log
+          grep -Fq '"failClosedOnReadModelError": true' /tmp/step10-final-backend-acceptance.log
+      - name: Record acceptance marker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/step10-final-backend-acceptance.json <<EOF
+          {
+            "marker": "STEP10_FINAL_BACKEND_OFFPRODUCTION_PASS",
+            "sourceCommit": "${GITHUB_SHA}",
+            "productionMutation": false,
+            "currentMaths11plusL3Required": true,
+            "englishOnly11plusExcluded": true,
+            "trialExcluded": true,
+            "lockedPreviewExcluded": true,
+            "inactiveExpiredExcluded": true,
+            "readModelFailureFailsClosed": true,
+            "launchOriginGuarded": true,
+            "launchCodeHashed": true,
+            "launchTtlSeconds": 90
+          }
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step10-final-backend-offproduction-acceptance
+          path: /tmp/step10-final-backend-acceptance.json
+          retention-days: 90
