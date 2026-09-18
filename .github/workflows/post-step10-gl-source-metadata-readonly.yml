@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - shell: bash
         run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
-      - name: Inspect source table schema only
+      - name: Export safe metadata for ALG-02 familiarisation evidence
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -41,12 +41,14 @@ jobs:
           database_name = "${QUIZ_D1_NAME}"
           database_id = "${QUIZ_D1_ID}"
           TOML
-          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "PRAGMA table_info(gl_source_question);" --json >/tmp/schema.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT golden_source_id,corpus_series,paper,question_no,legacy_alias,source_file,source_page,golden_status,gl_evidence_eligible,duplicate_status,content_sha256 FROM gl_source_question WHERE golden_source_id='GL-FAM-M2-Q50';" --json >/tmp/meta.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          rows=json.loads(Path('/tmp/schema.json').read_text())[0]['results']
-          print('POST_STEP10_GL_SOURCE_SCHEMA_READONLY_PASS')
-          for r in rows:
-              print(r['name'], r['type'])
+          rows=json.loads(Path('/tmp/meta.json').read_text())[0]['results']
+          assert len(rows)==1, f'Expected one GL-FAM-M2-Q50 metadata row, got {len(rows)}'
+          row=rows[0]
+          assert 'source_text' not in row and 'provenance_note' not in row
+          print('POST_STEP10_ALG02_FAMILIARISATION_METADATA_READONLY_PASS')
+          print(json.dumps(row,sort_keys=True))
           PY
