@@ -1,6 +1,6 @@
 name: Step 10 Gate D account preflight
 
-# Gate D session/frontend recheck trigger: 2026-09-18 after restored bridge and refreshed authorised user session.
+# Gate D live-site asset/session diagnostic: 2026-09-18.
 on:
   push:
     branches:
@@ -26,19 +26,34 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify live Portal frontend bootstrap and Worker target
+      - name: Inspect live Portal frontend bootstrap paths independently
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location 'https://lessons.futureperfect.education/config.js' -o /tmp/live-config.js
-          curl --fail --silent --show-error --location 'https://lessons.futureperfect.education/assets/phase7.js?v=20260912-y6-sats-section-1' -o /tmp/live-phase7.js
-          grep -Fq 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' /tmp/live-config.js
-          grep -Fq "/api/v1/student/session" /tmp/live-phase7.js
-          grep -Fq "credentials: 'include'" /tmp/live-phase7.js
-          grep -Fq 'readSession();' /tmp/live-phase7.js
-          echo "LIVE_CONFIG_SHA256=$(sha256sum /tmp/live-config.js | awk '{print $1}')"
-          echo "LIVE_PHASE7_SHA256=$(sha256sum /tmp/live-phase7.js | awk '{print $1}')"
-          echo 'LIVE_PORTAL_FRONTEND_SESSION_BOOTSTRAP_PASS'
+          ROOT_STATUS="$(curl --silent --show-error --location -o /tmp/live-index.html -w '%{http_code}' 'https://lessons.futureperfect.education/' || true)"
+          CONFIG_STATUS="$(curl --silent --show-error --location -o /tmp/live-config.js -w '%{http_code}' 'https://lessons.futureperfect.education/config.js' || true)"
+          PHASE7_STATUS="$(curl --silent --show-error --location -o /tmp/live-phase7.js -w '%{http_code}' 'https://lessons.futureperfect.education/assets/phase7.js?v=20260912-y6-sats-section-1' || true)"
+          echo "LIVE_ROOT_STATUS=${ROOT_STATUS}"
+          echo "LIVE_CONFIG_STATUS=${CONFIG_STATUS}"
+          echo "LIVE_PHASE7_STATUS=${PHASE7_STATUS}"
+          echo "LIVE_ROOT_BYTES=$(wc -c </tmp/live-index.html 2>/dev/null || echo 0)"
+          echo "LIVE_CONFIG_BYTES=$(wc -c </tmp/live-config.js 2>/dev/null || echo 0)"
+          echo "LIVE_PHASE7_BYTES=$(wc -c </tmp/live-phase7.js 2>/dev/null || echo 0)"
+          if [ "$ROOT_STATUS" = "200" ]; then
+            echo '--- ROOT BOOTSTRAP REFERENCES ---'
+            grep -Eo '(<script[^>]+src="[^"]+"|<link[^>]+href="[^"]+")' /tmp/live-index.html | grep -E 'config\.js|phase7\.js|assets/' | tail -n 30 || true
+          fi
+          if [ "$CONFIG_STATUS" = "200" ]; then
+            grep -Fq 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' /tmp/live-config.js && echo 'LIVE_CONFIG_WORKER_TARGET_PASS' || echo 'LIVE_CONFIG_WORKER_TARGET_MISMATCH'
+            echo "LIVE_CONFIG_SHA256=$(sha256sum /tmp/live-config.js | awk '{print $1}')"
+          fi
+          if [ "$PHASE7_STATUS" = "200" ]; then
+            grep -Fq '/api/v1/student/session' /tmp/live-phase7.js && echo 'LIVE_PHASE7_SESSION_ROUTE_PASS' || echo 'LIVE_PHASE7_SESSION_ROUTE_MISSING'
+            grep -Fq "credentials: 'include'" /tmp/live-phase7.js && echo 'LIVE_PHASE7_CREDENTIALS_PASS' || echo 'LIVE_PHASE7_CREDENTIALS_MISSING'
+            grep -Fq 'readSession();' /tmp/live-phase7.js && echo 'LIVE_PHASE7_BOOT_READSESSION_PASS' || echo 'LIVE_PHASE7_BOOT_READSESSION_MISSING'
+            echo "LIVE_PHASE7_SHA256=$(sha256sum /tmp/live-phase7.js | awk '{print $1}')"
+          fi
+          echo 'LIVE_PORTAL_FRONTEND_HTTP_DIAGNOSTIC_COMPLETE'
 
       - name: Verify authorised account currently has active L3 Maths 11plus assignment
         shell: bash
