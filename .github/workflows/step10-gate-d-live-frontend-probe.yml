@@ -21,13 +21,13 @@ jobs:
           set -euo pipefail
           BASE='https://lessons.futureperfect.education'
           ASSET='portal-CeIaLZ5y.js'
-          code="$(curl --silent --show-error --location --max-time 30 --dump-header /tmp/bundle.headers --output /tmp/bundle.js --write-out '%{http_code}' "$BASE/assets/$ASSET?gate_d_probe=20260918c" || true)"
+          code="$(curl --silent --show-error --location --max-time 30 --dump-header /tmp/bundle.headers --output /tmp/bundle.js --write-out '%{http_code}' "$BASE/assets/$ASSET?gate_d_probe=20260918d" || true)"
           echo "BUNDLE_HTTP=$code"
           sed -n '1,30p' /tmp/bundle.headers || true
           test "$code" = '200'
           echo "BUNDLE_BYTES=$(wc -c </tmp/bundle.js)"
           echo 'WORKER_URLS_BEGIN'
-          grep -oE 'https://[^"'"'[:space:]<>)]+' /tmp/bundle.js | grep -E 'workers\.dev|futureperfect' | sort -u | head -n 100 || true
+          grep -oE 'https://[^"[:space:]<>()]+' /tmp/bundle.js | grep -E 'workers\.dev|futureperfect' | sort -u | head -n 100 || true
           echo 'WORKER_URLS_END'
           echo 'API_PATHS_BEGIN'
           grep -oE '/api/[A-Za-z0-9_./?&=:-]+' /tmp/bundle.js | sort -u | head -n 200 || true
@@ -37,6 +37,6 @@ jobs:
           echo 'AUTH_MARKERS_END'
           echo 'BUNDLE_HASH'
           sha256sum /tmp/bundle.js
-          map_code="$(curl --silent --show-error --location --max-time 20 --output /tmp/bundle.map --write-out '%{http_code}' "$BASE/assets/$ASSET.map?gate_d_probe=20260918c" || true)"
+          map_code="$(curl --silent --show-error --location --max-time 20 --output /tmp/bundle.map --write-out '%{http_code}' "$BASE/assets/$ASSET.map?gate_d_probe=20260918d" || true)"
           echo "SOURCE_MAP_HTTP=$map_code SOURCE_MAP_BYTES=$(wc -c </tmp/bundle.map)"
           echo 'GATE_D_COMPILED_FRONTEND_PROBE_PASS'
