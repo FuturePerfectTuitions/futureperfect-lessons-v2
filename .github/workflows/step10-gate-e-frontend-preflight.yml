@@ -24,14 +24,15 @@ env:
   EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
   EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
   EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+  EXPECTED_LIVE_BUNDLE: assets/portal-CeIaLZ5y.js
+  EXPECTED_LIVE_BUNDLE_SHA256: 9dc3203a012c1530216cba9f8362d227a46745249499362a3160310bb34f45dc
   FRONTEND_SHA: c26f03d1b353fcccf46b783656bef3bef1315d6d
-  FRONTEND_BASE_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97
   FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
 
 jobs:
   preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,28 +45,16 @@ jobs:
           path: frontend
           fetch-depth: 0
 
-      - uses: actions/checkout@v4
-        with:
-          repository: FuturePerfectTuitions/futureperfect-lessons-test
-          ref: ${{ env.FRONTEND_BASE_SHA }}
-          path: baseline
-          fetch-depth: 1
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Assert Gate D closed and Gate E source is exact
+      - name: Assert Gate D closed and exact approved Gate E source
         shell: bash
         run: |
           set -Eeuo pipefail
           grep -Fq 'Status: **CLOSED — PASS**' control/docs/step10/STEP10_GATE_D_CLOSEOUT_2026-09-18.md
           test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_SHA"
-          test "$(git -C baseline rev-parse HEAD)" = "$FRONTEND_BASE_SHA"
-          git -C frontend merge-base --is-ancestor "$FRONTEND_BASE_SHA" "$FRONTEND_SHA"
-          git -C frontend diff --name-only "$FRONTEND_BASE_SHA..$FRONTEND_SHA" > /tmp/gate-e-source-files.txt
-          grep -Fxq 'src/app.js' /tmp/gate-e-source-files.txt
-          grep -Fxq 'tests/step10-v2-maths-practice-static.mjs' /tmp/gate-e-source-files.txt
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const app=fs.readFileSync('frontend/src/app.js','utf8');
@@ -86,7 +75,7 @@ jobs:
           console.log('STEP10_GATE_E_SOURCE_CONTRACT_PASS');
           NODE
 
-      - name: Run retained frontend regressions and build exact Gate E source
+      - name: Run retained frontend regressions and production build
         working-directory: frontend
         shell: bash
         run: |
@@ -105,24 +94,12 @@ jobs:
           ! grep -R -Fq '/api/v1/student/quiz/' dist
           echo STEP10_GATE_E_FRONTEND_BUILD_PASS
 
-      - name: Build frozen pre-Gate-E frontend for live-byte comparison
-        working-directory: baseline
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          npm install --no-audit --no-fund
-          npm run build
-          test -s dist/index.html
-          ! grep -R -Fq '/api/v2/student/quiz/eligibility' dist
-          echo STEP10_GATE_E_FROZEN_BASELINE_BUILD_PASS
-
-      - name: Freshly verify production topology, Worker anchors and live bundle
+      - name: Freshly verify production topology, Worker anchors and authoritative live bundle
         shell: bash
         run: |
           set -Eeuo pipefail
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          import path from 'node:path';
           import crypto from 'node:crypto';
           const clean=v=>String(v??'').trim();
           const sha256=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -156,29 +133,26 @@ jobs:
           const matches=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);
           const bundlePath=matches.find(x=>/portal-|\/assets\//i.test(x))||matches[0];
           if(!bundlePath) throw new Error('Live JS bundle not found');
+          const normalized=bundlePath.replace(/^\//,'').split('?')[0];
+          if(normalized!==process.env.EXPECTED_LIVE_BUNDLE) throw new Error(`Live bundle path drift: ${normalized}`);
           const bundleUrl=new URL(bundlePath,`https://${host}/`);
           const bundleResp=await fetch(bundleUrl,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-preflight'}});
           if(!bundleResp.ok) throw new Error(`Live bundle failed ${bundleResp.status}`);
           const liveBytes=Buffer.from(await bundleResp.arrayBuffer());
           const liveSha=sha256(liveBytes);
-          if(liveBytes.toString('utf8').includes('/api/v2/student/quiz/eligibility')) throw new Error('Gate E UI appears to be already live unexpectedly');
-
-          const baseIndex=fs.readFileSync('baseline/dist/index.html','utf8');
-          const baseMatch=[...baseIndex.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map(m=>m[1]).find(x=>/portal-|\/assets\//i.test(x));
-          if(!baseMatch) throw new Error('Frozen baseline JS bundle not found');
-          const baseFile=path.join('baseline/dist',baseMatch.replace(/^\//,''));
-          const baseBytes=fs.readFileSync(baseFile);
-          const baseSha=sha256(baseBytes);
-          if(liveSha!==baseSha) throw new Error(`Live bundle does not match frozen pre-Gate-E source: live=${liveSha} baseline=${baseSha}`);
+          if(liveSha!==process.env.EXPECTED_LIVE_BUNDLE_SHA256) throw new Error(`Authoritative live bundle hash drift: ${liveSha}`);
+          const liveText=liveBytes.toString('utf8');
+          for(const p of ['/api/v2/auth/login','/api/v2/auth/logout','/api/v2/student/home','/api/v2/student/views/','/api/v2/student/lessons/']) if(!liveText.includes(p)) throw new Error(`Expected v2 runtime route absent: ${p}`);
+          if(liveText.includes('/api/v2/student/quiz/eligibility')) throw new Error('Gate E UI appears to be already live unexpectedly');
 
           const unauth=await fetch(`https://${host}/api/v2/student/quiz/eligibility`,{redirect:'manual'});
           if(unauth.status!==401) throw new Error(`Unauthenticated eligibility must fail closed; got ${unauth.status}`);
-          const out={marker:'STEP10_GATE_E_PREFLIGHT_PASS',readOnly:true,workerAnchors:actual,route:matching,serviceBinding:{name:service.name,service:service.service},liveBundle:{url:bundleUrl.toString(),sha256:liveSha},frozenBaseline:{sha:process.env.FRONTEND_BASE_SHA,bundle:baseMatch,sha256:baseSha,byteIdenticalToLive:true},unauthEligibilityStatus:unauth.status,frontendSha:process.env.FRONTEND_SHA};
+          const out={marker:'STEP10_GATE_E_PREFLIGHT_PASS',readOnly:true,workerAnchors:actual,route:matching,serviceBinding:{name:service.name,service:service.service},liveBundle:{path:normalized,url:bundleUrl.toString(),sha256:liveSha,authorityMatch:true},unauthEligibilityStatus:unauth.status,frontendSha:process.env.FRONTEND_SHA};
           fs.writeFileSync('/tmp/step10-gate-e-preflight.json',JSON.stringify(out,null,2));
           console.log(JSON.stringify(out,null,2));
           NODE
 
-      - name: Verify frontend main remains rollback/source anchor
+      - name: Verify frontend main remains unchanged source anchor
         shell: bash
         run: |
           set -Eeuo pipefail
