@@ -1,0 +1,58 @@
+name: Post-Step-10 MEA-07 LIVE contract read-only
+
+on:
+  push:
+    branches:
+      - mastery/post-step10-expansion-planning-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-mea07-live-contract-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Export MEA-07 LIVE contract metadata only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-mea07-live-contract-readonly"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,difficulty_band,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,correct_option,correct_display,earliest_release_point,prerequisite_lessons,lifecycle_status,deployment_status FROM question_instance WHERE family_id='MEA-07' AND lifecycle_status='LIVE' ORDER BY question_id;" --json >/tmp/live.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=json.loads(Path('/tmp/live.json').read_text())[0]['results']
+          assert len(rows)==6, len(rows)
+          Path('/tmp/mea07_live_contract.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+          print(json.dumps({'marker':'POST_STEP10_MEA07_LIVE_CONTRACT_READONLY_PASS','rows':len(rows),'stem_or_source_text_exported':False},indent=2))
+          PY
+          rm -f /tmp/live.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-step10-mea07-live-contract-readonly
+          path: /tmp/mea07_live_contract.json
+          retention-days: 30
