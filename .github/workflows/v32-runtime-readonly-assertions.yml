@@ -1,0 +1,56 @@
+name: v3.2 runtime read-only assertions
+
+on:
+  push:
+    branches:
+      - fix/y4e1-prelesson-readmodel-20260917
+    paths:
+      - '.github/workflows/v32-runtime-readonly-assertions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assert-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Assert current public topology and safe binding identities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          if(!token||!account) throw new Error('Cloudflare audit credentials unavailable');
+          const base='https://api.cloudflare.com/client/v4', auth={Authorization:`Bearer ${token}`};
+          const clean=v=>String(v??'').trim();
+          async function cf(path){const r=await fetch(base+path,{headers:auth});const b=await r.json();if(!r.ok||b.success!==true)throw new Error(`CF ${r.status} ${path}`);return b.result;}
+          const host='lessons.futureperfect.education', browser='fpt-portal-v2-rebuild-browser-prod', student='fpt-portal-v2-rebuild-student-prod', legacy='fpt-portal-v2-worker';
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Production zone unavailable');
+          const routes=(await cf(`/zones/${zone.id}/workers/routes`)).filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(routes.length!==1||clean(routes[0].pattern).toLowerCase()!==`${host}/*`||clean(routes[0].script)!==browser) throw new Error('Public route assertion failed');
+          const bs=await cf(`/accounts/${account}/workers/scripts/${browser}/settings`), bb=bs.bindings||[];
+          const services=bb.filter(b=>clean(b.type)==='service');
+          if(services.length!==1||clean(services[0].name)!=='STAGING_API'||clean(services[0].service)!==student) throw new Error('Browser service assertion failed');
+          if(bb.some(b=>/admin/i.test(`${clean(b.name)} ${clean(b.service)}`))) throw new Error('Browser unexpectedly has Admin binding');
+          const ss=await cf(`/accounts/${account}/workers/scripts/${student}/settings`), sb=ss.bindings||[];
+          const kv=n=>clean(sb.find(b=>clean(b.name)===n&&clean(b.type)==='kv_namespace')?.namespace_id);
+          const r2=n=>clean(sb.find(b=>clean(b.name)===n&&clean(b.type)==='r2_bucket')?.bucket_name);
+          const db=n=>clean(sb.find(b=>clean(b.name)===n&&clean(b.type)==='d1')?.id||sb.find(b=>clean(b.name)===n&&clean(b.type)==='d1')?.database_id);
+          if(kv('READ_MODELS_KV')!=='77b35165c8694087bc1b0515c35a7e89') throw new Error('READ_MODELS_KV assertion failed');
+          if(kv('STUDENTS_KV')!=='c9723c8806334e4ea54d1b456d31b794') throw new Error('STUDENTS_KV assertion failed');
+          if(r2('MATERIALS_R2')!=='fpt-materials-dev') throw new Error('MATERIALS_R2 assertion failed');
+          if(db('DB')!=='97250a54-fa91-45ad-a002-3c4566b1fc38') throw new Error(`DB assertion failed:${db('DB')}`);
+          const ls=await cf(`/accounts/${account}/workers/scripts/${legacy}/settings`), lb=ls.bindings||[];
+          const lessons=clean(lb.find(b=>clean(b.name)==='LESSONS_KV'&&clean(b.type)==='kv_namespace')?.namespace_id);
+          if(lessons!=='49619b1a24b244bc8aaa6223fcd24e80') throw new Error('LESSONS_KV assertion failed');
+          async function activeVersion(worker){const d=await cf(`/accounts/${account}/workers/scripts/${worker}/deployments`);const rows=Array.isArray(d?.deployments)?d.deployments:(Array.isArray(d)?d:[]);const vs=Array.isArray(rows[0]?.versions)?rows[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          if(!await activeVersion(browser)||!await activeVersion(student)||!await activeVersion(legacy)) throw new Error('Active version missing');
+          console.log('V32_RUNTIME_ASSERTIONS_PASS');
+          NODE
