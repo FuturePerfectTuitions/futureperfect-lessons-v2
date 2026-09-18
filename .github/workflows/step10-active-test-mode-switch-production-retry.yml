@@ -1,0 +1,189 @@
+name: Step 10 active-test mode-switch production retry
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-active-test-mode-switch-production-retry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-active-test-mode-switch-production-hotfix
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  EXPECTED_OLD_QUIZ_VERSION: 118935bc-291e-4d0d-b046-219e0c894a6f
+  VERIFIED_HOTFIX_VERSION: e6cc78a5-4d8e-47ea-87ac-0f5d7aced9ae
+  VERIFIED_HOTFIX_SOURCE_BLOB: 06d9a66352a684a682ec348abd7f360c091f6ae1
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+
+jobs:
+  promote-retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require current production rollback anchor and candidate identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-before.json
+          OLD_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-before.json | head -n1)"
+          echo "current_quiz_version=$OLD_VERSION"
+          test "$OLD_VERSION" = "$EXPECTED_OLD_QUIZ_VERSION" || { echo "Quiz drift: expected rollback anchor $EXPECTED_OLD_QUIZ_VERSION got $OLD_VERSION" >&2; exit 1; }
+          echo "OLD_VERSION=$OLD_VERSION" >> "$GITHUB_ENV"
+
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/versions/${VERIFIED_HOTFIX_VERSION}" -H "$AUTH" -o /tmp/candidate.json
+          jq -e '.success == true' /tmp/candidate.json >/dev/null
+          candidate_id="$(jq -r '.result.id // .result.version_id // empty' /tmp/candidate.json)"
+          test "$candidate_id" = "$VERIFIED_HOTFIX_VERSION" || { echo "Candidate identity mismatch: $candidate_id" >&2; exit 1; }
+
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          expected_names='DB,ENVIRONMENT,LAUNCH_REDEEM_TIMEOUT_MS,PORTAL_BRIDGE_URL,PORTAL_LOGIN_URL,QUIZ_BRIDGE_SECRET,QUIZ_ORIGIN,QUIZ_SESSION_TTL_SECONDS'
+          current_names="$(jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/settings-before.json)"
+          candidate_names="$(jq -r '[.result.resources.bindings[].name] | sort | join(",")' /tmp/candidate.json)"
+          test "$current_names" = "$expected_names"
+          test "$candidate_names" = "$expected_names"
+          jq -e --arg id "$QUIZ_D1_ID" '.result.resources.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/candidate.json >/dev/null
+          jq -e '.result.resources.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/candidate.json >/dev/null
+          for n in ENVIRONMENT PORTAL_BRIDGE_URL PORTAL_LOGIN_URL QUIZ_ORIGIN QUIZ_SESSION_TTL_SECONDS LAUNCH_REDEEM_TIMEOUT_MS; do
+            before="$(jq -r --arg n "$n" '[.result.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/settings-before.json)"
+            after="$(jq -r --arg n "$n" '[.result.resources.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/candidate.json)"
+            test -n "$before"
+            test "$after" = "$before" || { echo "Candidate binding value drift: $n" >&2; exit 1; }
+          done
+
+          curl --fail --silent --show-error "$API/workers/scripts/${BROWSER_WORKER}/deployments" -H "$AUTH" -o /tmp/browser-before.json
+          BROWSER_BEFORE="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/browser-before.json)"
+          test -n "$BROWSER_BEFORE"
+          echo "BROWSER_BEFORE=$BROWSER_BEFORE" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/student-before.json
+          STUDENT_BEFORE="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/student-before.json)"
+          test -n "$STUDENT_BEFORE"
+          echo "STUDENT_BEFORE=$STUDENT_BEFORE" >> "$GITHUB_ENV"
+
+          test "$(curl --silent --show-error --output /tmp/health-before --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')" = '200'
+          test "$(curl --silent --show-error --max-redirs 0 --output /tmp/root-before --write-out '%{http_code}' 'https://quiz.futureperfect.education/')" = '303'
+          echo "STEP10_MODE_HOTFIX_RETRY_PREFLIGHT_PASS candidate=$VERIFIED_HOTFIX_VERSION source_blob=$VERIFIED_HOTFIX_SOURCE_BLOB"
+
+      - name: Promote immutable verified candidate at 100 percent
+        id: promote
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$VERIFIED_HOTFIX_VERSION@100%" --name "$QUIZ_WORKER" --message 'Step 10 active-test mode-switch production hotfix retry' -y
+          echo 'STEP10_MODE_HOTFIX_RETRY_PROMOTED'
+
+      - name: Verify active version and live custom-domain behaviour with retries
+        id: verify
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          active_ok=false
+          for attempt in $(seq 1 12); do
+            npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-after.json
+            active="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-after.json | head -n1)"
+            echo "active_version_attempt_${attempt}=$active"
+            if test "$active" = "$VERIFIED_HOTFIX_VERSION"; then active_ok=true; break; fi
+            sleep 5
+          done
+          test "$active_ok" = 'true'
+          echo 'ACTIVE_VERSION_PASS'
+
+          live_ok=false
+          for attempt in $(seq 1 18); do
+            health="$(curl --silent --show-error --output /tmp/health-after --write-out '%{http_code}' 'https://quiz.futureperfect.education/health' || true)"
+            root="$(curl --silent --show-error --max-redirs 0 --output /tmp/root-after --write-out '%{http_code}' 'https://quiz.futureperfect.education/' || true)"
+            app_status="$(curl --silent --show-error --output /tmp/live-app.js --write-out '%{http_code}' 'https://quiz.futureperfect.education/assets/app.js' || true)"
+            mode=no; abandon=no; reuse=no; timer=no
+            grep -Fq "existingMode===requestedMode" /tmp/live-app.js 2>/dev/null && mode=yes || true
+            grep -Fq "/abandon" /tmp/live-app.js 2>/dev/null && abandon=yes || true
+            grep -Fq 'Unanswered questions from the discarded test may be served again.' /tmp/live-app.js 2>/dev/null && reuse=yes || true
+            grep -Fq 'Time left ' /tmp/live-app.js 2>/dev/null && timer=yes || true
+            echo "live_attempt_${attempt}: health=$health root=$root app=$app_status mode=$mode abandon=$abandon reuse=$reuse timer=$timer"
+            if test "$health" = '200' && test "$root" = '303' && test "$app_status" = '200' && test "$mode" = yes && test "$abandon" = yes && test "$reuse" = yes && test "$timer" = yes; then
+              live_ok=true
+              break
+            fi
+            sleep 5
+          done
+          test "$live_ok" = 'true'
+          echo 'LIVE_CUSTOM_DOMAIN_HOTFIX_PASS'
+
+          unauth="$(curl --silent --show-error --max-redirs 0 --request POST --output /tmp/unauth-abandon --write-out '%{http_code}' 'https://quiz.futureperfect.education/api/tests/not-a-real-session/abandon')"
+          echo "unauth_abandon_status=$unauth"
+          test "$unauth" = '401'
+
+          invalid_ok=false
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-redirs 0 --output /tmp/invalid-launch.html --write-out '%{http_code}' 'https://quiz.futureperfect.education/launch?code=step10-mode-hotfix-retry-invalid-probe' || true)"
+            echo "invalid_launch_attempt_${attempt}=$code"
+            if test "$code" = '410' && grep -Fqi 'practice link is no longer valid' /tmp/invalid-launch.html; then invalid_ok=true; break; fi
+            sleep 5
+          done
+          test "$invalid_ok" = 'true'
+          echo 'INVALID_LAUNCH_GUARD_PASS'
+
+          curl --fail --silent --show-error "$API/workers/scripts/${BROWSER_WORKER}/deployments" -H "$AUTH" -o /tmp/browser-after.json
+          BROWSER_AFTER="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/browser-after.json)"
+          echo "browser_before=$BROWSER_BEFORE browser_after=$BROWSER_AFTER"
+          test "$BROWSER_AFTER" = "$BROWSER_BEFORE"
+          curl --fail --silent --show-error "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/student-after.json
+          STUDENT_AFTER="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/student-after.json)"
+          echo "student_before=$STUDENT_BEFORE student_after=$STUDENT_AFTER"
+          test "$STUDENT_AFTER" = "$STUDENT_BEFORE"
+          echo 'SURROUNDING_WORKERS_UNCHANGED_PASS'
+
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/settings-after.json
+          before_names="$(jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/settings-before.json)"
+          after_names="$(jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/settings-after.json)"
+          test "$after_names" = "$before_names"
+          echo 'QUIZ_BINDINGS_PRESERVED_PASS'
+          echo 'STEP10_MODE_HOTFIX_RETRY_PRODUCTION_VERIFY_PASS'
+
+      - name: Roll back automatically if verified live behaviour does not pass
+        if: always() && steps.promote.outcome == 'success' && steps.verify.outcome != 'success'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD_VERSION@100%" --name "$QUIZ_WORKER" --message 'Automatic rollback after mode-switch hotfix retry verification failure' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/rollback.json
+          jq -e --arg id "$OLD_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/rollback.json >/dev/null
+          echo 'STEP10_MODE_HOTFIX_RETRY_ROLLBACK_PASS'
+
+      - name: Require successful production verification
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "promote_outcome=${{ steps.promote.outcome }} verify_outcome=${{ steps.verify.outcome }}"
+          test '${{ steps.promote.outcome }}' = 'success'
+          test '${{ steps.verify.outcome }}' = 'success'
+          echo "STEP10_ACTIVE_TEST_MODE_SWITCH_PRODUCTION_PASS version=$VERIFIED_HOTFIX_VERSION rollback=$OLD_VERSION source_blob=$VERIFIED_HOTFIX_SOURCE_BLOB"
