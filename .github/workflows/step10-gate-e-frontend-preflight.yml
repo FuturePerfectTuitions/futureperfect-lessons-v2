@@ -1,0 +1,171 @@
+name: Step 10 Gate E frontend promotion preflight
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-gate-e-frontend-preflight.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-gate-e-frontend-preflight
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+  EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+  FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  FRONTEND_SHA: c26f03d1b353fcccf46b783656bef3bef1315d6d
+  FRONTEND_BASE_SHA: 598ec347ffddb126889f95d6a7753539e0ed3c97
+  FRONTEND_MAIN_SHA: 96bfdc4dc3e72b0f354a205bc5a79f6d51c290f7
+  EXPECTED_LIVE_BUNDLE_SHA256: 9dc3205dabe0cf8d6f20f4b48d9bcac7a8eecb7b63d51fae1af92374f1b09f1d
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+
+      - uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.FRONTEND_SHA }}
+          path: frontend
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Assert Gate D closed and Gate E source is exact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'Status: **CLOSED — PASS**' control/docs/step10/STEP10_GATE_D_CLOSEOUT_2026-09-18.md
+          test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_SHA"
+          git -C frontend merge-base --is-ancestor "$FRONTEND_BASE_SHA" "$FRONTEND_SHA"
+          git -C frontend diff --name-only "$FRONTEND_BASE_SHA..$FRONTEND_SHA" > /tmp/gate-e-source-files.txt
+          # The Step 10 lineage may include its draft workflow; runtime source change itself is app.js + its test.
+          grep -Fxq 'src/app.js' /tmp/gate-e-source-files.txt
+          grep -Fxq 'tests/step10-v2-maths-practice-static.mjs' /tmp/gate-e-source-files.txt
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const app=fs.readFileSync('frontend/src/app.js','utf8');
+          const required=[
+            "requestJson('/api/v2/student/quiz/eligibility')",
+            "requestJson('/api/v2/student/quiz/launch', { method: 'POST' })",
+            "if (subject === 'maths') void revealMathsPracticeCard();",
+            "payload?.eligible !== true",
+            '11+ Practice',
+            'Take a Maths quiz',
+            "document.querySelector('[data-view-grid=\"current\"]')",
+            "url.hostname !== 'quiz.futureperfect.education'",
+            "url.pathname !== '/launch'"
+          ];
+          for(const s of required) if(!app.includes(s)) throw new Error(`Missing Gate E source contract: ${s}`);
+          if(app.includes('/api/v1/student/quiz/')) throw new Error('Retired v1 quiz endpoint present');
+          if(/nav[^\n]{0,200}11\+ Practice/i.test(app)) throw new Error('Global/top-nav practice link pattern detected');
+          console.log('STEP10_GATE_E_SOURCE_CONTRACT_PASS');
+          NODE
+
+      - name: Run retained frontend regressions and production build
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          node tests/step10-v2-maths-practice-static.mjs
+          npm run build
+          git diff --check
+          test -s dist/index.html
+          grep -R -Fq '11+ Practice' dist
+          grep -R -Fq '/api/v2/student/quiz/eligibility' dist
+          grep -R -Fq '/api/v2/student/quiz/launch' dist
+          ! grep -R -Fq '/api/v1/student/quiz/' dist
+          echo STEP10_GATE_E_FRONTEND_BUILD_PASS
+
+      - name: Freshly verify production topology, Worker anchors and live bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN),account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          if(!token||!account) throw new Error('Cloudflare credentials unavailable');
+          const base='https://api.cloudflare.com/client/v4';
+          async function cf(path){const r=await fetch(base+path,{headers:{Authorization:`Bearer ${token}`}});const text=await r.text();let j=null;try{j=JSON.parse(text)}catch{};if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j?.errors||text)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const d=ds[0];const vs=Array.isArray(d?.versions)?d.versions:[];return{deploymentId:clean(d?.id),versionId:clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id)};}
+          const actual={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          if(actual.browser.versionId!==process.env.EXPECTED_BROWSER_VERSION) throw new Error(`Browser Worker drift: ${JSON.stringify(actual.browser)}`);
+          if(actual.student.versionId!==process.env.EXPECTED_STUDENT_VERSION) throw new Error(`Student Worker drift: ${JSON.stringify(actual.student)}`);
+          if(actual.quiz.versionId!==process.env.EXPECTED_QUIZ_VERSION) throw new Error(`Quiz Worker drift: ${JSON.stringify(actual.quiz)}`);
+
+          const host=process.env.PROD_HOST.toLowerCase();
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Production zone not found');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const matching=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(!matching.some(r=>clean(r.pattern).toLowerCase()===`${host}/*`&&clean(r.script)===process.env.BROWSER_WORKER)) throw new Error('Expected Browser Worker route missing');
+          if(matching.some(r=>clean(r.script)!==process.env.BROWSER_WORKER)) throw new Error('Foreign route owner detected');
+
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.BROWSER_WORKER)}/settings`);
+          const bindings=Array.isArray(settings?.bindings)?settings.bindings:[];
+          const service=bindings.find(b=>clean(b.type)==='service'&&clean(b.service)===process.env.STUDENT_WORKER);
+          if(!service) throw new Error(`Browser Worker no longer binds Student Worker: ${JSON.stringify(bindings)}`);
+
+          const root=await fetch(`https://${host}/`,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-preflight'}});
+          if(!root.ok) throw new Error(`Live root failed ${root.status}`);
+          const html=await root.text();
+          const matches=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);
+          const bundlePath=matches.find(x=>/portal-|\/assets\//i.test(x))||matches[0];
+          if(!bundlePath) throw new Error('Live JS bundle not found');
+          const bundleUrl=new URL(bundlePath,`https://${host}/`);
+          const bundleResp=await fetch(bundleUrl,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-preflight'}});
+          if(!bundleResp.ok) throw new Error(`Live bundle failed ${bundleResp.status}`);
+          const bytes=Buffer.from(await bundleResp.arrayBuffer());
+          const sha=crypto.createHash('sha256').update(bytes).digest('hex');
+          if(sha!==process.env.EXPECTED_LIVE_BUNDLE_SHA256) throw new Error(`Unexpected pre-Gate-E live bundle hash ${sha}`);
+          if(bytes.toString('utf8').includes('/api/v2/student/quiz/eligibility')) throw new Error('Gate E UI appears to be already live unexpectedly');
+
+          const unauth=await fetch(`https://${host}/api/v2/student/quiz/eligibility`,{redirect:'manual'});
+          if(unauth.status!==401) throw new Error(`Unauthenticated eligibility must fail closed; got ${unauth.status}`);
+          fs.writeFileSync('/tmp/step10-gate-e-preflight.json',JSON.stringify({marker:'STEP10_GATE_E_PREFLIGHT_PASS',readOnly:true,workerAnchors:actual,route:matching,serviceBinding:{name:service.name,service:service.service},liveBundle:{url:bundleUrl.toString(),sha256:sha},unauthEligibilityStatus:unauth.status,frontendSha:process.env.FRONTEND_SHA},null,2));
+          console.log(fs.readFileSync('/tmp/step10-gate-e-preflight.json','utf8'));
+          NODE
+
+      - name: Verify frontend main remains rollback/source anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          const r=await fetch('https://api.github.com/repos/FuturePerfectTuitions/futureperfect-lessons-test/branches/main',{headers:{'user-agent':'fpt-step10-gate-e-preflight'}});
+          if(!r.ok) throw new Error(`Frontend main lookup failed ${r.status}`);
+          const sha=String((await r.json())?.commit?.sha||'');
+          if(sha!==process.env.FRONTEND_MAIN_SHA) throw new Error(`Frontend main drift ${sha}`);
+          console.log(JSON.stringify({marker:'STEP10_GATE_E_FRONTEND_MAIN_STABLE_PASS',sha},null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step10-gate-e-frontend-preflight
+          path: /tmp/step10-gate-e-preflight.json
+          retention-days: 30
