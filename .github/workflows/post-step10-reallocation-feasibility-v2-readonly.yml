@@ -61,7 +61,7 @@ jobs:
           Path('/tmp/reallocation_family_rules.json').write_text(json.dumps(rules,indent=2),encoding='utf-8')
           Path('/tmp/reallocation_schema_candidates.json').write_text(json.dumps(schema,indent=2),encoding='utf-8')
           with open('/tmp/reallocation_live_contracts.csv','w',newline='',encoding='utf-8') as h:
-              fields=['family_id','question_id','difficulty_band','presentation_type','diagram_type','diagram_spec_json','validation_spec_json','correct_option','correct_display','earliest_release_point','prerequisite_lessons','deployment_status']
+              fields=['family_id','question_id','difficulty_band','presentation_type','diagram_type','diagram_spec_json','validation_spec_json','correct_option','correct_display','earliest_release_point','prerequisite_lessons','lifecycle_status','deployment_status']
               w=csv.DictWriter(h,fieldnames=fields); w.writeheader(); w.writerows(live)
           print(json.dumps({
               'marker':'POST_STEP10_REALLOCATION_FEASIBILITY_V2_READONLY_PASS',
