@@ -15,28 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe exact live compiled Portal bundle
+      - name: Inspect live compiled Portal source map for API v2 authority
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://lessons.futureperfect.education'
           ASSET='portal-CeIaLZ5y.js'
-          code="$(curl --silent --show-error --location --max-time 30 --dump-header /tmp/bundle.headers --output /tmp/bundle.js --write-out '%{http_code}' "$BASE/assets/$ASSET?gate_d_probe=20260918d" || true)"
-          echo "BUNDLE_HTTP=$code"
-          sed -n '1,30p' /tmp/bundle.headers || true
-          test "$code" = '200'
-          echo "BUNDLE_BYTES=$(wc -c </tmp/bundle.js)"
-          echo 'WORKER_URLS_BEGIN'
-          grep -oE 'https://[^"[:space:]<>()]+' /tmp/bundle.js | grep -E 'workers\.dev|futureperfect' | sort -u | head -n 100 || true
-          echo 'WORKER_URLS_END'
-          echo 'API_PATHS_BEGIN'
-          grep -oE '/api/[A-Za-z0-9_./?&=:-]+' /tmp/bundle.js | sort -u | head -n 200 || true
-          echo 'API_PATHS_END'
-          echo 'AUTH_MARKERS_BEGIN'
-          grep -oE '.{0,180}(student/session|auth/login|credentials.{0,30}include|fpt_v2_session).{0,220}' /tmp/bundle.js | head -n 80 || true
-          echo 'AUTH_MARKERS_END'
-          echo 'BUNDLE_HASH'
-          sha256sum /tmp/bundle.js
-          map_code="$(curl --silent --show-error --location --max-time 20 --output /tmp/bundle.map --write-out '%{http_code}' "$BASE/assets/$ASSET.map?gate_d_probe=20260918d" || true)"
-          echo "SOURCE_MAP_HTTP=$map_code SOURCE_MAP_BYTES=$(wc -c </tmp/bundle.map)"
-          echo 'GATE_D_COMPILED_FRONTEND_PROBE_PASS'
+          curl --fail --silent --show-error --location --max-time 30 "$BASE/assets/$ASSET.map?gate_d_probe=20260918e" -o /tmp/bundle.map
+          jq -e '.version == 3 and (.sources|length) > 0 and (.sourcesContent|length) > 0' /tmp/bundle.map >/dev/null
+          echo 'SOURCE_NAMES_BEGIN'
+          jq -r '.sources[]' /tmp/bundle.map
+          echo 'SOURCE_NAMES_END'
+          echo 'API_V2_SOURCE_SNIPPETS_BEGIN'
+          jq -r '[.sources,.sourcesContent] | transpose[] | select(.[1] != null and (.[1] | contains("/api/v2"))) | "SOURCE=" + .[0] + "\n" + .[1]' /tmp/bundle.map | sed -n '1,1600p'
+          echo 'API_V2_SOURCE_SNIPPETS_END'
+          echo 'GATE_D_SOURCE_MAP_AUTHORITY_PROBE_PASS'
