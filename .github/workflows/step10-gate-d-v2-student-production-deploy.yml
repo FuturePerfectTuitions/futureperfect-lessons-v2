@@ -1,0 +1,200 @@
+name: Step 10 Gate D V2 Student Worker guarded production deploy
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-d-v2-backend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_GATE_D_V2_STUDENT_PRODUCTION_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-gate-d-v2-student-production-2026-09-18
+  cancel-in-progress: false
+
+jobs:
+  deploy-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      PROD_HOST: lessons.futureperfect.education
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      WRANGLER_VERSION: 4.125.0
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Exact source and regression gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF_NAME" = 'mastery/step10-gate-d-v2-backend-2026-09-18'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node tests/step10-gate-d-v2-quiz-runtime.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuilt-trial-manager-verification.mjs
+
+      - name: Fresh Cloudflare topology binding version and D1 preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const student=process.env.STUDENT_WORKER, browser=process.env.BROWSER_WORKER, host=process.env.PROD_HOST, d1Expected=process.env.PORTAL_D1_ID;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path, init={}) {
+            const r=await fetch(base+path,{...init,headers:{...headers,'content-type':'application/json',...(init.headers||{})}});
+            const j=await r.json();
+            if(!r.ok||j.success!==true) throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);
+            return j.result;
+          }
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          async function d1Count(){
+            const result=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(d1Expected)}/query`,{method:'POST',body:JSON.stringify({sql:'SELECT COUNT(*) AS c FROM quiz_launch_codes'})});
+            const block=Array.isArray(result)?result[0]:result;
+            const rows=block?.results||[];
+            const c=Number(rows[0]?.c);
+            if(!Number.isFinite(c)) throw new Error(`Launch row count unresolved: ${JSON.stringify(result)}`);
+            return c;
+          }
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hostRoutes.length!==1||String(hostRoutes[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hostRoutes[0].script!==browser) throw new Error(`Public route drift: ${JSON.stringify(hostRoutes)}`);
+          const browserSettings=await settings(browser);
+          const services=(browserSettings.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].service!==student) throw new Error(`Browser service drift: ${JSON.stringify(services)}`);
+          if((browserSettings.bindings||[]).some(b=>/admin/i.test(`${b.name||''} ${b.service||''}`))) throw new Error('Forbidden Browser Admin binding');
+
+          const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const s=await settings(student), oldVersion=await active(student);
+          if(!oldVersion) throw new Error('Active Student Worker version unresolved');
+          const unsupported=(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))&&!supported.has(b.type));
+          if(unsupported.length) throw new Error(`Unsupported Student binding types: ${JSON.stringify(unsupported.map(b=>({name:b.name,type:b.type})))}`);
+          const snap={oldVersion,nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};
+          for(const name of ['READ_MODELS_KV','STUDENTS_KV','DB','MATERIALS_R2']) if(!snap.nonSecret.some(b=>b.name===name)) throw new Error(`Student Worker missing ${name}`);
+          for(const name of ['AUTH_SIGNING_SECRET','ACCESS_SCOPE_SECRET']) if(!snap.secretNames.includes(name)) throw new Error(`Student Worker missing secret ${name}`);
+          const d1=snap.nonSecret.find(b=>b.name==='DB'&&b.type==='d1');
+          if(!d1||d1.id!==d1Expected) throw new Error(`Portal D1 drift: ${JSON.stringify(d1)}`);
+          const topology={route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},browserVersion:await active(browser),service:{name:services[0].name,service:services[0].service}};
+          const launchRowsBefore=await d1Count();
+          fs.writeFileSync('/tmp/gated-student-before.json',JSON.stringify({...snap,launchRowsBefore},null,2),{mode:0o600});
+          fs.writeFileSync('/tmp/gated-topology-before.json',JSON.stringify(topology,null,2));
+
+          function q(v){return JSON.stringify(String(v??''));}
+          let toml=`name = ${q(student)}\nmain = \"src/index.js\"\ncompatibility_date = \"2026-08-20\"\nkeep_vars = true\nworkers_dev = true\n`;
+          const plains=snap.nonSecret.filter(b=>b.type==='plain_text');
+          if(plains.length){toml+='\n[vars]\n';for(const b of plains)toml+=`${b.name} = ${q(b.text)}\n`;}
+          for(const b of snap.nonSecret.filter(b=>b.type==='kv_namespace')) toml+=`\n[[kv_namespaces]]\nbinding = ${q(b.name)}\nid = ${q(b.namespace_id)}\n`;
+          for(const b of snap.nonSecret.filter(b=>b.type==='r2_bucket')) toml+=`\n[[r2_buckets]]\nbinding = ${q(b.name)}\nbucket_name = ${q(b.bucket_name)}\n`;
+          for(const b of snap.nonSecret.filter(b=>b.type==='d1')) {const db=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(b.id)}`);toml+=`\n[[d1_databases]]\nbinding = ${q(b.name)}\ndatabase_name = ${q(db.name)}\ndatabase_id = ${q(b.id)}\n`;}
+          for(const b of snap.nonSecret.filter(b=>b.type==='send_email')) toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
+          fs.writeFileSync('rebuild/student/wrangler.step10-gate-d-prod.toml',toml);
+          console.log(JSON.stringify({marker:'STEP10_GATE_D_V2_STUDENT_PREFLIGHT_PASS',sourceSha:process.env.GITHUB_SHA,oldVersion,topology,portalD1:d1Expected,launchRowsBefore,secretNames:snap.secretNames},null,2));
+          NODE
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/gated-student-dryrun --config rebuild/student/wrangler.step10-gate-d-prod.toml >/tmp/gated-student-dryrun.log
+          grep -R -Fq 'portal-api-v2-live-l3-view-v1' /tmp/gated-student-dryrun
+          grep -R -Fq '/api/v2/student/quiz/eligibility' /tmp/gated-student-dryrun
+          grep -R -Fq '/api/v2/student/quiz/launch' /tmp/gated-student-dryrun
+
+      - name: Deploy only rebuilt Student Worker with automatic rollback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_STUDENT="$(jq -r .oldVersion /tmp/gated-student-before.json)"
+          STUDENT_DEPLOYED=0
+          rollback(){
+            rc=$?
+            set +e
+            if [ "$STUDENT_DEPLOYED" = '1' ]; then
+              echo "Rolling Student Worker back to $OLD_STUDENT" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" rollback "$OLD_STUDENT" --name "$STUDENT_WORKER" --message 'Automatic rollback: Step 10 Gate D v2 backend gate failure'
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config rebuild/student/wrangler.step10-gate-d-prod.toml --keep-vars --message 'Step 10 Gate D: API-v2 quiz eligibility and launch boundary'
+          STUDENT_DEPLOYED=1
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN,student=process.env.STUDENT_WORKER,browser=process.env.BROWSER_WORKER,host=process.env.PROD_HOST,d1Expected=process.env.PORTAL_D1_ID;
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`,'content-type':'application/json'};
+          async function cf(path,init={}){const r=await fetch(base+path,{...init,headers:{...headers,...(init.headers||{})}});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          async function d1Count(){const result=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(d1Expected)}/query`,{method:'POST',body:JSON.stringify({sql:'SELECT COUNT(*) AS c FROM quiz_launch_codes'})});const block=Array.isArray(result)?result[0]:result;const c=Number((block?.results||[])[0]?.c);if(!Number.isFinite(c))throw new Error('Launch row count unresolved');return c;}
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const before=JSON.parse(fs.readFileSync('/tmp/gated-student-before.json','utf8'));
+          const s=await settings(student);
+          const now={nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};
+          if(JSON.stringify(now)!==JSON.stringify({nonSecret:before.nonSecret,secretNames:before.secretNames})) throw new Error('Student Worker bindings changed');
+          const newVersion=await active(student);
+          if(!newVersion||newVersion===before.oldVersion) throw new Error('Student Worker version did not advance');
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`),zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0],routes=await cf(`/zones/${zone.id}/workers/routes`),hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          const bs=await settings(browser),services=(bs.bindings||[]).filter(b=>b.type==='service');
+          const topology={route:{pattern:hostRoutes[0]?.pattern,script:hostRoutes[0]?.script},browserVersion:await active(browser),service:{name:services[0]?.name,service:services[0]?.service}};
+          const topologyBefore=JSON.parse(fs.readFileSync('/tmp/gated-topology-before.json','utf8'));
+          if(JSON.stringify(topology)!==JSON.stringify(topologyBefore)) throw new Error(`Public Browser topology changed: ${JSON.stringify({topologyBefore,topology})}`);
+          const launchRowsAfterDeploy=await d1Count();
+          if(launchRowsAfterDeploy!==before.launchRowsBefore) throw new Error(`Deployment unexpectedly changed quiz_launch_codes: ${before.launchRowsBefore} -> ${launchRowsAfterDeploy}`);
+          fs.writeFileSync('/tmp/gated-deploy-result.json',JSON.stringify({marker:'STEP10_GATE_D_V2_STUDENT_DEPLOYED',sourceSha:process.env.GITHUB_SHA,studentWorker:{oldVersion:before.oldVersion,newVersion,bindingParity:true},topology,portalD1:d1Expected,launchRowsBefore:before.launchRowsBefore,launchRowsAfterDeploy},null,2));
+          console.log(fs.readFileSync('/tmp/gated-deploy-result.json','utf8'));
+          NODE
+
+          code="$(curl --silent --show-error -o /tmp/gated-eligibility-negative.json -w '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/eligibility')"
+          test "$code" = '401'
+          jq -e '.ok==false and .eligible==false and .error=="AUTH_REQUIRED"' /tmp/gated-eligibility-negative.json >/dev/null
+
+          code="$(curl --silent --show-error -o /tmp/gated-launch-negative.json -w '%{http_code}' -X POST 'https://lessons.futureperfect.education/api/v2/student/quiz/launch' -H 'Origin: https://lessons.futureperfect.education' -H 'Content-Type: application/json' --data '{}')"
+          test "$code" = '401'
+          jq -e '.ok==false and .error=="AUTH_REQUIRED"' /tmp/gated-launch-negative.json >/dev/null
+
+          code="$(curl --silent --show-error -o /tmp/gated-home-negative.json -w '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/home')"
+          test "$code" = '401'
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN,id=process.env.PORTAL_D1_ID;
+          const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${id}/query`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({sql:'SELECT COUNT(*) AS c FROM quiz_launch_codes'})});
+          const j=await r.json(); if(!r.ok||j.success!==true) throw new Error(JSON.stringify(j)); const block=Array.isArray(j.result)?j.result[0]:j.result; const c=Number((block?.results||[])[0]?.c);
+          const before=JSON.parse(fs.readFileSync('/tmp/gated-student-before.json','utf8'));
+          if(c!==before.launchRowsBefore) throw new Error(`Unauthenticated smoke unexpectedly changed quiz_launch_codes: ${before.launchRowsBefore} -> ${c}`);
+          const deploy=JSON.parse(fs.readFileSync('/tmp/gated-deploy-result.json','utf8'));
+          fs.writeFileSync('/tmp/step10-gate-d-v2-student-production-result.json',JSON.stringify({marker:'STEP10_GATE_D_V2_STUDENT_PRODUCTION_PASS',sourceSha:process.env.GITHUB_SHA,deploy,negativeSmoke:{eligibility401:true,launch401:true,home401:true},launchRowsAfterNegativeSmoke:c},null,2));
+          console.log(fs.readFileSync('/tmp/step10-gate-d-v2-student-production-result.json','utf8'));
+          NODE
+          trap - ERR
+
+      - name: Upload redacted deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: step10-gate-d-v2-student-production-evidence
+          path: /tmp/step10-gate-d-v2-student-production-result.json
+          retention-days: 30
