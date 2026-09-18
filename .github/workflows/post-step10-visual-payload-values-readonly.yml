@@ -1,0 +1,83 @@
+name: Post-Step-10 visual payload values read-only
+
+on:
+  push:
+    branches:
+      - mastery/post-step10-expansion-planning-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-visual-payload-values-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Export visual payload values without question text
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-visual-payload-values-readonly"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT family_id,question_id,difficulty_band,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,correct_option,correct_display,earliest_release_point,prerequisite_lessons,deployment_status FROM question_instance WHERE family_id IN ('COO-01','DAT-07','GEO-05','GEO-10','GEO-12') AND lifecycle_status='Live' ORDER BY family_id,question_id;" --json >/tmp/raw.json
+          python3 - <<'PY'
+          import csv,json
+          from pathlib import Path
+          rows=json.loads(Path('/tmp/raw.json').read_text())[0]['results']
+          out=[]
+          for r in rows:
+              out.append({
+                  'family_id':r['family_id'],
+                  'question_id':r['question_id'],
+                  'difficulty_band':r['difficulty_band'],
+                  'presentation_type':r['presentation_type'],
+                  'diagram_type':r['diagram_type'],
+                  'diagram_spec_json':r['diagram_spec_json'],
+                  'validation_spec_json':r['validation_spec_json'],
+                  'correct_option':r.get('correct_option'),
+                  'correct_display':r.get('correct_display'),
+                  'earliest_release_point':r.get('earliest_release_point'),
+                  'prerequisite_lessons':r.get('prerequisite_lessons'),
+                  'deployment_status':r.get('deployment_status')
+              })
+          if len(out)!=30:
+              raise SystemExit(f'Expected 30 visual-family Live rows, found {len(out)}')
+          with open('/tmp/visual_payload_values.csv','w',newline='',encoding='utf-8') as h:
+              w=csv.DictWriter(h,fieldnames=out[0].keys()); w.writeheader(); w.writerows(out)
+          print(json.dumps({
+              'marker':'POST_STEP10_VISUAL_PAYLOAD_VALUES_READONLY_PASS',
+              'live_rows':len(out),
+              'families':sorted(set(x['family_id'] for x in out)),
+              'raw_question_text_exported':False,
+              'raw_source_text_exported':False,
+              'd1_write_performed':False
+          },indent=2))
+          PY
+          rm -f /tmp/raw.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-step10-visual-payload-values-readonly
+          path: /tmp/visual_payload_values.csv
+          retention-days: 30
