@@ -1,5 +1,7 @@
 name: Step 10 Gate C hidden backend deploy
 
+# 2026-09-18: restore the approved hidden Step 10 wrapper after the later
+# parent-email production deployment replaced the live Worker entrypoint.
 on:
   pull_request:
     paths:
