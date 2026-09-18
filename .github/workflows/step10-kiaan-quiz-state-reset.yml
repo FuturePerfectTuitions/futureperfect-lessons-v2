@@ -1,0 +1,131 @@
+name: Step 10 Kiaan quiz state reset
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-kiaan-quiz-state-reset.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  TARGET_USER: kiaan1312
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  EXPECTED_QUIZ_VERSION: e6cc78a5-4d8e-47ea-87ac-0f5d7aced9ae
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Pin target, database and live Quiz Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$TARGET_USER" = 'kiaan1312'
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 list --json > /tmp/d1-list.json
+          jq -e --arg id "$QUIZ_D1_ID" --arg name "$QUIZ_D1" '.[] | select(.uuid==$id and .name==$name)' /tmp/d1-list.json >/dev/null
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-worker.json
+          ACTIVE_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-worker.json | head -n1)"
+          test "$ACTIVE_VERSION" = "$EXPECTED_QUIZ_VERSION" || { echo "Quiz Worker drift: expected $EXPECTED_QUIZ_VERSION got $ACTIVE_VERSION" >&2; exit 1; }
+          echo 'KIAAN_RESET_TARGET_AND_RUNTIME_PIN_PASS'
+
+      - name: Capture pre-reset counts and require no submitted-attempt state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/kiaan-reset-evidence
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+            "SELECT
+              (SELECT COUNT(*) FROM quiz_auth_session WHERE portal_user_id='$TARGET_USER') AS quiz_auth_session,
+              (SELECT COUNT(*) FROM quiz_generation_lock WHERE portal_user_id='$TARGET_USER') AS quiz_generation_lock,
+              (SELECT COUNT(*) FROM quiz_audit_event WHERE portal_user_id='$TARGET_USER') AS quiz_audit_event,
+              (SELECT COUNT(*) FROM quiz_recommendation WHERE portal_user_id='$TARGET_USER') AS quiz_recommendation,
+              (SELECT COUNT(*) FROM exposure_history WHERE portal_user_id='$TARGET_USER') AS exposure_history,
+              (SELECT COUNT(*) FROM attempt WHERE portal_user_id='$TARGET_USER') AS attempt,
+              (SELECT COUNT(*) FROM student_skill_profile WHERE portal_user_id='$TARGET_USER') AS student_skill_profile,
+              (SELECT COUNT(*) FROM quiz_session WHERE portal_user_id='$TARGET_USER') AS quiz_session,
+              (SELECT COUNT(*) FROM quiz_session_runtime WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER')) AS quiz_session_runtime,
+              (SELECT COUNT(*) FROM quiz_answer_draft WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER')) AS quiz_answer_draft,
+              (SELECT COUNT(*) FROM quiz_question WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER')) AS quiz_question;" \
+            > /tmp/kiaan-reset-evidence/before.json
+          jq '.[0].results[0]' /tmp/kiaan-reset-evidence/before.json
+          ATTEMPTS="$(jq -r '.[0].results[0].attempt' /tmp/kiaan-reset-evidence/before.json)"
+          MASTERY="$(jq -r '.[0].results[0].student_skill_profile' /tmp/kiaan-reset-evidence/before.json)"
+          test "$ATTEMPTS" = '0' || { echo 'Refusing reset: submitted attempts appeared after pre-audit; aggregate reversal requires a separate guarded path.' >&2; exit 1; }
+          test "$MASTERY" = '0' || { echo 'Refusing reset: mastery records appeared after pre-audit.' >&2; exit 1; }
+          echo 'KIAAN_RESET_PRESTATE_GUARD_PASS'
+
+      - name: Reset Kiaan quiz testing state only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/kiaan-reset.sql <<SQL
+          DELETE FROM quiz_recommendation WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM exposure_history WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM attempt WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM quiz_answer_draft WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='${TARGET_USER}');
+          DELETE FROM quiz_question WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='${TARGET_USER}');
+          DELETE FROM quiz_session_runtime WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='${TARGET_USER}');
+          DELETE FROM quiz_audit_event WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM quiz_generation_lock WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM quiz_auth_session WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM student_skill_profile WHERE portal_user_id='${TARGET_USER}';
+          DELETE FROM quiz_session WHERE portal_user_id='${TARGET_USER}';
+          SQL
+          cat /tmp/kiaan-reset.sql
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --yes --file /tmp/kiaan-reset.sql > /tmp/kiaan-reset-evidence/reset-command.txt
+          echo 'KIAAN_QUIZ_STATE_RESET_APPLIED'
+
+      - name: Verify clean slate and live service health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+            "SELECT
+              (SELECT COUNT(*) FROM quiz_auth_session WHERE portal_user_id='$TARGET_USER') AS quiz_auth_session,
+              (SELECT COUNT(*) FROM quiz_generation_lock WHERE portal_user_id='$TARGET_USER') AS quiz_generation_lock,
+              (SELECT COUNT(*) FROM quiz_audit_event WHERE portal_user_id='$TARGET_USER') AS quiz_audit_event,
+              (SELECT COUNT(*) FROM quiz_recommendation WHERE portal_user_id='$TARGET_USER') AS quiz_recommendation,
+              (SELECT COUNT(*) FROM exposure_history WHERE portal_user_id='$TARGET_USER') AS exposure_history,
+              (SELECT COUNT(*) FROM attempt WHERE portal_user_id='$TARGET_USER') AS attempt,
+              (SELECT COUNT(*) FROM student_skill_profile WHERE portal_user_id='$TARGET_USER') AS student_skill_profile,
+              (SELECT COUNT(*) FROM quiz_session WHERE portal_user_id='$TARGET_USER') AS quiz_session,
+              (SELECT COUNT(*) FROM quiz_session_runtime WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER')) AS quiz_session_runtime,
+              (SELECT COUNT(*) FROM quiz_answer_draft WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER')) AS quiz_answer_draft,
+              (SELECT COUNT(*) FROM quiz_question WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER')) AS quiz_question;" \
+            > /tmp/kiaan-reset-evidence/after.json
+          jq '.[0].results[0]' /tmp/kiaan-reset-evidence/after.json
+          jq -e '.[0].results[0] | to_entries | all(.value == 0)' /tmp/kiaan-reset-evidence/after.json >/dev/null
+
+          test "$(curl --silent --show-error --output /tmp/health --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')" = '200'
+          test "$(curl --silent --show-error --max-redirs 0 --output /tmp/root --write-out '%{http_code}' 'https://quiz.futureperfect.education/')" = '303'
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-worker-after.json
+          ACTIVE_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-worker-after.json | head -n1)"
+          test "$ACTIVE_VERSION" = "$EXPECTED_QUIZ_VERSION"
+          echo 'KIAAN_QUIZ_STATE_RESET_VERIFIED_PASS'
+
+      - name: Upload reset evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiaan-quiz-state-reset-evidence
+          path: /tmp/kiaan-reset-evidence
+          if-no-files-found: warn
+          retention-days: 30
