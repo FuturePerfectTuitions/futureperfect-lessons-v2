@@ -1,5 +1,6 @@
 name: Step 10 Gate D account preflight
 
+# Gate D session recheck trigger: 2026-09-18 after authorised user re-login.
 on:
   push:
     branches:
