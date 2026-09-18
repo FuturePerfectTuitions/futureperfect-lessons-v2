@@ -1,0 +1,259 @@
+name: Step 10 final Browser production promotion
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-final-browser-production-promote.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-final-browser-production-promotion
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  PRE_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+  EXPECTED_QUIZ_VERSION: 118935bc-291e-4d0d-b046-219e0c894a6f
+  EXPECTED_PRE_BUNDLE: assets/portal-CeIaLZ5y.js
+  EXPECTED_PRE_BUNDLE_SHA256: 9dc3203a012c1530216cba9f8362d227a46745249499362a3160310bb34f45dc
+  FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  FRONTEND_SHA: 4a0a26090b1d119a7d6748d15eea3d7406513705
+  ACCEPTANCE_RUN_ID: '35355219788'
+  ACCEPTANCE_ARTIFACT_ID: '10550854602'
+  ACCEPTANCE_ARTIFACT_DIGEST: sha256:19734ba89a81c3d32dcdcfdd842da013997bbec9fc3e3453f48dc7c59a3ff9ad
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+
+      - uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.FRONTEND_SHA }}
+          path: frontend
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Confirm exact final frontend and acceptance evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_SHA"
+          grep -Fq 'Status: **CLOSED — PASS**' control/docs/step10/STEP10_GATE_D_CLOSEOUT_2026-09-18.md
+          node --input-type=module <<'NODE'
+          const headers={'user-agent':'fpt-step10-final-browser-deploy'};
+          const rr=await fetch(`https://api.github.com/repos/${process.env.FRONTEND_REPO}/actions/runs/${process.env.ACCEPTANCE_RUN_ID}`,{headers});
+          if(!rr.ok) throw new Error(`Acceptance run lookup failed ${rr.status}`);
+          const run=await rr.json();
+          if(run.status!=='completed'||run.conclusion!=='success'||run.head_sha!==process.env.FRONTEND_SHA){
+            throw new Error(`Acceptance run mismatch ${JSON.stringify({status:run.status,conclusion:run.conclusion,head_sha:run.head_sha})}`);
+          }
+          const ar=await fetch(`https://api.github.com/repos/${process.env.FRONTEND_REPO}/actions/artifacts/${process.env.ACCEPTANCE_ARTIFACT_ID}`,{headers});
+          if(!ar.ok) throw new Error(`Acceptance artifact lookup failed ${ar.status}`);
+          const artifact=await ar.json();
+          if(artifact.expired===true||artifact.workflow_run?.head_sha!==process.env.FRONTEND_SHA||artifact.digest!==process.env.ACCEPTANCE_ARTIFACT_DIGEST){
+            throw new Error(`Acceptance artifact mismatch ${JSON.stringify({expired:artifact.expired,head_sha:artifact.workflow_run?.head_sha,digest:artifact.digest})}`);
+          }
+          console.log(JSON.stringify({marker:'STEP10_FINAL_FRONTEND_ACCEPTANCE_EVIDENCE_PASS',runId:run.id,frontendSha:run.head_sha,artifactId:artifact.id,digest:artifact.digest},null,2));
+          NODE
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const app=fs.readFileSync('frontend/src/app.js','utf8');
+          const required=[
+            "requestJson('/api/v2/student/quiz/eligibility')",
+            "requestJson('/api/v2/student/quiz/launch', { method: 'POST' })",
+            "if (subject === 'maths') void revealMathsPracticeCard();",
+            "payload?.eligible !== true",
+            '11+ Practice',
+            'Take a real exam style GL quiz',
+            "document.querySelector('[data-view-grid=\"current\"]')"
+          ];
+          for(const x of required) if(!app.includes(x)) throw new Error(`Final frontend source contract missing: ${x}`);
+          if(app.includes('Take a Maths quiz')) throw new Error('Superseded card copy still present');
+          if(app.includes('/api/v1/student/quiz/')) throw new Error('Retired v1 quiz endpoint present');
+          NODE
+
+      - name: Build exact accepted frontend and record bundle identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          node tests/step10-v2-maths-practice-static.mjs
+          npm run build
+          git diff --check
+          test -s dist/index.html
+          grep -R -Fq '11+ Practice' dist
+          grep -R -Fq 'Take a real exam style GL quiz' dist
+          grep -R -Fq '/api/v2/student/quiz/eligibility' dist
+          grep -R -Fq '/api/v2/student/quiz/launch' dist
+          ! grep -R -Fq 'Take a Maths quiz' dist
+          ! grep -R -Fq '/api/v1/student/quiz/' dist
+          cd "$GITHUB_WORKSPACE"
+          rm -rf control/rebuild/browser-staging/public
+          mkdir -p control/rebuild/browser-staging/public
+          cp -a frontend/dist/. control/rebuild/browser-staging/public/
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto';
+          const html=fs.readFileSync('frontend/dist/index.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map(m=>m[1]);
+          const main=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];
+          if(!main) throw new Error('Built main bundle not found');
+          const rel=main.replace(/^\.\//,'').replace(/^\//,'');
+          const bytes=fs.readFileSync(path.join('frontend/dist',rel));
+          const sha=crypto.createHash('sha256').update(bytes).digest('hex');
+          const text=bytes.toString('utf8');
+          for(const s of ['11+ Practice','Take a real exam style GL quiz','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch','/api/v2/auth/login','/api/v2/student/home']) if(!text.includes(s)) throw new Error(`Built bundle missing ${s}`);
+          if(text.includes('Take a Maths quiz')) throw new Error('Built bundle contains superseded card copy');
+          if(text.includes('/api/v1/student/quiz/')) throw new Error('Built bundle contains retired v1 endpoint');
+          fs.appendFileSync(process.env.GITHUB_ENV,`FINAL_BUNDLE_PATH=${rel}\nFINAL_BUNDLE_SHA256=${sha}\n`);
+          console.log(JSON.stringify({marker:'STEP10_FINAL_BROWSER_BUILD_PASS',frontendSha:process.env.FRONTEND_SHA,bundlePath:rel,bundleSha256:sha},null,2));
+          NODE
+
+      - name: Install pinned Wrangler and verify rollback command
+        working-directory: control
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          npx wrangler rollback --help > /tmp/wrangler-rollback-help.txt
+          grep -Fq -- '--message' /tmp/wrangler-rollback-help.txt
+          grep -Fq -- '--name' /tmp/wrangler-rollback-help.txt
+
+      - name: Immediate pre-mutation production anchors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim();const sha256=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN),base='https://api.cloudflare.com/client/v4';
+          if(!account||!token)throw new Error('Cloudflare credentials unavailable');
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const text=await r.text();let j;try{j=JSON.parse(text)}catch{};if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${p}: ${JSON.stringify(j?.errors||text)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const d=ds[0];const vs=Array.isArray(d?.versions)?d.versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const browser=await active(process.env.BROWSER_WORKER),student=await active(process.env.STUDENT_WORKER),quiz=await active(process.env.QUIZ_WORKER);
+          if(browser!==process.env.PRE_BROWSER_VERSION)throw new Error(`Browser drift ${browser}`);
+          if(student!==process.env.EXPECTED_STUDENT_VERSION)throw new Error(`Student drift ${student}`);
+          if(quiz!==process.env.EXPECTED_QUIZ_VERSION)throw new Error(`Quiz drift ${quiz}`);
+          const host=process.env.PROD_HOST.toLowerCase();
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];if(!zone)throw new Error('Zone not found');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);const matching=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));
+          if(!matching.some(r=>clean(r.pattern).toLowerCase()===`${host}/*`&&clean(r.script)===process.env.BROWSER_WORKER)||matching.some(r=>clean(r.script)!==process.env.BROWSER_WORKER))throw new Error(`Route drift ${JSON.stringify(matching)}`);
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.BROWSER_WORKER)}/settings`);const bindings=Array.isArray(settings?.bindings)?settings.bindings:[];
+          const service=bindings.find(b=>clean(b.type)==='service'&&clean(b.name)==='STAGING_API'&&clean(b.service)===process.env.STUDENT_WORKER);if(!service)throw new Error(`Service binding drift ${JSON.stringify(bindings)}`);
+          const root=await fetch(`https://${host}/`,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-final-browser'}});if(!root.ok)throw new Error(`Root ${root.status}`);const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];if(!bundle)throw new Error('Live bundle missing');const norm=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];if(norm!==process.env.EXPECTED_PRE_BUNDLE)throw new Error(`Old bundle path drift ${norm}`);const br=await fetch(new URL(bundle,`https://${host}/`),{headers:{'cache-control':'no-store'}});if(!br.ok)throw new Error(`Bundle ${br.status}`);const bytes=Buffer.from(await br.arrayBuffer());const hash=sha256(bytes);if(hash!==process.env.EXPECTED_PRE_BUNDLE_SHA256)throw new Error(`Old bundle hash drift ${hash}`);if(bytes.toString('utf8').includes('/api/v2/student/quiz/eligibility'))throw new Error('Gate E frontend unexpectedly already live');
+          const eligibility=await fetch(`https://${host}/api/v2/student/quiz/eligibility`,{redirect:'manual'});if(eligibility.status!==401)throw new Error(`Unauth eligibility expected 401 got ${eligibility.status}`);
+          const launch=await fetch(`https://${host}/api/v2/student/quiz/launch`,{method:'POST',headers:{'content-type':'application/json','origin':`https://${host}`},body:'{}',redirect:'manual'});if(launch.status!==401)throw new Error(`Unauth launch expected 401 got ${launch.status}`);
+          const qh=await fetch('https://quiz.futureperfect.education/health');if(qh.status!==200)throw new Error(`Quiz health ${qh.status}`);
+          console.log(JSON.stringify({marker:'STEP10_FINAL_BROWSER_PREMUTATION_PASS',browser,student,quiz,bundlePath:norm,bundleSha256:hash,serviceBinding:{name:service.name,service:service.service}},null,2));
+          NODE
+
+      - name: Write exact Browser Worker deployment config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > control/rebuild/browser-staging/wrangler.step10final.toml <<TOML
+          name = "${BROWSER_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [[services]]
+          binding = "STAGING_API"
+          service = "${STUDENT_WORKER}"
+
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+
+      - name: Deploy exact final frontend to Browser Worker only
+        id: deploy
+        working-directory: control
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler deploy --config rebuild/browser-staging/wrangler.step10final.toml | tee /tmp/step10-final-browser-deploy.txt
+          echo deployed=true >> "$GITHUB_OUTPUT"
+
+      - name: Verify final production frontend and unchanged backend anchors
+        id: verify
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim();const sha256=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN),base='https://api.cloudflare.com/client/v4';
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const text=await r.text();let j;try{j=JSON.parse(text)}catch{};if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${p}: ${JSON.stringify(j?.errors||text)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const d=ds[0];const vs=Array.isArray(d?.versions)?d.versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const browser=await active(process.env.BROWSER_WORKER),student=await active(process.env.STUDENT_WORKER),quiz=await active(process.env.QUIZ_WORKER);
+          if(!browser||browser===process.env.PRE_BROWSER_VERSION)throw new Error(`Browser did not advance ${browser}`);
+          if(student!==process.env.EXPECTED_STUDENT_VERSION)throw new Error(`Student changed ${student}`);
+          if(quiz!==process.env.EXPECTED_QUIZ_VERSION)throw new Error(`Quiz changed ${quiz}`);
+          const host=process.env.PROD_HOST.toLowerCase();const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);const zone=zones.filter(z=>host===z.name||host.endsWith(`.${z.name}`)).sort((a,b)=>b.name.length-a.name.length)[0];if(!zone)throw new Error('Zone missing');const routes=await cf(`/zones/${zone.id}/workers/routes`);const matching=routes.filter(r=>clean(r.pattern).toLowerCase().includes(host));if(!matching.some(r=>clean(r.pattern).toLowerCase()===`${host}/*`&&clean(r.script)===process.env.BROWSER_WORKER)||matching.some(r=>clean(r.script)!==process.env.BROWSER_WORKER))throw new Error(`Route changed ${JSON.stringify(matching)}`);
+          const settings=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.BROWSER_WORKER)}/settings`);const bindings=Array.isArray(settings?.bindings)?settings.bindings:[];const service=bindings.find(b=>clean(b.type)==='service'&&clean(b.name)==='STAGING_API'&&clean(b.service)===process.env.STUDENT_WORKER);if(!service)throw new Error(`Service binding changed ${JSON.stringify(bindings)}`);
+          let observed=null;
+          for(let i=0;i<30;i++){
+            const root=await fetch(`https://${host}/?step10final=${Date.now()}-${i}`,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-final-browser'}});if(root.ok){const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];if(bundle){const norm=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];const br=await fetch(new URL(bundle,`https://${host}/`),{headers:{'cache-control':'no-store'}});if(br.ok){const bytes=Buffer.from(await br.arrayBuffer());const hash=sha256(bytes);if(norm===process.env.FINAL_BUNDLE_PATH&&hash===process.env.FINAL_BUNDLE_SHA256){observed={path:norm,sha256:hash,text:bytes.toString('utf8')};break;}}}}
+            await new Promise(r=>setTimeout(r,2000));
+          }
+          if(!observed)throw new Error(`Live frontend never matched exact build ${process.env.FINAL_BUNDLE_PATH} ${process.env.FINAL_BUNDLE_SHA256}`);
+          for(const x of ['11+ Practice','Take a real exam style GL quiz','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch','/api/v2/auth/login','/api/v2/student/home'])if(!observed.text.includes(x))throw new Error(`Production bundle missing ${x}`);
+          if(observed.text.includes('Take a Maths quiz'))throw new Error('Production bundle contains superseded card copy');
+          if(observed.text.includes('/api/v1/student/quiz/'))throw new Error('Production bundle contains retired v1 quiz endpoint');
+          const eligibility=await fetch(`https://${host}/api/v2/student/quiz/eligibility`,{redirect:'manual'});if(eligibility.status!==401)throw new Error(`Unauth eligibility expected 401 got ${eligibility.status}`);
+          const launch=await fetch(`https://${host}/api/v2/student/quiz/launch`,{method:'POST',headers:{'content-type':'application/json','origin':`https://${host}`},body:'{}',redirect:'manual'});if(launch.status!==401)throw new Error(`Unauth launch expected 401 got ${launch.status}`);
+          const qh=await fetch('https://quiz.futureperfect.education/health');if(qh.status!==200)throw new Error(`Quiz health ${qh.status}`);
+          const qr=await fetch('https://quiz.futureperfect.education/',{redirect:'manual'});if(qr.status!==303)throw new Error(`Unauth Quiz root expected 303 got ${qr.status}`);
+          console.log(JSON.stringify({marker:'STEP10_FINAL_BROWSER_PRODUCTION_VERIFY_PASS',frontendSha:process.env.FRONTEND_SHA,browser,student,quiz,bundlePath:observed.path,bundleSha256:observed.sha256,serviceBinding:{name:service.name,service:service.service},unauthenticated:{eligibility:eligibility.status,launch:launch.status,quizRoot:qr.status}},null,2));
+          NODE
+
+      - name: Automatic Browser rollback on any post-deploy failure
+        if: always() && steps.deploy.outputs.deployed == 'true' && steps.verify.outcome != 'success'
+        working-directory: control
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo 'Final Browser verification failed; restoring exact pre-Gate-E Browser version.'
+          npx wrangler rollback "$PRE_BROWSER_VERSION" --name "$BROWSER_WORKER" --message 'Step 10 final Browser automatic rollback'
+          sleep 3
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const root=await fetch(`https://${process.env.PROD_HOST}/`,{headers:{'cache-control':'no-store'}});if(!root.ok)throw new Error(`Rollback root ${root.status}`);const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];if(!bundle)throw new Error('Rollback bundle missing');const norm=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];const br=await fetch(new URL(bundle,`https://${process.env.PROD_HOST}/`),{headers:{'cache-control':'no-store'}});if(!br.ok)throw new Error(`Rollback bundle ${br.status}`);const bytes=Buffer.from(await br.arrayBuffer());const hash=crypto.createHash('sha256').update(bytes).digest('hex');if(norm!==process.env.EXPECTED_PRE_BUNDLE||hash!==process.env.EXPECTED_PRE_BUNDLE_SHA256)throw new Error(`Rollback bundle mismatch ${norm} ${hash}`);console.log(JSON.stringify({marker:'STEP10_FINAL_BROWSER_AUTOMATIC_ROLLBACK_PASS',bundlePath:norm,bundleSha256:hash},null,2));
+          NODE
+
+      - name: Require successful final Browser promotion
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.deploy.outcome }}' = 'success'
+          test '${{ steps.verify.outcome }}' = 'success'
+          echo "STEP10_FINAL_BROWSER_PRODUCTION_PASS frontend_sha=${FRONTEND_SHA} bundle=${FINAL_BUNDLE_PATH} bundle_sha256=${FINAL_BUNDLE_SHA256}"
