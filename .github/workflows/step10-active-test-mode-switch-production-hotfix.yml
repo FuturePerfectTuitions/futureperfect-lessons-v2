@@ -1,0 +1,344 @@
+name: Step 10 active-test mode-switch production hotfix
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-active-test-mode-switch-production-hotfix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-active-test-mode-switch-production-hotfix
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  EXPECTED_OLD_QUIZ_VERSION: 118935bc-291e-4d0d-b046-219e0c894a6f
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  HISTORICAL_SOURCE_BRANCH: ops/step10-gate-c-readonly-20260917-2012
+  OLD_INDEX_BLOB: e7a5c0fb704d17eddf108f817cf5f3df89f496ff
+  TIMER_INDEX_BLOB: 070081d24dd8d9c3f3add20d8d39f6c8f947bd86
+  HOTFIX_INDEX_BLOB: 06d9a66352a684a682ec348abd7f360c091f6ae1
+  SELECTOR_BLOB: 2082299d1bc513a5076bc1f9c7f1d06b653d235d
+  REMEDIATION_BLOB: 030692e4c0d6a318dcf3bdded5750234e39c271c
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Reconstruct exact previously-tested timer source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin "${HISTORICAL_SOURCE_BRANCH}:refs/remotes/origin/${HISTORICAL_SOURCE_BRANCH}"
+          rm -rf /tmp/step10-mode-hotfix
+          mkdir -p /tmp/step10-mode-hotfix/src
+          git show "origin/${HISTORICAL_SOURCE_BRANCH}:ops/step10-gate-c-quiz-copy/src/index.js" > /tmp/step10-mode-hotfix/src/index.js
+          git show "origin/${HISTORICAL_SOURCE_BRANCH}:ops/step10-gate-c-quiz-copy/src/selector.js" > /tmp/step10-mode-hotfix/src/selector.js
+          git show "origin/${HISTORICAL_SOURCE_BRANCH}:ops/step10-gate-c-quiz-copy/src/remediation.js" > /tmp/step10-mode-hotfix/src/remediation.js
+          test "$(git hash-object /tmp/step10-mode-hotfix/src/index.js)" = "$OLD_INDEX_BLOB"
+          test "$(git hash-object /tmp/step10-mode-hotfix/src/selector.js)" = "$SELECTOR_BLOB"
+          test "$(git hash-object /tmp/step10-mode-hotfix/src/remediation.js)" = "$REMEDIATION_BLOB"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/step10-mode-hotfix/src/index.js')
+          s=p.read_text()
+          replacements=[
+            ("const TIMED_MS = 25 * 60 * 1000;\nconst LOCK_MS = 15_000;",
+             "const TIMED_MS = 25 * 60 * 1000;\nconst FINAL_MINUTE_MS = 60 * 1000;\nconst LOCK_MS = 15_000;"),
+            ("  const timedOut = session.mode === 'TIMED' && deadlineMs != null && now.getTime() >= deadlineMs;\n  const effectiveReason = timedOut ? 'TIMEOUT' : reason;",
+             "  const timedOut = session.mode === 'TIMED' && deadlineMs != null && now.getTime() >= deadlineMs;\n  const manualSubmitLocked = session.mode === 'TIMED' && deadlineMs != null\n    && now.getTime() >= deadlineMs - FINAL_MINUTE_MS\n    && now.getTime() < deadlineMs;\n  if (reason === 'MANUAL' && manualSubmitLocked) {\n    return { ok: false, status: 409, error: 'MANUAL_SUBMIT_LOCKED_FINAL_MINUTE' };\n  }\n  const effectiveReason = timedOut ? 'TIMEOUT' : reason;"),
+            ("el.classList.toggle('danger',remain<=300);if(ms<=0){",
+             "el.classList.toggle('danger',remain<=300);const submitBtn=document.getElementById('submit');const manualLocked=remain<=60;if(submitBtn){submitBtn.disabled=manualLocked;submitBtn.textContent=manualLocked?'Submission locked · time will auto-submit':'Submit whole test';submitBtn.title=manualLocked?'Manual submission is disabled in the final 60 seconds.':''}if(ms<=0){"),
+            ("if(e.body?.error==='ALL_ANSWERS_REQUIRED'){alert('Please answer every question before submitting.')}else err(e)",
+             "if(e.body?.error==='ALL_ANSWERS_REQUIRED'){alert('Please answer every question before submitting.')}else if(e.body?.error==='MANUAL_SUBMIT_LOCKED_FINAL_MINUTE'){alert('Manual submission is disabled in the final 60 seconds. Your test will submit automatically when time expires.')}else err(e)"),
+            (".timer{font-weight:800;font-variant-numeric:tabular-nums}.timer.danger{color:#a11212}",
+             ".timer{position:fixed;top:74px;right:18px;z-index:50;min-width:132px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;background:#fff;color:#012169;border:2px solid #cfd9e6;border-radius:12px;padding:10px 14px;box-shadow:0 8px 24px rgba(1,33,105,.18)}.timer.warning{color:#7a4b00;background:#fff3cd;border-color:#d9a300}@media(max-width:600px){.timer{top:70px;right:10px;padding:9px 12px;min-width:124px}}"),
+            ("if(t.mode!=='TIMED'||!t.deadlineAt){el.textContent='Untimed';return}const tick=async()=>",
+             "if(t.mode!=='TIMED'||!t.deadlineAt){el.hidden=true;return}el.hidden=false;const tick=async()=>"),
+            ("el.textContent=Math.floor(remain/60)+':'+String(remain%60).padStart(2,'0');el.classList.toggle('danger',remain<=300);",
+             "el.textContent='Time left '+Math.floor(remain/60)+':'+String(remain%60).padStart(2,'0');el.classList.toggle('warning',remain<=300);")
+          ]
+          for old,new in replacements:
+              if s.count(old) != 1:
+                  raise SystemExit(f'Timer patch anchor mismatch: {old[:100]}')
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          test "$(git hash-object /tmp/step10-mode-hotfix/src/index.js)" = "$TIMER_INDEX_BLOB"
+
+      - name: Reconstruct exact tested mode-switch hotfix blob
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/step10-mode-hotfix/src/index.js')
+          s=p.read_text()
+
+          old_active="SELECT session_id,mode FROM quiz_session WHERE portal_user_id=? AND status='IN_PROGRESS' ORDER BY started_at DESC LIMIT 1"
+          new_active="SELECT qs.session_id,qs.mode FROM quiz_session qs JOIN quiz_session_runtime rt ON rt.session_id=qs.session_id WHERE qs.portal_user_id=? AND qs.status='IN_PROGRESS' AND COALESCE(rt.submission_reason,'')<>'ABANDONED' ORDER BY qs.started_at DESC LIMIT 1"
+          if s.count(old_active) != 3: raise SystemExit('active-test query anchor mismatch')
+          s=s.replace(old_active,new_active)
+
+          old_expired="WHERE qs.portal_user_id=? AND qs.status='IN_PROGRESS' AND rt.deadline_at IS NOT NULL AND rt.deadline_at<=?"
+          new_expired="WHERE qs.portal_user_id=? AND qs.status='IN_PROGRESS' AND COALESCE(rt.submission_reason,'')<>'ABANDONED' AND rt.deadline_at IS NOT NULL AND rt.deadline_at<=?"
+          if s.count(old_expired) != 1: raise SystemExit('expired-test anchor mismatch')
+          s=s.replace(old_expired,new_expired)
+
+          marker="async function finaliseSession(env, auth, sessionId, reason) {"
+          if s.count(marker) != 1: raise SystemExit('finalise anchor mismatch')
+          abandon="""async function abandonSession(request, env, auth, sessionId) {
+            if (!checkMutationOrigin(request, env)) return responseJson({ error: 'ORIGIN_NOT_ALLOWED' }, 403);
+            let session = await sessionOwned(env, auth, sessionId);
+            if (!session) return responseJson({ error: 'TEST_NOT_FOUND' }, 404);
+            if (session.submission_reason === 'ABANDONED') return responseJson({ ok: true, sessionId, mode: session.mode, alreadyAbandoned: true });
+            if (session.status !== 'IN_PROGRESS') return responseJson({ error: 'TEST_ALREADY_SUBMITTED' }, 409);
+            if (session.mode === 'TIMED' && session.deadline_at && Date.now() >= new Date(session.deadline_at).getTime()) {
+              await finaliseSession(env, auth, sessionId, 'TIMEOUT');
+              return responseJson({ error: 'TEST_EXPIRED', submitted: true }, 409);
+            }
+            const counts = await env.DB.prepare(
+              `SELECT SUM(CASE WHEN selected_option IS NOT NULL THEN 1 ELSE 0 END) AS answered,
+                      SUM(CASE WHEN selected_option IS NULL THEN 1 ELSE 0 END) AS unanswered
+               FROM quiz_answer_draft WHERE session_id=?`
+            ).bind(sessionId).first();
+            const answered = Number(counts?.answered || 0);
+            const unanswered = Number(counts?.unanswered || 0);
+            const abandonedAt = nowIso();
+            await env.DB.batch([
+              env.DB.prepare(`DELETE FROM exposure_history
+                              WHERE portal_user_id=? AND session_id=?
+                                AND question_id IN (
+                                  SELECT question_id FROM quiz_answer_draft
+                                  WHERE session_id=? AND selected_option IS NULL
+                                )`).bind(auth.portalUserId, sessionId, sessionId),
+              env.DB.prepare(`UPDATE quiz_session_runtime
+                              SET submission_reason='ABANDONED',score_correct=NULL,score_total=NULL,finalised_at=?
+                              WHERE session_id=? AND submission_reason IS NULL`).bind(abandonedAt, sessionId),
+              env.DB.prepare(`INSERT INTO quiz_audit_event(event_id,portal_user_id,session_id,event_type,event_at,detail_json) VALUES(?,?,?,?,?,?)`)
+                .bind(randomId('evt'), auth.portalUserId, sessionId, 'TEST_ABANDONED', abandonedAt, JSON.stringify({ mode: session.mode, answered, unanswered, unansweredExposureReleased: unanswered }))
+            ]);
+            return responseJson({ ok: true, sessionId, mode: session.mode, answered, unanswered, unansweredExposureReleased: unanswered });
+          }
+
+          """
+          s=s.replace(marker,abandon+marker)
+
+          pairs=[
+            ("  if (!session) return { ok: false, status: 404, error: 'TEST_NOT_FOUND' };\n  if (session.status === 'SUBMITTED') return { ok: true, already: true, session };",
+             "  if (!session) return { ok: false, status: 404, error: 'TEST_NOT_FOUND' };\n  if (session.submission_reason === 'ABANDONED') return { ok: false, status: 409, error: 'TEST_ABANDONED' };\n  if (session.status === 'SUBMITTED') return { ok: true, already: true, session };"),
+            ("  if (!session) return responseJson({ error: 'TEST_NOT_FOUND' }, 404);\n  if (session.status === 'IN_PROGRESS' && session.mode === 'TIMED' && session.deadline_at && Date.now() >= new Date(session.deadline_at).getTime()) {",
+             "  if (!session) return responseJson({ error: 'TEST_NOT_FOUND' }, 404);\n  if (session.submission_reason === 'ABANDONED') return responseJson({ error: 'TEST_ABANDONED' }, 409);\n  if (session.status === 'IN_PROGRESS' && session.mode === 'TIMED' && session.deadline_at && Date.now() >= new Date(session.deadline_at).getTime()) {"),
+            ("  if (!session) return responseJson({ error: 'TEST_NOT_FOUND' }, 404);\n  if (session.status !== 'IN_PROGRESS') return responseJson({ error: 'TEST_ALREADY_SUBMITTED' }, 409);",
+             "  if (!session) return responseJson({ error: 'TEST_NOT_FOUND' }, 404);\n  if (session.submission_reason === 'ABANDONED') return responseJson({ error: 'TEST_ABANDONED' }, 409);\n  if (session.status !== 'IN_PROGRESS') return responseJson({ error: 'TEST_ALREADY_SUBMITTED' }, 409);"),
+            ("    const answerId = routeMatch(url.pathname, '/answer');\n    if (answerId && request.method === 'POST') return saveAnswer(request, env, auth, answerId);\n    const submitId = routeMatch(url.pathname, '/submit');",
+             "    const answerId = routeMatch(url.pathname, '/answer');\n    if (answerId && request.method === 'POST') return saveAnswer(request, env, auth, answerId);\n    const abandonId = routeMatch(url.pathname, '/abandon');\n    if (abandonId && request.method === 'POST') return abandonSession(request, env, auth, abandonId);\n    const submitId = routeMatch(url.pathname, '/submit');"),
+            ("async function start(mode){try{const b=await api('/api/tests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});await loadTest(b.sessionId)}catch(e){if(e.body?.error==='ACTIVE_TEST_EXISTS')return loadTest(e.body.sessionId);err(e)}}",
+             "async function start(mode){try{const b=await api('/api/tests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});await loadTest(b.sessionId)}catch(e){if(e.body?.error==='ACTIVE_TEST_EXISTS'){const existingMode=String(e.body.mode||'').toUpperCase();const requestedMode=String(mode||'').toUpperCase();if(existingMode===requestedMode)return loadTest(e.body.sessionId);const from=existingMode==='TIMED'?'Timed':'Stretch';const to=requestedMode==='TIMED'?'Timed':'Stretch';if(!confirm('You already have a '+from+' Test in progress. Discard it and start a '+to+' Test instead? Unanswered questions from the discarded test may be served again.'))return;try{await api('/api/tests/'+encodeURIComponent(e.body.sessionId)+'/abandon',{method:'POST'});return start(mode)}catch(abandonError){return err(abandonError)}}err(e)}}")
+          ]
+          for old,new in pairs:
+              if s.count(old) != 1: raise SystemExit(f'Hotfix patch anchor mismatch: {old[:120]}')
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          test "$(git hash-object /tmp/step10-mode-hotfix/src/index.js)" = "$HOTFIX_INDEX_BLOB"
+          node --check /tmp/step10-mode-hotfix/src/index.js
+          node --check /tmp/step10-mode-hotfix/src/selector.js
+          node --check /tmp/step10-mode-hotfix/src/remediation.js
+          grep -Fq "COALESCE(rt.submission_reason,'')<>'ABANDONED'" /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq 'DELETE FROM exposure_history' /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq 'selected_option IS NULL' /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq "submission_reason='ABANDONED'" /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq "existingMode===requestedMode" /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq "'/abandon'" /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq 'MANUAL_SUBMIT_LOCKED_FINAL_MINUTE' /tmp/step10-mode-hotfix/src/index.js
+          grep -Fq "el.classList.toggle('warning',remain<=300)" /tmp/step10-mode-hotfix/src/index.js
+          echo 'STEP10_MODE_HOTFIX_EXACT_TESTED_SOURCE_RECONSTRUCTED'
+
+      - name: Write minimal keep-vars deployment config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/step10-mode-hotfix/wrangler.toml <<TOML
+          name = "${QUIZ_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-09-17"
+          keep_vars = true
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt-11plus-practice"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+
+      - name: Immediate pre-mutation live anchors and bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings-before.json
+          jq -e '.success == true' /tmp/quiz-settings-before.json >/dev/null
+          expected_names='DB,ENVIRONMENT,LAUNCH_REDEEM_TIMEOUT_MS,PORTAL_BRIDGE_URL,PORTAL_LOGIN_URL,QUIZ_BRIDGE_SECRET,QUIZ_ORIGIN,QUIZ_SESSION_TTL_SECONDS'
+          actual_names="$(jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/quiz-settings-before.json)"
+          test "$actual_names" = "$expected_names" || { echo "Unexpected Quiz binding set: $actual_names" >&2; exit 1; }
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-settings-before.json >/dev/null
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-before.json
+          OLD_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-before.json | head -n1)"
+          test "$OLD_VERSION" = "$EXPECTED_OLD_QUIZ_VERSION" || { echo "Quiz drift: expected $EXPECTED_OLD_QUIZ_VERSION got $OLD_VERSION" >&2; exit 1; }
+          echo "OLD_VERSION=$OLD_VERSION" >> "$GITHUB_ENV"
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-versions-before.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-versions-before.json | sort -u > /tmp/quiz-version-ids-before.txt
+
+          curl --fail --silent --show-error "$API/workers/scripts/${BROWSER_WORKER}/deployments" -H "$AUTH" -o /tmp/browser-before.json
+          BROWSER_BEFORE="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/browser-before.json)"
+          test -n "$BROWSER_BEFORE"
+          echo "BROWSER_BEFORE=$BROWSER_BEFORE" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/student-before.json
+          STUDENT_BEFORE="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/student-before.json)"
+          test -n "$STUDENT_BEFORE"
+          echo "STUDENT_BEFORE=$STUDENT_BEFORE" >> "$GITHUB_ENV"
+
+          code="$(curl --silent --show-error --output /tmp/quiz-health-before.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+          test "$code" = '200'
+          code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-root-before.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/')"
+          test "$code" = '303'
+          echo 'STEP10_MODE_HOTFIX_PREMUTATION_PASS'
+
+      - name: Upload exact candidate without changing traffic
+        working-directory: /tmp/step10-mode-hotfix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions upload src/index.js --config wrangler.toml --keep-vars --message 'Step 10 active-test mode-switch hotfix candidate' | tee /tmp/quiz-mode-hotfix-upload.txt
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-versions-after.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-versions-after.json | sort -u > /tmp/quiz-version-ids-after.txt
+          NEW_VERSION="$(comm -13 /tmp/quiz-version-ids-before.txt /tmp/quiz-version-ids-after.txt | head -n1)"
+          test -n "$NEW_VERSION"
+          test "$NEW_VERSION" != "$OLD_VERSION"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "STEP10_MODE_HOTFIX_CANDIDATE_VERSION=$NEW_VERSION"
+
+      - name: Inspect unpromoted candidate and preserve bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/versions/${NEW_VERSION}" -H "$AUTH" -o /tmp/quiz-candidate.json
+          jq -e '.success == true' /tmp/quiz-candidate.json >/dev/null
+          expected_names='DB,ENVIRONMENT,LAUNCH_REDEEM_TIMEOUT_MS,PORTAL_BRIDGE_URL,PORTAL_LOGIN_URL,QUIZ_BRIDGE_SECRET,QUIZ_ORIGIN,QUIZ_SESSION_TTL_SECONDS'
+          actual_names="$(jq -r '[.result.resources.bindings[].name] | sort | join(",")' /tmp/quiz-candidate.json)"
+          test "$actual_names" = "$expected_names" || { echo "Candidate binding set changed: $actual_names" >&2; exit 1; }
+          jq -e --arg id "$QUIZ_D1_ID" '.result.resources.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-candidate.json >/dev/null
+          jq -e '.result.resources.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-candidate.json >/dev/null
+          for n in ENVIRONMENT PORTAL_BRIDGE_URL PORTAL_LOGIN_URL QUIZ_ORIGIN QUIZ_SESSION_TTL_SECONDS LAUNCH_REDEEM_TIMEOUT_MS; do
+            before="$(jq -r --arg n "$n" '[.result.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/quiz-settings-before.json)"
+            after="$(jq -r --arg n "$n" '[.result.resources.bindings[] | select(.name==$n and .type=="plain_text") | .text][0] // ""' /tmp/quiz-candidate.json)"
+            test -n "$before"
+            test "$after" = "$before" || { echo "Candidate binding value changed: $n" >&2; exit 1; }
+          done
+          echo 'STEP10_MODE_HOTFIX_UNPROMOTED_BINDINGS_PASS'
+
+      - name: Promote exact hotfix candidate at 100 percent
+        id: promote
+        continue-on-error: true
+        working-directory: /tmp/step10-mode-hotfix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$NEW_VERSION@100%" --name "$QUIZ_WORKER" --message 'Step 10 active-test mode-switch production hotfix' -y
+          echo 'STEP10_MODE_HOTFIX_PROMOTED'
+
+      - name: Verify live hotfix and surrounding-worker immutability
+        id: verify
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-after.json
+          jq -e --arg id "$NEW_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy-after.json >/dev/null
+
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-settings-after.json
+          expected_names='DB,ENVIRONMENT,LAUNCH_REDEEM_TIMEOUT_MS,PORTAL_BRIDGE_URL,PORTAL_LOGIN_URL,QUIZ_BRIDGE_SECRET,QUIZ_ORIGIN,QUIZ_SESSION_TTL_SECONDS'
+          actual_names="$(jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/quiz-settings-after.json)"
+          test "$actual_names" = "$expected_names"
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-settings-after.json >/dev/null
+
+          curl --fail --silent --show-error "$API/workers/scripts/${BROWSER_WORKER}/deployments" -H "$AUTH" -o /tmp/browser-after.json
+          BROWSER_AFTER="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/browser-after.json)"
+          test "$BROWSER_AFTER" = "$BROWSER_BEFORE" || { echo 'Browser worker changed during Quiz-only hotfix' >&2; exit 1; }
+          curl --fail --silent --show-error "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/student-after.json
+          STUDENT_AFTER="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' /tmp/student-after.json)"
+          test "$STUDENT_AFTER" = "$STUDENT_BEFORE" || { echo 'Student worker changed during Quiz-only hotfix' >&2; exit 1; }
+
+          code="$(curl --silent --show-error --output /tmp/quiz-health-after.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')"
+          test "$code" = '200'
+          code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-root-after.txt --write-out '%{http_code}' 'https://quiz.futureperfect.education/')"
+          test "$code" = '303'
+          curl --fail --silent --show-error 'https://quiz.futureperfect.education/assets/app.js' -o /tmp/live-app.js
+          grep -Fq "existingMode===requestedMode" /tmp/live-app.js
+          grep -Fq "/abandon" /tmp/live-app.js
+          grep -Fq 'Unanswered questions from the discarded test may be served again.' /tmp/live-app.js
+          grep -Fq 'Time left ' /tmp/live-app.js
+
+          code="$(curl --silent --show-error --max-redirs 0 --request POST --output /tmp/unauth-abandon.json --write-out '%{http_code}' 'https://quiz.futureperfect.education/api/tests/not-a-real-session/abandon')"
+          test "$code" = '401'
+          passed=false
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-invalid-after.html --write-out '%{http_code}' 'https://quiz.futureperfect.education/launch?code=step10-mode-hotfix-invalid-probe')"
+            if test "$code" = '410' && grep -Fqi 'practice link is no longer valid' /tmp/quiz-invalid-after.html; then
+              passed=true
+              break
+            fi
+            sleep 5
+          done
+          test "$passed" = 'true'
+          echo 'STEP10_MODE_HOTFIX_PRODUCTION_VERIFY_PASS'
+
+      - name: Roll back automatically on any promotion verification failure
+        if: always() && env.OLD_VERSION != '' && (steps.promote.outcome != 'success' || steps.verify.outcome != 'success')
+        working-directory: /tmp/step10-mode-hotfix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD_VERSION@100%" --name "$QUIZ_WORKER" --message 'Automatic rollback after active-test mode-switch hotfix failure' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-rollback.json
+          jq -e --arg id "$OLD_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback.json >/dev/null
+          echo 'STEP10_MODE_HOTFIX_AUTOMATIC_ROLLBACK_PASS'
+
+      - name: Require successful production hotfix
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.promote.outcome }}' = 'success'
+          test '${{ steps.verify.outcome }}' = 'success'
+          echo "STEP10_ACTIVE_TEST_MODE_SWITCH_PRODUCTION_PASS new_version=${NEW_VERSION} rollback_version=${OLD_VERSION} source_blob=${HOTFIX_INDEX_BLOB}"
