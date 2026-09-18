@@ -1,6 +1,6 @@
 name: Step 10 Gate D account preflight
 
-# Gate D session recheck trigger: 2026-09-18 after restored bridge and refreshed authorised user session.
+# Gate D session/frontend recheck trigger: 2026-09-18 after restored bridge and refreshed authorised user session.
 on:
   push:
     branches:
@@ -25,6 +25,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Verify live Portal frontend bootstrap and Worker target
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location 'https://lessons.futureperfect.education/config.js' -o /tmp/live-config.js
+          curl --fail --silent --show-error --location 'https://lessons.futureperfect.education/assets/phase7.js?v=20260912-y6-sats-section-1' -o /tmp/live-phase7.js
+          grep -Fq 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev' /tmp/live-config.js
+          grep -Fq "/api/v1/student/session" /tmp/live-phase7.js
+          grep -Fq "credentials: 'include'" /tmp/live-phase7.js
+          grep -Fq 'readSession();' /tmp/live-phase7.js
+          echo "LIVE_CONFIG_SHA256=$(sha256sum /tmp/live-config.js | awk '{print $1}')"
+          echo "LIVE_PHASE7_SHA256=$(sha256sum /tmp/live-phase7.js | awk '{print $1}')"
+          echo 'LIVE_PORTAL_FRONTEND_SESSION_BOOTSTRAP_PASS'
 
       - name: Verify authorised account currently has active L3 Maths 11plus assignment
         shell: bash
