@@ -65,7 +65,7 @@ const globalModel = {
   }
 };
 
-function accessModel({ trial = false, status = 'active', expiresOn = null, lockedPreview = false, current = true, group = 'current', catalogueAvailable = true } = {}) {
+function accessModel({ trial = false, status = 'active', expiresOn = null, lockedPreview = false, current = true, group = 'current', catalogueAvailable = true, subject = 'maths' } = {}) {
   return {
     schemaVersion: 1,
     kind: 'prepared-access-read-model',
@@ -76,7 +76,7 @@ function accessModel({ trial = false, status = 'active', expiresOn = null, locke
       account: { firstName: 'Kiaan', status, expiresOn, trial },
       views: [{
         viewId: 'maths-level3',
-        subject: 'maths',
+        subject,
         label: 'L3',
         current,
         group,
@@ -193,7 +193,12 @@ res = await call('/api/v2/student/quiz/eligibility');
 body = await res.json();
 assert.equal(body.eligible, false, 'Previous-group L3 must fail closed.');
 
-await publish(`access:${scopeId}`, accessModel({ catalogueAvailable: false }), 'a8');
+await publish(`access:${scopeId}`, accessModel({ subject: 'english' }), 'a8');
+res = await call('/api/v2/student/quiz/eligibility');
+body = await res.json();
+assert.equal(body.eligible, false, 'English-only 11+ must fail closed.');
+
+await publish(`access:${scopeId}`, accessModel({ catalogueAvailable: false }), 'a9');
 res = await call('/api/v2/student/quiz/eligibility');
 body = await res.json();
 assert.equal(body.eligible, false, 'Unverifiable catalogue must fail closed.');
@@ -211,6 +216,7 @@ console.log(JSON.stringify({
   lockedPreviewExcluded: true,
   inactiveExpiredExcluded: true,
   nonCurrentExcluded: true,
+  englishOnlyExcluded: true,
   failClosedOnReadModelError: true,
   trustedOriginRequiredForLaunch: true,
   hashedLaunchCodeOnly: true,
