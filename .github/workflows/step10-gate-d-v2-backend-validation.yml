@@ -1,0 +1,58 @@
+name: Step 10 Gate D V2 backend validation
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-d-v2-backend-2026-09-18
+    paths:
+      - 'rebuild/student/src/**'
+      - 'rebuild/shared/auth/**'
+      - 'tests/step10-gate-d-v2-quiz-runtime.mjs'
+      - 'tests/rebuild-checkpoint5-auth-capability-core.mjs'
+      - 'tests/rebuild-checkpoint6-new-student-worker.mjs'
+      - 'tests/rebuild-checkpoint11-vr-howto-runtime.mjs'
+      - 'tests/rebuild-checkpoint11-scope-compatibility.mjs'
+      - 'tests/rebuild-cp12-admin-principal.mjs'
+      - 'tests/rebuilt-trial-manager-verification.mjs'
+      - '.github/workflows/step10-gate-d-v2-backend-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax checks
+        run: |
+          set -euo pipefail
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node --check tests/step10-gate-d-v2-quiz-runtime.mjs
+
+      - name: Gate D v2 quiz boundary regression
+        run: node tests/step10-gate-d-v2-quiz-runtime.mjs
+
+      - name: Rebuilt auth and Student Worker regressions
+        run: |
+          set -euo pipefail
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuilt-trial-manager-verification.mjs
+
+      - name: Record validation marker
+        run: |
+          printf '%s\n' \
+            'STEP10_GATE_D_V2_BACKEND_VALIDATION_PASS' \
+            "source_sha=$GITHUB_SHA"
