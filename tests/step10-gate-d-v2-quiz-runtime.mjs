@@ -8,7 +8,7 @@ const AUTH_SECRET = 'step10-gate-d-auth-secret-0123456789-abcdefghijklmnopqrstuv
 const SCOPE_SECRET = 'step10-gate-d-access-scope-secret-0123456789';
 const USER = 'kiaan1312';
 const ORIGIN = 'https://lessons.futureperfect.education';
-const NOW = Date.parse('2026-09-18T08:10:00Z');
+const NOW = Date.now();
 
 class KV {
   constructor() { this.values = new Map(); }
