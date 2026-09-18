@@ -133,7 +133,7 @@ jobs:
           const matches=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);
           const bundlePath=matches.find(x=>/portal-|\/assets\//i.test(x))||matches[0];
           if(!bundlePath) throw new Error('Live JS bundle not found');
-          const normalized=bundlePath.replace(/^\//,'').split('?')[0];
+          const normalized=bundlePath.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];
           if(normalized!==process.env.EXPECTED_LIVE_BUNDLE) throw new Error(`Live bundle path drift: ${normalized}`);
           const bundleUrl=new URL(bundlePath,`https://${host}/`);
           const bundleResp=await fetch(bundleUrl,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-preflight'}});
