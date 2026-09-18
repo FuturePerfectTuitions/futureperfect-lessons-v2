@@ -20,7 +20,7 @@ jobs:
       PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
       QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
       TEST_USER: kiaan1312
-      BASELINE_CAPTURED_AT: 2026-09-18T10:04:05.489Z
+      BASELINE_CAPTURED_AT: 2026-09-18T10:41:22.755Z
       BASELINE_LAUNCH_COUNT: '2'
       BASELINE_USED_LAUNCH_COUNT: '1'
       BASELINE_AUTH_COUNT: '1'
@@ -29,11 +29,11 @@ jobs:
       BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
       STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
       QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
-      EXPECTED_BROWSER_VERSION: 359ec0ec-6b22-4679-aa25-2151f4ebf9b4
+      EXPECTED_BROWSER_VERSION: d59497dd-c2cc-48d6-b733-5169270059de
       EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
       EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
-      EXPECTED_LIVE_BUNDLE: assets/portal-BloPjI-K.js
-      EXPECTED_LIVE_BUNDLE_SHA256: 4674f7652c110c982a01a47d18456499785b7fbf282ac22756ed6d5ead9a9495
+      EXPECTED_LIVE_BUNDLE: assets/portal-wK1OwW5J.js
+      EXPECTED_LIVE_BUNDLE_SHA256: 3907cb7782d070590c2f2c00bebb09fe80260de295e35b3dd1a41a8309e2cb5e
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
           const workers={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
           if(workers.browser!==process.env.EXPECTED_BROWSER_VERSION||workers.student!==process.env.EXPECTED_STUDENT_VERSION||workers.quiz!==process.env.EXPECTED_QUIZ_VERSION) throw new Error(`Worker drift ${JSON.stringify(workers)}`);
 
-          const root=await fetch('https://lessons.futureperfect.education/',{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-postcheck'}}); if(!root.ok)throw new Error(`Portal root ${root.status}`); const html=await root.text(); const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]); const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0]; if(!bundle)throw new Error('Live bundle missing'); const norm=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0]; const br=await fetch(new URL(bundle,'https://lessons.futureperfect.education/'),{headers:{'cache-control':'no-store'}}); const bytes=Buffer.from(await br.arrayBuffer()); const hash=crypto.createHash('sha256').update(bytes).digest('hex'); if(norm!==process.env.EXPECTED_LIVE_BUNDLE||hash!==process.env.EXPECTED_LIVE_BUNDLE_SHA256)throw new Error(`Gate E bundle drift ${norm} ${hash}`); const text=bytes.toString('utf8'); for(const s of ['11+ Practice','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'])if(!text.includes(s))throw new Error(`Gate E bundle missing ${s}`);
+          const root=await fetch('https://lessons.futureperfect.education/',{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-postcheck'}}); if(!root.ok)throw new Error(`Portal root ${root.status}`); const html=await root.text(); const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]); const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0]; if(!bundle)throw new Error('Live bundle missing'); const norm=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0]; const br=await fetch(new URL(bundle,'https://lessons.futureperfect.education/'),{headers:{'cache-control':'no-store'}}); const bytes=Buffer.from(await br.arrayBuffer()); const hash=crypto.createHash('sha256').update(bytes).digest('hex'); if(norm!==process.env.EXPECTED_LIVE_BUNDLE||hash!==process.env.EXPECTED_LIVE_BUNDLE_SHA256)throw new Error(`Gate E bundle drift ${norm} ${hash}`); const text=bytes.toString('utf8'); for(const s of ['11+ Practice','Take a real exam style GL quiz','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'])if(!text.includes(s))throw new Error(`Gate E bundle missing ${s}`); if(text.includes('Take a Maths quiz'))throw new Error('Old practice-card copy returned');
 
           async function d1(id,sql){const result=await cf(`/accounts/${account}/d1/database/${id}/query`,{method:'POST',body:JSON.stringify({sql})}); for(const b of result||[])if(Number(b?.meta?.rows_written||0)!==0||b?.meta?.changed_db===true)throw new Error('Postcheck unexpectedly wrote D1'); return (result||[]).map(x=>x.results||[]);}
           const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -67,7 +67,7 @@ jobs:
           const quiz=await d1(process.env.QUIZ_D1_ID,quizSql); const auth=quiz[0], audits=quiz[1], tests=Number(quiz[2]?.[0]?.count||0); if(auth.length!==Number(process.env.BASELINE_AUTH_COUNT)+1)throw new Error(`Expected one new Quiz auth session: ${auth.length}`); if(audits.length!==Number(process.env.BASELINE_LOGIN_AUDIT_COUNT)+1)throw new Error(`Expected one new Quiz login audit: ${audits.length}`); if(tests!==Number(process.env.BASELINE_QUIZ_TEST_COUNT))throw new Error(`A quiz test was started during Gate E UI acceptance: ${tests}`); const newAuth=auth.filter(r=>Date.parse(r.created_at)>Date.parse(process.env.BASELINE_CAPTURED_AT)); if(newAuth.length!==1)throw new Error(`Expected exactly one new Quiz auth row ${JSON.stringify(newAuth)}`); const qctx=JSON.parse(newAuth[0].release_context_json); if(qctx.l3Eligible!==true||qctx.l2Inherited!==true||qctx.source!=='portal-api-v2-live-l3-view-v1')throw new Error(`Quiz auth release context drift ${JSON.stringify(qctx)}`);
 
           const direct=await fetch('https://quiz.futureperfect.education/',{redirect:'manual'}); if(direct.status!==303||!String(direct.headers.get('location')||'').startsWith('https://lessons.futureperfect.education/'))throw new Error(`Direct Quiz return drift ${direct.status} ${direct.headers.get('location')}`);
-          const out={marker:'STEP10_GATE_E_REAL_UI_POSTCHECK_PASS',testUser:process.env.TEST_USER,workers,liveBundle:{path:norm,sha256:hash},assignment:assignment[0],baseline:{launchCount:baseLaunch,usedLaunchCount:baseUsed,authCount:Number(process.env.BASELINE_AUTH_COUNT),loginAuditCount:Number(process.env.BASELINE_LOGIN_AUDIT_COUNT),quizTestCount:Number(process.env.BASELINE_QUIZ_TEST_COUNT)},after:{launchCount:launches.length,usedLaunchCount:used.length,authCount:auth.length,loginAuditCount:audits.length,quizTestCount:tests},exactlyOneUiLaunch:true,launchRedeemed:true,noQuizTestStarted:true,directUnauthenticatedQuizReturnsPortal:true,productionAnchorsStable:true,checkedAt:new Date().toISOString()}; fs.writeFileSync('/tmp/gate-e-real-ui-postcheck.json',JSON.stringify(out,null,2)); console.log(JSON.stringify(out,null,2));
+          const out={marker:'STEP10_GATE_E_REAL_UI_POSTCHECK_PASS',testUser:process.env.TEST_USER,workers,liveBundle:{path:norm,sha256:hash},copy:'Take a real exam style GL quiz',assignment:assignment[0],baseline:{launchCount:baseLaunch,usedLaunchCount:baseUsed,authCount:Number(process.env.BASELINE_AUTH_COUNT),loginAuditCount:Number(process.env.BASELINE_LOGIN_AUDIT_COUNT),quizTestCount:Number(process.env.BASELINE_QUIZ_TEST_COUNT),capturedAt:process.env.BASELINE_CAPTURED_AT},after:{launchCount:launches.length,usedLaunchCount:used.length,authCount:auth.length,loginAuditCount:audits.length,quizTestCount:tests},exactlyOneUiLaunch:true,launchRedeemed:true,noQuizTestStarted:true,directUnauthenticatedQuizReturnsPortal:true,productionAnchorsStable:true,checkedAt:new Date().toISOString()}; fs.writeFileSync('/tmp/gate-e-real-ui-postcheck.json',JSON.stringify(out,null,2)); console.log(JSON.stringify(out,null,2));
           NODE
 
       - uses: actions/upload-artifact@v4
