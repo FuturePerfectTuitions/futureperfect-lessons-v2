@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - shell: bash
         run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
-      - name: Export LIVE Money/menu contract metadata only
+      - name: Export all Money/menu contract metadata only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -41,13 +41,13 @@ jobs:
           database_name = "${QUIZ_D1_NAME}"
           database_id = "${QUIZ_D1_ID}"
           TOML
-          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,family_id,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,difficulty_band,earliest_release_point,lifecycle_status,deployment_status FROM question_instance WHERE diagram_type='Money/menu' AND lifecycle_status='Live' ORDER BY family_id,question_id;" --json >/tmp/rows.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,family_id,presentation_type,diagram_type,diagram_spec_json,validation_spec_json,difficulty_band,earliest_release_point,lifecycle_status,deployment_status FROM question_instance WHERE diagram_type='Money/menu' ORDER BY family_id,question_id;" --json >/tmp/rows.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           rows=json.loads(Path('/tmp/rows.json').read_text())[0]['results']
           Path('/tmp/money_menu_contracts.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
-          types={}; families={}; item_counts={}; presentations={}; deployments={}
+          types={}; families={}; item_counts={}; presentations={}; deployments={}; lifecycles={}
           for r in rows:
               v=json.loads(r['validation_spec_json']) if r.get('validation_spec_json') else {}
               d=json.loads(r['diagram_spec_json']) if r.get('diagram_spec_json') else {}
@@ -56,9 +56,10 @@ jobs:
               families[r['family_id']]=families.get(r['family_id'],0)+1
               presentations[r['presentation_type']]=presentations.get(r['presentation_type'],0)+1
               deployments[r['deployment_status']]=deployments.get(r['deployment_status'],0)+1
+              lifecycles[r['lifecycle_status']]=lifecycles.get(r['lifecycle_status'],0)+1
               n=len(d.get('items',[])) if isinstance(d.get('items'),list) else -1
               item_counts[str(n)]=item_counts.get(str(n),0)+1
-          print(json.dumps({'marker':'POST_STEP10_MONEY_MENU_CONTRACTS_READONLY_PASS','rows':len(rows),'validation_types':types,'families':families,'presentations':presentations,'deployment_statuses':deployments,'item_counts':item_counts,'stem_or_source_text_exported':False},indent=2))
+          print(json.dumps({'marker':'POST_STEP10_ALL_MONEY_MENU_CONTRACTS_READONLY_PASS','rows':len(rows),'validation_types':types,'families':families,'presentations':presentations,'lifecycle_statuses':lifecycles,'deployment_statuses':deployments,'item_counts':item_counts,'stem_or_source_text_exported':False},indent=2))
           PY
           rm -f /tmp/rows.json
       - uses: actions/upload-artifact@v4
