@@ -1,0 +1,81 @@
+name: Step 10 Gate D API v2 topology preflight
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+    paths:
+      - .github/workflows/step10-gate-d-v2-topology-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_HOST: lessons.futureperfect.education
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      LEGACY_WORKER: fpt-portal-v2-worker
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      WRANGLER_VERSION: 4.134.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify current production route and sanitized bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          CF='https://api.cloudflare.com/client/v4'
+          API="$CF/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$CF/zones?name=futureperfect.education&account.id=${CLOUDFLARE_ACCOUNT_ID}" -H "$AUTH" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[]|select(.name=="futureperfect.education")|.id' /tmp/zones.json | head -n1)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "$CF/zones/${ZONE_ID}/workers/routes" -H "$AUTH" -o /tmp/routes.json
+          jq -e --arg route "${PROD_HOST}/*" --arg worker "$BROWSER_WORKER" '.success==true and ([.result[]|select(.pattern==$route and .script==$worker)]|length)==1 and ([.result[]|select(.pattern==$route and .script!=$worker)]|length)==0' /tmp/routes.json >/dev/null
+          echo "PROD_ROUTE=${PROD_HOST}/* -> ${BROWSER_WORKER}"
+          for worker in "$BROWSER_WORKER" "$STUDENT_WORKER" "$LEGACY_WORKER" "$QUIZ_WORKER"; do
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}/settings" -H "$AUTH" -o "/tmp/${worker}-settings.json"
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}/deployments" -H "$AUTH" -o "/tmp/${worker}-deployments.json"
+            VERSION="$(jq -r '.result.deployments[0].versions[]|select((.percentage//0)==100)|.version_id' "/tmp/${worker}-deployments.json" | head -n1)"
+            DEPLOYMENT="$(jq -r '.result.deployments[0].id' "/tmp/${worker}-deployments.json")"
+            echo "WORKER=${worker} DEPLOYMENT=${DEPLOYMENT} VERSION=${VERSION}"
+            jq -c '.result.bindings[] | if ((.type//"")|test("secret";"i")) then {name,type} elif .type=="service" then {name,type,service} elif .type=="d1" then {name,type,database_id:(.database_id//.id)} elif (.type=="kv_namespace" or .type=="kv") then {name,type,namespace_id:(.namespace_id//.id)} elif .type=="r2_bucket" then {name,type,bucket_name:(.bucket_name//.bucket)} elif .type=="plain_text" then {name,type,text} else {name,type} end' "/tmp/${worker}-settings.json"
+          done
+          jq -e --arg student "$STUDENT_WORKER" '.result.bindings | ([.[]|select(.type=="service")]|length)==1 and any(.[];.name=="STAGING_API" and .type=="service" and .service==$student)' "/tmp/${BROWSER_WORKER}-settings.json" >/dev/null
+          jq -e '.result.bindings | any(.[];.name=="AUTH_SIGNING_SECRET" and ((.type//"")|test("secret";"i"))) and any(.[];.name=="ACCESS_SCOPE_SECRET" and ((.type//"")|test("secret";"i"))) and any(.[];.name=="DB" and (.database_id//.id)=="97250a54-fa91-45ad-a002-3c4566b1fc38")' "/tmp/${STUDENT_WORKER}-settings.json" >/dev/null
+          echo 'GATE_D_V2_LIVE_TOPOLOGY_PASS'
+
+      - name: Verify API v2 facade and fail-closed auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          code="$(curl --silent --show-error --dump-header /tmp/home.headers --output /tmp/home.json --write-out '%{http_code}' "$BASE/api/v2/student/home")"
+          test "$code" = '401'
+          grep -iFq 'x-fpt-cp9-browser-facade: service-binding' /tmp/home.headers
+          grep -Fq 'AUTH_REQUIRED' /tmp/home.json
+          echo 'GATE_D_V2_PUBLIC_AUTH_BOUNDARY_PASS'
+
+      - name: Verify shared D1 launch schema remains clean and capture bookmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_launch_codes'; SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;" --yes | tee /tmp/gated-v2-d1.txt
+          grep -Fq 'quiz_launch_codes' /tmp/gated-v2-d1.txt
+          grep -Eq '"launch_code_rows"[[:space:]]*:[[:space:]]*0' /tmp/gated-v2-d1.txt
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 time-travel info fpt_portal_v2_db --json | tee /tmp/gated-v2-bookmark.json
+          echo 'GATE_D_V2_D1_PREFLIGHT_PASS'
+
+      - name: Complete
+        run: echo 'STEP10_GATE_D_V2_TOPOLOGY_PREFLIGHT_PASS'
