@@ -1,0 +1,88 @@
+name: Step 10 Kiaan quiz reset audit
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - '.github/workflows/step10-kiaan-quiz-reset-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  TARGET_USER: kiaan1312
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify credentials and database identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 list --json > /tmp/d1-list.json
+          jq -e --arg id "$QUIZ_D1_ID" --arg name "$QUIZ_D1" '.[] | select(.uuid==$id and .name==$name)' /tmp/d1-list.json >/dev/null
+          echo 'KIAAN_RESET_AUDIT_D1_IDENTITY_PASS'
+
+      - name: Inventory schema and Kiaan-specific state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/kiaan-reset-audit
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+            "SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" \
+            > /tmp/kiaan-reset-audit/schema.json
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+            "SELECT m.name AS table_name FROM sqlite_master m WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) p WHERE p.name='portal_user_id') ORDER BY m.name;" \
+            > /tmp/kiaan-reset-audit/user-tables.json
+
+          jq -r '.[0].results[]?.table_name // empty' /tmp/kiaan-reset-audit/user-tables.json > /tmp/kiaan-reset-audit/user-tables.txt
+          : > /tmp/kiaan-reset-audit/user-counts.tsv
+          while IFS= read -r table; do
+            test -n "$table" || continue
+            case "$table" in
+              *[!A-Za-z0-9_]*) echo "Unsafe table name: $table" >&2; exit 1;;
+            esac
+            npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+              "SELECT COUNT(*) AS n FROM \"$table\" WHERE portal_user_id='$TARGET_USER';" > /tmp/count.json
+            n="$(jq -r '.[0].results[0].n // 0' /tmp/count.json)"
+            printf '%s\t%s\n' "$table" "$n" | tee -a /tmp/kiaan-reset-audit/user-counts.tsv
+          done < /tmp/kiaan-reset-audit/user-tables.txt
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+            "SELECT session_id,mode,status,started_at,submitted_at FROM quiz_session WHERE portal_user_id='$TARGET_USER' ORDER BY started_at;" \
+            > /tmp/kiaan-reset-audit/sessions.json
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1" --remote --json --command \
+            "SELECT COUNT(*) AS session_count FROM quiz_session WHERE portal_user_id='$TARGET_USER'; SELECT COUNT(*) AS draft_count FROM quiz_answer_draft WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER'); SELECT COUNT(*) AS question_count FROM quiz_question WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER'); SELECT COUNT(*) AS runtime_count FROM quiz_session_runtime WHERE session_id IN (SELECT session_id FROM quiz_session WHERE portal_user_id='$TARGET_USER');" \
+            > /tmp/kiaan-reset-audit/session-dependent-counts.json
+
+          echo '--- USER TABLE COUNTS ---'
+          cat /tmp/kiaan-reset-audit/user-counts.tsv
+          echo '--- SESSION DEPENDENT COUNTS ---'
+          cat /tmp/kiaan-reset-audit/session-dependent-counts.json
+          echo 'KIAAN_RESET_AUDIT_COMPLETE'
+
+      - name: Upload read-only audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiaan-quiz-reset-prestate
+          path: /tmp/kiaan-reset-audit
+          retention-days: 30
