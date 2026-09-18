@@ -1,0 +1,33 @@
+name: Step 10 Gate D live frontend probe
+
+on:
+  push:
+    branches:
+      - ops/step10-gate-c-readonly-20260917-2012
+    paths:
+      - .github/workflows/step10-gate-d-live-frontend-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe live Portal frontend configuration and auth client
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          curl --fail --silent --show-error --location --max-time 20 "$BASE/config.js?gate_d_probe=20260918" -o /tmp/live-config.js
+          curl --fail --silent --show-error --location --max-time 20 "$BASE/assets/phase7.js?gate_d_probe=20260918" -o /tmp/live-phase7.js
+          echo 'LIVE_CONFIG_BEGIN'
+          sed -n '1,40p' /tmp/live-config.js
+          echo 'LIVE_CONFIG_END'
+          grep -F 'workerBaseUrl' /tmp/live-config.js
+          grep -Fq "credentials: 'include'" /tmp/live-phase7.js
+          grep -Fq "api('/api/v1/student/session'" /tmp/live-phase7.js
+          grep -Fq "api('/api/v1/student/auth/login'" /tmp/live-phase7.js
+          sha256sum /tmp/live-config.js /tmp/live-phase7.js
+          echo 'GATE_D_LIVE_FRONTEND_PROBE_PASS'
