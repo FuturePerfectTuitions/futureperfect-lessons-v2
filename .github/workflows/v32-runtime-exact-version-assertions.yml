@@ -1,0 +1,42 @@
+name: v3.2 runtime exact version assertions
+
+on:
+  push:
+    branches:
+      - fix/y4e1-prelesson-readmodel-20260917
+    paths:
+      - '.github/workflows/v32-runtime-exact-version-assertions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assert-exact-versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Assert exact active production versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          if(!token||!account) throw new Error('Cloudflare audit credentials unavailable');
+          const base='https://api.cloudflare.com/client/v4', auth={Authorization:`Bearer ${token}`};
+          const expected={
+            'fpt-portal-v2-rebuild-browser-prod':'f8a64bc8-8192-4400-9e45-8f1a1de10019',
+            'fpt-portal-v2-rebuild-student-prod':'b2e8bebb-1a18-4fc0-8dbc-ae9763ced1b4',
+            'fpt-portal-v2-worker':'c877dc0d-4216-4a2e-86e4-066d6891e6ad'
+          };
+          async function cf(path){const r=await fetch(base+path,{headers:auth});const b=await r.json();if(!r.ok||b.success!==true)throw new Error(`CF ${r.status} ${path}`);return b.result;}
+          async function activeVersion(worker){const d=await cf(`/accounts/${account}/workers/scripts/${worker}/deployments`);const rows=Array.isArray(d?.deployments)?d.deployments:(Array.isArray(d)?d:[]);const vs=Array.isArray(rows[0]?.versions)?rows[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'').trim();}
+          for(const [worker,want] of Object.entries(expected)){
+            const got=await activeVersion(worker);
+            if(got!==want) throw new Error(`${worker} version drift: expected ${want}, observed ${got}`);
+          }
+          console.log('V32_EXACT_ACTIVE_VERSIONS_PASS');
+          NODE
