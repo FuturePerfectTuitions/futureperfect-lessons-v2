@@ -1,0 +1,109 @@
+name: Step 10 Gate E production frontend rollback
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_GATE_E_ROLLBACK_TRIGGER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step10-gate-e-production-rollback
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  ROLLBACK_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+  EXPECTED_QUIZ_VERSION: 13eda650-d6b3-4ed3-a3cc-c788306a4789
+  EXPECTED_ROLLBACK_BUNDLE: assets/portal-CeIaLZ5y.js
+  EXPECTED_ROLLBACK_BUNDLE_SHA256: 9dc3203a012c1530216cba9f8362d227a46745249499362a3160310bb34f45dc
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify live Gate E state and unchanged backend anchors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), base='https://api.cloudflare.com/client/v4';
+          if(!account||!token) throw new Error('Cloudflare credentials unavailable');
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const text=await r.text();let j;try{j=JSON.parse(text)}catch{};if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${p}: ${JSON.stringify(j?.errors||text)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const workers={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          if(workers.student!==process.env.EXPECTED_STUDENT_VERSION) throw new Error(`Student Worker drift: ${JSON.stringify(workers)}`);
+          if(workers.quiz!==process.env.EXPECTED_QUIZ_VERSION) throw new Error(`Quiz Worker drift: ${JSON.stringify(workers)}`);
+          if(!workers.browser) throw new Error('Current Browser Worker version unavailable');
+          const root=await fetch(`https://${process.env.PROD_HOST}/`,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-rollback'}});if(!root.ok)throw new Error(`Root ${root.status}`);
+          const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];if(!bundle)throw new Error('Live bundle missing');
+          const rel=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];const br=await fetch(new URL(bundle,`https://${process.env.PROD_HOST}/`),{headers:{'cache-control':'no-store'}});if(!br.ok)throw new Error(`Bundle ${br.status}`);const bytes=Buffer.from(await br.arrayBuffer());const sha=crypto.createHash('sha256').update(bytes).digest('hex');const text=bytes.toString('utf8');
+          if(workers.browser===process.env.ROLLBACK_BROWSER_VERSION){
+            if(rel!==process.env.EXPECTED_ROLLBACK_BUNDLE||sha!==process.env.EXPECTED_ROLLBACK_BUNDLE_SHA256) throw new Error(`Rollback version active but bundle mismatch: ${rel} ${sha}`);
+            console.log(JSON.stringify({marker:'STEP10_GATE_E_ALREADY_ROLLED_BACK',workers,bundle:{path:rel,sha256:sha}},null,2));
+            process.exit(0);
+          }
+          if(!text.includes('/api/v2/student/quiz/eligibility')||!text.includes('11+ Practice')) throw new Error(`Current frontend is not the known Gate E UI; refusing blind rollback: ${rel} ${sha}`);
+          console.log(JSON.stringify({marker:'STEP10_GATE_E_ROLLBACK_PRECHECK_PASS',workers,bundle:{path:rel,sha256:sha}},null,2));
+          NODE
+
+      - name: Install pinned Wrangler
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          npx wrangler rollback --help >/tmp/rollback-help.txt
+          grep -Fq -- '--name' /tmp/rollback-help.txt
+          grep -Fq -- '--message' /tmp/rollback-help.txt
+
+      - name: Roll back Browser Worker to exact pre-Gate-E version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CURRENT=$(node --input-type=module <<'NODE'
+          const clean=v=>String(v??'').trim(), account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN), base='https://api.cloudflare.com/client/v4';
+          const r=await fetch(`${base}/accounts/${account}/workers/scripts/${encodeURIComponent(process.env.BROWSER_WORKER)}/deployments`,{headers:{Authorization:`Bearer ${token}`}});const j=await r.json();if(!r.ok||j?.success!==true)throw new Error(JSON.stringify(j?.errors||j));const ds=Array.isArray(j.result?.deployments)?j.result.deployments:Array.isArray(j.result)?j.result:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];console.log(clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id));
+          NODE
+          )
+          if [ "$CURRENT" != "$ROLLBACK_BROWSER_VERSION" ]; then
+            npx wrangler rollback "$ROLLBACK_BROWSER_VERSION" --name "$BROWSER_WORKER" --message "Step 10 Gate E owner-requested frontend rollback; continue off-production" --yes
+          else
+            echo "Browser Worker already at rollback anchor."
+          fi
+
+      - name: Verify exact pre-Gate-E frontend restored and backends unchanged
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          const clean=v=>String(v??'').trim();const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN),base='https://api.cloudflare.com/client/v4';
+          async function cf(p){const r=await fetch(base+p,{headers:{Authorization:`Bearer ${token}`}});const text=await r.text();let j;try{j=JSON.parse(text)}catch{};if(!r.ok||j?.success!==true)throw new Error(`${r.status} ${p}: ${JSON.stringify(j?.errors||text)}`);return j.result;}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          const workers={browser:await active(process.env.BROWSER_WORKER),student:await active(process.env.STUDENT_WORKER),quiz:await active(process.env.QUIZ_WORKER)};
+          if(workers.browser!==process.env.ROLLBACK_BROWSER_VERSION) throw new Error(`Browser rollback failed: ${JSON.stringify(workers)}`);
+          if(workers.student!==process.env.EXPECTED_STUDENT_VERSION||workers.quiz!==process.env.EXPECTED_QUIZ_VERSION) throw new Error(`Backend anchor changed: ${JSON.stringify(workers)}`);
+          let observed=null;for(let i=0;i<30;i++){const root=await fetch(`https://${process.env.PROD_HOST}/`,{headers:{'cache-control':'no-store','user-agent':'fpt-step10-gate-e-rollback-verify'}});if(root.ok){const html=await root.text();const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi)].map(m=>m[1]);const bundle=scripts.find(x=>/portal-|\/assets\//i.test(x))||scripts[0];if(bundle){const rel=bundle.replace(/^\.\//,'').replace(/^\//,'').split('?')[0];const br=await fetch(new URL(bundle,`https://${process.env.PROD_HOST}/`),{headers:{'cache-control':'no-store'}});if(br.ok){const bytes=Buffer.from(await br.arrayBuffer());const sha=crypto.createHash('sha256').update(bytes).digest('hex');observed={path:rel,sha256:sha,text:bytes.toString('utf8')};if(rel===process.env.EXPECTED_ROLLBACK_BUNDLE&&sha===process.env.EXPECTED_ROLLBACK_BUNDLE_SHA256)break;}}}await new Promise(r=>setTimeout(r,1000));}
+          if(!observed||observed.path!==process.env.EXPECTED_ROLLBACK_BUNDLE||observed.sha256!==process.env.EXPECTED_ROLLBACK_BUNDLE_SHA256) throw new Error(`Restored bundle mismatch: ${JSON.stringify(observed&&{path:observed.path,sha256:observed.sha256})}`);
+          if(observed.text.includes('/api/v2/student/quiz/eligibility')||observed.text.includes('Take a real exam style GL quiz')) throw new Error('Gate E UI remains in restored bundle');
+          const eligibility=await fetch(`https://${process.env.PROD_HOST}/api/v2/student/quiz/eligibility`,{redirect:'manual'});if(eligibility.status!==401)throw new Error(`Gate D backend auth regression ${eligibility.status}`);
+          console.log(JSON.stringify({marker:'STEP10_GATE_E_ROLLBACK_PASS',workers,bundle:{path:observed.path,sha256:observed.sha256},gateECardExposed:false,gateDBackendPreserved:true},null,2));
+          NODE
