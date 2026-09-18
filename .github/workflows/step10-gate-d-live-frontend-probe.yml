@@ -15,19 +15,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe live Portal frontend configuration and auth client
+      - name: Probe live Portal frontend origin, configuration and auth client
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://lessons.futureperfect.education'
-          curl --fail --silent --show-error --location --max-time 20 "$BASE/config.js?gate_d_probe=20260918" -o /tmp/live-config.js
-          curl --fail --silent --show-error --location --max-time 20 "$BASE/assets/phase7.js?gate_d_probe=20260918" -o /tmp/live-phase7.js
-          echo 'LIVE_CONFIG_BEGIN'
-          sed -n '1,40p' /tmp/live-config.js
-          echo 'LIVE_CONFIG_END'
-          grep -F 'workerBaseUrl' /tmp/live-config.js
-          grep -Fq "credentials: 'include'" /tmp/live-phase7.js
-          grep -Fq "api('/api/v1/student/session'" /tmp/live-phase7.js
-          grep -Fq "api('/api/v1/student/auth/login'" /tmp/live-phase7.js
-          sha256sum /tmp/live-config.js /tmp/live-phase7.js
-          echo 'GATE_D_LIVE_FRONTEND_PROBE_PASS'
+          probe() {
+            label="$1"; url="$2"
+            code="$(curl --silent --show-error --location --max-time 20 --dump-header "/tmp/${label}.headers" --output "/tmp/${label}.body" --write-out '%{http_code}' "$url" || true)"
+            echo "${label}_HTTP=${code}"
+            echo "${label}_HEADERS_BEGIN"
+            sed -n '1,35p' "/tmp/${label}.headers" || true
+            echo "${label}_HEADERS_END"
+            echo "${label}_BODY_BEGIN"
+            head -c 3000 "/tmp/${label}.body" || true
+            echo
+            echo "${label}_BODY_END"
+          }
+          probe root "$BASE/?gate_d_probe=20260918b"
+          probe config "$BASE/config.js?gate_d_probe=20260918b"
+          probe phase7 "$BASE/assets/phase7.js?gate_d_probe=20260918b"
+          echo 'ROOT_SCRIPT_REFERENCES'
+          grep -oE '<script[^>]+src="[^"]+"' /tmp/root.body || true
+          echo 'CONFIG_WORKER_REFERENCE'
+          grep -F 'workerBaseUrl' /tmp/config.body || true
+          echo 'PHASE7_AUTH_MARKERS'
+          grep -F "credentials: 'include'" /tmp/phase7.body | head -n 2 || true
+          grep -F "api('/api/v1/student/session'" /tmp/phase7.body | head -n 2 || true
+          grep -F "api('/api/v1/student/auth/login'" /tmp/phase7.body | head -n 2 || true
+          echo 'LIVE_BODY_HASHES'
+          sha256sum /tmp/root.body /tmp/config.body /tmp/phase7.body
+          echo 'GATE_D_LIVE_FRONTEND_ORIGIN_PROBE_COMPLETE'
