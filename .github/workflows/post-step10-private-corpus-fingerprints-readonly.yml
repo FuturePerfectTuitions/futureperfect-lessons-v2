@@ -1,0 +1,100 @@
+name: Post-Step-10 private corpus fingerprints read-only
+
+on:
+  push:
+    branches:
+      - mastery/post-step10-expansion-planning-2026-09-18
+    paths:
+      - '.github/workflows/post-step10-private-corpus-fingerprints-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+
+jobs:
+  fingerprints:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: bash
+        run: npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+      - name: Build non-reversible source and LIVE fingerprints
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat >/tmp/w.toml <<TOML
+          name = "post-step10-private-corpus-fingerprints-readonly"
+          compatibility_date = "2026-09-18"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT golden_source_id,corpus_series,source_text FROM gl_source_question;" --json >/tmp/gl_raw.json
+          npx wrangler d1 execute "$QUIZ_D1_NAME" --remote --config /tmp/w.toml --command "SELECT question_id,family_id,stem FROM question_instance WHERE lifecycle_status='Live';" --json >/tmp/live_raw.json
+          python3 - <<'PY'
+          import csv,hashlib,json,re,unicodedata
+          from pathlib import Path
+
+          def rows(path):
+              return json.loads(Path(path).read_text())[0]['results']
+
+          def normalized(text):
+              text=unicodedata.normalize('NFKC', text or '').lower()
+              toks=re.findall(r'[a-z0-9]+', text)
+              return ' '.join(toks), toks
+
+          def fingerprint(text):
+              norm,toks=normalized(text)
+              exact=hashlib.sha256(norm.encode('utf-8')).hexdigest()
+              feats=list(toks)+[toks[i]+'_'+toks[i+1] for i in range(len(toks)-1)]
+              if not feats:
+                  return exact,'0000000000000000',0
+              vec=[0]*64
+              for feat in feats:
+                  h=int.from_bytes(hashlib.sha256(feat.encode('utf-8')).digest()[:8],'big')
+                  for bit in range(64):
+                      vec[bit]+=1 if (h>>bit)&1 else -1
+              sim=0
+              for bit,v in enumerate(vec):
+                  if v>=0: sim|=1<<bit
+              return exact,f'{sim:016x}',len(toks)
+
+          gl=rows('/tmp/gl_raw.json')
+          live=rows('/tmp/live_raw.json')
+          with open('/tmp/gl_source_fingerprints.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=['golden_source_id','corpus_series','exact_sha256','simhash64','word_count'])
+              w.writeheader()
+              for r in gl:
+                  exact,sim,wc=fingerprint(r.get('source_text'))
+                  w.writerow({'golden_source_id':r['golden_source_id'],'corpus_series':r['corpus_series'],'exact_sha256':exact,'simhash64':sim,'word_count':wc})
+          with open('/tmp/live_question_fingerprints.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=['question_id','family_id','exact_sha256','simhash64','word_count'])
+              w.writeheader()
+              for r in live:
+                  exact,sim,wc=fingerprint(r.get('stem'))
+                  w.writerow({'question_id':r['question_id'],'family_id':r['family_id'],'exact_sha256':exact,'simhash64':sim,'word_count':wc})
+          summary={'marker':'POST_STEP10_PRIVATE_CORPUS_FINGERPRINTS_READONLY_PASS','source_count':len(gl),'live_count':len(live),'raw_text_exported':False,'algorithm':'NFKC lowercase alnum tokens; SHA256 exact; 64-bit token+bigram SimHash'}
+          Path('/tmp/fingerprint_summary.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          print(json.dumps(summary,indent=2))
+          PY
+          rm -f /tmp/gl_raw.json /tmp/live_raw.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-step10-private-corpus-fingerprints-readonly
+          path: |
+            /tmp/gl_source_fingerprints.csv
+            /tmp/live_question_fingerprints.csv
+            /tmp/fingerprint_summary.json
+          retention-days: 30
