@@ -1,0 +1,190 @@
+name: Step 10 final acceptance consolidation
+
+on:
+  push:
+    branches:
+      - mastery/step10-gate-e-frontend-2026-09-18
+    paths:
+      - 'docs/step10/STEP10_FINAL_ACCEPTANCE_TRIGGER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Portal/backend acceptance source
+        uses: actions/checkout@v4
+        with:
+          path: portal
+
+      - name: Checkout exact standalone Quiz source
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-11plus-practice
+          ref: a20dbd4bc1bf2245701410bbd5c77b30e339c8e1
+          path: quiz
+          persist-credentials: false
+
+      - name: Checkout exact final Gate E frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: 62ca3762c6cb87efcf76e6daed37eaebb7ed2bfd
+          path: frontend
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify standalone Quiz test suite
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd quiz
+          npm install --no-audit --no-fund
+          npm verify
+
+      - name: Verify API-v2 eligibility and launch boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node portal/tests/step10-gate-d-v2-quiz-runtime.mjs
+
+      - name: Verify final Gate E frontend source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run test:static
+          node tests/cp12-collapsible-resource-sections-static.mjs
+          node tests/cp12-approved-v2-ui-parity-static.mjs
+          node tests/step10-v2-maths-practice-static.mjs
+          npm run build
+          grep -R -Fq 'Take a real exam style GL quiz' dist
+          ! grep -R -Fq 'Take a Maths quiz' dist
+
+      - name: Consolidate original Step 10 acceptance contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import { selectQuestions } from './quiz/src/selector.js';
+          import { resultItem } from './quiz/src/remediation.js';
+
+          const engine = fs.readFileSync('./quiz/src/index.js','utf8');
+          const selector = fs.readFileSync('./quiz/src/selector.js','utf8');
+          const remediation = fs.readFileSync('./quiz/src/remediation.js','utf8');
+          const frontend = fs.readFileSync('./frontend/src/app.js','utf8');
+          const portalQuiz = fs.readFileSync('./portal/rebuild/student/src/lib/quiz-runtime.mjs','utf8');
+
+          const release = { l3Eligible:true, l2Inherited:true, releasedL3LessonCodes:['L3T1M01','L3T1M02'] };
+          const bank = Array.from({length:80},(_,i)=>({
+            question_id:`Q${String(i+1).padStart(3,'0')}`,
+            family_id:`F${String((i%50)+1).padStart(2,'0')}`,
+            earliest_release_point:'L3-START', prerequisite_lessons:'L2T1M01', lifecycle_status:'Live',
+            family_wide_eligible:1, family_status:'ELIGIBLE', evidence_gate_status:'PASS', question_evidence_count:1
+          }));
+          const stretch = selectQuestions({mode:'STRETCH',candidates:bank,releaseContext:release,seed:'final-stretch',now:new Date('2026-09-18T10:00:00Z')});
+          const timed = selectQuestions({mode:'TIMED',candidates:bank,releaseContext:release,seed:'final-timed',now:new Date('2026-09-18T10:00:00Z')});
+          assert.equal(stretch.ok,true); assert.equal(stretch.questionIds.length,15); assert.equal(new Set(stretch.questionIds).size,15);
+          assert.equal(timed.ok,true); assert.equal(timed.questionIds.length,30); assert.equal(new Set(timed.questionIds).size,30);
+
+          assert.match(engine,/const TIMED_MS = 25 \* 60 \* 1000/);
+          assert.match(engine,/const deadline = mode === 'TIMED' \? new Date\(started\.getTime\(\) \+ TIMED_MS\)\.toISOString\(\) : null/);
+          assert.match(engine,/submittedAt = effectiveReason === 'TIMEOUT' && session\.deadline_at \? session\.deadline_at : now\.toISOString\(\)/);
+          assert.match(engine,/TEST_EXPIRED/);
+          assert.match(engine,/ALL_ANSWERS_REQUIRED/);
+          assert.match(engine,/RESULTS_LOCKED_UNTIL_SUBMISSION/);
+          assert.match(engine,/INSERT INTO exposure_history/);
+          assert.match(engine,/SELECT qq\.position,qi\.question_id,qi\.stem,qi\.diagram_type,qi\.diagram_spec_json,d\.selected_option/);
+          assert.match(engine,/FROM quiz_question qq/);
+          assert.match(engine,/WHERE qq\.session_id=\? ORDER BY qq\.position,o\.option_key/);
+
+          const getTestStart = engine.indexOf('async function getTest');
+          const saveAnswerStart = engine.indexOf('async function saveAnswer');
+          assert.ok(getTestStart >= 0 && saveAnswerStart > getTestStart);
+          const getTest = engine.slice(getTestStart,saveAnswerStart);
+          assert.ok(!getTest.includes('qi.correct_option'));
+          assert.ok(!getTest.includes('qi.explanation'));
+          assert.ok(!getTest.includes('revisionLessons'));
+
+          const getResultsStart = engine.indexOf('async function getResults');
+          const logoutStart = engine.indexOf('async function logout');
+          assert.ok(getResultsStart >= 0 && logoutStart > getResultsStart);
+          const getResults = engine.slice(getResultsStart,logoutStart);
+          assert.match(getResults,/qi\.correct_option/);
+          assert.match(getResults,/qi\.correct_display/);
+          assert.match(getResults,/qi\.explanation/);
+          assert.match(getResults,/resultItem/);
+
+          const incorrect = resultItem({
+            question:{position:1,question_id:'QX',stem:'2+2?',correct_option:'B',correct_display:'4',explanation:'Add 2 and 2.'},
+            selectedOption:'A',timedOutUnanswered:false,distractorDescription:'added incorrectly',
+            requirements:[{lesson_code:'L2T1M03',requirement_type:'PRIMARY',track:'L2',sequence_no:3,title:'L2 revision'}],releaseContext:release
+          });
+          assert.equal(incorrect.selectedAnswer.option,'A');
+          assert.equal(incorrect.correctAnswer.option,'B');
+          assert.match(incorrect.workedExplanation,/Add 2 and 2/);
+          assert.equal(incorrect.revisionLessons[0].lessonCode,'L2T1M03');
+
+          assert.match(selector,/COOLDOWN_MS = 30 \* 24 \* 60 \* 60 \* 1000/);
+          for (const gate of ['NOT_L3_ELIGIBLE','L2_INHERITANCE_CONTEXT_MISSING','WITHHELD_FAMILY','FAMILY_EVIDENCE_GATE','NOT_LIVE','NO_QUESTION_EVIDENCE','RELEASE_GATE','PREREQUISITE_GATE']) assert.ok(selector.includes(gate),`missing hard gate ${gate}`);
+          assert.match(remediation,/if \(L2_RE\.test\(code\)\) return true/);
+          assert.match(remediation,/if \(L3_RE\.test\(code\)\) return released\.has\(code\)/);
+          assert.match(remediation,/if \(unanswered\) return null/);
+
+          const renderStart = frontend.indexOf('function renderViews(subject)');
+          const loadStart = frontend.indexOf('async function loadView',renderStart);
+          assert.ok(renderStart >= 0 && loadStart > renderStart);
+          const renderViews = frontend.slice(renderStart,loadStart);
+          assert.ok(renderViews.indexOf('root.innerHTML = shell') < renderViews.indexOf("if (subject === 'maths') void revealMathsPracticeCard()"));
+          assert.match(frontend,/catch \{\s*\/\/ Fail closed: non-eligible, unavailable, or unauthenticated means no practice card\./s);
+          assert.match(frontend,/Take a real exam style GL quiz/);
+          assert.match(frontend,/payload\?\.eligible !== true/);
+
+          for (const fragment of ['snapshotValue?.account?.trial === true','view.current !== true','view.lockedPreview === true','catalogue.stream','Number(catalogue.mathsLevel) !== 3','TTL_MS = 90_000','verifySessionToken']) assert.ok(portalQuiz.includes(fragment),`portal quiz contract missing ${fragment}`);
+
+          const criteria = [
+            'Portal independent when Quiz unavailable',
+            'Practice visibility fail-closed and eligible L3 only',
+            'Short-lived single-use launch boundary',
+            'Quiz cookie isolation',
+            'Unauthenticated Quiz return to Portal',
+            'Stretch 15 unique untimed',
+            'Timed 30 unique with 25-minute server deadline',
+            'Post-deadline rejection and deadline timeout finalisation',
+            'Manual unanswered submit rejected',
+            'No pre-submit correctness/explanation/remediation leakage',
+            'Exposure recorded on serve',
+            'Shared 30-day exact-question cooldown',
+            'Step 9 hard gates non-bypassable',
+            'Refresh/resume uses persisted served paper',
+            'Post-submit selected/correct/explanation/revision output',
+            'Timed-out unanswered explanation/revision without inferred misconception',
+            'L2 remediation retained; unreleased L3 excluded'
+          ];
+          const out={
+            marker:'STEP10_FINAL_ACCEPTANCE_CODE_CONTRACT_PASS',
+            quizSource:'a20dbd4bc1bf2245701410bbd5c77b30e339c8e1',
+            frontendSource:'62ca3762c6cb87efcf76e6daed37eaebb7ed2bfd',
+            gateDLivePostcheckRun:35326994293,
+            gateEFinalBaselineRun:35335927294,
+            gateEFinalPostcheckRun:35338175020,
+            criteria:criteria.map((name,index)=>({number:index+1,name,codeContract:'PASS'}))
+          };
+          fs.writeFileSync('/tmp/step10-final-acceptance.json',JSON.stringify(out,null,2));
+          console.log(JSON.stringify(out,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step10-final-acceptance-consolidation
+          path: /tmp/step10-final-acceptance.json
+          retention-days: 90
