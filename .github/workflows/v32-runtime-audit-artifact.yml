@@ -1,0 +1,52 @@
+name: v3.2 runtime audit artifact
+
+on:
+  push:
+    branches:
+      - fix/y4e1-prelesson-readmodel-20260917
+    paths:
+      - '.github/workflows/v32-runtime-audit-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Capture safe current production topology and versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          if(!token||!account) throw new Error('Cloudflare audit credentials unavailable');
+          const base='https://api.cloudflare.com/client/v4', auth={Authorization:`Bearer ${token}`};
+          const clean=v=>String(v??'').trim();
+          async function cf(path){const r=await fetch(base+path,{headers:auth});const b=await r.json();if(!r.ok||b.success!==true)throw new Error(`CF ${r.status} ${path}`);return b.result;}
+          function safeBinding(b){const o={name:clean(b.name),type:clean(b.type)};for(const k of ['namespace_id','database_id','id','bucket_name','service','environment'])if(clean(b[k]))o[k]=clean(b[k]);return o;}
+          async function activeVersion(worker){const d=await cf(`/accounts/${account}/workers/scripts/${worker}/deployments`);const rows=Array.isArray(d?.deployments)?d.deployments:(Array.isArray(d)?d:[]);const vs=Array.isArray(rows[0]?.versions)?rows[0].versions:[];return clean((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id);}
+          (async()=>{
+            const host='lessons.futureperfect.education';
+            const workers=['fpt-portal-v2-rebuild-browser-prod','fpt-portal-v2-rebuild-student-prod','fpt-portal-v2-worker'];
+            const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+            const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+            if(!zone) throw new Error('Production zone unavailable');
+            const report={observedAt:new Date().toISOString(),host,routes:(await cf(`/zones/${zone.id}/workers/routes`)).filter(r=>clean(r.pattern).toLowerCase().includes(host)).map(r=>({pattern:r.pattern,script:r.script})),workers:{}};
+            for(const worker of workers){const settings=await cf(`/accounts/${account}/workers/scripts/${worker}/settings`);report.workers[worker]={activeVersionId:await activeVersion(worker),bindings:(settings.bindings||[]).map(safeBinding)};}
+            fs.writeFileSync('runtime-audit.json',JSON.stringify(report,null,2)+'\n');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+      - name: Upload runtime audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: v32-runtime-audit
+          path: runtime-audit.json
+          if-no-files-found: error
+          retention-days: 7
