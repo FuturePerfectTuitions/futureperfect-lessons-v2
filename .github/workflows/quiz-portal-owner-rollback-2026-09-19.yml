@@ -1,0 +1,146 @@
+name: Quiz portal owner rollback 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-portal-owner-rollback-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quiz-portal-owner-rollback-2026-09-19
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_BROWSER_BEFORE: 8cf1f74c-1ed5-4f6d-8a98-68a79345ab6a
+  EXPECTED_STUDENT_BEFORE: f26167b1-073c-4015-912a-288a3d20e0bb
+  BROWSER_ROLLBACK: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  STUDENT_ROLLBACK: b2e8bebb-1a18-4fc0-8dbc-ae9763ced1b4
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fresh production anchors and rollback targets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p /tmp/quiz-rollback
+          for pair in "$BROWSER_WORKER:$EXPECTED_BROWSER_BEFORE:$BROWSER_ROLLBACK" "$STUDENT_WORKER:$EXPECTED_STUDENT_BEFORE:$STUDENT_ROLLBACK"; do
+            IFS=: read -r worker expected target <<< "$pair"
+            npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$worker" --json > "/tmp/quiz-rollback/${worker}-before.json"
+            active="$(jq -r '.versions[] | select(.percentage==100) | .version_id' "/tmp/quiz-rollback/${worker}-before.json" | head -n1)"
+            test "$active" = "$expected" || { echo "PRODUCTION_DRIFT $worker expected=$expected actual=$active" >&2; exit 1; }
+            npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$worker" --json > "/tmp/quiz-rollback/${worker}-versions.json"
+            jq -e --arg id "$target" '.[] | select((.id // .version_id)==$id)' "/tmp/quiz-rollback/${worker}-versions.json" >/dev/null || { echo "ROLLBACK_TARGET_MISSING $worker $target" >&2; exit 1; }
+          done
+          code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-before.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
+          test "$code" = '200'
+          echo QUIZ_PORTAL_ROLLBACK_PREFLIGHT_PASS
+
+      - name: Hide Quiz from the Portal frontend first
+        id: browser
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$BROWSER_ROLLBACK@100%" --name "$BROWSER_WORKER" --message 'Owner-requested Quiz rollback: hide 11+ Practice and continue review off-production' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-after.json
+          jq -e --arg id "$BROWSER_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-after.json >/dev/null
+          echo QUIZ_PORTAL_FRONTEND_ROLLBACK_PASS
+
+      - name: Remove API-v2 Quiz launch boundary from active student runtime
+        id: student
+        if: steps.browser.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$STUDENT_ROLLBACK@100%" --name "$STUDENT_WORKER" --message 'Owner-requested Quiz rollback: restore pre-Quiz student runtime for external review period' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-after.json
+          jq -e --arg id "$STUDENT_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-after.json >/dev/null
+          echo QUIZ_PORTAL_STUDENT_RUNTIME_ROLLBACK_PASS
+
+      - name: Verify Portal is healthy and Quiz launch surface is absent
+        id: verify
+        if: steps.browser.outcome == 'success' && steps.student.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          passed=false
+          for attempt in $(seq 1 12); do
+            root="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-after.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
+            elig="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/eligibility-after.txt --write-out '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/eligibility')"
+            launch="$(curl --silent --show-error --max-redirs 0 --request POST --header 'Content-Type: application/json' --data '{}' --output /tmp/quiz-rollback/launch-after.txt --write-out '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/launch')"
+            if test "$root" = '200' && test "$elig" = '404' && test "$launch" = '404'; then passed=true; break; fi
+            sleep 5
+          done
+          test "$passed" = 'true' || { echo "POST_ROLLBACK_VERIFY_FAILED root=$root eligibility=$elig launch=$launch" >&2; exit 1; }
+          echo QUIZ_PORTAL_OWNER_ROLLBACK_PRODUCTION_VERIFY_PASS
+
+      - name: Automatic restoration if any rollback or verification step fails
+        if: always() && (steps.browser.outcome != 'success' || steps.student.outcome != 'success' || steps.verify.outcome != 'success')
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo 'Rollback verification failed; restoring exact pre-change versions.'
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_STUDENT_BEFORE@100%" --name "$STUDENT_WORKER" --message 'Automatic restore after Quiz rollback verification failure' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_BROWSER_BEFORE@100%" --name "$BROWSER_WORKER" --message 'Automatic restore after Quiz rollback verification failure' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-restored.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-restored.json
+          jq -e --arg id "$EXPECTED_STUDENT_BEFORE" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-restored.json >/dev/null
+          jq -e --arg id "$EXPECTED_BROWSER_BEFORE" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-restored.json >/dev/null
+          echo QUIZ_PORTAL_AUTOMATIC_RESTORE_PASS
+
+      - name: Record rollback evidence
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/quiz-rollback/evidence.json <<JSON
+          {
+            "marker":"QUIZ_PORTAL_OWNER_ROLLBACK_2026_09_19",
+            "browserBefore":"$EXPECTED_BROWSER_BEFORE",
+            "browserRollback":"$BROWSER_ROLLBACK",
+            "studentBefore":"$EXPECTED_STUDENT_BEFORE",
+            "studentRollback":"$STUDENT_ROLLBACK",
+            "browserOutcome":"${{ steps.browser.outcome }}",
+            "studentOutcome":"${{ steps.student.outcome }}",
+            "verifyOutcome":"${{ steps.verify.outcome }}"
+          }
+          JSON
+          cat /tmp/quiz-rollback/evidence.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quiz-portal-owner-rollback-evidence
+          path: /tmp/quiz-rollback
+          retention-days: 90
+
+      - name: Require completed rollback
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.browser.outcome }}' = 'success'
+          test '${{ steps.student.outcome }}' = 'success'
+          test '${{ steps.verify.outcome }}' = 'success'
+          echo QUIZ_PORTAL_OWNER_ROLLBACK_COMPLETE
