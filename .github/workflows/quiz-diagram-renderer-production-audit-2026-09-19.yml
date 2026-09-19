@@ -1,0 +1,69 @@
+name: Quiz diagram renderer production audit 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-diagram-renderer-production-audit-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  EXPECTED_VERSION: e6cc78a5-4d8e-47ea-87ac-0f5d7aced9ae
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require existing Cloudflare CI credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo CLOUDFLARE_API_TOKEN_MISSING; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo CLOUDFLARE_ACCOUNT_ID_MISSING; exit 1; }
+
+      - name: Read-only standalone Quiz production audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/quiz-diagram-audit
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-diagram-audit/settings.json
+          jq -e '.success == true' /tmp/quiz-diagram-audit/settings.json >/dev/null
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-diagram-audit/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-diagram-audit/settings.json >/dev/null
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-diagram-audit/deployments.json
+          ACTIVE="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-diagram-audit/deployments.json | head -n1)"
+          test "$ACTIVE" = "$EXPECTED_VERSION" || { echo "QUIZ_VERSION_DRIFT expected=$EXPECTED_VERSION actual=$ACTIVE"; exit 1; }
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COUNT(*) AS live_questions FROM question_instance WHERE UPPER(lifecycle_status)='LIVE';" --json > /tmp/quiz-diagram-audit/live-count.json
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COALESCE(diagram_type,'<NULL>') AS diagram_type, COUNT(*) AS live_count FROM question_instance WHERE UPPER(lifecycle_status)='LIVE' GROUP BY COALESCE(diagram_type,'<NULL>') ORDER BY live_count DESC, diagram_type;" --json > /tmp/quiz-diagram-audit/type-counts.json
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT question_id,family_id,stem,diagram_type,diagram_spec_json FROM question_instance WHERE UPPER(lifecycle_status)='LIVE' AND diagram_type IS NOT NULL AND diagram_type<>'None/text' ORDER BY diagram_type,question_id;" --json > /tmp/quiz-diagram-audit/live-visual-rows.json
+
+          LIVE_COUNT="$(jq -r '.[0].results[0].live_questions' /tmp/quiz-diagram-audit/live-count.json)"
+          test "$LIVE_COUNT" = '714' || { echo "LIVE_BANK_DRIFT expected=714 actual=$LIVE_COUNT"; exit 1; }
+          echo "QUIZ_DIAGRAM_AUDIT_PASS active_version=$ACTIVE live_questions=$LIVE_COUNT"
+          cat /tmp/quiz-diagram-audit/type-counts.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quiz-diagram-renderer-production-audit
+          path: /tmp/quiz-diagram-audit
+          retention-days: 30
