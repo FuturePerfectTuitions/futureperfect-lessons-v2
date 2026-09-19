@@ -22,89 +22,58 @@ env:
   BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
   STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
   EXPECTED_BROWSER_BEFORE: 8cf1f74c-1ed5-4f6d-8a98-68a79345ab6a
-  EXPECTED_STUDENT_BEFORE: f26167b1-073c-4015-912a-288a3d20e0bb
+  EXPECTED_STUDENT_UNCHANGED: f26167b1-073c-4015-912a-288a3d20e0bb
   BROWSER_ROLLBACK: f8a64bc8-8192-4400-9e45-8f1a1de10019
-  STUDENT_ROLLBACK: b2e8bebb-1a18-4fc0-8dbc-ae9763ced1b4
 
 jobs:
   rollback:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Fresh production anchors and rollback targets
+      - name: Fresh production anchors
         shell: bash
         run: |
           set -Eeuo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           mkdir -p /tmp/quiz-rollback
-          for pair in "$BROWSER_WORKER:$EXPECTED_BROWSER_BEFORE:$BROWSER_ROLLBACK" "$STUDENT_WORKER:$EXPECTED_STUDENT_BEFORE:$STUDENT_ROLLBACK"; do
-            IFS=: read -r worker expected target <<< "$pair"
-            npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$worker" --json > "/tmp/quiz-rollback/${worker}-before.json"
-            active="$(jq -r '.versions[] | select(.percentage==100) | .version_id' "/tmp/quiz-rollback/${worker}-before.json" | head -n1)"
-            test "$active" = "$expected" || { echo "PRODUCTION_DRIFT $worker expected=$expected actual=$active" >&2; exit 1; }
-            npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$worker" --json > "/tmp/quiz-rollback/${worker}-versions.json"
-            jq -e --arg id "$target" '.[] | select((.id // .version_id)==$id)' "/tmp/quiz-rollback/${worker}-versions.json" >/dev/null || { echo "ROLLBACK_TARGET_MISSING $worker $target" >&2; exit 1; }
-          done
-          code="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-before.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
-          test "$code" = '200'
-          echo QUIZ_PORTAL_ROLLBACK_PREFLIGHT_PASS
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-before.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-before.json
+          browser="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-rollback/browser-before.json | head -n1)"
+          student="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-rollback/student-before.json | head -n1)"
+          test "$browser" = "$EXPECTED_BROWSER_BEFORE" || { echo "BROWSER_DRIFT expected=$EXPECTED_BROWSER_BEFORE actual=$browser" >&2; exit 1; }
+          test "$student" = "$EXPECTED_STUDENT_UNCHANGED" || { echo "STUDENT_DRIFT expected=$EXPECTED_STUDENT_UNCHANGED actual=$student" >&2; exit 1; }
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-versions.json
+          jq -e --arg id "$BROWSER_ROLLBACK" '.[] | select((.id // .version_id)==$id)' /tmp/quiz-rollback/browser-versions.json >/dev/null
+          root="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-before.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
+          test "$root" = '200'
+          echo QUIZ_PORTAL_FRONTEND_ROLLBACK_PREFLIGHT_PASS
 
-      - name: Hide Quiz from the Portal frontend first
+      - name: Withdraw 11+ Practice from Student Portal
         id: browser
         continue-on-error: true
         shell: bash
         run: |
           set -Eeuo pipefail
-          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$BROWSER_ROLLBACK@100%" --name "$BROWSER_WORKER" --message 'Owner-requested Quiz rollback: hide 11+ Practice and continue review off-production' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$BROWSER_ROLLBACK@100%" --name "$BROWSER_WORKER" --message 'Owner-requested Quiz withdrawal: hide 11+ Practice until owner review is complete' -y
           npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-after.json
           jq -e --arg id "$BROWSER_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-after.json >/dev/null
-          echo QUIZ_PORTAL_FRONTEND_ROLLBACK_PASS
+          echo QUIZ_PORTAL_FRONTEND_WITHDRAWAL_PASS
 
-      - name: Restore pre-Quiz student runtime
-        id: student
+      - name: Verify public Portal assets contain no Quiz surface and student runtime was untouched
+        id: verify
         if: steps.browser.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
           set -Eeuo pipefail
-          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$STUDENT_ROLLBACK@100%" --name "$STUDENT_WORKER" --message 'Owner-requested Quiz rollback: restore pre-Quiz student runtime for external review period' -y
           npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-after.json
-          jq -e --arg id "$STUDENT_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-after.json >/dev/null
-          echo QUIZ_PORTAL_STUDENT_RUNTIME_ROLLBACK_PASS
+          jq -e --arg id "$EXPECTED_STUDENT_UNCHANGED" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-after.json >/dev/null
 
-      - name: Verify exact rollback code and public Portal assets contain no Quiz launch surface
-        id: verify
-        if: steps.browser.outcome == 'success' && steps.student.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-
-          # Re-prove exact active versions.
-          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-verified.json
-          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-verified.json
-          jq -e --arg id "$BROWSER_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-verified.json >/dev/null
-          jq -e --arg id "$STUDENT_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-verified.json >/dev/null
-
-          # Inspect the exact deployed Worker packages, not unauthenticated route status.
-          for worker in "$BROWSER_WORKER" "$STUDENT_WORKER"; do
-            curl --fail --silent --show-error "$API/workers/scripts/${worker}" -H "$AUTH" -o "/tmp/quiz-rollback/${worker}-rollback-package.bin"
-            strings "/tmp/quiz-rollback/${worker}-rollback-package.bin" > "/tmp/quiz-rollback/${worker}-rollback-strings.txt" || true
-            if grep -Ein '11\+ Practice|quiz\.futureperfect\.education|/api/v2/student/quiz/eligibility|/api/v2/student/quiz/launch' "/tmp/quiz-rollback/${worker}-rollback-strings.txt" > "/tmp/quiz-rollback/${worker}-unexpected-quiz-markers.txt"; then
-              echo "QUIZ_MARKER_REMAINS_IN_ROLLBACK_PACKAGE $worker" >&2
-              cat "/tmp/quiz-rollback/${worker}-unexpected-quiz-markers.txt" >&2
-              exit 1
-            fi
-          done
-
-          # Check the public Portal shell and its currently referenced JS assets.
           root="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-after.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
           test "$root" = '200'
           python3 - <<'PY'
@@ -115,49 +84,44 @@ jobs:
           if not refs:
               raise SystemExit('NO_PORTAL_JS_ASSET_FOUND')
           combined=[]
+          urls=[]
           for i,ref in enumerate(refs):
               url=urllib.parse.urljoin('https://lessons.futureperfect.education/',ref)
+              urls.append(url)
               out=f'/tmp/quiz-rollback/portal-asset-{i}.js'
               subprocess.run(['curl','--fail','--silent','--show-error',url,'-o',out],check=True)
               combined.append(Path(out).read_text(errors='replace'))
           text='\n'.join(combined)
           markers=['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch']
           found=[m for m in markers if m in text]
-          Path('/tmp/quiz-rollback/public-asset-marker-check.txt').write_text('found='+repr(found)+'\n')
+          Path('/tmp/quiz-rollback/public-asset-marker-check.txt').write_text('assets='+repr(urls)+'\nfound='+repr(found)+'\n')
           if found:
               raise SystemExit('QUIZ_MARKER_REMAINS_IN_PUBLIC_ASSETS: '+repr(found))
           PY
+          echo QUIZ_PORTAL_FRONTEND_WITHDRAWAL_VERIFY_PASS
 
-          echo QUIZ_PORTAL_OWNER_ROLLBACK_PRODUCTION_VERIFY_PASS
-
-      - name: Automatic restoration if any rollback or verification step fails
-        if: always() && (steps.browser.outcome != 'success' || steps.student.outcome != 'success' || steps.verify.outcome != 'success')
+      - name: Automatic browser restoration if withdrawal verification fails
+        if: always() && (steps.browser.outcome != 'success' || steps.verify.outcome != 'success')
         shell: bash
         run: |
           set -Eeuo pipefail
-          echo 'Rollback verification failed; restoring exact pre-change versions.'
-          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_STUDENT_BEFORE@100%" --name "$STUDENT_WORKER" --message 'Automatic restore after Quiz rollback verification failure' -y
-          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_BROWSER_BEFORE@100%" --name "$BROWSER_WORKER" --message 'Automatic restore after Quiz rollback verification failure' -y
-          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-restored.json
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_BROWSER_BEFORE@100%" --name "$BROWSER_WORKER" --message 'Automatic restore after Quiz frontend withdrawal verification failure' -y
           npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-restored.json
-          jq -e --arg id "$EXPECTED_STUDENT_BEFORE" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-restored.json >/dev/null
           jq -e --arg id "$EXPECTED_BROWSER_BEFORE" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-restored.json >/dev/null
-          echo QUIZ_PORTAL_AUTOMATIC_RESTORE_PASS
+          echo QUIZ_PORTAL_FRONTEND_AUTOMATIC_RESTORE_PASS
 
-      - name: Record rollback evidence
+      - name: Record evidence
         if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
           cat > /tmp/quiz-rollback/evidence.json <<JSON
           {
-            "marker":"QUIZ_PORTAL_OWNER_ROLLBACK_2026_09_19_V2",
+            "marker":"QUIZ_PORTAL_FRONTEND_WITHDRAWAL_2026_09_19",
             "browserBefore":"$EXPECTED_BROWSER_BEFORE",
             "browserRollback":"$BROWSER_ROLLBACK",
-            "studentBefore":"$EXPECTED_STUDENT_BEFORE",
-            "studentRollback":"$STUDENT_ROLLBACK",
+            "studentUnchanged":"$EXPECTED_STUDENT_UNCHANGED",
             "browserOutcome":"${{ steps.browser.outcome }}",
-            "studentOutcome":"${{ steps.student.outcome }}",
             "verifyOutcome":"${{ steps.verify.outcome }}"
           }
           JSON
@@ -166,16 +130,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: quiz-portal-owner-rollback-evidence-v2
+          name: quiz-portal-frontend-withdrawal-evidence
           path: /tmp/quiz-rollback
           retention-days: 90
 
-      - name: Require completed rollback
+      - name: Require completed Portal withdrawal
         if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
           test '${{ steps.browser.outcome }}' = 'success'
-          test '${{ steps.student.outcome }}' = 'success'
           test '${{ steps.verify.outcome }}' = 'success'
-          echo QUIZ_PORTAL_OWNER_ROLLBACK_COMPLETE
+          echo QUIZ_PORTAL_FRONTEND_WITHDRAWAL_COMPLETE
