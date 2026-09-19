@@ -1,0 +1,44 @@
+name: Quiz diagram spec shape audit 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-diagram-spec-shape-audit-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read live diagram spec shapes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          SQL1="SELECT qi.diagram_type,COUNT(*) AS live_count,group_concat(DISTINCT je.key) AS top_level_keys FROM question_instance qi LEFT JOIN json_each(qi.diagram_spec_json) je WHERE UPPER(qi.lifecycle_status)='LIVE' AND qi.diagram_type IS NOT NULL AND qi.diagram_type<>'None/text' GROUP BY qi.diagram_type ORDER BY qi.diagram_type;"
+          SQL2="SELECT diagram_type,COALESCE(json_extract(diagram_spec_json,'$.shape'),json_extract(diagram_spec_json,'$.solid'),json_extract(diagram_spec_json,'$.net_type'),json_extract(diagram_spec_json,'$.mirror_axis'),json_extract(diagram_spec_json,'$.x_axis'),json_extract(diagram_spec_json,'$.start_direction'),'') AS variant,COUNT(*) AS n FROM question_instance WHERE UPPER(lifecycle_status)='LIVE' AND diagram_type IS NOT NULL AND diagram_type<>'None/text' GROUP BY diagram_type,variant ORDER BY diagram_type,variant;"
+          SQL3="SELECT diagram_type,question_id,stem,diagram_spec_json FROM question_instance WHERE UPPER(lifecycle_status)='LIVE' AND diagram_type IS NOT NULL AND diagram_type<>'None/text' ORDER BY diagram_type,question_id;"
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "$SQL1" --json
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "$SQL2" --json
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "$SQL3" --json > /tmp/live-diagrams.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quiz-live-diagram-specs
+          path: /tmp/live-diagrams.json
+          retention-days: 7
