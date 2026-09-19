@@ -1,0 +1,71 @@
+name: Revoke student Quiz auth for owner review hold 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-revoke-student-review-hold-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quiz-revoke-student-review-hold-2026-09-19
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_D1_NAME: fpt-11plus-practice
+
+jobs:
+  revoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard question-bank invariant and inspect active auth sessions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p /tmp/quiz-auth-hold
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COUNT(*) AS live_questions FROM question_instance WHERE UPPER(lifecycle_status)='LIVE';" --json > /tmp/quiz-auth-hold/live-before.json
+          live="$(jq -r '.[0].results[0].live_questions' /tmp/quiz-auth-hold/live-before.json)"
+          test "$live" = '714' || { echo "LIVE_BANK_DRIFT expected=714 actual=$live" >&2; exit 1; }
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT CASE WHEN portal_user_id LIKE 'owner-review-%' THEN 'owner-review' ELSE 'student-or-portal' END AS session_class, COUNT(*) AS active_count FROM quiz_auth_session WHERE revoked_at IS NULL AND expires_at > datetime('now') GROUP BY session_class ORDER BY session_class;" --json > /tmp/quiz-auth-hold/active-before.json
+          cat /tmp/quiz-auth-hold/active-before.json
+          echo QUIZ_AUTH_HOLD_PREFLIGHT_PASS
+
+      - name: Revoke every existing non-review Quiz login session
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "UPDATE quiz_auth_session SET revoked_at = COALESCE(revoked_at, datetime('now')) WHERE revoked_at IS NULL AND portal_user_id NOT LIKE 'owner-review-%'; SELECT changes() AS revoked_sessions;" --json > /tmp/quiz-auth-hold/revoke.json
+          cat /tmp/quiz-auth-hold/revoke.json
+          echo QUIZ_NON_REVIEW_AUTH_REVOKE_APPLIED
+
+      - name: Verify no active non-review Quiz auth remains and question bank is unchanged
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COUNT(*) AS active_non_review FROM quiz_auth_session WHERE revoked_at IS NULL AND expires_at > datetime('now') AND portal_user_id NOT LIKE 'owner-review-%';" --json > /tmp/quiz-auth-hold/non-review-after.json
+          remaining="$(jq -r '.[0].results[0].active_non_review' /tmp/quiz-auth-hold/non-review-after.json)"
+          test "$remaining" = '0' || { echo "ACTIVE_NON_REVIEW_AUTH_REMAINS=$remaining" >&2; exit 1; }
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COUNT(*) AS live_questions FROM question_instance WHERE UPPER(lifecycle_status)='LIVE';" --json > /tmp/quiz-auth-hold/live-after.json
+          live="$(jq -r '.[0].results[0].live_questions' /tmp/quiz-auth-hold/live-after.json)"
+          test "$live" = '714'
+          echo "QUIZ_OWNER_REVIEW_HOLD_AUTH_PASS active_non_review=$remaining live_questions=$live"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quiz-owner-review-hold-auth-evidence
+          path: /tmp/quiz-auth-hold
+          retention-days: 90
