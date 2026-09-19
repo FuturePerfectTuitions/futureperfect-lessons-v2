@@ -1,0 +1,64 @@
+name: Quiz portal exposure audit 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-portal-exposure-audit-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read-only inspect live Portal workers for Quiz exposure
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p /tmp/portal-quiz-exposure
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          printf 'worker\tactive_version\tquiz_markers\n' > /tmp/portal-quiz-exposure/summary.tsv
+          for worker in fpt-portal-v2-worker fpt-portal-v2-rebuild-browser-prod fpt-portal-v2-rebuild-student-prod; do
+            echo "=== $worker ==="
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}/deployments" -H "$AUTH" -o "/tmp/portal-quiz-exposure/${worker}-deployments.json"
+            active="$(jq -r '(.result.deployments // .result)[0].versions | (map(select((.percentage//0)==100))[0].version_id // .[0].version_id // empty)' "/tmp/portal-quiz-exposure/${worker}-deployments.json")"
+            test -n "$active"
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}/settings" -H "$AUTH" -o "/tmp/portal-quiz-exposure/${worker}-settings.json"
+            jq -e '.success == true' "/tmp/portal-quiz-exposure/${worker}-settings.json" >/dev/null
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}" -H "$AUTH" -o "/tmp/portal-quiz-exposure/${worker}-package.bin"
+            strings "/tmp/portal-quiz-exposure/${worker}-package.bin" > "/tmp/portal-quiz-exposure/${worker}-strings.txt" || true
+            grep -Ein '11\+ Practice|quiz\.futureperfect\.education|student/quiz/eligibility|student/quiz/launch|quiz-bridge|Practice Test|Stretch Test|Timed Test' "/tmp/portal-quiz-exposure/${worker}-strings.txt" > "/tmp/portal-quiz-exposure/${worker}-quiz-markers.txt" || true
+            markers="$(wc -l < "/tmp/portal-quiz-exposure/${worker}-quiz-markers.txt" | tr -d ' ')"
+            printf '%s\t%s\t%s\n' "$worker" "$active" "$markers" | tee -a /tmp/portal-quiz-exposure/summary.tsv
+            cat "/tmp/portal-quiz-exposure/${worker}-quiz-markers.txt" || true
+          done
+
+          echo '=== public portal surface probes ==='
+          for path in / /api/v1/student/quiz/eligibility; do
+            code="$(curl --silent --show-error --max-redirs 0 --output "/tmp/portal-quiz-exposure/probe-$(echo "$path" | tr '/+' '__').txt" --write-out '%{http_code}' "https://lessons.futureperfect.education${path}")"
+            printf '%s %s\n' "$path" "$code" | tee -a /tmp/portal-quiz-exposure/public-probes.txt
+          done
+          echo QUIZ_PORTAL_EXPOSURE_AUDIT_PASS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quiz-portal-exposure-audit
+          path: /tmp/portal-quiz-exposure
+          retention-days: 30
