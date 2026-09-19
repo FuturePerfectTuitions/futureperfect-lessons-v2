@@ -1,0 +1,30 @@
+name: Quiz cross-repo checkout probe 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-crossrepo-checkout-probe-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Attempt read-only checkout of private Quiz repository
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-11plus-practice
+          ref: 1bfef511ca2b501446384eee755a6af506136cfc
+          token: ${{ github.token }}
+          path: quiz
+      - name: Verify exact Quiz source commit
+        run: |
+          set -euo pipefail
+          test "$(git -C quiz rev-parse HEAD)" = '1bfef511ca2b501446384eee755a6af506136cfc'
+          echo QUIZ_CROSSREPO_CHECKOUT_PASS
