@@ -1,0 +1,249 @@
+name: Secure Quiz owner-review deploy v2 2026-09-19
+
+on:
+  push:
+    branches:
+      - ops/quiz-diagram-renderer-2026-09-19
+    paths:
+      - '.github/workflows/quiz-secure-owner-review-deploy-v2-2026-09-19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: secure-quiz-owner-review-deploy-v2-2026-09-19
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.134.0
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  QUIZ_D1_NAME: fpt-11plus-practice
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  EXPECTED_OLD_QUIZ_VERSION: 3c969e3c-af89-44ba-a382-2d87e05de53a
+  EXPECTED_SOURCE_COMMIT: a2050925132a91a0a403c1cdc2a4a8d21f938646
+  EXPECTED_SOURCE_ZIP_SHA256: df1250c4a7994c53183c89002d8c5b34bd5bddbf0bc233e9d6c6d3b51e49d5e0
+  EXPECTED_LIVE_COUNT: '714'
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+  TRANSFER_BRANCH: ops/quiz-diagram-renderer-2026-09-19
+
+jobs:
+  deploy-review-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/quiz-diagram-renderer-2026-09-19
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove owner-review hold and exact rollback anchor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p /tmp/quiz-deploy-v2
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-v2/quiz-before.json
+          OLD_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-v2/quiz-before.json | head -n1)"
+          test "$OLD_VERSION" = "$EXPECTED_OLD_QUIZ_VERSION" || { echo "QUIZ_VERSION_DRIFT expected=$EXPECTED_OLD_QUIZ_VERSION actual=$OLD_VERSION"; exit 1; }
+          echo "OLD_VERSION=$OLD_VERSION" >> "$GITHUB_ENV"
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-deploy-v2/browser-before.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-deploy-v2/student-before.json
+          browser="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-v2/browser-before.json | head -n1)"
+          student="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-v2/student-before.json | head -n1)"
+          test "$browser" = "$EXPECTED_BROWSER_VERSION"
+          test "$student" = "$EXPECTED_STUDENT_VERSION"
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COUNT(*) AS live_questions FROM question_instance WHERE UPPER(lifecycle_status)='LIVE'; SELECT COUNT(*) AS active_non_review FROM quiz_auth_session WHERE revoked_at IS NULL AND expires_at > datetime('now') AND portal_user_id NOT LIKE 'owner-review-%';" --json > /tmp/quiz-deploy-v2/db-before.json
+          test "$(jq -r '.[0].results[0].live_questions' /tmp/quiz-deploy-v2/db-before.json)" = "$EXPECTED_LIVE_COUNT"
+          test "$(jq -r '.[1].results[0].active_non_review' /tmp/quiz-deploy-v2/db-before.json)" = '0'
+
+          curl --fail --silent --show-error 'https://lessons.futureperfect.education/' -o /tmp/quiz-deploy-v2/portal-root.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess, urllib.parse
+          html=Path('/tmp/quiz-deploy-v2/portal-root.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I)
+          if not refs: raise SystemExit('NO_PORTAL_JS_ASSET_FOUND')
+          text=''
+          for i,ref in enumerate(refs):
+              out=f'/tmp/quiz-deploy-v2/portal-{i}.js'
+              subprocess.run(['curl','--fail','--silent','--show-error',urllib.parse.urljoin('https://lessons.futureperfect.education/',ref),'-o',out],check=True)
+              text += Path(out).read_text(errors='replace')
+          markers=['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch']
+          found=[m for m in markers if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PRESENT_IN_PORTAL: '+repr(found))
+          PY
+          echo OWNER_REVIEW_HOLD_PREFLIGHT_PASS
+
+      - name: Generate one-time RSA transfer key
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /tmp/quiz-deploy-v2/private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/quiz-deploy-v2/private.pem -pubout -out /tmp/quiz-deploy-v2/public.pem >/dev/null 2>&1
+          body="$(printf 'Temporary one-time public key for secure Quiz owner-review transfer run `%s`. The private key exists only in this runner.\n\n```pem\n%s\n```\n' "$GITHUB_RUN_ID" "$(cat /tmp/quiz-deploy-v2/public.pem)")"
+          issue_url="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/issues" -f title="TEMP Quiz v2 secure transfer public key ${GITHUB_RUN_ID}" -f body="$body" --jq .html_url)"
+          issue_no="${issue_url##*/}"
+          echo "TRANSFER_ISSUE=$issue_no" >> "$GITHUB_ENV"
+          echo "TRANSFER_ISSUE=$issue_no"
+
+      - name: Receive, decrypt and verify exact tested runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base="ops/quiz-secure-transfer-v2/${GITHUB_RUN_ID}"
+          ready=false
+          for attempt in $(seq 1 120); do
+            git fetch origin "$TRANSFER_BRANCH" --quiet || true
+            ok=true
+            for f in key.b64 part00 part01 part02 part03 part04; do
+              git show "origin/${TRANSFER_BRANCH}:${base}/${f}" > "/tmp/quiz-deploy-v2/${f}" 2>/dev/null || { ok=false; break; }
+            done
+            if test "$ok" = true; then ready=true; break; fi
+            sleep 5
+          done
+          test "$ready" = true || { echo ENCRYPTED_TRANSFER_TIMEOUT; exit 1; }
+          cat /tmp/quiz-deploy-v2/part0{0,1,2,3,4} | base64 -d > /tmp/quiz-deploy-v2/runtime.zip.enc
+          base64 -d /tmp/quiz-deploy-v2/key.b64 > /tmp/quiz-deploy-v2/key.enc
+          openssl pkeyutl -decrypt -inkey /tmp/quiz-deploy-v2/private.pem -in /tmp/quiz-deploy-v2/key.enc -out /tmp/quiz-deploy-v2/pass.txt -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          openssl enc -d -aes-256-cbc -pbkdf2 -in /tmp/quiz-deploy-v2/runtime.zip.enc -out /tmp/quiz-deploy-v2/runtime.zip -pass file:/tmp/quiz-deploy-v2/pass.txt
+          actual="$(sha256sum /tmp/quiz-deploy-v2/runtime.zip | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_SOURCE_ZIP_SHA256" || { echo "SOURCE_ZIP_DIGEST_MISMATCH expected=$EXPECTED_SOURCE_ZIP_SHA256 actual=$actual"; exit 1; }
+          mkdir -p /tmp/quiz-deploy-v2/runtime
+          unzip -q /tmp/quiz-deploy-v2/runtime.zip -d /tmp/quiz-deploy-v2/runtime
+          test "$(cat /tmp/quiz-deploy-v2/runtime/SOURCE_COMMIT.txt)" = "$EXPECTED_SOURCE_COMMIT"
+          sed 's#/tmp/quiz-runtime-source/#/tmp/quiz-deploy-v2/runtime/#' /tmp/quiz-deploy-v2/runtime/SHA256SUMS.txt > /tmp/quiz-deploy-v2/runtime/SHA256SUMS.local.txt
+          sha256sum -c /tmp/quiz-deploy-v2/runtime/SHA256SUMS.local.txt
+          node --check /tmp/quiz-deploy-v2/runtime/src/index.js
+          grep -Fq "function diagram(type,spec,stem='')" /tmp/quiz-deploy-v2/runtime/src/index.js
+          grep -Fq "diagram(x.diagramType,x.diagramSpec,x.stem)" /tmp/quiz-deploy-v2/runtime/src/index.js
+          echo TESTED_RUNTIME_TRANSFER_PASS
+
+      - name: Prepare deployment preserving all existing vars and secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/quiz-deploy-v2/runtime/wrangler.toml <<TOML
+          name = "${QUIZ_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-09-17"
+          keep_vars = true
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${QUIZ_D1_NAME}"
+          database_id = "${QUIZ_D1_ID}"
+          TOML
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/settings" -H "$AUTH" -o /tmp/quiz-deploy-v2/settings-before.json
+          expected='DB,ENVIRONMENT,LAUNCH_REDEEM_TIMEOUT_MS,PORTAL_BRIDGE_URL,PORTAL_LOGIN_URL,QUIZ_BRIDGE_SECRET,QUIZ_ORIGIN,QUIZ_SESSION_TTL_SECONDS'
+          actual="$(jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/quiz-deploy-v2/settings-before.json)"
+          test "$actual" = "$expected" || { echo "BINDING_SET_DRIFT $actual"; exit 1; }
+          jq -e --arg id "$QUIZ_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-deploy-v2/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-deploy-v2/settings-before.json >/dev/null
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-v2/versions-before.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-deploy-v2/versions-before.json | sort -u > /tmp/quiz-deploy-v2/version-ids-before.txt
+
+      - name: Upload candidate without traffic
+        id: upload
+        working-directory: /tmp/quiz-deploy-v2/runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions upload src/index.js --config wrangler.toml --keep-vars --message 'Owner-review v2: comprehensive diagrams and repeated result diagrams' >/tmp/quiz-deploy-v2/upload.txt
+          npx --yes wrangler@"$WRANGLER_VERSION" versions list --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-v2/versions-after.json
+          jq -r '.[] | (.id // .version_id // empty)' /tmp/quiz-deploy-v2/versions-after.json | sort -u > /tmp/quiz-deploy-v2/version-ids-after.txt
+          NEW_VERSION="$(comm -13 /tmp/quiz-deploy-v2/version-ids-before.txt /tmp/quiz-deploy-v2/version-ids-after.txt | head -n1)"
+          test -n "$NEW_VERSION"
+          test "$NEW_VERSION" != "$OLD_VERSION"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "CANDIDATE=$NEW_VERSION"
+
+      - name: Verify candidate bindings before promotion
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${QUIZ_WORKER}/versions/${NEW_VERSION}" -H "$AUTH" -o /tmp/quiz-deploy-v2/candidate.json
+          expected='DB,ENVIRONMENT,LAUNCH_REDEEM_TIMEOUT_MS,PORTAL_BRIDGE_URL,PORTAL_LOGIN_URL,QUIZ_BRIDGE_SECRET,QUIZ_ORIGIN,QUIZ_SESSION_TTL_SECONDS'
+          actual="$(jq -r '[.result.resources.bindings[].name] | sort | join(",")' /tmp/quiz-deploy-v2/candidate.json)"
+          test "$actual" = "$expected"
+          jq -e --arg id "$QUIZ_D1_ID" '.result.resources.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/quiz-deploy-v2/candidate.json >/dev/null
+          jq -e '.result.resources.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/quiz-deploy-v2/candidate.json >/dev/null
+
+      - name: Promote hidden owner-review runtime
+        id: promote
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$NEW_VERSION@100%" --name "$QUIZ_WORKER" --message 'Owner-review v2: comprehensive diagram renderer; original diagrams repeated in results' -y
+
+      - name: Verify hidden runtime and student Portal remains withdrawn
+        id: verify
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-v2/quiz-after.json
+          jq -e --arg id "$NEW_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy-v2/quiz-after.json >/dev/null
+          test "$(curl --silent --show-error --output /tmp/quiz-deploy-v2/health.json --write-out '%{http_code}' 'https://quiz.futureperfect.education/health')" = '200'
+          curl --fail --silent --show-error 'https://quiz.futureperfect.education/assets/app.js' -o /tmp/quiz-deploy-v2/live-app.js
+          for marker in "function diagram(type,spec,stem='')" "spec.translation" "spec.mirror_axis" "spec.fraction" "spec.clockwise_turn_degrees" "spec.dimensions_cm" "diagram(x.diagramType,x.diagramSpec,x.stem)"; do grep -Fq "$marker" /tmp/quiz-deploy-v2/live-app.js; done
+          ! grep -Fq '<strong>Equal-part diagram:</strong>' /tmp/quiz-deploy-v2/live-app.js
+          ! grep -Fq '<strong>3D solid:</strong>' /tmp/quiz-deploy-v2/live-app.js
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$QUIZ_D1_NAME" --remote --command "SELECT COUNT(*) AS live_questions FROM question_instance WHERE UPPER(lifecycle_status)='LIVE'; SELECT COUNT(*) AS active_non_review FROM quiz_auth_session WHERE revoked_at IS NULL AND expires_at > datetime('now') AND portal_user_id NOT LIKE 'owner-review-%';" --json > /tmp/quiz-deploy-v2/db-after.json
+          test "$(jq -r '.[0].results[0].live_questions' /tmp/quiz-deploy-v2/db-after.json)" = "$EXPECTED_LIVE_COUNT"
+          test "$(jq -r '.[1].results[0].active_non_review' /tmp/quiz-deploy-v2/db-after.json)" = '0'
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-deploy-v2/browser-after.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-deploy-v2/student-after.json
+          test "$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-v2/browser-after.json | head -n1)" = "$EXPECTED_BROWSER_VERSION"
+          test "$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/quiz-deploy-v2/student-after.json | head -n1)" = "$EXPECTED_STUDENT_VERSION"
+          echo OWNER_REVIEW_V2_VERIFY_PASS
+
+      - name: Automatic Quiz-only rollback on any failed promotion verification
+        if: always() && env.OLD_VERSION != '' && (steps.promote.outcome != 'success' || steps.verify.outcome != 'success')
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD_VERSION@100%" --name "$QUIZ_WORKER" --message 'Automatic rollback after owner-review v2 verification failure' -y
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deploy-v2/rollback.json
+          jq -e --arg id "$OLD_VERSION" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-deploy-v2/rollback.json >/dev/null
+
+      - name: Close temporary key issue
+        if: always() && env.TRANSFER_ISSUE != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh issue comment "$TRANSFER_ISSUE" --repo "$GITHUB_REPOSITORY" --body "Secure owner-review v2 transfer finished. Verification outcome: **${{ steps.verify.outcome }}**. The one-time private key has been destroyed with the runner."
+          gh issue close "$TRANSFER_ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      - name: Require verified owner-review deployment
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.promote.outcome }}' = 'success'
+          test '${{ steps.verify.outcome }}' = 'success'
+          echo QUIZ_OWNER_REVIEW_V2_DEPLOY_COMPLETE
