@@ -65,7 +65,7 @@ jobs:
           jq -e --arg id "$BROWSER_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-after.json >/dev/null
           echo QUIZ_PORTAL_FRONTEND_ROLLBACK_PASS
 
-      - name: Remove API-v2 Quiz launch boundary from active student runtime
+      - name: Restore pre-Quiz student runtime
         id: student
         if: steps.browser.outcome == 'success'
         continue-on-error: true
@@ -77,22 +77,57 @@ jobs:
           jq -e --arg id "$STUDENT_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-after.json >/dev/null
           echo QUIZ_PORTAL_STUDENT_RUNTIME_ROLLBACK_PASS
 
-      - name: Verify Portal is healthy and Quiz launch surface is absent
+      - name: Verify exact rollback code and public Portal assets contain no Quiz launch surface
         id: verify
         if: steps.browser.outcome == 'success' && steps.student.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
           set -Eeuo pipefail
-          passed=false
-          for attempt in $(seq 1 12); do
-            root="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-after.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
-            elig="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/eligibility-after.txt --write-out '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/eligibility')"
-            launch="$(curl --silent --show-error --max-redirs 0 --request POST --header 'Content-Type: application/json' --data '{}' --output /tmp/quiz-rollback/launch-after.txt --write-out '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/launch')"
-            if test "$root" = '200' && test "$elig" = '404' && test "$launch" = '404'; then passed=true; break; fi
-            sleep 5
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          # Re-prove exact active versions.
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$BROWSER_WORKER" --json > /tmp/quiz-rollback/browser-verified.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$STUDENT_WORKER" --json > /tmp/quiz-rollback/student-verified.json
+          jq -e --arg id "$BROWSER_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/browser-verified.json >/dev/null
+          jq -e --arg id "$STUDENT_ROLLBACK" '.versions[] | select(.version_id==$id and .percentage==100)' /tmp/quiz-rollback/student-verified.json >/dev/null
+
+          # Inspect the exact deployed Worker packages, not unauthenticated route status.
+          for worker in "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}" -H "$AUTH" -o "/tmp/quiz-rollback/${worker}-rollback-package.bin"
+            strings "/tmp/quiz-rollback/${worker}-rollback-package.bin" > "/tmp/quiz-rollback/${worker}-rollback-strings.txt" || true
+            if grep -Ein '11\+ Practice|quiz\.futureperfect\.education|/api/v2/student/quiz/eligibility|/api/v2/student/quiz/launch' "/tmp/quiz-rollback/${worker}-rollback-strings.txt" > "/tmp/quiz-rollback/${worker}-unexpected-quiz-markers.txt"; then
+              echo "QUIZ_MARKER_REMAINS_IN_ROLLBACK_PACKAGE $worker" >&2
+              cat "/tmp/quiz-rollback/${worker}-unexpected-quiz-markers.txt" >&2
+              exit 1
+            fi
           done
-          test "$passed" = 'true' || { echo "POST_ROLLBACK_VERIFY_FAILED root=$root eligibility=$elig launch=$launch" >&2; exit 1; }
+
+          # Check the public Portal shell and its currently referenced JS assets.
+          root="$(curl --silent --show-error --max-redirs 0 --output /tmp/quiz-rollback/root-after.html --write-out '%{http_code}' 'https://lessons.futureperfect.education/')"
+          test "$root" = '200'
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess, urllib.parse
+          html=Path('/tmp/quiz-rollback/root-after.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I)
+          if not refs:
+              raise SystemExit('NO_PORTAL_JS_ASSET_FOUND')
+          combined=[]
+          for i,ref in enumerate(refs):
+              url=urllib.parse.urljoin('https://lessons.futureperfect.education/',ref)
+              out=f'/tmp/quiz-rollback/portal-asset-{i}.js'
+              subprocess.run(['curl','--fail','--silent','--show-error',url,'-o',out],check=True)
+              combined.append(Path(out).read_text(errors='replace'))
+          text='\n'.join(combined)
+          markers=['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch']
+          found=[m for m in markers if m in text]
+          Path('/tmp/quiz-rollback/public-asset-marker-check.txt').write_text('found='+repr(found)+'\n')
+          if found:
+              raise SystemExit('QUIZ_MARKER_REMAINS_IN_PUBLIC_ASSETS: '+repr(found))
+          PY
+
           echo QUIZ_PORTAL_OWNER_ROLLBACK_PRODUCTION_VERIFY_PASS
 
       - name: Automatic restoration if any rollback or verification step fails
@@ -116,7 +151,7 @@ jobs:
           set -Eeuo pipefail
           cat > /tmp/quiz-rollback/evidence.json <<JSON
           {
-            "marker":"QUIZ_PORTAL_OWNER_ROLLBACK_2026_09_19",
+            "marker":"QUIZ_PORTAL_OWNER_ROLLBACK_2026_09_19_V2",
             "browserBefore":"$EXPECTED_BROWSER_BEFORE",
             "browserRollback":"$BROWSER_ROLLBACK",
             "studentBefore":"$EXPECTED_STUDENT_BEFORE",
@@ -131,7 +166,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: quiz-portal-owner-rollback-evidence
+          name: quiz-portal-owner-rollback-evidence-v2
           path: /tmp/quiz-rollback
           retention-days: 90
 
