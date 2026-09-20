@@ -1,0 +1,108 @@
+name: Current student access read-model reconciliation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/reconcile-current-student-access-read-models.mjs'
+      - '.github/workflows/current-student-access-reconciliation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/reconcile-current-student-access-read-models.mjs'
+      - '.github/workflows/current-student-access-reconciliation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-current-student-access-reconciliation
+  cancel-in-progress: false
+
+env:
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  RECONCILIATION_CONCURRENCY: '3'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify reconciliation source and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/reconcile-current-student-access-read-models.mjs
+          node --check worker/src/access-read-model-sync.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
+          node --check worker/src/admin-lesson-release-import-email-reconciled.js
+          node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+
+  reconcile-production:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require production credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Reconcile every current student from canonical access state
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/reconcile-current-student-access-read-models.mjs
+          jq -e '
+            .marker == "CURRENT_STUDENT_ACCESS_RECONCILIATION_PASS" and
+            .status == "PASS" and
+            .eligibleCurrentStudents > 0 and
+            .reconciled == .eligibleCurrentStudents and
+            .failures == 0 and
+            .canonicalSourcesMutated == false and
+            .writeTarget == "READ_MODELS_KV_ONLY" and
+            .atomicPerStudentPointers == true and
+            .safeToRerun == true and
+            .studentIdentitiesIncluded == false and
+            .credentialsDisclosed == false
+          ' /tmp/current-student-access-reconciliation.json >/dev/null
+      - name: Verify production bindings remain unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/current-student-access-settings.json
+          jq -e --arg students "$EXPECTED_STUDENTS_KV_ID" '.success == true and (.result.bindings[] | select(.name=="STUDENTS_KV" and .namespace_id==$students))' /tmp/current-student-access-settings.json >/dev/null
+          jq -e --arg readmodels "$EXPECTED_READ_MODELS_KV_ID" '.result.bindings[] | select(.name=="READ_MODELS_KV" and .namespace_id==$readmodels)' /tmp/current-student-access-settings.json >/dev/null
+          jq -e --arg db "$EXPECTED_PROD_D1_ID" '.result.bindings[] | select(.name=="DB" and ((.id // .database_id)==$db))' /tmp/current-student-access-settings.json >/dev/null
+          echo 'CURRENT_STUDENT_ACCESS_BINDINGS_UNCHANGED_PASS'
+      - name: Upload identity-free reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-student-access-reconciliation-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: /tmp/current-student-access-reconciliation.json
