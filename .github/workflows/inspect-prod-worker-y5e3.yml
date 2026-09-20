@@ -1,0 +1,78 @@
+name: Inspect live Y5 English runtime (read-only)
+
+on:
+  push:
+    branches:
+      - diagnostic/y5e3-release-2026-09-20
+    paths:
+      - .github/workflows/inspect-prod-worker-y5e3.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Download current production Worker package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-package.bin
+          sha256sum /tmp/worker-package.bin
+
+      - name: Print bounded code evidence around access routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          data=open('/tmp/worker-package.bin','rb').read().decode('utf-8','replace')
+          needles=[
+            'english-year5-11plus',
+            'source_batch_code',
+            'lesson_entitlements',
+            '/api/v1/student/views/',
+            'displayLessonId',
+            'lockedPreview',
+            'Y5T1EE02',
+            'Y5T1E02'
+          ]
+          for needle in needles:
+              print(f'=== {needle} ===')
+              positions=[m.start() for m in re.finditer(re.escape(needle),data,re.I)]
+              print('count',len(positions))
+              for pos in positions[:3]:
+                  lo=max(0,pos-900); hi=min(len(data),pos+1800)
+                  text=data[lo:hi]
+                  # collapse binary/multipart noise but preserve JS text
+                  text=''.join(ch if ch=='\n' or ch=='\t' or 32<=ord(ch)<127 else ' ' for ch in text)
+                  print(text)
+                  print('---')
+          PY
+
+      - name: Read-only live access check
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source_batch_code, source_lesson_date, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN ('ma0605','kiaan1312') AND lesson_id IN ('Y5E2','Y5E3') ORDER BY portal_user_id_norm, lesson_id;"
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT batch_key, subject, school_year, stream FROM batch_definitions WHERE batch_key='Y511FE';"
+
+      - name: Confirm read-only completion
+        run: echo 'Read-only inspection complete; no production mutation or deployment ran.'
