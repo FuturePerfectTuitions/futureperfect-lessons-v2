@@ -1,11 +1,8 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
-  SCOPE_SALT_KEY,
   assertReadModelReconciliationReady,
-  refreshStudentAccessReadModel,
-  opaqueAccessScopeId,
-  pointerKey
+  refreshStudentAccessReadModel
 } from '../worker/src/access-read-model-sync.js';
 
 const clean = value => String(value ?? '').trim();
@@ -19,7 +16,7 @@ const expectedDb = clean(process.env.EXPECTED_PROD_D1_ID || '97250a54-fa91-45ad-
 const asOfDate = clean(process.env.RECONCILIATION_AS_OF_DATE) || new Intl.DateTimeFormat('en-CA', {
   timeZone:'Europe/London', year:'numeric', month:'2-digit', day:'2-digit'
 }).format(new Date());
-const concurrency = Math.max(1, Math.min(8, Number(process.env.RECONCILIATION_CONCURRENCY || 4)));
+const concurrency = Math.max(1, Math.min(6, Number(process.env.RECONCILIATION_CONCURRENCY || 3)));
 
 if (!token || !account) throw new Error('Cloudflare credentials are required.');
 if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) throw new Error('RECONCILIATION_AS_OF_DATE must be YYYY-MM-DD.');
@@ -63,13 +60,6 @@ async function kvPut(namespaceId, key, value) {
   if (!out.response.ok || out.body?.success !== true) throw new Error(`KV write failed: ${out.response.status}`);
 }
 
-async function kvDelete(namespaceId, key) {
-  const out = await request(`/accounts/${account}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`, {
-    method:'DELETE'
-  });
-  if (!out.response.ok || out.body?.success !== true) throw new Error(`KV delete failed: ${out.response.status}`);
-}
-
 async function kvKeys(namespaceId, prefix) {
   const keys = [];
   let cursor = '';
@@ -93,8 +83,7 @@ function remoteKv(namespaceId) {
       }
       return text;
     },
-    async put(key, value) { return kvPut(namespaceId, key, value); },
-    async delete(key) { return kvDelete(namespaceId, key); }
+    async put(key, value) { return kvPut(namespaceId, key, value); }
   };
 }
 
@@ -120,7 +109,9 @@ function remoteDb(databaseId) {
 
 function isCurrentStudent(id, user) {
   const role = norm(user?.role || user?.accountType);
-  if (id === 'admin' || role.includes('admin') || user?.isAdmin === true || user?.superuser === true) return { current:false, reason:'admin' };
+  if (id === 'admin' || role.includes('admin') || user?.isAdmin === true || user?.superuser === true) {
+    return { current:false, reason:'admin' };
+  }
   const status = norm(user?.accountStatus || user?.status || 'active');
   const expires = clean(user?.expiresOn || user?.expires);
   if (['inactive','disabled','expired','withdrawn'].includes(status) || (expires && expires <= asOfDate)) {
@@ -140,19 +131,23 @@ async function mapLimit(values, limit, fn) {
     while (true) {
       const index = next++;
       if (index >= values.length) return;
-      results[index] = await fn(values[index], index);
+      try {
+        results[index] = { ok:true, value:await fn(values[index], index) };
+      } catch (error) {
+        results[index] = { ok:false, error };
+      }
     }
   }
   await Promise.all(Array.from({ length:Math.min(limit, Math.max(1, values.length)) }, runner));
   return results;
 }
 
-async function retry(fn, attempts = 3) {
+async function retry(fn, attempts = 4) {
   let last;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try { return await fn(attempt); } catch (error) {
       last = error;
-      if (attempt < attempts) await sleep(750 * attempt);
+      if (attempt < attempts) await sleep(1000 * attempt);
     }
   }
   throw last;
@@ -177,9 +172,6 @@ const env = {
 const ready = await assertReadModelReconciliationReady(env);
 if (!ready?.ok) throw new Error('Prepared read-model reconciliation preflight failed.');
 
-const scopeSalt = clean(await env.READ_MODELS_KV.get(SCOPE_SALT_KEY));
-if (!/^[0-9a-f]{64}$/i.test(scopeSalt)) throw new Error('Production scope salt is missing or malformed.');
-
 const profileKeys = (await kvKeys(studentsId, 'user:')).sort();
 const current = [];
 let excludedAdmin = 0;
@@ -194,78 +186,52 @@ for (const key of profileKeys) {
     else excludedInactive += 1;
     continue;
   }
-  const scopeId = await opaqueAccessScopeId(id, scopeSalt);
-  const scope = `access:${scopeId}`;
-  const keyName = pointerKey(scope);
-  const previousPointerText = await env.READ_MODELS_KV.get(keyName);
-  current.push({ id, scope, pointerKey:keyName, previousPointerText });
+  current.push(id);
 }
 
 if (!current.length) throw new Error('No current student profiles were found to reconcile.');
 
-const changed = [];
+const results = await mapLimit(current, concurrency, id =>
+  retry(() => refreshStudentAccessReadModel(env, id, { asOfDate }), 4)
+);
+
 const failures = [];
-try {
-  await mapLimit(current, concurrency, async item => {
-    try {
-      const result = await retry(() => refreshStudentAccessReadModel(env, item.id, { asOfDate }), 3);
-      changed.push({ item, result });
-      return result;
-    } catch (error) {
-      failures.push({ digest:digest(item.id), message:String(error?.message || error) });
-      throw error;
-    }
-  });
-} catch (error) {
-  const rollbackFailures = [];
-  await mapLimit(changed, Math.min(concurrency, 4), async ({ item }) => {
-    try {
-      if (item.previousPointerText == null) await env.READ_MODELS_KV.delete(item.pointerKey);
-      else await env.READ_MODELS_KV.put(item.pointerKey, item.previousPointerText);
-    } catch (rollbackError) {
-      rollbackFailures.push({ digest:digest(item.id), message:String(rollbackError?.message || rollbackError) });
-    }
-  });
-  const summary = {
-    marker:'CURRENT_STUDENT_ACCESS_RECONCILIATION_ROLLED_BACK',
-    status:rollbackFailures.length ? 'ROLLBACK_INCOMPLETE' : 'ROLLED_BACK',
-    asOfDate,
-    profileKeyCount:profileKeys.length,
-    eligibleCurrentStudents:current.length,
-    attempted:changed.length + failures.length,
-    failures:failures.length,
-    rollbackFailures:rollbackFailures.length,
-    canonicalSourcesMutated:false,
-    studentIdentitiesIncluded:false,
-    credentialsDisclosed:false
-  };
-  fs.writeFileSync('/tmp/current-student-access-reconciliation.json', JSON.stringify(summary, null, 2));
-  console.error(JSON.stringify(summary, null, 2));
-  if (failures.length) console.error(`First failed student digest: ${failures[0].digest}; ${failures[0].message}`);
-  throw new Error(rollbackFailures.length ? 'Reconciliation failed and rollback was incomplete.' : 'Reconciliation failed; read-model pointers were rolled back.');
+let reused = 0;
+let published = 0;
+for (let index = 0; index < results.length; index += 1) {
+  const result = results[index];
+  if (!result?.ok) {
+    failures.push({ digest:digest(current[index]), message:String(result?.error?.message || result?.error || 'unknown') });
+    continue;
+  }
+  if (result.value?.reused === true) reused += 1;
+  else published += 1;
 }
 
-const reused = changed.filter(row => row.result?.reused === true).length;
-const published = changed.length - reused;
 const summary = {
-  marker:'CURRENT_STUDENT_ACCESS_RECONCILIATION_PASS',
-  status:'PASS',
+  marker:failures.length ? 'CURRENT_STUDENT_ACCESS_RECONCILIATION_INCOMPLETE' : 'CURRENT_STUDENT_ACCESS_RECONCILIATION_PASS',
+  status:failures.length ? 'INCOMPLETE' : 'PASS',
   asOfDate,
   globalVersion:ready.globalVersion,
   profileKeyCount:profileKeys.length,
   eligibleCurrentStudents:current.length,
   excludedAdmin,
   excludedInactive,
-  reconciled:changed.length,
+  reconciled:current.length - failures.length,
   published,
   reused,
-  failures:0,
+  failures:failures.length,
   canonicalSourcesMutated:false,
   writeTarget:'READ_MODELS_KV_ONLY',
   atomicPerStudentPointers:true,
+  safeToRerun:true,
   studentIdentitiesIncluded:false,
   credentialsDisclosed:false,
   bindings:{ studentsKv:studentsId, readModelsKv:readModelsId, d1:dbId }
 };
 fs.writeFileSync('/tmp/current-student-access-reconciliation.json', JSON.stringify(summary, null, 2));
 console.log(JSON.stringify(summary, null, 2));
+if (failures.length) {
+  for (const failure of failures.slice(0, 10)) console.error(`Failed student digest ${failure.digest}: ${failure.message}`);
+  throw new Error(`Current-student access reconciliation incomplete: ${failures.length} student(s) failed. Safe to rerun.`);
+}
