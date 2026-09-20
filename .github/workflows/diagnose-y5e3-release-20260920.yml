@@ -1,0 +1,83 @@
+name: Y5 English release diagnostic (read-only)
+
+on:
+  push:
+    branches:
+      - diagnostic/y5e3-release-2026-09-20
+    paths:
+      - .github/workflows/diagnose-y5e3-release-20260920.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify credentials without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Resolve production KV bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/settings.json)"
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          test -n "$STUDENTS_KV_ID"; test "$STUDENTS_KV_ID" != null
+          echo "LESSONS_KV_ID=$LESSONS_KV_ID" >> "$GITHUB_ENV"
+          echo "STUDENTS_KV_ID=$STUDENTS_KV_ID" >> "$GITHUB_ENV"
+          echo "Production bindings resolved."
+
+      - name: Read-only D1 entitlement and batch audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== TARGET ENTITLEMENTS ==='
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source, source_batch_code, source_lesson_date, first_granted_at, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN ('ma0605','kiaan1312') AND lesson_id IN ('Y5E2','Y5E3','Y5E4') ORDER BY portal_user_id_norm, lesson_id;"
+          echo '=== BATCH DEFINITION ==='
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions WHERE batch_key = 'Y511FE';"
+          echo '=== BATCH ASSIGNMENTS ==='
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, batch_key, effective_from, effective_to FROM student_batch_assignments WHERE portal_user_id_norm IN ('ma0605','kiaan1312') ORDER BY portal_user_id_norm, batch_key;"
+
+      - name: Read-only live lesson and curriculum audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== ENGLISH_Y5 curriculum contains ==='
+          npx --yes wrangler@latest kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote
+          for id in Y5E2 Y5E3 Y5E4; do
+            echo "=== lesson:${id} ==="
+            npx --yes wrangler@latest kv key get "lesson:${id}" --namespace-id "$LESSONS_KV_ID" --remote | jq '{lessonId,title,subject,active,displayIds}'
+          done
+
+      - name: Read-only student profile audit with secrets removed
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in ma0605 kiaan1312; do
+            echo "=== user:${id} redacted ==="
+            npx --yes wrangler@latest kv key get "user:${id}" --namespace-id "$STUDENTS_KV_ID" --remote > "/tmp/${id}.json"
+            jq 'del(.p, .password, .answerPassword, .answerPackPassword, .email, .parentEmail)' "/tmp/${id}.json"
+          done
+
+      - name: Confirm read-only completion
+        run: echo 'Read-only diagnostic complete. No production write or deploy command ran.'
