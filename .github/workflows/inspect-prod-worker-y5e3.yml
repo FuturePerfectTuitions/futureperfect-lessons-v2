@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   inspect:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -37,13 +37,13 @@ jobs:
             --output /tmp/worker-package.bin
           sha256sum /tmp/worker-package.bin
 
-      - name: Print exact live access functions
+      - name: Print exact live English presentation and access functions
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           data=open('/tmp/worker-package.bin','rb').read().decode('utf-8','replace')
-          def excerpt(label, needle, before=250, after=5000):
+          def excerpt(label, needle, before=300, after=6500):
               pos=data.find(needle)
               print(f'=== {label} ===')
               print('found', pos >= 0)
@@ -52,20 +52,49 @@ jobs:
               text=data[lo:hi]
               text=''.join(ch if ch in '\n\t' or 32<=ord(ch)<127 else ' ' for ch in text)
               print(text)
+              print('---')
+          excerpt('englishDescriptor', 'function englishDescriptor')
+          excerpt('displayIdForView', 'function displayIdForView')
+          excerpt('handleAugmentedLessonList', 'async function handleAugmentedLessonList')
           excerpt('sourceCoreEntitled', 'function sourceCoreEntitled')
           excerpt('classifyCurrentBatches', 'function classifyCurrentBatches')
           excerpt('currentEnglishDescriptor', 'function currentEnglishDescriptor')
           excerpt('visibleLessonsForDescriptor', 'async function visibleLessonsForDescriptor')
-          excerpt('buildVisibleDescriptors', 'async function buildVisibleDescriptors')
-          excerpt('student view list route', 'pathname.match(/^\\/api\\/v1\\/student\\/views')
+          excerpt('handleStudentViewLessons', 'async function handleStudentViewLessons')
           PY
 
-      - name: Read-only live access check
+      - name: Read-only live D1 access check
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source_batch_code, source_lesson_date, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN ('ma0605','kiaan1312') AND lesson_id IN ('Y5E2','Y5E3') ORDER BY portal_user_id_norm, lesson_id;"
+          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source_batch_code, source_lesson_date, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN ('ma0605','kiaan1312') AND lesson_id IN ('Y5E1','Y5E2','Y5E3','Y5E4') ORDER BY portal_user_id_norm, lesson_id;"
           npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT batch_key, subject, school_year, stream FROM batch_definitions WHERE batch_key='Y511FE';"
+
+      - name: Read exact live KV presentation metadata without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          LESSONS_NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id // empty' /tmp/settings.json | head -1)"
+          STUDENTS_NS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | .namespace_id // empty' /tmp/settings.json | head -1)"
+          test -n "$LESSONS_NS"
+          test -n "$STUDENTS_NS"
+
+          echo '=== Maahi non-secret profile fields ==='
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/$STUDENTS_NS/values/user:ma0605" -H "$AUTH" \
+            | jq '{firstName, schoolYear, batches, historicalViews, fullLibraries, upsellViews}'
+
+          echo '=== ENGLISH_Y5 curriculum first entries ==='
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS_NS/values/curriculum:ENGLISH_Y5" -H "$AUTH" \
+            | jq 'if type=="array" then .[0:8] elif (.lessonIds|type)=="array" then {lessonIds:.lessonIds[0:8]} elif (.lessons|type)=="array" then {lessons:.lessons[0:8]} elif (.items|type)=="array" then {items:.items[0:8]} else . end'
+
+          for id in Y5E1 Y5E2 Y5E3 Y5E4; do
+            echo "=== lesson:$id presentation fields ==="
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS_NS/values/lesson:$id" -H "$AUTH" \
+              | jq '{lessonId,title,subject,order,displayIds,displayLessonIds,presentation,active}'
+          done
 
       - name: Confirm read-only completion
         run: echo 'Read-only inspection complete; no production mutation or deployment ran.'
