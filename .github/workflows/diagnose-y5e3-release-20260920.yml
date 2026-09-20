@@ -31,7 +31,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Resolve production KV bindings
+      - name: Resolve production bindings safely
         shell: bash
         run: |
           set -euo pipefail
@@ -39,13 +39,18 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/settings.json
+          echo '=== PRODUCTION BINDING NAMES/TYPES ==='
+          jq -r '.result.bindings[] | [.name,.type] | @tsv' /tmp/settings.json | sort
           LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/settings.json)"
           STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "STUDENTS_KV") | .namespace_id' /tmp/settings.json)"
+          REBUILD_SHADOW_KV_ID="$(jq -r '.result.bindings[] | select(.name == "REBUILD_SHADOW_KV") | .namespace_id' /tmp/settings.json)"
           test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
           test -n "$STUDENTS_KV_ID"; test "$STUDENTS_KV_ID" != null
+          test -n "$REBUILD_SHADOW_KV_ID"; test "$REBUILD_SHADOW_KV_ID" != null
           echo "LESSONS_KV_ID=$LESSONS_KV_ID" >> "$GITHUB_ENV"
           echo "STUDENTS_KV_ID=$STUDENTS_KV_ID" >> "$GITHUB_ENV"
-          echo "Production bindings resolved."
+          echo "REBUILD_SHADOW_KV_ID=$REBUILD_SHADOW_KV_ID" >> "$GITHUB_ENV"
+          echo 'Required production bindings resolved.'
 
       - name: Read-only deployed Worker audit
         shell: bash
@@ -53,9 +58,6 @@ jobs:
           set -euo pipefail
           echo '=== CURRENT DEPLOYMENT ==='
           npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json
-          echo '=== RECENT DEPLOYMENTS ==='
-          npx --yes wrangler@latest deployments list --name "$WORKER_NAME" --json
-
           curl --fail --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -65,8 +67,9 @@ jobs:
           body = open('/tmp/worker-package.bin','rb').read()
           print('Worker package SHA256:', hashlib.sha256(body).hexdigest())
           for marker in [
-              b'LIVE_STUDENT_CATALOGUE_OVERLAY_V1',
-              b'LIVE_HOME_COUNTS_AUTHORITY_V1',
+              b'PREPARED_ACCESS_PUBLISH_FAILED',
+              b'REBUILD_SHADOW_KV',
+              b'prepared-access-read-model',
               b'english-year5-11plus',
               b'admin/lesson-release/import'
           ]:
@@ -84,25 +87,59 @@ jobs:
           echo '=== BATCH ASSIGNMENTS ==='
           npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, batch_key, effective_from, effective_to FROM student_batch_assignments WHERE portal_user_id_norm IN ('ma0605','kiaan1312') ORDER BY portal_user_id_norm, batch_key;"
 
-      - name: Read-only live lesson and curriculum audit
+      - name: Read-only prepared access audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest kv key get 'meta:scope-salt' --namespace-id "$REBUILD_SHADOW_KV_ID" --remote > /tmp/scope-salt
+          test -s /tmp/scope-salt
+          chmod 600 /tmp/scope-salt
+
+          python3 - <<'PY' > /tmp/scopes.tsv
+          import hashlib,hmac
+          secret=open('/tmp/scope-salt','r',encoding='utf-8').read().strip().encode()
+          for user in ('ma0605','kiaan1312'):
+              domain=f'rebuild-shadow-scope-v1:{user}'.encode()
+              digest=hmac.new(secret,domain,hashlib.sha256).hexdigest()[:40]
+              scope=f'access:u-{digest}'
+              encoded=scope.replace(':','_3A')
+              print(user,scope,encoded,sep='\t')
+          PY
+
+          while IFS=$'\t' read -r user scope encoded; do
+            pointer="rm:v1:scope:${encoded}:current"
+            npx --yes wrangler@latest kv key get "$pointer" --namespace-id "$REBUILD_SHADOW_KV_ID" --remote > "/tmp/${user}-pointer.json"
+            version="$(jq -r '.current.version // empty' "/tmp/${user}-pointer.json")"
+            test -n "$version"
+            envelope="rm:v1:scope:${encoded}:version:${version}"
+            npx --yes wrangler@latest kv key get "$envelope" --namespace-id "$REBUILD_SHADOW_KV_ID" --remote > "/tmp/${user}-envelope.json"
+            echo "=== PREPARED ACCESS ${user} ==="
+            jq '{pointerUpdatedAt:(input.updatedAt)}' "/tmp/${user}-envelope.json" "/tmp/${user}-pointer.json"
+            jq '{scope:.scope,version:.version,kind:.payload.kind,asOfDate:.payload.snapshot.asOfDate,year5EnglishViews:[.payload.snapshot.views[]? | select(.viewId|contains("english-year5"))],lessonAccess:{Y5E2:.payload.snapshot.lessonAccess.Y5E2,Y5E3:.payload.snapshot.lessonAccess.Y5E3,Y5E4:.payload.snapshot.lessonAccess.Y5E4}}' "/tmp/${user}-envelope.json"
+          done < /tmp/scopes.tsv
+
+          global_pointer='rm:v1:scope:global:current'
+          npx --yes wrangler@latest kv key get "$global_pointer" --namespace-id "$REBUILD_SHADOW_KV_ID" --remote > /tmp/global-pointer.json
+          global_version="$(jq -r '.current.version // empty' /tmp/global-pointer.json)"
+          test -n "$global_version"
+          npx --yes wrangler@latest kv key get "rm:v1:scope:global:version:${global_version}" --namespace-id "$REBUILD_SHADOW_KV_ID" --remote > /tmp/global-envelope.json
+          echo '=== PREPARED GLOBAL ENGLISH YEAR 5 11+ SAMPLE ==='
+          jq '{version:.version,view:(.payload.catalogues["english-year5-11plus"] | {viewId,label,lessonCount,lessons:[.lessons[]? | select(.lessonId=="Y5E2" or .lessonId=="Y5E3" or .lessonId=="Y5E4")]})}' /tmp/global-envelope.json
+
+      - name: Read-only live lesson and student profile audit
         shell: bash
         run: |
           set -euo pipefail
           echo '=== ENGLISH_Y5 curriculum contains ==='
-          npx --yes wrangler@latest kv key get "curriculum:ENGLISH_Y5" --namespace-id "$LESSONS_KV_ID" --remote
+          npx --yes wrangler@latest kv key get 'curriculum:ENGLISH_Y5' --namespace-id "$LESSONS_KV_ID" --remote
           for id in Y5E2 Y5E3 Y5E4; do
             echo "=== lesson:${id} ==="
             npx --yes wrangler@latest kv key get "lesson:${id}" --namespace-id "$LESSONS_KV_ID" --remote | jq '{lessonId,title,subject,active,displayIds}'
           done
-
-      - name: Read-only student profile audit with secrets removed
-        shell: bash
-        run: |
-          set -euo pipefail
           for id in ma0605 kiaan1312; do
             echo "=== user:${id} redacted ==="
             npx --yes wrangler@latest kv key get "user:${id}" --namespace-id "$STUDENTS_KV_ID" --remote > "/tmp/${id}.json"
-            jq 'del(.p, .password, .answerPassword, .answerPackPassword, .email, .parentEmail)' "/tmp/${id}.json"
+            jq 'del(.p,.password,.answerPassword,.answerPackPassword,.email,.parentEmail)' "/tmp/${id}.json"
           done
 
       - name: Confirm read-only completion
