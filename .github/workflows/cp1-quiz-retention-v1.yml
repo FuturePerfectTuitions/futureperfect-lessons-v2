@@ -1,0 +1,111 @@
+name: CP1 Quiz annual student-data retention v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run or apply; apply requires a separate owner approval after dry-run review'
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, apply]
+      authority_version:
+        required: true
+        default: v1.3
+        type: string
+      cohort_label:
+        description: 'Owner-reviewed L3 completion cohort label'
+        required: true
+        type: string
+      retention_date:
+        description: '10 September due date, YYYY-MM-DD'
+        required: true
+        type: string
+      expected_manifest_sha256:
+        description: 'Required for apply; from reviewed dry-run'
+        required: false
+        type: string
+      expected_d1_uuid:
+        required: true
+        default: 5b988d3d-341a-492d-8e40-8d4efa66150e
+        type: string
+      expected_rollback_bookmark:
+        description: 'Required for apply; exact reviewed dry-run bookmark'
+        required: false
+        type: string
+      dry_run_run_id:
+        description: 'Required for apply; reviewed dry-run run ID'
+        required: false
+        type: string
+      apply_approval_ref:
+        description: 'Required for apply; separate owner approval reference'
+        required: false
+        type: string
+      maintenance_window_confirmed:
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false','true']
+      destructive_confirmation:
+        description: 'Apply only: PURGE QUIZ STUDENT DATA <cohort_label> ON <retention_date>'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: cp1-quiz-annual-student-data-retention-v1
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  RETENTION_TARGET_MANIFEST_JSON: ${{ secrets.RETENTION_TARGET_MANIFEST_JSON }}
+  RETENTION_MODE: ${{ inputs.mode }}
+  AUTHORITY_VERSION: ${{ inputs.authority_version }}
+  COHORT_LABEL: ${{ inputs.cohort_label }}
+  RETENTION_DATE: ${{ inputs.retention_date }}
+  EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+  EXPECTED_D1_UUID: ${{ inputs.expected_d1_uuid }}
+  EXPECTED_ROLLBACK_BOOKMARK: ${{ inputs.expected_rollback_bookmark }}
+  DRY_RUN_RUN_ID: ${{ inputs.dry_run_run_id }}
+  APPLY_APPROVAL_REF: ${{ inputs.apply_approval_ref }}
+  MAINTENANCE_WINDOW_CONFIRMED: ${{ inputs.maintenance_window_confirmed }}
+  DESTRUCTIVE_CONFIRMATION: ${{ inputs.destructive_confirmation }}
+  GITHUB_TOKEN: ${{ github.token }}
+  RETENTION_AUDIT_DIR: retention-audit
+
+jobs:
+  retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require operational inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$RETENTION_TARGET_MANIFEST_JSON"
+          if [ "$RETENTION_MODE" = apply ]; then
+            test -n "$EXPECTED_MANIFEST_SHA256"
+            test -n "$EXPECTED_ROLLBACK_BOOKMARK"
+            test -n "$DRY_RUN_RUN_ID"
+            test -n "$APPLY_APPROVAL_REF"
+          fi
+      - name: Execute guarded retention control
+        run: node ops/quiz-retention/retention_v1.mjs
+      - name: Upload de-identified retention evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp1-retention-v1-${{ inputs.mode }}-${{ github.run_id }}
+          path: retention-audit/
+          retention-days: 365
+          if-no-files-found: error
