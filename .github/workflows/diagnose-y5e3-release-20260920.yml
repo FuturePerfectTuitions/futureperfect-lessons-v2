@@ -47,6 +47,32 @@ jobs:
           echo "STUDENTS_KV_ID=$STUDENTS_KV_ID" >> "$GITHUB_ENV"
           echo "Production bindings resolved."
 
+      - name: Read-only deployed Worker audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== CURRENT DEPLOYMENT ==='
+          npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json
+          echo '=== RECENT DEPLOYMENTS ==='
+          npx --yes wrangler@latest deployments list --name "$WORKER_NAME" --json
+
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-package.bin
+          python3 - <<'PY'
+          import hashlib
+          body = open('/tmp/worker-package.bin','rb').read()
+          print('Worker package SHA256:', hashlib.sha256(body).hexdigest())
+          for marker in [
+              b'LIVE_STUDENT_CATALOGUE_OVERLAY_V1',
+              b'LIVE_HOME_COUNTS_AUTHORITY_V1',
+              b'english-year5-11plus',
+              b'admin/lesson-release/import'
+          ]:
+              print(marker.decode(), marker in body)
+          PY
+
       - name: Read-only D1 entitlement and batch audit
         shell: bash
         run: |
