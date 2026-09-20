@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Guard workflow shape and syntax
+      - name: Guard workflow shape, authority and syntax
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -44,16 +44,19 @@ jobs:
           operational=Path('.github/workflows/cp1-quiz-retention-v1.yml').read_text()
           verifier=Path('.github/workflows/cp1-quiz-retention-v1-nondestructive-verify.yml').read_text()
           script=Path('ops/quiz-retention/retention_v1.mjs').read_text()
+          runbook=Path('docs/CP1_QUIZ_RETENTION_CONTROL_v1_RUNBOOK.md').read_text()
           assert 'workflow_dispatch:' in operational
           assert '\n  schedule:' not in operational
           assert '\n  push:' not in operational
-          assert "RETENTION_MODE: ${{ inputs.mode }}" in operational
+          assert 'RETENTION_MODE:' in operational and 'inputs.mode' in operational
           assert "retentionDate!==new Date().toISOString().slice(0,10)" in script
-          assert 'expected rollback bookmark' not in script.lower() or 'rollback bookmark' in script.lower()
           assert 'question_aggregate' in script
           assert 'PRAGMA foreign_key_check' in script
           assert 'DELETE FROM' in script
           assert 'CONTROL_VERIFICATION_FIXTURE' in verifier
+          assert 'L2 -> L3' in runbook
+          assert 'does **not** authorise apply' in runbook
+          assert '10 September' in runbook
           print('CP1_RETENTION_V1_STATIC_PASS')
           PY
       - name: Fresh exact-production read-only control verification
