@@ -1,4 +1,8 @@
-import currentWorker from './index-phase25-english-batch-code-compat.js';
+import currentWorker from './index-phase24-trial-vr.js';
+import {
+  englishBatchCompatEnv,
+  needsCompatibility
+} from './index-phase25-english-batch-code-compat.js';
 import { handleAdminResourceRequest } from './admin-resource-replace.js';
 
 export default {
@@ -7,6 +11,10 @@ export default {
     if (url.pathname.startsWith('/api/v1/admin/resources/')) {
       return handleAdminResourceRequest(request, env, ctx);
     }
-    return currentWorker.fetch(request, env, ctx);
+    return currentWorker.fetch(
+      request,
+      needsCompatibility(request) ? englishBatchCompatEnv(env) : env,
+      ctx
+    );
   }
 };
