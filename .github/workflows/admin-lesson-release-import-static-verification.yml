@@ -8,8 +8,12 @@ on:
       - assets/admin-import.js
       - assets/admin-import-manual-email.js
       - worker/src/admin-lesson-release-import.js
+      - worker/src/admin-lesson-release-import-reconciled.js
       - worker/src/admin-lesson-release-import-email.js
+      - worker/src/admin-lesson-release-import-email-reconciled.js
       - worker/src/admin-lesson-release-import-manual-email.js
+      - worker/src/admin-lesson-release-import-manual-email-reconciled.js
+      - worker/src/access-read-model-sync.js
       - worker/src/parent-email.js
       - worker/src/parent-email-signature.js
       - worker/src/index-phase20-change7.js
@@ -21,6 +25,7 @@ on:
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/admin-lesson-release-y6-sats-verification.mjs
+      - tests/access-read-model-reconciliation-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
@@ -28,14 +33,18 @@ on:
       - tests/lesson-release-navigation-verification.mjs
       - .github/workflows/admin-lesson-release-import-static-verification.yml
   push:
-    branches: [lesson-release-admin-import, feature/parent-email-csv-import, feature/admin-import-auto-process, feature/import-auto-send-manual]
+    branches: [lesson-release-admin-import, feature/parent-email-csv-import, feature/admin-import-auto-process, feature/import-auto-send-manual, fix/import-read-model-reconciliation-2026-09-20]
     paths:
       - admin-import.html
       - assets/admin-import.js
       - assets/admin-import-manual-email.js
       - worker/src/admin-lesson-release-import.js
+      - worker/src/admin-lesson-release-import-reconciled.js
       - worker/src/admin-lesson-release-import-email.js
+      - worker/src/admin-lesson-release-import-email-reconciled.js
       - worker/src/admin-lesson-release-import-manual-email.js
+      - worker/src/admin-lesson-release-import-manual-email-reconciled.js
+      - worker/src/access-read-model-sync.js
       - worker/src/parent-email.js
       - worker/src/parent-email-signature.js
       - worker/src/index-phase20-change7.js
@@ -47,6 +56,7 @@ on:
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/admin-lesson-release-y6-sats-verification.mjs
+      - tests/access-read-model-reconciliation-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
       - tests/parent-email-completed-status-verification.mjs
@@ -70,8 +80,12 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
           node --check worker/src/admin-lesson-release-import-email.js
+          node --check worker/src/admin-lesson-release-import-email-reconciled.js
           node --check worker/src/admin-lesson-release-import-manual-email.js
+          node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
+          node --check worker/src/access-read-model-sync.js
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
           node --check worker/src/index-phase20-change7.js
@@ -87,6 +101,7 @@ jobs:
           node tests/admin-import-manual-email-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/access-read-model-reconciliation-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-idempotency-verification.mjs
           node tests/parent-email-completed-status-verification.mjs
@@ -97,4 +112,6 @@ jobs:
           node tests/lesson-release-navigation-verification.mjs
           test -f worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml
+          grep -Fq 'binding = "READ_MODELS_KV"' worker/wrangler.toml
           grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          grep -Fq "./admin-lesson-release-import-manual-email-reconciled.js" worker/src/index-phase20-change17-parent-email.js
