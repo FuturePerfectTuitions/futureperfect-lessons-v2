@@ -1,30 +1,42 @@
-import currentWorker from './index-phase24-trial-vr.js';
-
-// Phase 25 compatibility bridge for the live Excel/D1 English batch naming.
+// Phase 25 compatibility bridge for live Excel/D1 batch naming.
 //
-// The legacy navigation core still recognises English batches in the historical
-// Y5E / Y5E11 shape. Live owner-supplied batch keys instead use the established
-// Y5FE / Y5OE and Y511FE / Y511OE shapes (with an optional numeric suffix).
-// Keep the exact live batch key authoritative and add only a request-local legacy
-// alias for the two narrow reads used by that older navigation layer. Nothing is
-// written back to KV or D1.
+// The legacy navigation core recognises historical aliases such as Y5E/Y5E11
+// and Y5M/Y5M11. Live owner-supplied batch keys use the established paired
+// face-to-face/online shapes such as Y5FE/Y5FM and Y511FE/Y511FM, optionally
+// with a numeric suffix. Preserve every exact live batch key and add only
+// request-local legacy aliases to the narrow reads consumed by the older
+// navigation layer. This module itself performs no KV or D1 mutations.
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
-function legacyEnglishBatchAlias(value) {
+function legacyLiveBatchAlias(value) {
   const code = clean(value).toUpperCase();
-  const match = code.match(/^Y([2-6])(11)?([FO])E(\d*)$/);
+  const match = code.match(/^Y([2-6])(11)?([FO])([EM])(\d*)$/);
   if (!match) return '';
 
   const year = Number(match[1]);
   const elevenPlus = match[2] === '11';
-  if (elevenPlus && year !== 4 && year !== 5) return '';
+  const subject = match[4];
 
-  return `Y${year}E${elevenPlus ? '11' : ''}`;
+  // English 11+ views exist only for Years 4 and 5. Maths uses the existing
+  // legacy navigation rules for whatever live 11+ year is supplied.
+  if (subject === 'E' && elevenPlus && year !== 4 && year !== 5) return '';
+
+  return `Y${year}${subject}${elevenPlus ? '11' : ''}`;
 }
 
-function withEnglishBatchAliases(user) {
+function legacyEnglishBatchAlias(value) {
+  const alias = legacyLiveBatchAlias(value);
+  return /E(?:11)?$/.test(alias) ? alias : '';
+}
+
+function legacyMathsBatchAlias(value) {
+  const alias = legacyLiveBatchAlias(value);
+  return /M(?:11)?$/.test(alias) ? alias : '';
+}
+
+function withLiveBatchAliases(user) {
   if (!user || typeof user !== 'object' || Array.isArray(user)) return user;
   if (!Array.isArray(user.batches)) return user;
 
@@ -33,7 +45,7 @@ function withEnglishBatchAliases(user) {
   const seen = new Set(original.map(value => value.toUpperCase()));
 
   for (const value of original) {
-    const alias = legacyEnglishBatchAlias(value);
+    const alias = legacyLiveBatchAlias(value);
     if (!alias || seen.has(alias)) continue;
     seen.add(alias);
     batches.push(alias);
@@ -46,7 +58,7 @@ function augmentSessionProfileRow(row) {
   if (!row?.user_json) return row;
   try {
     const user = JSON.parse(String(row.user_json));
-    const augmented = withEnglishBatchAliases(user);
+    const augmented = withLiveBatchAliases(user);
     if (augmented === user) return row;
     return { ...row, user_json: JSON.stringify(augmented) };
   } catch {
@@ -61,7 +73,7 @@ function augmentLegacyAccessRows(result) {
   const augmented = [];
   for (const row of rows) {
     augmented.push(row);
-    const alias = legacyEnglishBatchAlias(row?.source_batch_code);
+    const alias = legacyLiveBatchAlias(row?.source_batch_code);
     if (!alias || alias === clean(row?.source_batch_code).toUpperCase()) continue;
     augmented.push({ ...row, source_batch_code: alias });
   }
@@ -135,12 +147,12 @@ function compatStudentsKv(namespace) {
         const value = await target.get(key, options);
         if (value == null || !norm(key).startsWith('user:')) return value;
 
-        if (options?.type === 'json') return withEnglishBatchAliases(value);
+        if (options?.type === 'json') return withLiveBatchAliases(value);
         if (typeof value !== 'string') return value;
 
         try {
           const user = JSON.parse(value);
-          const augmented = withEnglishBatchAliases(user);
+          const augmented = withLiveBatchAliases(user);
           return augmented === user ? value : JSON.stringify(augmented);
         } catch {
           return value;
@@ -150,7 +162,7 @@ function compatStudentsKv(namespace) {
   });
 }
 
-function englishBatchCompatEnv(env) {
+function liveBatchCompatEnv(env) {
   if (!env) return env;
   const studentsKv = compatStudentsKv(env.STUDENTS_KV);
   const db = compatDb(env.DB);
@@ -174,22 +186,14 @@ function needsCompatibility(request) {
 }
 
 export {
+  legacyLiveBatchAlias,
   legacyEnglishBatchAlias,
-  withEnglishBatchAliases,
+  legacyMathsBatchAlias,
+  withLiveBatchAliases,
   augmentSessionProfileRow,
   augmentLegacyAccessRows,
   isLegacyAccessStateQuery,
   isSessionProfileLoadQuery,
-  englishBatchCompatEnv,
+  liveBatchCompatEnv,
   needsCompatibility
-};
-
-export default {
-  async fetch(request, env, ctx) {
-    return currentWorker.fetch(
-      request,
-      needsCompatibility(request) ? englishBatchCompatEnv(env) : env,
-      ctx
-    );
-  }
 };
