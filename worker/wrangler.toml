@@ -13,10 +13,19 @@ PARENT_EMAIL_TEST_TO = ""
 [[send_email]]
 name = "EMAIL"
 
+# Prepared access read models used by the rebuilt public Student Worker. The
+# lesson-release importer reconciles this projection immediately after canonical
+# D1 access writes so public Portal access cannot remain stale/preview-only.
+[[kv_namespaces]]
+binding = "READ_MODELS_KV"
+id = "77b35165c8694087bc1b0515c35a7e89"
+
 # Canonical Portal V2 production entrypoint.
 # Admin Tools wraps Phase 24 only to add authenticated operational routes such as
 # Replace Resource. Every non-admin-resource request is delegated unchanged to
-# Phase 24. Production KV, D1, R2 bindings and secrets remain Cloudflare-managed.
+# Phase 24. Production student/lesson KV, D1, R2 bindings and secrets remain
+# Cloudflare-managed; READ_MODELS_KV is deliberately pinned here because it is
+# the live prepared-access projection shared with the rebuilt Student Worker.
 #
 # Phase 24 wraps Phase 23 only to extend 11+ Trial access with the VR resources
 # belonging to the explicitly allowed Year 4/Year 5 English 11+ trial view.
@@ -53,9 +62,9 @@ name = "EMAIL"
 # rollback; student entitlements are not modified.
 #
 # Production KV, D1, R2 bindings and secrets remain Cloudflare-managed. The
-# outbound EMAIL binding is declared here because Wrangler treats it as a Worker
-# binding and production deploys must carry it explicitly. `keep_vars = true`
-# preserves existing dashboard vars/secrets; deployment scripts separately
-# preserve the production KV, D1, R2 and EMAIL bindings.
+# outbound EMAIL and READ_MODELS_KV bindings are declared here because Wrangler
+# treats them as Worker bindings and production deploys must carry them explicitly.
+# `keep_vars = true` preserves existing dashboard vars/secrets; deployment scripts
+# separately preserve/verify the production bindings.
 # Passwords, Answer Pack passwords, private student records, production allowlists
 # and Cloudflare credential values must never be committed to this repository.
