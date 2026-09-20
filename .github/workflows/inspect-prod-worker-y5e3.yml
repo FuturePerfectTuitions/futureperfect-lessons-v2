@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Read exact live non-secret access state
+      - name: Verify exact production DB binding and access rows
         shell: bash
         run: |
           set -euo pipefail
@@ -33,19 +33,25 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+
+          echo '=== Current Worker non-secret storage bindings ==='
+          jq -c '.result.bindings[] | select(.name=="DB" or .name=="STUDENTS_KV" or .name=="LESSONS_KV" or .name=="MATERIALS_R2") | {name,type,namespace_id,database_id,bucket_name}' /tmp/settings.json
+
+          DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB") | .id // .database_id // empty' /tmp/settings.json | head -1)"
           STUDENTS_NS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | .namespace_id // empty' /tmp/settings.json | head -1)"
+          test -n "$DB_ID"
           test -n "$STUDENTS_NS"
 
-          echo '=== Maahi non-secret access overrides ==='
+          echo '=== Maahi access overrides from the exact Worker KV binding ==='
           curl --fail --silent --show-error "$API/storage/kv/namespaces/$STUDENTS_NS/values/user:ma0605" -H "$AUTH" \
             | jq '{firstName, schoolYear, batches, blockedLessons, manualAccess, fullLibraries, historicalViews, upsellViews, vrEligible}'
 
-          echo '=== Kiaan non-secret access overrides ==='
-          curl --fail --silent --show-error "$API/storage/kv/namespaces/$STUDENTS_NS/values/user:kiaan1312" -H "$AUTH" \
-            | jq '{firstName, schoolYear, batches, blockedLessons, manualAccess, fullLibraries, historicalViews, upsellViews, vrEligible}'
-
-          echo '=== Current D1 English entitlement rows ==='
-          npx --yes wrangler@latest d1 execute fpt_portal_v2_db --remote --command "SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source_batch_code, source_lesson_date, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN ('ma0605','kiaan1312') AND lesson_id IN ('Y5E2','Y5E3','Y5E4') ORDER BY portal_user_id_norm, lesson_id;"
+          echo '=== Maahi/Kiaan English entitlements from the exact Worker DB binding ==='
+          curl --fail --silent --show-error \
+            "$API/d1/database/$DB_ID/query" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"sql":"SELECT portal_user_id_norm, lesson_id, core_access, vr_access, source_batch_code, source_lesson_date, last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm IN (\u0027ma0605\u0027,\u0027kiaan1312\u0027) AND lesson_id IN (\u0027Y5E2\u0027,\u0027Y5E3\u0027,\u0027Y5E4\u0027) ORDER BY portal_user_id_norm, lesson_id"}' \
+            | jq '{success,result:[.result[] | {results,success,meta:{changes:.meta.changes,rows_read:.meta.rows_read,rows_written:.meta.rows_written}}]}'
 
       - name: Confirm read-only completion
         run: echo 'Read-only inspection complete; no production mutation or deployment ran.'
