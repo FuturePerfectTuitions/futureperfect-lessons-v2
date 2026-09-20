@@ -1,0 +1,40 @@
+name: English batch-code compatibility verification
+
+on:
+  pull_request:
+    paths:
+      - 'worker/src/index-phase25-english-batch-code-compat.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'tests/english-batch-code-compat-verification.mjs'
+      - 'tests/lesson-release-navigation-verification.mjs'
+      - 'tests/subject-preview-enrolment-boundary-verification.mjs'
+      - '.github/workflows/english-batch-code-compat-verification.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'worker/src/index-phase25-english-batch-code-compat.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'tests/english-batch-code-compat-verification.mjs'
+      - '.github/workflows/english-batch-code-compat-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check compatibility layer
+        run: |
+          node --check worker/src/index-phase25-english-batch-code-compat.js
+          node --check worker/src/index-admin-tools.js
+      - name: Run focused navigation regressions
+        run: |
+          node --experimental-default-type=module tests/english-batch-code-compat-verification.mjs
+          node --experimental-default-type=module tests/lesson-release-navigation-verification.mjs
+          node --experimental-default-type=module tests/subject-preview-enrolment-boundary-verification.mjs
