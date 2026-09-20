@@ -1,0 +1,238 @@
+name: Lesson Progress CP9 read-only live regression
+
+on:
+  push:
+    branches:
+      - ops/lesson-progress-cp9-readonly-2026-09-20
+    paths:
+      - '.github/workflows/lesson-progress-cp9-readonly-live.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: 4.134.0
+      QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+      QUIZ_D1_NAME: fpt-11plus-practice
+      QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+      EXPECTED_QUIZ_VERSION: afedd4ad-c7ff-435a-aa24-eeadb0bc2efc
+      QUIZ_HEALTH_URL: https://quiz.futureperfect.education/health
+      QUIZ_PUBLIC_ROOT: https://quiz.futureperfect.education/
+      OWNER_REVIEW_URL: https://futureperfect-11plus-practice-owner-review.futureperfectlessons.workers.dev/review
+      PORTAL_ROOT: https://lessons.futureperfect.education/
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Guard credentials and retention-control installation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -f .github/workflows/cp1-quiz-retention-v1.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('.github/workflows/cp1-quiz-retention-v1.yml').read_text()
+          assert 'workflow_dispatch:' in text
+          assert '\n  schedule:' not in text
+          assert '\n  push:' not in text
+          print('CP1_RETENTION_CONTROL_STILL_MANUAL_ONLY_PASS')
+          PY
+          mkdir -p cp9-evidence
+
+      - name: Fresh production identity and non-exposure preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 list --json > /tmp/d1-list.json
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$QUIZ_WORKER" --json > /tmp/quiz-deployment.json
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${QUIZ_WORKER}/settings" > /tmp/quiz-settings.json
+
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          expected_id=os.environ['QUIZ_D1_ID']; expected_name=os.environ['QUIZ_D1_NAME']; expected_version=os.environ['EXPECTED_QUIZ_VERSION']
+          d1=json.loads(Path('/tmp/d1-list.json').read_text())
+          rows=d1 if isinstance(d1,list) else d1.get('result',d1.get('databases',[]))
+          matches=[r for r in rows if (r.get('uuid') or r.get('id'))==expected_id and r.get('name')==expected_name]
+          if len(matches)!=1: raise SystemExit(f'D1_IDENTITY_DRIFT matches={len(matches)}')
+          dep=json.loads(Path('/tmp/quiz-deployment.json').read_text())
+          versions=dep.get('versions',dep.get('result',{}).get('versions',[]))
+          live=[v for v in versions if float(v.get('percentage',0))==100.0]
+          current=(live[0].get('version_id') or live[0].get('id')) if live else None
+          if current!=expected_version: raise SystemExit(f'QUIZ_VERSION_DRIFT expected={expected_version} actual={current}')
+          settings=json.loads(Path('/tmp/quiz-settings.json').read_text()); result=settings.get('result',settings)
+          bindings=result.get('bindings',result.get('resources',{}).get('bindings',[]))
+          db=[b for b in bindings if b.get('name')=='DB']
+          if len(db)!=1: raise SystemExit(f'DB_BINDING_COUNT_DRIFT count={len(db)}')
+          bound=db[0].get('database_id') or db[0].get('id')
+          if bound!=expected_id: raise SystemExit(f'DB_BINDING_DRIFT expected={expected_id} actual={bound}')
+          evidence={'d1':{'name':expected_name,'uuid':expected_id},'quizWorker':os.environ['QUIZ_WORKER'],'quizVersion100pct':current,'dbBindingUuid':bound}
+          Path('cp9-evidence/identity.json').write_text(json.dumps(evidence,indent=2))
+          print('CP9_IDENTITY_PASS')
+          PY
+
+          health_code="$(curl -sS -o /tmp/health.json -w '%{http_code}' "$QUIZ_HEALTH_URL")"
+          owner_code="$(curl -sS -o /tmp/owner.html -w '%{http_code}' "$OWNER_REVIEW_URL")"
+          public_code="$(curl -sS -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' "$QUIZ_PUBLIC_ROOT")"
+          test "$health_code" = 200
+          test "$owner_code" = 200
+
+          PUBLIC_CODE="$public_code" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          headers=Path('/tmp/root.headers').read_text(errors='replace').splitlines()
+          location=next((x.split(':',1)[1].strip() for x in headers if x.lower().startswith('location:')),'')
+          cookie=any(x.lower().startswith('set-cookie:') for x in headers)
+          code=int(os.environ['PUBLIC_CODE'])
+          expected='https://lessons.futureperfect.education/'
+          ok=(code==404 and not cookie) or (code==303 and location.rstrip('/')==expected.rstrip('/') and not cookie)
+          data={'http':code,'location':location,'setCookiePresent':cookie,'nonExposing':ok}
+          Path('cp9-evidence/public-root.json').write_text(json.dumps(data,indent=2))
+          if not ok: raise SystemExit(f'PUBLIC_ROOT_EXPOSURE_DRIFT {data}')
+          print('CP9_PUBLIC_ROOT_NONEXPOSING_PASS')
+          PY
+
+          curl -fsS "$PORTAL_ROOT" -o /tmp/portal.html
+          python3 - <<'PY'
+          import json, os, re, subprocess, urllib.parse
+          from pathlib import Path
+          root=os.environ['PORTAL_ROOT']; html=Path('/tmp/portal.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I)
+          if not refs: raise SystemExit('NO_PORTAL_JS_ASSET_FOUND')
+          text=''
+          for i,ref in enumerate(refs):
+              path=f'/tmp/portal-{i}.js'
+              subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',path],check=True)
+              text+=Path(path).read_text(errors='replace')
+          markers=['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch']
+          found=[m for m in markers if m in text]
+          result={'portalScriptCount':len(refs),'quizSurfaceMarkersFound':found,'withdrawn':not found}
+          Path('cp9-evidence/portal-withdrawal.json').write_text(json.dumps(result,indent=2))
+          if found: raise SystemExit('STUDENT_PORTAL_QUIZ_SURFACE_DRIFT '+repr(found))
+          print('CP9_STUDENT_PORTAL_WITHDRAWAL_PASS')
+          PY
+
+      - name: Exact production D1 read-only invariant checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${QUIZ_D1_ID}/query"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          python3 - <<'PY'
+          import json
+          statements={
+            'live_boundary': "SELECT COUNT(*) AS live_questions, COUNT(DISTINCT family_id) AS live_families FROM question_instance WHERE UPPER(lifecycle_status)='LIVE'",
+            'null_selected_non_timeout': "SELECT COUNT(*) AS attempt_rows, COUNT(DISTINCT a.session_id) AS affected_sessions FROM attempt a LEFT JOIN quiz_session_runtime rt ON rt.session_id=a.session_id WHERE a.selected_option IS NULL AND UPPER(COALESCE(rt.submission_reason,'')) <> 'TIMEOUT'",
+            'attempts_on_abandoned': "SELECT COUNT(*) AS attempt_rows, COUNT(DISTINCT a.session_id) AS affected_sessions FROM attempt a JOIN quiz_session_runtime rt ON rt.session_id=a.session_id WHERE UPPER(COALESCE(rt.submission_reason,''))='ABANDONED'",
+            'history_volume': "WITH per_user AS (SELECT portal_user_id,COUNT(*) AS attempts,COUNT(DISTINCT session_id) AS sessions,MIN(answered_at) AS first_attempt_at,MAX(answered_at) AS last_attempt_at FROM attempt GROUP BY portal_user_id) SELECT COUNT(*) AS students_with_attempts,COALESCE(SUM(attempts),0) AS total_attempts,COALESCE(SUM(sessions),0) AS summed_distinct_sessions_per_student,MIN(first_attempt_at) AS earliest_attempt_at,MAX(last_attempt_at) AS latest_attempt_at FROM per_user",
+            'foreign_key_check': "PRAGMA foreign_key_check",
+          }
+          forbidden=('INSERT','UPDATE','DELETE','REPLACE','CREATE','ALTER','DROP','VACUUM','REINDEX','ATTACH','DETACH','BEGIN','COMMIT','ROLLBACK')
+          for name,sql in statements.items():
+              starter=sql.strip().split(None,1)[0].upper()
+              if starter not in ('SELECT','WITH','PRAGMA'): raise SystemExit(f'NON_READONLY_STARTER {name} {starter}')
+              upper=' '+sql.upper()+' '
+              if any(f' {x} ' in upper for x in forbidden): raise SystemExit(f'FORBIDDEN_TOKEN {name}')
+          open('/tmp/cp9-statements.json','w').write(json.dumps(statements))
+          print('CP9_READONLY_SQL_GUARD_PASS')
+          PY
+
+          : > /tmp/cp9-results.jsonl
+          jq -r 'to_entries[] | @base64' /tmp/cp9-statements.json | while read -r item; do
+            decoded="$(printf '%s' "$item" | base64 -d)"
+            name="$(printf '%s' "$decoded" | jq -r '.key')"
+            sql="$(printf '%s' "$decoded" | jq -r '.value')"
+            payload="$(jq -n --arg sql "$sql" '{sql:$sql}')"
+            curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' --data "$payload" "$API" > "/tmp/${name}.json"
+            NAME="$name" FILE="/tmp/${name}.json" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          name=os.environ['NAME']; j=json.loads(Path(os.environ['FILE']).read_text())
+          if j.get('success') is not True: raise SystemExit(f'{name}: API failure')
+          results=j.get('result',[])
+          if not results or any(r.get('success') is not True for r in results): raise SystemExit(f'{name}: D1 statement failure')
+          for r in results:
+              meta=r.get('meta') or {}
+              if meta.get('changed_db') is True or int(meta.get('changes') or 0)!=0 or int(meta.get('rows_written') or 0)!=0:
+                  raise SystemExit(f'{name}: read-only invariant failed: {meta}')
+          safe={'name':name,'rows':[row for r in results for row in (r.get('results') or [])]}
+          with Path('/tmp/cp9-results.jsonl').open('a') as f: f.write(json.dumps(safe,separators=(',',':'))+'\n')
+          PY
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data={}
+          for line in Path('/tmp/cp9-results.jsonl').read_text().splitlines():
+              x=json.loads(line); data[x['name']]=x['rows']
+          live=(data['live_boundary'] or [{}])[0]
+          if int(live.get('live_questions',-1))!=714 or int(live.get('live_families',-1))!=91:
+              raise SystemExit(f'LIVE_BOUNDARY_DRIFT {live}')
+          nulls=(data['null_selected_non_timeout'] or [{}])[0]
+          if int(nulls.get('attempt_rows',-1))!=0 or int(nulls.get('affected_sessions',-1))!=0:
+              raise SystemExit(f'NULL_SELECTED_ANOMALY {nulls}')
+          abandoned=(data['attempts_on_abandoned'] or [{}])[0]
+          if int(abandoned.get('attempt_rows',-1))!=0 or int(abandoned.get('affected_sessions',-1))!=0:
+              raise SystemExit(f'ABANDONED_ATTEMPT_ANOMALY {abandoned}')
+          if data['foreign_key_check']:
+              raise SystemExit(f'FOREIGN_KEY_VIOLATIONS count={len(data["foreign_key_check"])}')
+          summary={
+              'readOnlyInvariantPassed':True,
+              'liveBoundary':live,
+              'nullSelectedNonTimeout':nulls,
+              'attemptsOnAbandoned':abandoned,
+              'historyVolume':(data['history_volume'] or [{}])[0],
+              'foreignKeyViolations':0,
+          }
+          Path('cp9-evidence/d1-invariants.json').write_text(json.dumps(summary,indent=2))
+          print('CP9_D1_INVARIANTS_PASS')
+          PY
+
+      - name: Consolidate evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          def load(name): return json.loads(Path('cp9-evidence/'+name).read_text())
+          out={
+            'checkpoint':'CP9',
+            'status':'PASS',
+            'productionMutation':False,
+            'identity':load('identity.json'),
+            'publicRoot':load('public-root.json'),
+            'portalWithdrawal':load('portal-withdrawal.json'),
+            'd1Invariants':load('d1-invariants.json'),
+            'expectedFeatureBoundary':{
+              'studentPortalPromotionAuthorised':False,
+              'productionD1MutationAuthorised':False,
+              'questionBankLiveCountExpected':714,
+            },
+            'github':{'repository':os.environ.get('GITHUB_REPOSITORY'),'runId':os.environ.get('GITHUB_RUN_ID'),'sha':os.environ.get('GITHUB_SHA')},
+          }
+          Path('cp9-evidence/CP9_CURRENT_LIVE_READONLY_CLOSEOUT.json').write_text(json.dumps(out,indent=2))
+          PY
+          echo CP9_READONLY_LIVE_PASS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lesson-progress-cp9-readonly-live
+          path: cp9-evidence/
+          retention-days: 365
