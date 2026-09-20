@@ -1,4 +1,4 @@
-import currentWorker from './index-phase24-trial-vr.js';
+import currentWorker from './index-phase25-english-batch-code-compat.js';
 import { handleAdminResourceRequest } from './admin-resource-replace.js';
 
 export default {
