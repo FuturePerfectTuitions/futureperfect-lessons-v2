@@ -1,6 +1,6 @@
 import currentWorker from './index-phase24-trial-vr.js';
 import {
-  englishBatchCompatEnv,
+  liveBatchCompatEnv,
   needsCompatibility
 } from './index-phase25-english-batch-code-compat.js';
 import { handleAdminResourceRequest } from './admin-resource-replace.js';
@@ -13,7 +13,7 @@ export default {
     }
     return currentWorker.fetch(
       request,
-      needsCompatibility(request) ? englishBatchCompatEnv(env) : env,
+      needsCompatibility(request) ? liveBatchCompatEnv(env) : env,
       ctx
     );
   }
