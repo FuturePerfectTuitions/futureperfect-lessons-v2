@@ -5,6 +5,7 @@ set -euo pipefail
 : "${WORKER_NAME:=fpt-portal-v2-worker}"
 : "${WRANGLER_VERSION:=4.125.0}"
 : "${WORKER_CONFIG_FILE:=worker/wrangler.toml}"
+: "${READ_MODELS_KV_ID:=77b35165c8694087bc1b0515c35a7e89}"
 
 CONFIG_DIR="$(dirname "$WORKER_CONFIG_FILE")"
 CONFIG_ENTRYPOINT="$(sed -nE 's/^main[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$WORKER_CONFIG_FILE" | head -n 1)"
@@ -40,8 +41,25 @@ STUDENTS="$(field STUDENTS_KV kv_namespace namespace_id)"
 LESSONS="$(field LESSONS_KV kv_namespace namespace_id)"
 DBID="$(field DB d1 id)"
 R2="$(field MATERIALS_R2 r2_bucket bucket_name)"
+CURRENT_READ_MODELS="$(field READ_MODELS_KV kv_namespace namespace_id)"
+if [ -n "$CURRENT_READ_MODELS" ] && [ "$CURRENT_READ_MODELS" != "$READ_MODELS_KV_ID" ]; then
+  echo "READ_MODELS_KV binding drift: expected $READ_MODELS_KV_ID, found $CURRENT_READ_MODELS" >&2
+  exit 1
+fi
+READ_MODELS="$READ_MODELS_KV_ID"
 PARENT_EMAIL_TEST_TO="$(plain PARENT_EMAIL_TEST_TO)"
-for value in "$STUDENTS" "$LESSONS" "$DBID" "$R2"; do test -n "$value"; done
+for value in "$STUDENTS" "$LESSONS" "$DBID" "$R2" "$READ_MODELS"; do test -n "$value"; done
+
+# The live rebuilt Student Worker derives opaque student scopes from the same salt
+# stored in the prepared-read-model namespace. Verify that exact namespace before
+# deploying any importer capable of writing its access projection.
+curl --fail --silent --show-error \
+  "$API/storage/kv/namespaces/${READ_MODELS}/values/meta%3Ascope-salt" \
+  -H "$AUTH" -o /tmp/fpt-read-model-scope-salt
+SCOPE_SALT="$(tr -d '\r\n' < /tmp/fpt-read-model-scope-salt)"
+[[ "$SCOPE_SALT" =~ ^[0-9A-Fa-f]{64}$ ]]
+rm -f /tmp/fpt-read-model-scope-salt
+
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-secrets-before.json >/dev/null 2>&1 || true
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings.json >/tmp/fpt-secrets-before.json
 {
@@ -54,13 +72,13 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
   printf 'PROD_LOGIN_ALLOWLIST = "%s"\n' "$(plain PROD_LOGIN_ALLOWLIST)"
   printf 'STUDENT_LOGIN_ENABLED = "%s"\n' "$(plain STUDENT_LOGIN_ENABLED)"
   printf 'PARENT_EMAIL_TEST_TO = "%s"\n' "$PARENT_EMAIL_TEST_TO"
-  # Email Sending is a Worker binding, not a plain var. Wrangler deploys replace
-  # non-secret bindings from the generated config, so every production deploy
-  # must explicitly carry EMAIL forward. Omitting this binding causes the admin
-  # importer to report EMAIL_SENDING_NOT_CONFIGURED even though email code exists.
+  # Email Sending and KV namespaces are Worker bindings, not plain vars. Wrangler
+  # deploys replace non-secret bindings from the generated config, so production
+  # deploys must explicitly carry EMAIL and READ_MODELS_KV forward.
   printf '\n[[send_email]]\nname = "EMAIL"\n'
   printf '\n[[kv_namespaces]]\nbinding = "STUDENTS_KV"\nid = "%s"\n' "$STUDENTS"
   printf '\n[[kv_namespaces]]\nbinding = "LESSONS_KV"\nid = "%s"\n' "$LESSONS"
+  printf '\n[[kv_namespaces]]\nbinding = "READ_MODELS_KV"\nid = "%s"\n' "$READ_MODELS"
   printf '\n[[r2_buckets]]\nbinding = "MATERIALS_R2"\nbucket_name = "%s"\n' "$R2"
   printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = "%s"\n' "$DBID"
 } > worker/wrangler.runtime-preserve.toml
@@ -68,10 +86,12 @@ jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /
 grep -Fq "main = \"$WORKER_ENTRYPOINT\"" worker/wrangler.runtime-preserve.toml
 grep -Fq '[[send_email]]' worker/wrangler.runtime-preserve.toml
 grep -Fq 'name = "EMAIL"' worker/wrangler.runtime-preserve.toml
+grep -Fq 'binding = "READ_MODELS_KV"' worker/wrangler.runtime-preserve.toml
 npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-preserve.toml --keep-vars --message "${DEPLOY_MESSAGE:-Portal V2 production update}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings-after.json
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-after.json >/tmp/fpt-secrets-after.json
 cmp -s /tmp/fpt-secrets-before.json /tmp/fpt-secrets-after.json
 jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-worker-settings-after.json >/dev/null
+jq -e --arg expected "$READ_MODELS" '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace" and .namespace_id==$expected)' /tmp/fpt-worker-settings-after.json >/dev/null
 jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/fpt-worker-settings-after.json >/dev/null
-echo 'PRODUCTION_BINDINGS_PRESERVED_WITH_EMAIL'
+echo 'PRODUCTION_BINDINGS_PRESERVED_WITH_EMAIL_AND_READ_MODELS'
