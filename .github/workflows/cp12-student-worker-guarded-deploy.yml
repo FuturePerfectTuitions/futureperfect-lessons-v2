@@ -1,0 +1,151 @@
+name: CP12 Student Worker guarded deploy
+on:
+  push:
+    branches: [feature/cp12-l2-l3-promotion-2026-09-21]
+    paths: ['.github/workflows/cp12-student-worker-guarded-deploy.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cp12-student-worker-promotion-2026-09-21
+  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BRIDGE_WORKER: fpt-portal-v2-worker
+  EXPECTED_STUDENT_VERSION: f26167b1-073c-4015-912a-288a3d20e0bb
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
+  PROD_HOST: lessons.futureperfect.education
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  WRANGLER_VERSION: 4.134.0
+jobs:
+  deploy-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Exact source and regression gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node tests/cp12-l2-l3-quiz-runtime.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuilt-trial-manager-verification.mjs
+          grep -Fq "const POLICY_VERSION = 'quiz-release-context-v2.0'" rebuild/student/src/lib/quiz-runtime.mjs
+          grep -Fq "const RELEASE_SOURCE = 'portal-live-maths11plus-release-v2'" rebuild/student/src/lib/quiz-runtime.mjs
+      - name: Fresh production preflight and generated config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const student=process.env.STUDENT_WORKER,browser=process.env.BROWSER_WORKER,bridge=process.env.BRIDGE_WORKER,host=process.env.PROD_HOST,d1Expected=process.env.PORTAL_D1_ID;
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`,'content-type':'application/json'};
+          async function cf(path,init={}){const r=await fetch(base+path,{...init,headers:{...headers,...(init.headers||{})}});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          async function d1Count(){const result=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(d1Expected)}/query`,{method:'POST',body:JSON.stringify({sql:'SELECT COUNT(*) AS c FROM quiz_launch_codes'})});const block=Array.isArray(result)?result[0]:result;const c=Number((block?.results||[])[0]?.c);if(!Number.isFinite(c))throw new Error('quiz_launch_codes count unresolved');return c;}
+          const studentVersion=await active(student),browserVersion=await active(browser),bridgeVersion=await active(bridge);
+          if(studentVersion!==process.env.EXPECTED_STUDENT_VERSION)throw new Error(`Student version drift ${studentVersion}`);
+          if(browserVersion!==process.env.EXPECTED_BROWSER_VERSION)throw new Error(`Browser version drift ${browserVersion}`);
+          if(bridgeVersion!==process.env.EXPECTED_BRIDGE_VERSION)throw new Error(`Bridge version drift ${bridgeVersion}`);
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone)throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);const hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hostRoutes.length!==1||String(hostRoutes[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hostRoutes[0].script!==browser)throw new Error(`Public route drift ${JSON.stringify(hostRoutes)}`);
+          const bs=await settings(browser),services=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].service!==student)throw new Error(`Browser service drift ${JSON.stringify(services)}`);
+          const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const s=await settings(student),unsupported=(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))&&!supported.has(b.type));
+          if(unsupported.length)throw new Error(`Unsupported Student bindings ${JSON.stringify(unsupported)}`);
+          const snap={oldVersion:studentVersion,nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort(),browserVersion,bridgeVersion,route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},service:{name:services[0].name,service:services[0].service},launchRowsBefore:await d1Count()};
+          for(const n of ['READ_MODELS_KV','STUDENTS_KV','DB','MATERIALS_R2'])if(!snap.nonSecret.some(b=>b.name===n))throw new Error(`Student missing ${n}`);
+          for(const n of ['AUTH_SIGNING_SECRET','ACCESS_SCOPE_SECRET'])if(!snap.secretNames.includes(n))throw new Error(`Student missing ${n}`);
+          const d1=snap.nonSecret.find(b=>b.name==='DB'&&b.type==='d1');if(!d1||d1.id!==d1Expected)throw new Error(`Portal D1 drift ${JSON.stringify(d1)}`);
+          if(snap.launchRowsBefore!==8)throw new Error(`Unexpected launch rows ${snap.launchRowsBefore}`);
+          fs.writeFileSync('/tmp/cp12-student-before.json',JSON.stringify(snap,null,2),{mode:0o600});
+          function q(v){return JSON.stringify(String(v??''));}
+          let toml=`name = ${q(student)}\nmain = \"src/index.js\"\ncompatibility_date = \"2026-08-20\"\nkeep_vars = true\nworkers_dev = true\n`;
+          const plains=snap.nonSecret.filter(b=>b.type==='plain_text');if(plains.length){toml+='\n[vars]\n';for(const b of plains)toml+=`${b.name} = ${q(b.text)}\n`;}
+          for(const b of snap.nonSecret.filter(b=>b.type==='kv_namespace'))toml+=`\n[[kv_namespaces]]\nbinding = ${q(b.name)}\nid = ${q(b.namespace_id)}\n`;
+          for(const b of snap.nonSecret.filter(b=>b.type==='r2_bucket'))toml+=`\n[[r2_buckets]]\nbinding = ${q(b.name)}\nbucket_name = ${q(b.bucket_name)}\n`;
+          for(const b of snap.nonSecret.filter(b=>b.type==='d1')){const db=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(b.id)}`);toml+=`\n[[d1_databases]]\nbinding = ${q(b.name)}\ndatabase_name = ${q(db.name)}\ndatabase_id = ${q(b.id)}\n`;}
+          for(const b of snap.nonSecret.filter(b=>b.type==='send_email'))toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
+          fs.writeFileSync('rebuild/student/wrangler.cp12-prod.toml',toml);
+          console.log(JSON.stringify({marker:'CP12_STUDENT_PREFLIGHT_PASS',studentVersion,browserVersion,bridgeVersion,launchRows:snap.launchRowsBefore},null,2));
+          NODE
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/cp12-student-dry --config rebuild/student/wrangler.cp12-prod.toml >/tmp/cp12-dry.log
+          grep -R -Fq 'portal-live-maths11plus-release-v2' /tmp/cp12-student-dry
+          grep -R -Fq 'quiz-release-context-v2.0' /tmp/cp12-student-dry
+          grep -R -Fq '/api/v2/student/quiz/eligibility' /tmp/cp12-student-dry
+          grep -R -Fq '/api/v2/student/quiz/launch' /tmp/cp12-student-dry
+      - name: Deploy Student Worker with automatic rollback and verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD="$(jq -r .oldVersion /tmp/cp12-student-before.json)"
+          DEPLOYED=0
+          rollback(){ rc=$?; set +e; if [ "$DEPLOYED" = 1 ]; then echo "ROLLBACK_STUDENT_TO=$OLD" >&2; npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD@100%" --name "$STUDENT_WORKER" --message 'Rollback CP12 L2 L3 Student Quiz backend' -y || true; sleep 4; fi; exit "$rc"; }
+          trap rollback ERR
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config rebuild/student/wrangler.cp12-prod.toml --keep-vars --message 'CP12: signed-session L2 L3 Quiz eligibility and launch'
+          DEPLOYED=1
+          sleep 5
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN,student=process.env.STUDENT_WORKER,browser=process.env.BROWSER_WORKER,bridge=process.env.BRIDGE_WORKER,host=process.env.PROD_HOST,d1Expected=process.env.PORTAL_D1_ID;
+          const base='https://api.cloudflare.com/client/v4',headers={Authorization:`Bearer ${token}`,'content-type':'application/json'};
+          async function cf(path,init={}){const r=await fetch(base+path,{...init,headers:{...headers,...(init.headers||{})}});const j=await r.json();if(!r.ok||j.success!==true)throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);return j.result;}
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');}
+          async function d1Count(){const result=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(d1Expected)}/query`,{method:'POST',body:JSON.stringify({sql:'SELECT COUNT(*) AS c FROM quiz_launch_codes'})});const block=Array.isArray(result)?result[0]:result;return Number((block?.results||[])[0]?.c);}
+          const normalize=b=>({name:b.name,type:b.type,...(b.type==='plain_text'?{text:b.text}:{}),...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),...(b.type==='d1'?{id:b.id||b.database_id}:{}),...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),...(b.type==='send_email'?{}:{})});
+          const before=JSON.parse(fs.readFileSync('/tmp/cp12-student-before.json','utf8')),s=await settings(student);
+          const now={nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()};
+          if(JSON.stringify(now)!==JSON.stringify({nonSecret:before.nonSecret,secretNames:before.secretNames}))throw new Error('Student bindings changed');
+          const newVersion=await active(student);if(!newVersion||newVersion===before.oldVersion)throw new Error('Student version did not advance');
+          if(await active(browser)!==before.browserVersion)throw new Error('Browser version changed');
+          if(await active(bridge)!==before.bridgeVersion)throw new Error('Bridge version changed');
+          const bs=await settings(browser),services=(bs.bindings||[]).filter(b=>b.type==='service');if(services.length!==1||services[0].service!==student)throw new Error('Browser service binding changed');
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`),zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0],routes=await cf(`/zones/${zone.id}/workers/routes`),hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hostRoutes.length!==1||hostRoutes[0].pattern!==before.route.pattern||hostRoutes[0].script!==before.route.script)throw new Error('Public route changed');
+          const rows=await d1Count();if(rows!==before.launchRowsBefore)throw new Error(`Deploy changed quiz_launch_codes ${before.launchRowsBefore}->${rows}`);
+          fs.writeFileSync('/tmp/cp12-student-result.json',JSON.stringify({newVersion,rows,browserVersion:before.browserVersion,bridgeVersion:before.bridgeVersion},null,2));
+          console.log(JSON.stringify({marker:'CP12_STUDENT_DEPLOY_TOPOLOGY_PASS',newVersion,rows},null,2));
+          NODE
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$API/workers/scripts/${STUDENT_WORKER}" -o /tmp/student-script.bin
+          grep -aFq 'portal-live-maths11plus-release-v2' /tmp/student-script.bin
+          grep -aFq 'quiz-release-context-v2.0' /tmp/student-script.bin
+          code="$(curl -sS -o /tmp/e.json -w '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/eligibility')"; test "$code" = 401; jq -e '.error=="AUTH_REQUIRED" and .eligible==false' /tmp/e.json >/dev/null
+          code="$(curl -sS -o /tmp/l.json -w '%{http_code}' -X POST 'https://lessons.futureperfect.education/api/v2/student/quiz/launch' -H 'Origin: https://lessons.futureperfect.education' -H 'Content-Type: application/json' --data '{}')"; test "$code" = 401; jq -e '.error=="AUTH_REQUIRED"' /tmp/l.json >/dev/null
+          code="$(curl -sS -o /tmp/x.json -w '%{http_code}' -X POST 'https://lessons.futureperfect.education/api/v2/student/quiz/launch' -H 'Origin: https://evil.example' -H 'Content-Type: application/json' --data '{}')"; test "$code" = 403; jq -e '.error=="FORBIDDEN_ORIGIN"' /tmp/x.json >/dev/null
+          curl -fsS 'https://lessons.futureperfect.education/' -o /tmp/portal.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,subprocess,urllib.parse
+          root='https://lessons.futureperfect.education/'; html=Path('/tmp/portal.html').read_text(errors='replace'); refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I); text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/ui{i}.js';subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',p],check=True);text+=Path(p).read_text(errors='replace')
+          found=[m for m in ['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'] if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PREMATURELY_EXPOSED '+repr(found))
+          print('PORTAL_WITHDRAWAL_AFTER_STUDENT_BACKEND_PASS')
+          PY
+          trap - ERR
+          echo CP12_STUDENT_WORKER_GUARDED_DEPLOY_PASS
