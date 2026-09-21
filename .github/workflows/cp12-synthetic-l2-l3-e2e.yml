@@ -94,32 +94,31 @@ jobs:
               raise SystemExit(f'expected one canonicalLessonCodes function, found {s.count(old_func)}')
           s=s.replace(old_func,new_func)
 
-          old_personas='''  const nonce = crypto.randomBytes(4).toString('hex');
-          state.personas = [
-            { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 2, 2) },
-            { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 3, 2) }
-          ];'''.replace('          ','')
-          new_personas='''  const nonce = crypto.randomBytes(4).toString('hex');
-          const l2Fixture = canonicalLessonFixture(global.payload, 2, 2);
-          const l3Fixture = canonicalLessonFixture(global.payload, 3, 2);
-          state.personas = [
-            { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: l2Fixture.lessonIds, expectedReleaseCodes: l2Fixture.releaseCodes },
-            { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: l3Fixture.lessonIds, expectedReleaseCodes: l3Fixture.releaseCodes }
-          ];'''.replace('          ','')
-          if s.count(old_personas)!=1:
-              raise SystemExit(f'expected one persona fixture block, found {s.count(old_personas)}')
-          s=s.replace(old_personas,new_personas)
+          nonce_line="  const nonce = crypto.randomBytes(4).toString('hex');"
+          nonce_replacement=nonce_line+"\n  const l2Fixture = canonicalLessonFixture(global.payload, 2, 2);\n  const l3Fixture = canonicalLessonFixture(global.payload, 3, 2);"
+          if s.count(nonce_line)!=1:
+              raise SystemExit(f'expected one fixture nonce line, found {s.count(nonce_line)}')
+          s=s.replace(nonce_line,nonce_replacement,1)
+
+          old_l2_persona="    { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 2, 2) },"
+          new_l2_persona="    { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: l2Fixture.lessonIds, expectedReleaseCodes: l2Fixture.releaseCodes },"
+          old_l3_persona="    { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 3, 2) }"
+          new_l3_persona="    { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: l3Fixture.lessonIds, expectedReleaseCodes: l3Fixture.releaseCodes }"
+          for old,new,label in [(old_l2_persona,new_l2_persona,'L2 persona fixture'),(old_l3_persona,new_l3_persona,'L3 persona fixture')]:
+              if s.count(old)!=1:
+                  raise SystemExit(f'expected one {label}, found {s.count(old)}')
+              s=s.replace(old,new,1)
 
           old_l2="assert(sameSet(context?.releasedL2LessonCodes || [], persona.lessonCodes), 'L2 release list is not exactly the explicit L2 entitlements');"
           new_l2="const actual = context?.releasedL2LessonCodes || []; if (!sameSet(actual, persona.expectedReleaseCodes)) console.log(`CP12_L2_RELEASE_CONTEXT_MISMATCH expected=${JSON.stringify(persona.expectedReleaseCodes)} actual=${JSON.stringify(actual)}`); assert(sameSet(actual, persona.expectedReleaseCodes), 'L2 release list is not exactly the explicit L2 entitlement release codes');"
           if s.count(old_l2)!=1:
               raise SystemExit(f'expected one L2 release assertion, found {s.count(old_l2)}')
-          s=s.replace(old_l2,new_l2)
+          s=s.replace(old_l2,new_l2,1)
           old_l3="assert(sameSet(context?.releasedL3LessonCodes || [], persona.lessonCodes), 'L3 release list is not exactly the explicit L3 entitlements');"
           new_l3="const actual = context?.releasedL3LessonCodes || []; if (!sameSet(actual, persona.expectedReleaseCodes)) console.log(`CP12_L3_RELEASE_CONTEXT_MISMATCH expected=${JSON.stringify(persona.expectedReleaseCodes)} actual=${JSON.stringify(actual)}`); assert(sameSet(actual, persona.expectedReleaseCodes), 'L3 release list is not exactly the explicit L3 entitlement release codes');"
           if s.count(old_l3)!=1:
               raise SystemExit(f'expected one L3 release assertion, found {s.count(old_l3)}')
-          s=s.replace(old_l3,new_l3)
+          s=s.replace(old_l3,new_l3,1)
 
           old='''async function portalSession(persona) {
             const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
@@ -162,6 +161,7 @@ jobs:
           grep -Fq "from '../rebuild/student/src/lib/access-scope.mjs'" scripts/cp12-e2e-synthetic-fixture.mjs
           ! grep -Fq "from '../rebuild/adminops/src/lib/compatibility.mjs'" scripts/cp12-e2e-synthetic-fixture.mjs
           grep -Fq 'expectedReleaseCodes' scripts/cp12-e2e-synthetic-fixture.mjs
+          ! grep -Fq 'canonicalLessonCodes(global.payload' scripts/cp12-e2e-synthetic-fixture.mjs
           node --check scripts/cp12-e2e-synthetic-fixture.mjs
           sha256sum scripts/cp12-e2e-synthetic-fixture.mjs
           echo CP12_E2E_EXECUTABLE_FROZEN_PASS
