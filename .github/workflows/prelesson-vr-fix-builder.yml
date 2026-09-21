@@ -1,0 +1,133 @@
+name: PreLesson VR fix builder
+
+on:
+  push:
+    branches: [fix/prelesson-vr-entitlement-20260921]
+    paths:
+      - '.github/workflows/prelesson-vr-fix-builder.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/prelesson-vr-entitlement-20260921
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact guarded patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          access = 'worker/src/access-read-model-sync.js'
+          replace_once(access,
+          """function preLessonOnlyIds(rows) {\n  return [...new Set((Array.isArray(rows) ? rows : [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();\n}\n\nfunction manualCoreLessonIds(user) { return manualIds(user, 'core'); }""",
+          """function preLessonOnlyIds(rows) {\n  return [...new Set((Array.isArray(rows) ? rows : [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();\n}\n\nfunction preLessonVrLessonIds(rows) {\n  return [...new Set((Array.isArray(rows) ? rows : [])\n    .filter(row => Number(row?.vr_access ?? row?.vrAccess ?? 0) === 1)\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();\n}\n\nfunction manualCoreLessonIds(user) { return manualIds(user, 'core'); }""")
+
+          replace_once(access,
+          "function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds, preLessonIds, temporaryLessonAccess, blockedIds }) {",
+          "function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds, preLessonIds, preLessonVrIds, temporaryLessonAccess, blockedIds }) {")
+
+          replace_once(access,
+          """  const manualVr = new Set(manualVrIds);\n  const preOnly = new Set(preLessonIds);\n  const blocked = new Set(blockedIds);""",
+          """  const manualVr = new Set(manualVrIds);\n  const preOnly = new Set(preLessonIds);\n  const preVr = new Set(preLessonVrIds);\n  const blocked = new Set(blockedIds);""")
+
+          replace_once(access,
+          "    ...earned, ...earnedVr, ...manualCore, ...manualVr, ...preOnly, ...temporary.keys(), ...blocked",
+          "    ...earned, ...earnedVr, ...manualCore, ...manualVr, ...preOnly, ...preVr, ...temporary.keys(), ...blocked")
+
+          replace_once(access,
+          "    const vr = earnedVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);",
+          "    const vr = earnedVr.has(lessonId) || preVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);")
+
+          replace_once(access,
+          """  const manualVrIds = manualVrLessonIds(user);\n  const preLessonIds = preLessonOnlyIds(input?.onlinePreLessonEntitlements);\n  const blockedIds = blockedLessonIds(user);""",
+          """  const manualVrIds = manualVrLessonIds(user);\n  const preLessonIds = preLessonOnlyIds(input?.onlinePreLessonEntitlements);\n  const preLessonVrIds = preLessonVrLessonIds(input?.onlinePreLessonEntitlements);\n  const blockedIds = blockedLessonIds(user);""")
+
+          replace_once(access,
+          """    catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds,\n    preLessonIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds""",
+          """    catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds,\n    preLessonIds, preLessonVrIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds""")
+
+          replace_once(access,
+          """  const pre = new Set((input?.onlinePreLessonEntitlements || [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));\n  const access = compiled?.snapshot?.lessonAccess || {};""",
+          """  const pre = new Set((input?.onlinePreLessonEntitlements || [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));\n  const preVr = new Set((input?.onlinePreLessonEntitlements || [])\n    .filter(row => Number(row?.vr_access ?? row?.vrAccess ?? 0) === 1)\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));\n  const access = compiled?.snapshot?.lessonAccess || {};""")
+
+          replace_once(access,
+          """    } else if (!state?.preLessonOnly || state?.core) {\n      throw new Error(`READ_MODEL_PRELESSON_PARITY_FAILED:${lessonId}`);\n    }\n  }\n}""",
+          """    } else if (!state?.preLessonOnly || state?.core) {\n      throw new Error(`READ_MODEL_PRELESSON_PARITY_FAILED:${lessonId}`);\n    } else if (preVr.has(lessonId) && !state?.vr) {\n      throw new Error(`READ_MODEL_PRELESSON_VR_PARITY_FAILED:${lessonId}`);\n    }\n  }\n}""")
+
+          importer = 'worker/src/admin-lesson-release-import.js'
+          replace_once(importer,
+          """  const vrAccess = validation.subject === 'english' &&\n    elevenPlusBatch(item.batchKey) &&\n    validation.student?.vrEligible === true ? 1 : 0;""",
+          """  // Year 4/5 11+ English batch membership is the authoritative VR gate.\n  // Do not depend on the legacy student profile vrEligible flag: it can be stale\n  // or absent and must not suppress lesson-specific VR PreLesson resources.\n  const vrAccess = validation.subject === 'english' &&\n    elevenPlusBatch(item.batchKey) ? 1 : 0;""")
+
+          test_access = 'tests/access-read-model-reconciliation-verification.mjs'
+          replace_once(test_access,
+          """assert.equal(prePayload.snapshot.lessonAccess.Y5E2.preLessonOnly, true);\nassert.equal(prePayload.snapshot.lessonAccess.Y5E2.core, false);""",
+          """assert.equal(prePayload.snapshot.lessonAccess.Y5E2.preLessonOnly, true);\nassert.equal(prePayload.snapshot.lessonAccess.Y5E2.core, false);\nassert.equal(\n  prePayload.snapshot.lessonAccess.Y5E2.vr,\n  true,\n  'PreLesson-only vr_access=1 must remain visible in the prepared access model'\n);""")
+
+          test_import = 'tests/admin-lesson-release-import-verification.mjs'
+          replace_once(test_import,
+          "  ['user:pre0101', { name:'Synthetic Online', vrEligible:true, blockedLessons:[] }],",
+          "  ['user:pre0101', { name:'Synthetic Online', vrEligible:false, blockedLessons:[] }],")
+          replace_once(test_import,
+          """assert.equal(db.prelessons.size, 1);\nassert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);""",
+          """assert.equal(db.prelessons.size, 1);\nassert.equal(\n  [...db.prelessons.values()][0]?.vr_access,\n  1,\n  '11+ English online PreLesson must grant VR from batch semantics even when legacy vrEligible is false'\n);\nassert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);""")
+
+          reconcile = '.github/workflows/current-student-access-reconciliation.yml'
+          replace_once(reconcile,
+          """    paths:\n      - 'scripts/reconcile-current-student-access-read-models.mjs'\n      - '.github/workflows/current-student-access-reconciliation.yml'""",
+          """    paths:\n      - 'scripts/reconcile-current-student-access-read-models.mjs'\n      - 'worker/src/access-read-model-sync.js'\n      - '.github/workflows/current-student-access-reconciliation.yml'""")
+          replace_once(reconcile,
+          """    paths:\n      - 'scripts/reconcile-current-student-access-read-models.mjs'\n      - '.github/workflows/current-student-access-reconciliation.yml'""",
+          """    paths:\n      - 'scripts/reconcile-current-student-access-read-models.mjs'\n      - 'worker/src/access-read-model-sync.js'\n      - '.github/workflows/current-student-access-reconciliation.yml'""")
+
+          deploy = '.github/workflows/admin-superuser-production-deploy.yml'
+          replace_once(deploy,
+          """      - 'worker/src/admin-lesson-release-import.js'\n      - 'worker/src/admin-lesson-release-import-email.js'""",
+          """      - 'worker/src/admin-lesson-release-import.js'\n      - 'worker/src/access-read-model-sync.js'\n      - 'worker/src/admin-lesson-release-import-email.js'""")
+          replace_once(deploy,
+          """          node --check worker/src/admin-lesson-release-import.js\n          node --check worker/src/admin-lesson-release-import-email.js""",
+          """          node --check worker/src/admin-lesson-release-import.js\n          node --check worker/src/access-read-model-sync.js\n          node --check worker/src/admin-lesson-release-import-email.js""")
+          PY
+      - name: Verify syntax and focused regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          node --check worker/src/access-read-model-sync.js
+          node --check worker/src/admin-lesson-release-import.js
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/lesson-release-navigation-verification.mjs
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/access-read-model-sync.js \
+                  worker/src/admin-lesson-release-import.js \
+                  tests/access-read-model-reconciliation-verification.mjs \
+                  tests/admin-lesson-release-import-verification.mjs \
+                  .github/workflows/current-student-access-reconciliation.yml \
+                  .github/workflows/admin-superuser-production-deploy.yml
+          git commit -m 'Fix 11+ online PreLesson VR access projection'
+          git push origin HEAD:fix/prelesson-vr-entitlement-20260921
