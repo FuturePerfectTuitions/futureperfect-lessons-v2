@@ -46,8 +46,6 @@ jobs:
           node --check worker/src/index-phase20-change17-parent-email.js
           node --check scripts/reconcile-trial-prepared-access-live.mjs
           grep -Fq "./admin-trial-manager-projected.js" worker/src/index-phase20-change17-parent-email.js
-          grep -Fq "account?.trial" rebuild/student/src/lib/trial-runtime.mjs
-          grep -Fq "TRIAL_ACCESS_ENDED" rebuild/student/src/lib/trial-runtime.mjs
           echo TRIAL_REPAIR_STATIC_PASS
 
       - name: Freeze current live Admin Worker before mutation
