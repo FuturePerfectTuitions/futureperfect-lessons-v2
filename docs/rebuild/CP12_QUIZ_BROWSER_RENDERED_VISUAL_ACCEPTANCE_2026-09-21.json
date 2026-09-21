@@ -1,0 +1,51 @@
+{
+  "marker": "CP12_POSTPROMOTION_RENDERED_BROWSER_CLOSED_PASS",
+  "date": "2026-09-21",
+  "productionHost": "lessons.futureperfect.education",
+  "workflow": {
+    "runId": "35619476013",
+    "commitSha": "83c6a0ab151686fe20056bd02bfaa6a35d4ea2a7",
+    "artifact": {
+      "name": "cp12-postpromotion-rendered-browser-evidence",
+      "id": "10647468952",
+      "sha256": "56b5adca81bb428a7f83ed7651eeb7f7d2deb41f56cf670911168c4ca6552db6"
+    }
+  },
+  "productionVersions": {
+    "student": "51d725cc-d21e-4aad-9c64-24149c640637",
+    "browser": "ea701c02-93f7-46e9-9182-59a785dc0bee",
+    "bridge": "2ae28100-b4c6-40a3-87e2-42aef86c6fdf",
+    "quiz": "80d4942e-616c-4539-91f1-9f2daf05cfc1"
+  },
+  "browserBundleSha256": "ee665945ab14c80d2747d603138db8f0b4e2afef84656de04d0025409c2ef0c9",
+  "renderedVisualAcceptance": {
+    "playwrightVersion": "1.55.0",
+    "l2PracticeCardVisible": true,
+    "l3PracticeCardVisible": true,
+    "cardTitle": "11+ Practice",
+    "cardCopy": "Take a real exam style GL quiz",
+    "l2CardBoxCssPixels": {"width": 506, "height": 112},
+    "l3CardBoxCssPixels": {"width": 506, "height": 112},
+    "screenshotsRetained": true
+  },
+  "signedAcceptance": {
+    "l2LaunchRedeem": true,
+    "l3LaunchRedeem": true,
+    "identityContinuity": true,
+    "oneTimeRedeem": true
+  },
+  "cleanup": {
+    "verified": true,
+    "quizLaunchCodesBaseline": 8,
+    "assignmentAutoincrementSequence": 181,
+    "syntheticPortalRowsRemaining": 0,
+    "syntheticQuizRowsRemaining": 0,
+    "syntheticKvKeysRemaining": 0
+  },
+  "security": {
+    "unauthenticatedEligibilityStatus": 401,
+    "unauthenticatedLaunchStatus": 401,
+    "hostileOriginLaunchStatus": 403
+  },
+  "status": "CLOSED_PASS"
+}
