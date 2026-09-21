@@ -36,7 +36,8 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           active(){
-            local worker="$1" out="/tmp/${worker}.deployments.json"
+            local worker="$1"
+            local out="/tmp/${worker}.deployments.json"
             curl -fsS -H "$AUTH" "$API/workers/scripts/${worker}/deployments" -o "$out"
             jq -er '.result.deployments[0].versions[] | select((.percentage|tonumber)==100) | .version_id' "$out" | head -n1
           }
@@ -67,7 +68,7 @@ jobs:
             code="$(curl -sS -H "$AUTH" -o "/tmp/${user}.kv.json" -w '%{http_code}' \
               "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/user%3A${user}")"
             test "$code" = 200
-            jq -e --arg pw "$PW" --arg user "$user" '
+            jq -e --arg pw "$PW" '
               type=="object"
               and ((.status // "active") | ascii_downcase) == "active"
               and .p == $pw
@@ -124,8 +125,12 @@ jobs:
           PW="$(jq -er '.sharedLoginPassword' docs/data/phase11/test_personas.json)"
           ORIGIN="$PORTAL_ROOT"
           check_user(){
-            local user="$1" expected="$2" jar="/tmp/${user}.cookies" login="/tmp/${user}.login.json" eligibility="/tmp/${user}.eligibility.json"
-            local payload
+            local user="$1"
+            local expected="$2"
+            local jar="/tmp/${user}.cookies"
+            local login="/tmp/${user}.login.json"
+            local eligibility="/tmp/${user}.eligibility.json"
+            local payload code
             payload="$(jq -cn --arg username "$user" --arg password "$PW" '{username:$username,password:$password}')"
             code="$(curl -sS -c "$jar" -o "$login" -w '%{http_code}' -X POST "$PORTAL_ROOT/api/v2/auth/login" \
               -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data "$payload")"
