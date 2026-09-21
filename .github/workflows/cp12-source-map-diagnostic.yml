@@ -1,0 +1,33 @@
+name: CP12 source map diagnostic
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/cp12-source-map-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Identify source files embedded in production source map
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          MAP='https://lessons.futureperfect.education/assets/portal-CeIaLZ5y.js.map'
+          curl -fsS "$MAP" -o /tmp/map.json
+          jq -e '.version==3' /tmp/map.json >/dev/null
+          echo '=== SOURCE ROOT ==='
+          jq -r '.sourceRoot // ""' /tmp/map.json
+          echo '=== SOURCES ==='
+          jq -r '.sources[]' /tmp/map.json
+          echo '=== SOURCE CONTENT LENGTHS / SHAS ==='
+          python3 - <<'PY'
+          import json,hashlib
+          m=json.load(open('/tmp/map.json'))
+          for src,content in zip(m.get('sources',[]),m.get('sourcesContent',[])):
+              raw=(content or '').encode()
+              print(src, 'bytes='+str(len(raw)), 'sha256='+hashlib.sha256(raw).hexdigest())
+              print('HEAD',repr((content or '')[:240]))
+          PY
+          echo CP12_SOURCE_MAP_DIAGNOSTIC_COMPLETE
