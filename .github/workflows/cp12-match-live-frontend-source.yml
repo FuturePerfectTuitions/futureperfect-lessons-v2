@@ -1,0 +1,40 @@
+name: CP12 match live frontend source
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/cp12-match-live-frontend-source.yml']
+permissions:
+  contents: read
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Hash every frontend branch src/app.js against live source map
+        shell: bash
+        env:
+          EXPECTED_SHA: 2adfc87768f76ea4a1baae83555a7d81780edc322251752fbb08602627ed16e2
+        run: |
+          set -Eeuo pipefail
+          git clone --quiet --no-checkout https://github.com/FuturePerfectTuitions/futureperfect-lessons-test.git /tmp/frontend
+          cd /tmp/frontend
+          git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
+          : > /tmp/matches.tsv
+          while read -r ref; do
+            branch="${ref#refs/remotes/origin/}"
+            [ "$branch" = HEAD ] && continue
+            commit="$(git rev-parse "$ref")"
+            if git cat-file -e "$commit:src/app.js" 2>/dev/null; then
+              git show "$commit:src/app.js" > /tmp/app.js
+              sha="$(sha256sum /tmp/app.js | awk '{print $1}')"
+              bytes="$(wc -c </tmp/app.js | tr -d ' ')"
+              printf '%s\t%s\t%s\t%s\n' "$branch" "$commit" "$bytes" "$sha"
+              if [ "$sha" = "$EXPECTED_SHA" ]; then
+                printf '%s\t%s\t%s\t%s\n' "$branch" "$commit" "$bytes" "$sha" >> /tmp/matches.tsv
+              fi
+            fi
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/origin | sort)
+          echo '=== EXACT MATCHES ==='
+          cat /tmp/matches.tsv
+          test -s /tmp/matches.tsv || { echo LIVE_SOURCE_NOT_FOUND_ON_CURRENT_BRANCHES; exit 1; }
+          echo CP12_LIVE_FRONTEND_SOURCE_MATCH_PASS
