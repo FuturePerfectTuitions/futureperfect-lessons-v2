@@ -1,0 +1,103 @@
+name: Trial prepared access production fix
+
+on:
+  push:
+    branches:
+      - fix/trial-prepared-access-single-login-2026-09-21
+    paths:
+      - '.github/workflows/trial-prepared-access-production-fix.yml'
+      - 'worker/src/trial-prepared-access-publisher.js'
+      - 'worker/src/admin-trial-manager-projected.js'
+      - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'scripts/reconcile-trial-prepared-access-live.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_ADMIN_VERSION_BEFORE: 3c580c65-510f-4df4-b83f-bfbeec1ad728
+  DEPLOY_MESSAGE: Trial prepared-access projection and one-login repair
+
+jobs:
+  deploy-and-reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Static repair gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/trial-prepared-access-publisher.js
+          node --check worker/src/admin-trial-manager-projected.js
+          node --check worker/src/index-phase20-change17-parent-email.js
+          node --check scripts/reconcile-trial-prepared-access-live.mjs
+          grep -Fq "./admin-trial-manager-projected.js" worker/src/index-phase20-change17-parent-email.js
+          grep -Fq "account?.trial" rebuild/student/src/lib/trial-runtime.mjs
+          grep -Fq "TRIAL_ACCESS_ENDED" rebuild/student/src/lib/trial-runtime.mjs
+          echo TRIAL_REPAIR_STATIC_PASS
+
+      - name: Freeze current live Admin Worker before mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/deployments" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/admin-before.json
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0)==100)) | .[0].version_id) // empty' /tmp/admin-before.json)"
+          test "$VERSION" = "$EXPECTED_ADMIN_VERSION_BEFORE"
+          echo "$VERSION" > /tmp/admin-version-before.txt
+          echo TRIAL_REPAIR_PREMUTATION_ANCHOR_PASS
+
+      - name: Deploy targeted Admin Worker repair preserving production bindings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+
+      - name: Reconcile all current Trial prepared access and verify TrialEva
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/reconcile-trial-prepared-access-live.mjs | tee /tmp/trial-reconcile.json
+          jq -e '.marker=="TRIAL_PREPARED_ACCESS_RECONCILIATION_PASS" and .eva.oneLoginUnused==true and .eva.lessonAccessCount>0 and (.eva.visibleViews|sort)==(["english-year4-11plus","maths-level1","maths-level2"]|sort)' /tmp/trial-reconcile.json >/dev/null
+          echo TRIAL_EVA_RECONCILIATION_PASS
+
+      - name: Verify live Worker and Student security boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/deployments" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/admin-after.json
+          VERSION="$(jq -r '((.result.deployments[0].versions // .result[0].versions // []) | map(select((.percentage // 0)==100)) | .[0].version_id) // empty' /tmp/admin-after.json)"
+          test -n "$VERSION"
+          test "$VERSION" != "$(cat /tmp/admin-version-before.txt)"
+          CODE="$(curl --silent --show-error --output /tmp/live-home.json --write-out '%{http_code}' https://lessons.futureperfect.education/api/v2/student/home)"
+          test "$CODE" = 401
+          echo "$VERSION" > /tmp/admin-version-after.txt
+          echo TRIAL_REPAIR_LIVE_BOUNDARY_PASS
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trial-prepared-access-production-fix-evidence
+          path: |
+            /tmp/admin-before.json
+            /tmp/admin-after.json
+            /tmp/admin-version-before.txt
+            /tmp/admin-version-after.txt
+            /tmp/trial-reconcile.json
+          retention-days: 30
+          if-no-files-found: ignore
