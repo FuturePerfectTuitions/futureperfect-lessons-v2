@@ -1,0 +1,181 @@
+name: CP12 E2E persona readiness
+on:
+  push:
+    branches: [feature/cp12-l2-l3-promotion-2026-09-21]
+    paths: ['.github/workflows/cp12-e2e-persona-readiness.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cp12-e2e-persona-readiness-2026-09-21
+  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BRIDGE_WORKER: fpt-portal-v2-worker
+  EXPECTED_STUDENT_VERSION: 51d725cc-d21e-4aad-9c64-24149c640637
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  PORTAL_ROOT: https://lessons.futureperfect.education
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Freeze current production versions and launch-row baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          active(){
+            local worker="$1" out="/tmp/${worker}.deployments.json"
+            curl -fsS -H "$AUTH" "$API/workers/scripts/${worker}/deployments" -o "$out"
+            jq -er '.result.deployments[0].versions[] | select((.percentage|tonumber)==100) | .version_id' "$out" | head -n1
+          }
+          STUDENT="$(active "$STUDENT_WORKER")"
+          BROWSER="$(active "$BROWSER_WORKER")"
+          BRIDGE="$(active "$BRIDGE_WORKER")"
+          test "$STUDENT" = "$EXPECTED_STUDENT_VERSION"
+          test "$BROWSER" = "$EXPECTED_BROWSER_VERSION"
+          test "$BRIDGE" = "$EXPECTED_BRIDGE_VERSION"
+
+          SQL='SELECT COUNT(*) AS c FROM quiz_launch_codes;'
+          curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+            --data "$(jq -cn --arg sql "$SQL" '{sql:$sql}')" \
+            "$API/d1/database/${PORTAL_D1_ID}/query" -o /tmp/launch-before.json
+          jq -e '.success==true and .result[0].success==true and ((.result[0].meta.changes//0)==0) and ((.result[0].meta.rows_written//0)==0)' /tmp/launch-before.json >/dev/null
+          jq -er '.result[0].results[0].c' /tmp/launch-before.json > /tmp/launch-before.count
+          echo "CP12_READINESS_VERSION_GATE_PASS student=$STUDENT browser=$BROWSER bridge=$BRIDGE launchRows=$(cat /tmp/launch-before.count)"
+
+      - name: Verify controlled synthetic identities in production Students KV
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          PW="$(jq -er '.sharedLoginPassword' docs/data/phase11/test_personas.json)"
+          test "${#PW}" = 4
+          for user in testy411m testy511em; do
+            code="$(curl -sS -H "$AUTH" -o "/tmp/${user}.kv.json" -w '%{http_code}' \
+              "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/user%3A${user}")"
+            test "$code" = 200
+            jq -e --arg pw "$PW" --arg user "$user" '
+              type=="object"
+              and ((.status // "active") | ascii_downcase) == "active"
+              and .p == $pw
+              and ((.firstName // "") | length) > 0
+            ' "/tmp/${user}.kv.json" >/dev/null
+          done
+          unset PW
+          echo CP12_SYNTHETIC_STUDENTS_KV_READY_PASS
+
+      - name: Verify current active L2 and L3 Maths 11+ assignment rows read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          TODAY="$(TZ=Europe/London date +%F)"
+          read -r -d '' SQL <<SQL || true
+          SELECT a.portal_user_id_norm,
+                 a.assignment_id,
+                 a.effective_from,
+                 (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year - 3 END) AS maths_level
+          FROM student_batch_assignments a
+          JOIN batch_definitions b ON b.batch_key = a.batch_key
+          WHERE a.portal_user_id_norm IN ('testy411m','testy511em')
+            AND lower(b.subject) = 'maths'
+            AND lower(b.stream) = '11plus'
+            AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year - 3 END) IN (2,3)
+            AND a.effective_from <= '${TODAY}'
+            AND (a.effective_to IS NULL OR '${TODAY}' < a.effective_to)
+            AND (b.active_from IS NULL OR b.active_from <= '${TODAY}')
+            AND (b.active_to IS NULL OR '${TODAY}' < b.active_to)
+          ORDER BY a.portal_user_id_norm, a.effective_from DESC, a.assignment_id DESC;
+          SQL
+          curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+            --data "$(jq -cn --arg sql "$SQL" '{sql:$sql}')" \
+            "$API/d1/database/${PORTAL_D1_ID}/query" -o /tmp/assignments.json
+          jq -e '.success==true and .result[0].success==true and ((.result[0].meta.changes//0)==0) and ((.result[0].meta.rows_written//0)==0)' /tmp/assignments.json >/dev/null
+          jq -e '
+            .result[0].results as $r
+            | ([ $r[] | select(.portal_user_id_norm=="testy411m") | (.maths_level|tonumber) ] | unique) == [2]
+            and ([ $r[] | select(.portal_user_id_norm=="testy511em") | (.maths_level|tonumber) ] | unique) == [3]
+            and ([ $r[] | select(.portal_user_id_norm=="testy411m") | (.assignment_id|tonumber) ] | length) > 0
+            and ([ $r[] | select(.portal_user_id_norm=="testy511em") | (.assignment_id|tonumber) ] | length) > 0
+            and all($r[]; ((.assignment_id|tonumber) > 0))
+          ' /tmp/assignments.json >/dev/null
+          L2_ASSIGN="$(jq -er '.result[0].results | map(select(.portal_user_id_norm=="testy411m"))[0].assignment_id' /tmp/assignments.json)"
+          L3_ASSIGN="$(jq -er '.result[0].results | map(select(.portal_user_id_norm=="testy511em"))[0].assignment_id' /tmp/assignments.json)"
+          echo "CP12_SYNTHETIC_ASSIGNMENTS_READY_PASS date=$TODAY l2Assignment=$L2_ASSIGN l3Assignment=$L3_ASSIGN"
+
+      - name: Verify signed production login and Quiz eligibility without launch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PW="$(jq -er '.sharedLoginPassword' docs/data/phase11/test_personas.json)"
+          ORIGIN="$PORTAL_ROOT"
+          check_user(){
+            local user="$1" expected="$2" jar="/tmp/${user}.cookies" login="/tmp/${user}.login.json" eligibility="/tmp/${user}.eligibility.json"
+            local payload
+            payload="$(jq -cn --arg username "$user" --arg password "$PW" '{username:$username,password:$password}')"
+            code="$(curl -sS -c "$jar" -o "$login" -w '%{http_code}' -X POST "$PORTAL_ROOT/api/v2/auth/login" \
+              -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data "$payload")"
+            test "$code" = 200
+            jq -e '.ok==true and .accountLocked==false' "$login" >/dev/null
+            grep -Fq $'fpt_session\t' "$jar"
+            code="$(curl -sS -b "$jar" -o "$eligibility" -w '%{http_code}' "$PORTAL_ROOT/api/v2/student/quiz/eligibility" -H "Origin: $ORIGIN")"
+            test "$code" = 200
+            jq -e --arg level "$expected" '.ok==true and .eligible==true and .currentLevel==$level and .label=="11+ Practice"' "$eligibility" >/dev/null
+            code="$(curl -sS -b "$jar" -o "/tmp/${user}.home.json" -w '%{http_code}' "$PORTAL_ROOT/api/v2/student/home" -H "Origin: $ORIGIN")"
+            test "$code" = 200
+            jq -e '.ok==true and .accountLocked==false and (.modelVersion|type=="string")' "/tmp/${user}.home.json" >/dev/null
+            rm -f "$jar" "$login" "$eligibility" "/tmp/${user}.home.json"
+            echo "CP12_SIGNED_${expected}_READINESS_PASS user=$user"
+          }
+          check_user testy411m L2
+          check_user testy511em L3
+          unset PW
+
+      - name: Prove readiness created no launch row and surface remains withdrawn
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          SQL='SELECT COUNT(*) AS c FROM quiz_launch_codes;'
+          curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+            --data "$(jq -cn --arg sql "$SQL" '{sql:$sql}')" \
+            "$API/d1/database/${PORTAL_D1_ID}/query" -o /tmp/launch-after.json
+          jq -e '.success==true and .result[0].success==true and ((.result[0].meta.changes//0)==0) and ((.result[0].meta.rows_written//0)==0)' /tmp/launch-after.json >/dev/null
+          BEFORE="$(cat /tmp/launch-before.count)"
+          AFTER="$(jq -er '.result[0].results[0].c' /tmp/launch-after.json)"
+          test "$AFTER" = "$BEFORE"
+
+          curl -fsS "$PORTAL_ROOT/" -o /tmp/portal.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,re,subprocess,urllib.parse
+          root=os.environ['PORTAL_ROOT']+'/'
+          html=Path('/tmp/portal.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I)
+          text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/cp12-ui-{i}.js'
+              subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',p],check=True)
+              text += Path(p).read_text(errors='replace')
+          markers=['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch']
+          found=[m for m in markers if m in text]
+          if found:
+              raise SystemExit('QUIZ_SURFACE_PREMATURELY_EXPOSED '+repr(found))
+          print('CP12_PORTAL_SURFACE_STILL_WITHDRAWN_PASS')
+          PY
+          echo "CP12_E2E_PERSONA_READINESS_PASS launchRows=$AFTER"
