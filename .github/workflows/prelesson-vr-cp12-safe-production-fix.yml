@@ -1,0 +1,296 @@
+name: PreLesson VR CP12-safe production fix
+
+on:
+  push:
+    branches: [fix/prelesson-vr-cp12-safe-20260921]
+    paths:
+      - '.github/workflows/prelesson-vr-cp12-safe-production-fix.yml'
+
+permissions:
+  contents: write
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.134.0
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+  EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_OLD_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
+  BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  PORTAL_ROOT: https://lessons.futureperfect.education/
+
+jobs:
+  fix-deploy-reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/prelesson-vr-cp12-safe-20260921
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require production credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Apply exact source and regression patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{path}: expected one match, found {n}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          access = 'worker/src/access-read-model-sync.js'
+          replace_once(access,
+          """function preLessonOnlyIds(rows) {\n  return [...new Set((Array.isArray(rows) ? rows : [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();\n}\n\nfunction manualCoreLessonIds(user) { return manualIds(user, 'core'); }""",
+          """function preLessonOnlyIds(rows) {\n  return [...new Set((Array.isArray(rows) ? rows : [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();\n}\n\nfunction preLessonVrLessonIds(rows) {\n  return [...new Set((Array.isArray(rows) ? rows : [])\n    .filter(row => Number(row?.vr_access ?? row?.vrAccess ?? 0) === 1)\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();\n}\n\nfunction manualCoreLessonIds(user) { return manualIds(user, 'core'); }""")
+
+          replace_once(access,
+          "function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds, preLessonIds, temporaryLessonAccess, blockedIds }) {",
+          "function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds, preLessonIds, preLessonVrIds, temporaryLessonAccess, blockedIds }) {")
+          replace_once(access,
+          """  const manualVr = new Set(manualVrIds);\n  const preOnly = new Set(preLessonIds);\n  const blocked = new Set(blockedIds);""",
+          """  const manualVr = new Set(manualVrIds);\n  const preOnly = new Set(preLessonIds);\n  const preVr = new Set(preLessonVrIds);\n  const blocked = new Set(blockedIds);""")
+          replace_once(access,
+          "    ...earned, ...earnedVr, ...manualCore, ...manualVr, ...preOnly, ...temporary.keys(), ...blocked",
+          "    ...earned, ...earnedVr, ...manualCore, ...manualVr, ...preOnly, ...preVr, ...temporary.keys(), ...blocked")
+          replace_once(access,
+          "    const vr = earnedVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);",
+          "    const vr = earnedVr.has(lessonId) || preVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);")
+          replace_once(access,
+          """  const manualVrIds = manualVrLessonIds(user);\n  const preLessonIds = preLessonOnlyIds(input?.onlinePreLessonEntitlements);\n  const blockedIds = blockedLessonIds(user);""",
+          """  const manualVrIds = manualVrLessonIds(user);\n  const preLessonIds = preLessonOnlyIds(input?.onlinePreLessonEntitlements);\n  const preLessonVrIds = preLessonVrLessonIds(input?.onlinePreLessonEntitlements);\n  const blockedIds = blockedLessonIds(user);""")
+          replace_once(access,
+          """    catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds,\n    preLessonIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds""",
+          """    catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds,\n    preLessonIds, preLessonVrIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds""")
+          replace_once(access,
+          """  const pre = new Set((input?.onlinePreLessonEntitlements || [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));\n  const access = compiled?.snapshot?.lessonAccess || {};""",
+          """  const pre = new Set((input?.onlinePreLessonEntitlements || [])\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));\n  const preVr = new Set((input?.onlinePreLessonEntitlements || [])\n    .filter(row => Number(row?.vr_access ?? row?.vrAccess ?? 0) === 1)\n    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));\n  const access = compiled?.snapshot?.lessonAccess || {};""")
+          replace_once(access,
+          """    } else if (!state?.preLessonOnly || state?.core) {\n      throw new Error(`READ_MODEL_PRELESSON_PARITY_FAILED:${lessonId}`);\n    }\n  }\n}""",
+          """    } else if (!state?.preLessonOnly || state?.core) {\n      throw new Error(`READ_MODEL_PRELESSON_PARITY_FAILED:${lessonId}`);\n    } else if (preVr.has(lessonId) && !state?.vr) {\n      throw new Error(`READ_MODEL_PRELESSON_VR_PARITY_FAILED:${lessonId}`);\n    }\n  }\n}""")
+
+          importer = 'worker/src/admin-lesson-release-import.js'
+          replace_once(importer,
+          """  const vrAccess = validation.subject === 'english' &&\n    elevenPlusBatch(item.batchKey) &&\n    validation.student?.vrEligible === true ? 1 : 0;""",
+          """  // Year 4/5 11+ English batch membership is the authoritative VR gate.\n  // The legacy student profile vrEligible flag may be stale or absent and must\n  // not suppress lesson-specific VR PreLesson resources.\n  const vrAccess = validation.subject === 'english' &&\n    elevenPlusBatch(item.batchKey) ? 1 : 0;""")
+
+          test_access = 'tests/access-read-model-reconciliation-verification.mjs'
+          replace_once(test_access,
+          """assert.equal(prePayload.snapshot.lessonAccess.Y5E2.preLessonOnly, true);\nassert.equal(prePayload.snapshot.lessonAccess.Y5E2.core, false);""",
+          """assert.equal(prePayload.snapshot.lessonAccess.Y5E2.preLessonOnly, true);\nassert.equal(prePayload.snapshot.lessonAccess.Y5E2.core, false);\nassert.equal(\n  prePayload.snapshot.lessonAccess.Y5E2.vr,\n  true,\n  'PreLesson-only vr_access=1 must remain visible in the prepared access model'\n);""")
+
+          test_import = 'tests/admin-lesson-release-import-verification.mjs'
+          replace_once(test_import,
+          "  ['user:pre0101', { name:'Synthetic Online', vrEligible:true, blockedLessons:[] }],",
+          "  ['user:pre0101', { name:'Synthetic Online', vrEligible:false, blockedLessons:[] }],")
+          replace_once(test_import,
+          """assert.equal(db.prelessons.size, 1);\nassert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);""",
+          """assert.equal(db.prelessons.size, 1);\nassert.equal(\n  [...db.prelessons.values()][0]?.vr_access,\n  1,\n  '11+ English online PreLesson must grant VR from batch semantics even when legacy vrEligible is false'\n);\nassert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);""")
+          PY
+          git diff --check
+
+      - name: Verify focused fix and CP12 regression boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/access-read-model-sync.js
+          node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/index-step10-quiz-bridge.js
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/admin-resource-replace-verification.mjs
+          node tests/admin-tools-ui-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-superuser-static-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          grep -Fq "const RELEASE_SOURCE='portal-live-maths11plus-release-v2'" worker/src/index-step10-quiz-bridge.js
+          grep -Fq 'cp12SignedV2LaunchStillValid' worker/src/index-step10-quiz-bridge.js
+
+      - name: Commit verified fix source before production mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/access-read-model-sync.js \
+                  worker/src/admin-lesson-release-import.js \
+                  tests/access-read-model-reconciliation-verification.mjs \
+                  tests/admin-lesson-release-import-verification.mjs
+          git commit -m 'Fix 11+ online PreLesson VR projection'
+          git push origin HEAD:fix/prelesson-vr-cp12-safe-20260921
+
+      - name: Fresh production preflight and mutation guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          ORIGIN='https://lessons.futureperfect.education'
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/before.json
+          OLD="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/before.json | head -n1)"
+          echo "PRELESSON_VR_ROLLBACK_ANCHOR=$OLD"
+          test "$OLD" = "$EXPECTED_OLD_VERSION"
+
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}/settings" -o /tmp/settings-before.json
+          jq -e '.success==true' /tmp/settings-before.json >/dev/null
+          jq -e --arg id "$PORTAL_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/settings-before.json >/dev/null
+          jq -e --arg id "$EXPECTED_STUDENTS_KV_ID" '.result.bindings[] | select(.name=="STUDENTS_KV" and .namespace_id==$id)' /tmp/settings-before.json >/dev/null
+          jq -e --arg id "$EXPECTED_LESSONS_KV_ID" '.result.bindings[] | select(.name=="LESSONS_KV" and .namespace_id==$id)' /tmp/settings-before.json >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV_ID" '.result.bindings[] | select(.name=="READ_MODELS_KV" and .namespace_id==$id)' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/settings-before.json >/dev/null
+          jq -c '[.result.bindings[] | {name,type,service,environment,namespace_id,database_id:(.id // .database_id),bucket_name,text:(if .type=="plain_text" then .text else null end)}] | sort_by(.name)' /tmp/settings-before.json > /tmp/bindings-before.json
+
+          D1_API="$API/d1/database/${PORTAL_D1_ID}/query"
+          curl -fsS "$D1_API" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"sql":"SELECT batch_key, vr_access, COUNT(*) AS rows_count FROM online_prelesson_entitlements GROUP BY batch_key, vr_access ORDER BY batch_key, vr_access;"}' \
+            -o /tmp/prelesson-before.json
+          jq -e '.success==true' /tmp/prelesson-before.json >/dev/null
+          jq '.result[0].results' /tmp/prelesson-before.json
+          curl -fsS "$D1_API" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"sql":"SELECT COUNT(*) AS candidate_rows FROM online_prelesson_entitlements WHERE COALESCE(vr_access,0)=0 AND (UPPER(batch_key) LIKE '\''Y411%'\'' OR UPPER(batch_key) LIKE '\''Y511%'\'') AND INSTR(UPPER(batch_key),'\''E'\'')>0 AND INSTR(UPPER(batch_key),'\''O'\'')>0;"}' \
+            -o /tmp/prelesson-bad.json
+          jq -e '.success==true and .result[0].results[0].candidate_rows==0' /tmp/prelesson-bad.json >/dev/null
+          echo 'CANONICAL_PRELESSON_VR_STATE_PASS'
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$PORTAL_D1_ID" --remote --command="SELECT COUNT(*) AS n FROM quiz_launch_codes;" --json > /tmp/quiz-before.json
+          QUIZ_ROWS="$(jq -r '.[0].results[0].n' /tmp/quiz-before.json)"
+          test "$QUIZ_ROWS" = 8
+
+          curl -fsS "$PORTAL_ROOT" -o /tmp/portal-before.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,subprocess,urllib.parse,os
+          root=os.environ['PORTAL_ROOT']; html=Path('/tmp/portal-before.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I); text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/public-before-{i}.js'; subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',p],check=True); text+=Path(p).read_text(errors='replace')
+          found=[m for m in ['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'] if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PRESENT_BEFORE '+repr(found))
+          print('PORTAL_WITHDRAWAL_BEFORE_PASS')
+          PY
+
+      - name: Deploy CP12-preserving PreLesson VR fix with rollback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          DEPLOYED=0
+          rollback(){
+            code=$?
+            if [ "$DEPLOYED" = 1 ]; then
+              echo "PRELESSON_VR_VERIFY_FAILED_ROLLBACK=$EXPECTED_OLD_VERSION" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_OLD_VERSION@100%" --name "$WORKER_NAME" --message 'Rollback PreLesson VR projection fix' -y || true
+              sleep 4
+            fi
+            exit "$code"
+          }
+          trap rollback ERR
+
+          WORKER_ENTRYPOINT=src/index-step10-quiz-bridge.js DEPLOY_MESSAGE='Fix 11+ online PreLesson VR projection' bash ops/deploy_current_worker_preserve.sh
+          DEPLOYED=1
+          sleep 5
+
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          ORIGIN='https://lessons.futureperfect.education'
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/after.json
+          NEW="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/after.json | head -n1)"
+          test -n "$NEW"; test "$NEW" != "$EXPECTED_OLD_VERSION"
+          echo "PRELESSON_VR_NEW_VERSION=$NEW"
+
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}/settings" -o /tmp/settings-after.json
+          jq -e '.success==true' /tmp/settings-after.json >/dev/null
+          jq -c '[.result.bindings[] | {name,type,service,environment,namespace_id,database_id:(.id // .database_id),bucket_name,text:(if .type=="plain_text" then .text else null end)}] | sort_by(.name)' /tmp/settings-after.json > /tmp/bindings-after.json
+          cmp /tmp/bindings-before.json /tmp/bindings-after.json
+
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}" -o /tmp/script-after.bin
+          grep -aFq 'portal-live-maths11plus-release-v2' /tmp/script-after.bin
+          grep -aFq 'cp12SignedV2LaunchStillValid' /tmp/script-after.bin
+          grep -aFq 'READ_MODEL_PRELESSON_VR_PARITY_FAILED' /tmp/script-after.bin
+
+          admin="$(curl -sS -X POST -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data '{}' -o /tmp/admin.json -w '%{http_code}' "$BASE/api/v1/admin/trials/list")"
+          test "$admin" = 401; grep -Fq 'UNAUTHORISED' /tmp/admin.json
+          protected="$(curl -sS -H "Origin: $ORIGIN" -D /tmp/ph -o /tmp/pb -w '%{http_code}' "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+          test "$protected" = 410
+          grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/ph
+          eligibility="$(curl -sS -H "Origin: $ORIGIN" -o /tmp/e.json -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
+          launch="$(curl -sS -X POST -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data '{}' -o /tmp/l.json -w '%{http_code}' "$BASE/api/v1/student/quiz/launch")"
+          redeem="$(curl -sS -X POST -H 'Content-Type: application/json' --data '{"code":"cp12-invalid"}' -o /tmp/r.json -w '%{http_code}' "$BASE/api/v1/quiz-bridge/redeem")"
+          test "$eligibility" = 401; grep -Fq '"eligible":false' /tmp/e.json
+          test "$launch" = 401; grep -Fq 'SESSION_INVALID' /tmp/l.json
+          test "$redeem" = 401; grep -Fq 'UNAUTHORIZED' /tmp/r.json
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$PORTAL_D1_ID" --remote --command="SELECT COUNT(*) AS n FROM quiz_launch_codes;" --json > /tmp/quiz-after.json
+          test "$(jq -r '.[0].results[0].n' /tmp/quiz-after.json)" = 8
+
+          curl -fsS "$PORTAL_ROOT" -o /tmp/portal-after.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,subprocess,urllib.parse,os
+          root=os.environ['PORTAL_ROOT']; html=Path('/tmp/portal-after.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I); text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/public-after-{i}.js'; subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',p],check=True); text+=Path(p).read_text(errors='replace')
+          found=[m for m in ['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'] if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PRESENT_AFTER '+repr(found))
+          print('PORTAL_WITHDRAWAL_AFTER_PASS')
+          PY
+          trap - ERR
+          echo 'PRELESSON_VR_DEPLOY_PASS'
+
+      - name: Reconcile every current student prepared access snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/reconcile-current-student-access-read-models.mjs
+          jq -e '
+            .marker == "CURRENT_STUDENT_ACCESS_RECONCILIATION_PASS" and
+            .status == "PASS" and
+            .eligibleCurrentStudents > 0 and
+            .reconciled == .eligibleCurrentStudents and
+            .failures == 0 and
+            .canonicalSourcesMutated == false and
+            .writeTarget == "READ_MODELS_KV_ONLY" and
+            .atomicPerStudentPointers == true and
+            .safeToRerun == true and
+            .studentIdentitiesIncluded == false and
+            .credentialsDisclosed == false
+          ' /tmp/current-student-access-reconciliation.json >/dev/null
+          jq '{marker,status,eligibleCurrentStudents,reconciled,failures,canonicalSourcesMutated,writeTarget,atomicPerStudentPointers,safeToRerun,studentIdentitiesIncluded,credentialsDisclosed}' /tmp/current-student-access-reconciliation.json
+          echo 'PRELESSON_VR_CURRENT_STUDENT_RECONCILIATION_PASS'
+
+      - name: Final live deployment and binding verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json | tee /tmp/final-deploy.json
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}/settings" -o /tmp/final-settings.json
+          jq -e --arg id "$PORTAL_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/final-settings.json >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV_ID" '.result.bindings[] | select(.name=="READ_MODELS_KV" and .namespace_id==$id)' /tmp/final-settings.json >/dev/null
+          echo 'PRELESSON_VR_PRODUCTION_FIX_COMPLETE'
