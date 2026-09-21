@@ -1,0 +1,43 @@
+name: CP12 current Student Worker fingerprint
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/cp12-current-student-worker-fingerprint.yml']
+permissions:
+  contents: read
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+    steps:
+      - name: Read active production worker metadata and source fingerprint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          for w in "$STUDENT_WORKER" "$BROWSER_WORKER"; do
+            echo "=== $w deployments ==="
+            curl -fsS -H "$AUTH" "$API/workers/scripts/$w/deployments" -o "/tmp/${w}.deployments.json"
+            jq -e '.success==true' "/tmp/${w}.deployments.json" >/dev/null
+            jq -c '.result.deployments[0:5] | map({id,created_on,source,author_email,annotations,versions})' "/tmp/${w}.deployments.json"
+            echo "=== $w settings summary ==="
+            curl -fsS -H "$AUTH" "$API/workers/scripts/$w/settings" -o "/tmp/${w}.settings.json"
+            jq -e '.success==true' "/tmp/${w}.settings.json" >/dev/null
+            jq -c '.result | {compatibility_date,compatibility_flags,usage_model,bindings:[.bindings[]? | {name,type,service,environment,namespace_id,database_id:id,bucket_name}]}' "/tmp/${w}.settings.json"
+            echo "=== $w uploaded script sha/markers ==="
+            curl -fsS -H "$AUTH" "$API/workers/scripts/$w" -o "/tmp/${w}.script"
+            sha256sum "/tmp/${w}.script"
+            wc -c "/tmp/${w}.script"
+            for marker in 'portal-api-v2-live-l3-view-v1' 'portal-live-maths11plus-release-v2' '/api/v2/student/quiz/eligibility' '/api/v2/student/quiz/launch' 'PROTECTED_ANSWER' 'VR How-To'; do
+              if grep -aFq "$marker" "/tmp/${w}.script"; then echo "MARKER_PRESENT $marker"; else echo "MARKER_ABSENT $marker"; fi
+            done
+          done
+          echo CP12_CURRENT_STUDENT_WORKER_FINGERPRINT_COMPLETE
