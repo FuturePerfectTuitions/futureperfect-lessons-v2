@@ -1,0 +1,74 @@
+name: CP12 guarded synthetic L2 L3 E2E
+on:
+  push:
+    branches: [feature/cp12-e2e-synthetic-fixture-2026-09-21]
+    paths: ['.github/workflows/cp12-synthetic-l2-l3-e2e.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cp12-synthetic-l2-l3-e2e-production
+  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BRIDGE_WORKER: fpt-portal-v2-worker
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  EXPECTED_STUDENT_VERSION: 51d725cc-d21e-4aad-9c64-24149c640637
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
+  EXPECTED_QUIZ_VERSION: 80d4942e-616c-4539-91f1-9f2daf05cfc1
+  PORTAL_ROOT: https://lessons.futureperfect.education
+  QUIZ_ROOT: https://quiz.futureperfect.education
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply reviewed pre-run source corrections and freeze executable
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/cp12-e2e-synthetic-fixture.mjs')
+          s=p.read_text()
+          old="VALUES(?,?,1,0,'excel',?,?,?,?,?)"
+          new="VALUES(?,?,1,0,'excel',?,?,?,?)"
+          if s.count(old)!=1:
+              raise SystemExit(f'expected exactly one entitlement placeholder correction, found {s.count(old)}')
+          s=s.replace(old,new)
+          old2="batches: [clean(persona.batch.batch_key)],"
+          new2="batches: [],"
+          if s.count(old2)!=1:
+              raise SystemExit(f'expected exactly one synthetic legacy-batches narrowing, found {s.count(old2)}')
+          s=s.replace(old2,new2)
+          p.write_text(s)
+          PY
+          node --check scripts/cp12-e2e-synthetic-fixture.mjs
+          sha256sum scripts/cp12-e2e-synthetic-fixture.mjs
+          echo CP12_E2E_EXECUTABLE_FROZEN_PASS
+      - name: Re-run authoritative compiler and atomic-publisher regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          echo CP12_E2E_PUBLISHER_REGRESSION_PASS
+      - name: Execute guarded synthetic L2 and L3 production acceptance with mandatory cleanup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/cp12-e2e-synthetic-fixture.mjs
