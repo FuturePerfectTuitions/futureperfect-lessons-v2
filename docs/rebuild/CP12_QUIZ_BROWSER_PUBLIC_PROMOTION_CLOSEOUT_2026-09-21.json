@@ -1,0 +1,85 @@
+{
+  "marker": "CP12_BROWSER_PUBLIC_PROMOTION_CLOSED_PASS",
+  "date": "2026-09-21",
+  "productionHost": "lessons.futureperfect.education",
+  "workflow": {
+    "runId": "35616396909",
+    "commitSha": "3064ae531147bbf07f91353b3463e20bd509a385",
+    "artifact": {
+      "name": "cp12-browser-propagation-aware-promotion-evidence",
+      "id": "10646443326",
+      "sha256": "9335650be6b63186880247662e26d298a5ff29821b1201384c8e348c0222e279"
+    }
+  },
+  "frontend": {
+    "repository": "FuturePerfectTuitions/futureperfect-lessons-test",
+    "commitSha": "63f37895727e41ada427c9644b41b5a026ed196b",
+    "bundleSha256": "ee665945ab14c80d2747d603138db8f0b4e2afef84656de04d0025409c2ef0c9"
+  },
+  "productionVersions": {
+    "student": {
+      "worker": "fpt-portal-v2-rebuild-student-prod",
+      "versionId": "51d725cc-d21e-4aad-9c64-24149c640637",
+      "percentage": 100
+    },
+    "browser": {
+      "worker": "fpt-portal-v2-rebuild-browser-prod",
+      "versionId": "ea701c02-93f7-46e9-9182-59a785dc0bee",
+      "percentage": 100,
+      "rollbackVersionId": "f8a64bc8-8192-4400-9e45-8f1a1de10019"
+    },
+    "bridge": {
+      "worker": "fpt-portal-v2-worker",
+      "versionId": "2ae28100-b4c6-40a3-87e2-42aef86c6fdf",
+      "percentage": 100
+    },
+    "quiz": {
+      "worker": "futureperfect-11plus-practice-step10-preview",
+      "versionId": "80d4942e-616c-4539-91f1-9f2daf05cfc1",
+      "percentage": 100
+    }
+  },
+  "topology": {
+    "routePattern": "lessons.futureperfect.education/*",
+    "routeScript": "fpt-portal-v2-rebuild-browser-prod",
+    "browserBindings": [
+      {
+        "name": "ASSETS",
+        "type": "assets"
+      },
+      {
+        "name": "STAGING_API",
+        "type": "service",
+        "service": "fpt-portal-v2-rebuild-student-prod"
+      }
+    ]
+  },
+  "portalD1": {
+    "databaseId": "97250a54-fa91-45ad-a002-3c4566b1fc38",
+    "quizLaunchCodeRows": 8
+  },
+  "security": {
+    "unauthenticatedEligibilityStatus": 401,
+    "unauthenticatedLaunchStatus": 401,
+    "hostileOriginLaunchStatus": 403
+  },
+  "gates": {
+    "freshProductionPreflight": true,
+    "exactFrontendRebuild": true,
+    "candidateByteIdentity": true,
+    "zeroPercentStateVerified": true,
+    "productionHostVersionOverrideSmoke": true,
+    "candidateHundredPercentStateVerified": true,
+    "publicEdgePropagationVerified": true,
+    "stableRecheck": true,
+    "rollbackTriggered": false
+  },
+  "hiddenSignedE2E": {
+    "l2": "PASS",
+    "l3": "PASS",
+    "identityContinuity": true,
+    "syntheticHistoryPollution": false,
+    "cleanupComplete": true
+  },
+  "status": "CLOSED_PASS"
+}
