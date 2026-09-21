@@ -1,0 +1,54 @@
+name: CP12 L2 L3 backend validation
+on:
+  push:
+    branches: [feature/cp12-l2-l3-promotion-2026-09-21]
+    paths:
+      - 'rebuild/student/src/**'
+      - 'rebuild/shared/auth/**'
+      - 'tests/cp12-l2-l3-quiz-runtime.mjs'
+      - 'tests/rebuild-checkpoint5-auth-capability-core.mjs'
+      - 'tests/rebuild-checkpoint6-new-student-worker.mjs'
+      - 'tests/rebuild-checkpoint11-scope-compatibility.mjs'
+      - 'tests/rebuild-checkpoint11-vr-howto-runtime.mjs'
+      - 'tests/rebuild-cp12-admin-principal.mjs'
+      - 'tests/rebuilt-trial-manager-verification.mjs'
+      - '.github/workflows/cp12-l2-l3-backend-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and CP12 L2 L3 runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node --check tests/cp12-l2-l3-quiz-runtime.mjs
+          node tests/cp12-l2-l3-quiz-runtime.mjs
+      - name: Rebuilt Portal regression suite
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint11-vr-howto-runtime.mjs
+          node tests/rebuild-cp12-admin-principal.mjs
+          node tests/rebuilt-trial-manager-verification.mjs
+      - name: Contract markers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq "const POLICY_VERSION = 'quiz-release-context-v2.0'" rebuild/student/src/lib/quiz-runtime.mjs
+          grep -Fq "const RELEASE_SOURCE = 'portal-live-maths11plus-release-v2'" rebuild/student/src/lib/quiz-runtime.mjs
+          grep -Fq "releasedL2LessonCodes: context.currentLevel === 'L2' ? context.lessonCodes : []" rebuild/student/src/lib/quiz-runtime.mjs
+          grep -Fq "inheritedLevels: context.currentLevel === 'L3' ? ['L2'] : []" rebuild/student/src/lib/quiz-runtime.mjs
+          echo CP12_L2_L3_BACKEND_VALIDATION_PASS
