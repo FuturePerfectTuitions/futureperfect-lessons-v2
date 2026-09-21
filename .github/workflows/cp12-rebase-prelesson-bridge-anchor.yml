@@ -22,29 +22,40 @@ jobs:
           set -Eeuo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           p = Path('.github/workflows/cp12-browser-public-promotion-propagation-aware.yml')
           s = p.read_text()
+
           old_bridge = 'EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2'
           new_bridge = 'EXPECTED_BRIDGE_VERSION: 2ae28100-b4c6-40a3-87e2-42aef86c6fdf'
           if s.count(old_bridge) != 1:
               raise SystemExit(f'Expected exactly one old Bridge anchor, found {s.count(old_bridge)}')
           s = s.replace(old_bridge, new_bridge, 1)
-          old_checks = """          if(pct(student,process.env.EXPECTED_STUDENT_VERSION)!==100)throw new Error('Student version moved');
-          if(pct(bridge,process.env.EXPECTED_BRIDGE_VERSION)!==100)throw new Error('Bridge version moved');
-          if(pct(quiz,process.env.EXPECTED_QUIZ_VERSION)!==100)throw new Error('Quiz version moved');"""
-          new_checks = """          // During normal CP12 promotion, freeze every non-Browser component to its verified anchor.
-          // During emergency rollback, restore/verify the Browser independently so an unrelated concurrent
-          // production change cannot mask a successful Browser rollback.
-          if(mode!=='rollback'){
-            if(pct(student,process.env.EXPECTED_STUDENT_VERSION)!==100)throw new Error('Student version moved');
-            if(pct(bridge,process.env.EXPECTED_BRIDGE_VERSION)!==100)throw new Error('Bridge version moved');
-            if(pct(quiz,process.env.EXPECTED_QUIZ_VERSION)!==100)throw new Error('Quiz version moved');
-          }"""
-          if s.count(old_checks) != 1:
-              raise SystemExit(f'Expected exactly one component-freeze block, found {s.count(old_checks)}')
-          s = s.replace(old_checks, new_checks, 1)
+
+          pattern = re.compile(
+              r"(?m)^(?P<i>[ \t]*)if\(pct\(student,process\.env\.EXPECTED_STUDENT_VERSION\)!==100\)throw new Error\('Student version moved'\);\n"
+              r"(?P=i)if\(pct\(bridge,process\.env\.EXPECTED_BRIDGE_VERSION\)!==100\)throw new Error\('Bridge version moved'\);\n"
+              r"(?P=i)if\(pct\(quiz,process\.env\.EXPECTED_QUIZ_VERSION\)!==100\)throw new Error\('Quiz version moved'\);$"
+          )
+          matches = list(pattern.finditer(s))
+          if len(matches) != 1:
+              raise SystemExit(f'Expected exactly one component-freeze block, found {len(matches)}')
+          i = matches[0].group('i')
+          replacement = (
+              f"{i}// During normal CP12 promotion, freeze every non-Browser component to its verified anchor.\n"
+              f"{i}// During emergency rollback, restore/verify the Browser independently so unrelated production drift\n"
+              f"{i}// cannot mask a successful Browser rollback.\n"
+              f"{i}if(mode!=='rollback'){{\n"
+              f"{i}  if(pct(student,process.env.EXPECTED_STUDENT_VERSION)!==100)throw new Error('Student version moved');\n"
+              f"{i}  if(pct(bridge,process.env.EXPECTED_BRIDGE_VERSION)!==100)throw new Error('Bridge version moved');\n"
+              f"{i}  if(pct(quiz,process.env.EXPECTED_QUIZ_VERSION)!==100)throw new Error('Quiz version moved');\n"
+              f"{i}}}"
+          )
+          s = pattern.sub(replacement, s, count=1)
           p.write_text(s)
           PY
+
           git diff --check
           grep -Fq 'EXPECTED_BRIDGE_VERSION: 2ae28100-b4c6-40a3-87e2-42aef86c6fdf' .github/workflows/cp12-browser-public-promotion-propagation-aware.yml
           grep -Fq "if(mode!=='rollback'){" .github/workflows/cp12-browser-public-promotion-propagation-aware.yml
