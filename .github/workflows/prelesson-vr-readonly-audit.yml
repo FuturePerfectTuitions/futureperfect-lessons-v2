@@ -1,0 +1,88 @@
+name: PreLesson VR production read-only audit
+
+on:
+  push:
+    branches: [ops/prelesson-vr-audit-20260921]
+    paths:
+      - '.github/workflows/prelesson-vr-readonly-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require Cloudflare credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Fresh route ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://api.cloudflare.com/client/v4'
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/zones?name=futureperfect.education" -H "$AUTH" -o /tmp/zones.json
+          ZONE_ID="$(jq -r '.result[0].id // empty' /tmp/zones.json)"
+          test -n "$ZONE_ID"
+          curl --fail --silent --show-error "$API/zones/${ZONE_ID}/workers/routes" -H "$AUTH" -o /tmp/routes.json
+          jq -e '.success == true' /tmp/routes.json >/dev/null
+          jq '[.result[] | select(.pattern | contains("lessons.futureperfect.education")) | {pattern,script}]' /tmp/routes.json
+      - name: Fresh Worker deployments and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          for worker in fpt-portal-v2-worker fpt-portal-v2-rebuild-browser-prod fpt-portal-v2-rebuild-student-prod; do
+            echo "=== $worker deployments ==="
+            npx --yes wrangler@4.125.0 deployments status --name "$worker" --json
+            curl --fail --silent --show-error "$API/workers/scripts/${worker}/settings" -H "$AUTH" -o "/tmp/${worker}-settings.json"
+            jq '{success,bindings:[.result.bindings[] | {name,type,namespace_id,database_id,id,service,environment}]}' "/tmp/${worker}-settings.json"
+          done
+          jq -e --arg id "$EXPECTED_STUDENTS_KV_ID" '.result.bindings[] | select(.name=="STUDENTS_KV" and .namespace_id==$id)' /tmp/fpt-portal-v2-worker-settings.json >/dev/null
+          jq -e --arg id "$EXPECTED_LESSONS_KV_ID" '.result.bindings[] | select(.name=="LESSONS_KV" and .namespace_id==$id)' /tmp/fpt-portal-v2-worker-settings.json >/dev/null
+          jq -e --arg id "$EXPECTED_READ_MODELS_KV_ID" '.result.bindings[] | select(.name=="READ_MODELS_KV" and .namespace_id==$id)' /tmp/fpt-portal-v2-worker-settings.json >/dev/null
+          jq -e --arg id "$PROD_D1_ID" '.result.bindings[] | select(.name=="DB" and ((.id // .database_id)==$id))' /tmp/fpt-portal-v2-worker-settings.json >/dev/null
+          echo 'ADMIN_BINDINGS_FRESH_PASS'
+      - name: Fresh D1 schema and identity-free PreLesson VR audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${PROD_D1_ID}/query"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          query() {
+            local sql="$1"
+            curl --fail --silent --show-error "$API" -H "$AUTH" -H 'Content-Type: application/json' --data "$(jq -nc --arg sql "$sql" '{sql:$sql}')"
+          }
+          echo '=== online_prelesson_entitlements schema ==='
+          query "PRAGMA table_info('online_prelesson_entitlements');" | jq '{success,result}'
+          echo '=== identity-free counts by batch and vr_access ==='
+          query "SELECT batch_key, vr_access, COUNT(*) AS rows_count FROM online_prelesson_entitlements GROUP BY batch_key, vr_access ORDER BY batch_key, vr_access;" | jq '{success,result}'
+          echo '=== 11+ English online rows with vr_access=0 ==='
+          query "SELECT COUNT(*) AS candidate_rows, COUNT(DISTINCT portal_user_id_norm) AS candidate_students FROM online_prelesson_entitlements WHERE COALESCE(vr_access,0)=0 AND (UPPER(batch_key) LIKE 'Y411%' OR UPPER(batch_key) LIKE 'Y511%') AND INSTR(UPPER(batch_key),'E')>0 AND INSTR(UPPER(batch_key),'O')>0;" | tee /tmp/vr-zero.json | jq '{success,result}'
+          jq -e '.success == true' /tmp/vr-zero.json >/dev/null
+      - name: Fresh deployed Admin package hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/fpt-portal-v2-worker"
+          curl --fail --silent --show-error "$API" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/admin-package.bin
+          sha256sum /tmp/admin-package.bin
+          echo 'PRELESSON_VR_READONLY_AUDIT_PASS'
