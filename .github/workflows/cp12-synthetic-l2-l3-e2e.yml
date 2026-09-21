@@ -24,6 +24,7 @@ env:
   EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
   EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
   EXPECTED_QUIZ_VERSION: 80d4942e-616c-4539-91f1-9f2daf05cfc1
+  EXPECTED_HARNESS_SHA256: 7dcd92695ab9cde73690dcd099ff3c8a4393896eafe57844f8b5ceb84a1fc92b
   PORTAL_ROOT: https://lessons.futureperfect.education
   QUIZ_ROOT: https://quiz.futureperfect.education
 jobs:
@@ -35,136 +36,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply reviewed pre-run source corrections and freeze executable
+      - name: Freeze canonical stored executable
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('scripts/cp12-e2e-synthetic-fixture.mjs')
-          s=p.read_text()
-          replacements=[
-            ("import { opaqueAccessScopeId } from '../rebuild/adminops/src/lib/compatibility.mjs';", "import { opaqueAccessScopeId } from '../rebuild/student/src/lib/access-scope.mjs';", 'authoritative Student access-scope derivation'),
-            ("VALUES(?,?,1,0,'excel',?,?,?,?,?)", "VALUES(?,?,1,0,'excel',?,?,?,?)", 'entitlement placeholder correction'),
-            ("batches: [clean(persona.batch.batch_key)],", "batches: [],", 'synthetic legacy-batches narrowing'),
-          ]
-          for old,new,label in replacements:
-              if s.count(old)!=1:
-                  raise SystemExit(f'expected exactly one {label}, found {s.count(old)}')
-              s=s.replace(old,new)
-
-          old_func=r'''function canonicalLessonCodes(globalReadModel, level, count = 2) {
-            const viewId = `maths-level${level}`;
-            const lessons = globalReadModel?.catalogues?.[viewId]?.lessons || [];
-            const re = new RegExp(`^L${level}T\\d+M\\d+$`, 'i');
-            const out = [];
-            for (const lesson of lessons) {
-              const code = [lesson?.lessonId, lesson?.displayLessonId].map(clean).find(value => re.test(value));
-              if (code && !out.includes(code.toUpperCase())) out.push(code.toUpperCase());
-              if (out.length >= count) break;
-            }
-            assert(out.length === count, `Could not select ${count} canonical L${level} lessons from prepared global catalogue`);
-            return out;
-          }'''.replace('          ','')
-          new_func=r'''function canonicalLessonFixture(globalReadModel, level, count = 2) {
-            const viewId = `maths-level${level}`;
-            const lessons = globalReadModel?.catalogues?.[viewId]?.lessons || [];
-            const re = new RegExp(`^L${level}T\\d+M\\d+$`, 'i');
-            const rows = [];
-            const seenLessonIds = new Set();
-            const seenReleaseCodes = new Set();
-            for (const lesson of lessons) {
-              const lessonId = clean(lesson?.lessonId);
-              const releaseCode = [lesson?.displayLessonId, lesson?.lessonId].map(clean).find(value => re.test(value));
-              if (!lessonId || !releaseCode) continue;
-              const code = releaseCode.toUpperCase();
-              if (seenLessonIds.has(lessonId) || seenReleaseCodes.has(code)) continue;
-              seenLessonIds.add(lessonId);
-              seenReleaseCodes.add(code);
-              rows.push({ lessonId, releaseCode: code });
-              if (rows.length >= count) break;
-            }
-            assert(rows.length === count, `Could not select ${count} canonical L${level} lesson fixtures from prepared global catalogue`);
-            return {
-              lessonIds: rows.map(row => row.lessonId),
-              releaseCodes: rows.map(row => row.releaseCode)
-            };
-          }'''.replace('          ','')
-          if s.count(old_func)!=1:
-              raise SystemExit(f'expected one canonicalLessonCodes function, found {s.count(old_func)}')
-          s=s.replace(old_func,new_func)
-
-          nonce_line="  const nonce = crypto.randomBytes(4).toString('hex');"
-          nonce_replacement=nonce_line+"\n  const l2Fixture = canonicalLessonFixture(global.payload, 2, 2);\n  const l3Fixture = canonicalLessonFixture(global.payload, 3, 2);"
-          if s.count(nonce_line)!=1:
-              raise SystemExit(f'expected one fixture nonce line, found {s.count(nonce_line)}')
-          s=s.replace(nonce_line,nonce_replacement,1)
-
-          old_l2_persona="    { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 2, 2) },"
-          new_l2_persona="    { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: l2Fixture.lessonIds, expectedReleaseCodes: l2Fixture.releaseCodes },"
-          old_l3_persona="    { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 3, 2) }"
-          new_l3_persona="    { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: l3Fixture.lessonIds, expectedReleaseCodes: l3Fixture.releaseCodes }"
-          for old,new,label in [(old_l2_persona,new_l2_persona,'L2 persona fixture'),(old_l3_persona,new_l3_persona,'L3 persona fixture')]:
-              if s.count(old)!=1:
-                  raise SystemExit(f'expected one {label}, found {s.count(old)}')
-              s=s.replace(old,new,1)
-
-          old_l2="assert(sameSet(context?.releasedL2LessonCodes || [], persona.lessonCodes), 'L2 release list is not exactly the explicit L2 entitlements');"
-          new_l2="const actual = context?.releasedL2LessonCodes || []; if (!sameSet(actual, persona.expectedReleaseCodes)) console.log(`CP12_L2_RELEASE_CONTEXT_MISMATCH expected=${JSON.stringify(persona.expectedReleaseCodes)} actual=${JSON.stringify(actual)}`); assert(sameSet(actual, persona.expectedReleaseCodes), 'L2 release list is not exactly the explicit L2 entitlement release codes');"
-          if s.count(old_l2)!=1:
-              raise SystemExit(f'expected one L2 release assertion, found {s.count(old_l2)}')
-          s=s.replace(old_l2,new_l2,1)
-          old_l3="assert(sameSet(context?.releasedL3LessonCodes || [], persona.lessonCodes), 'L3 release list is not exactly the explicit L3 entitlements');"
-          new_l3="const actual = context?.releasedL3LessonCodes || []; if (!sameSet(actual, persona.expectedReleaseCodes)) console.log(`CP12_L3_RELEASE_CONTEXT_MISMATCH expected=${JSON.stringify(persona.expectedReleaseCodes)} actual=${JSON.stringify(actual)}`); assert(sameSet(actual, persona.expectedReleaseCodes), 'L3 release list is not exactly the explicit L3 entitlement release codes');"
-          if s.count(old_l3)!=1:
-              raise SystemExit(f'expected one L3 release assertion, found {s.count(old_l3)}')
-          s=s.replace(old_l3,new_l3,1)
-
-          old='''async function portalSession(persona) {
-            const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
-              method: 'POST',
-              headers: { Origin: portalRoot, 'content-type': 'application/json' },
-              body: JSON.stringify({ username: persona.user, password: persona.password })
-            });
-            assert(login.response.status === 200 && login.body?.ok === true && login.body?.accountLocked === false, `${persona.label} signed Portal login failed`);
-            return cookieFrom(login.response, 'fpt_session');
-          }'''.replace('          ','')
-          new='''async function portalSession(persona) {
-            let lastStatus = 0;
-            let lastError = '';
-            for (let attempt = 1; attempt <= 20; attempt += 1) {
-              const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
-                method: 'POST',
-                headers: { Origin: portalRoot, 'content-type': 'application/json' },
-                body: JSON.stringify({ username: persona.user, password: persona.password })
-              });
-              lastStatus = login.response.status;
-              lastError = clean(login.body?.error);
-              if (lastStatus === 200 && login.body?.ok === true && login.body?.accountLocked === false) {
-                console.log(`CP12_${persona.label}_EDGE_PROPAGATION_READY_PASS attempts=${attempt}`);
-                return cookieFrom(login.response, 'fpt_session');
-              }
-              const credentialPropagationPending = lastStatus === 401 && lastError === 'LOGIN_INVALID';
-              const readModelPropagationPending = lastStatus === 503 && ['READ_MODEL_POINTER_UNAVAILABLE','READ_MODEL_NO_VERIFIED_VERSION','RUNTIME_UNAVAILABLE'].includes(lastError);
-              if (!credentialPropagationPending && !readModelPropagationPending) {
-                throw new Error(`${persona.label} signed Portal login hard-failed status=${lastStatus} error=${lastError || 'none'}`);
-              }
-              if (attempt < 20) await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-            throw new Error(`${persona.label} signed Portal login propagation timeout status=${lastStatus} error=${lastError || 'none'}`);
-          }'''.replace('          ','')
-          if s.count(old)!=1:
-              raise SystemExit(f'expected exactly one portalSession propagation patch target, found {s.count(old)}')
-          s=s.replace(old,new)
-          p.write_text(s)
-          PY
-          grep -Fq "from '../rebuild/student/src/lib/access-scope.mjs'" scripts/cp12-e2e-synthetic-fixture.mjs
-          ! grep -Fq "from '../rebuild/adminops/src/lib/compatibility.mjs'" scripts/cp12-e2e-synthetic-fixture.mjs
-          grep -Fq 'expectedReleaseCodes' scripts/cp12-e2e-synthetic-fixture.mjs
-          ! grep -Fq 'canonicalLessonCodes(global.payload' scripts/cp12-e2e-synthetic-fixture.mjs
-          node --check scripts/cp12-e2e-synthetic-fixture.mjs
-          sha256sum scripts/cp12-e2e-synthetic-fixture.mjs
-          echo CP12_E2E_EXECUTABLE_FROZEN_PASS
+          FILE=scripts/cp12-e2e-synthetic-fixture.mjs
+          grep -Fq "from '../rebuild/student/src/lib/access-scope.mjs'" "$FILE"
+          ! grep -Fq "from '../rebuild/adminops/src/lib/compatibility.mjs'" "$FILE"
+          grep -Fq 'expectedReleaseCodes' "$FILE"
+          ! grep -Fq 'canonicalLessonCodes(global.payload' "$FILE"
+          grep -Fq 'batches: [],' "$FILE"
+          grep -Fq "VALUES(?,?,1,0,'excel',?,?,?,?)" "$FILE"
+          grep -Fq 'attempt <= 20' "$FILE"
+          node --check "$FILE"
+          ACTUAL_SHA="$(sha256sum "$FILE" | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_HARNESS_SHA256"
+          echo "CP12_E2E_CANONICAL_EXECUTABLE_FROZEN_PASS sha256=$ACTUAL_SHA"
       - name: Re-run authoritative compiler and atomic-publisher regressions
         shell: bash
         run: |
