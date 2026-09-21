@@ -1,0 +1,47 @@
+{
+  "marker": "CP12_POSTPROMOTION_SIGNED_E2E_CLOSED_PASS",
+  "date": "2026-09-21",
+  "productionHost": "lessons.futureperfect.education",
+  "workflow": {
+    "runId": "35618996043",
+    "commitSha": "88028168854f24c4d383b64deb5408785ff6a667",
+    "artifact": {
+      "name": "cp12-postpromotion-signed-e2e-evidence",
+      "id": "10647313187",
+      "sha256": "51aa0df64cca3485d306287e5c3a5098f2f8531a38ee12ce077a7a46c93fa0a4"
+    }
+  },
+  "productionVersions": {
+    "student": "51d725cc-d21e-4aad-9c64-24149c640637",
+    "browser": "ea701c02-93f7-46e9-9182-59a785dc0bee",
+    "bridge": "2ae28100-b4c6-40a3-87e2-42aef86c6fdf",
+    "quiz": "80d4942e-616c-4539-91f1-9f2daf05cfc1"
+  },
+  "browserBundleSha256": "ee665945ab14c80d2747d603138db8f0b4e2afef84656de04d0025409c2ef0c9",
+  "signedAcceptance": {
+    "l2LaunchRedeem": true,
+    "l3LaunchRedeem": true,
+    "identityContinuity": true,
+    "oneTimeRedeem": true,
+    "syntheticLearningHistoryCreated": false
+  },
+  "cleanup": {
+    "verified": true,
+    "quizLaunchCodesBaseline": 8,
+    "assignmentAutoincrementSequence": 181,
+    "syntheticPortalRowsRemaining": 0,
+    "syntheticQuizRowsRemaining": 0,
+    "syntheticKvKeysRemaining": 0
+  },
+  "publicSurface": {
+    "promoted": true,
+    "bundleIdentityVerified": true,
+    "quizMarkersPresent": true
+  },
+  "security": {
+    "unauthenticatedEligibilityStatus": 401,
+    "unauthenticatedLaunchStatus": 401,
+    "hostileOriginLaunchStatus": 403
+  },
+  "status": "CLOSED_PASS"
+}
