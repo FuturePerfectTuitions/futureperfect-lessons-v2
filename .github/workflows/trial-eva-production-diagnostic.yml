@@ -18,7 +18,6 @@ env:
   STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
   READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
   PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
-  PROD_HOST: lessons.futureperfect.education
   TARGET_USER_NORM: trialeva
 
 jobs:
@@ -52,11 +51,10 @@ jobs:
           const readKv=process.env.READ_MODELS_KV_ID;
           const db=process.env.PROD_D1_ID;
           const user=process.env.TARGET_USER_NORM;
-          const host=process.env.PROD_HOST;
           const base=`https://api.cloudflare.com/client/v4/accounts/${account}`;
           const headers={Authorization:`Bearer ${token}`};
-          async function cf(path,init={}){
-            const r=await fetch(`${base}${path}`,{...init,headers:{...headers,...(init.headers||{})}});
+          async function cf(path){
+            const r=await fetch(`${base}${path}`,{headers});
             const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
             if(!r.ok || (body && body.success===false)) throw new Error(`CF ${r.status} ${path}: ${text.slice(0,300)}`);
             return body?.result ?? text;
@@ -66,14 +64,9 @@ jobs:
             const rows=Array.isArray(x?.deployments)?x.deployments:(Array.isArray(x)?x:[]);
             const d=rows[0]||{}; const versions=Array.isArray(d.versions)?d.versions:[];
             const v=versions.find(v=>Number(v?.percentage||0)===100)||versions[0]||{};
-            return {deploymentId:String(d.id||''),versionId:String(v.version_id||''),createdOn:String(d.created_on||''),annotations:d.annotations||null};
+            return {deploymentId:String(d.id||''),versionId:String(v.version_id||''),createdOn:String(d.created_on||'')};
           }
           async function settings(name){return cf(`/workers/scripts/${encodeURIComponent(name)}/settings`);}
-          async function scriptText(name){
-            const r=await fetch(`${base}/workers/scripts/${encodeURIComponent(name)}/content`,{headers});
-            if(!r.ok) throw new Error(`script ${name} ${r.status}`);
-            return await r.text();
-          }
           async function kvRaw(ns,key){
             const r=await fetch(`${base}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});
             if(r.status===404) return null;
@@ -86,8 +79,8 @@ jobs:
             return body.result?.[0]?.results||[];
           }
 
-          const [legacyActive,studentActive,browserActive,legacySettings,browserSettings,legacyScript,studentScript]=await Promise.all([
-            active(legacy),active(student),active(browser),settings(legacy),settings(browser),scriptText(legacy),scriptText(student)
+          const [legacyActive,studentActive,browserActive,legacySettings,browserSettings]=await Promise.all([
+            active(legacy),active(student),active(browser),settings(legacy),settings(browser)
           ]);
           const userRaw=await kvRaw(studentsKv,`user:${user}`);
           const profile=userRaw?JSON.parse(userRaw):null;
@@ -105,8 +98,8 @@ jobs:
               const version=String(ptr?.current?.version||'');
               const vkey=`rm:v1:scope:${encoded}:version:${encodeURIComponent(version).replace(/%/g,'_')}`;
               const envRaw=version?await kvRaw(readKv,vkey):null;
-              const env=envRaw?JSON.parse(envRaw):null;
-              const snap=env?.payload?.snapshot||null;
+              const envelope=envRaw?JSON.parse(envRaw):null;
+              const snap=envelope?.payload?.snapshot||null;
               prepared={
                 present:Boolean(snap),
                 version,
@@ -125,11 +118,7 @@ jobs:
             workers:{legacy:legacyActive,student:studentActive,browser:browserActive},
             browserServices:services,
             legacyBindings,
-            runtimeMarkers:{
-              legacyPreparedPublisher:legacyScript.includes('PREPARED_ACCESS_POST_PUBLISH_VERIFY_FAILED')||legacyScript.includes('preparedAccessVersion'),
-              legacyCurrentReadModelSync:legacyScript.includes('READ_MODEL_RECONCILIATION_NOT_CONFIGURED'),
-              studentTrialRuntime:studentScript.includes('TRIAL_ACCESS_ENDED')
-            },
+            studentTrialRuntimeKnownFromVersion:studentActive.versionId==='b2e8bebb-1a18-4fc0-8dbc-ae9763ced1b4',
             trial:{
               exists:Boolean(profile),
               active:String(profile?.accountStatus||profile?.status||'').toLowerCase()==='active',
