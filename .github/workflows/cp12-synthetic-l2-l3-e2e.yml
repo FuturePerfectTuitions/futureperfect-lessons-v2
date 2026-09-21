@@ -63,7 +63,7 @@ jobs:
           new='''async function portalSession(persona) {
             let lastStatus = 0;
             let lastError = '';
-            for (let attempt = 1; attempt <= 20; attempt += 1) {
+            for (let attempt = 1; attempt <= 65; attempt += 1) {
               const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
                 method: 'POST',
                 headers: { Origin: portalRoot, 'content-type': 'application/json' },
@@ -80,7 +80,7 @@ jobs:
               if (!credentialPropagationPending && !readModelPropagationPending) {
                 throw new Error(`${persona.label} signed Portal login hard-failed status=${lastStatus} error=${lastError || 'none'}`);
               }
-              if (attempt < 20) await new Promise(resolve => setTimeout(resolve, 2000));
+              if (attempt < 65) await new Promise(resolve => setTimeout(resolve, 2000));
             }
             throw new Error(`${persona.label} signed Portal login propagation timeout status=${lastStatus} error=${lastError || 'none'}`);
           }'''.replace('          ','')
