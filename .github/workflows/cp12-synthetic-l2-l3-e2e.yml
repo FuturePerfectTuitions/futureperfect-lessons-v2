@@ -44,6 +44,7 @@ jobs:
           p=Path('scripts/cp12-e2e-synthetic-fixture.mjs')
           s=p.read_text()
           replacements=[
+            ("import { opaqueAccessScopeId } from '../rebuild/adminops/src/lib/compatibility.mjs';", "import { opaqueAccessScopeId } from '../rebuild/student/src/lib/access-scope.mjs';", 'authoritative Student access-scope derivation'),
             ("VALUES(?,?,1,0,'excel',?,?,?,?,?)", "VALUES(?,?,1,0,'excel',?,?,?,?)", 'entitlement placeholder correction'),
             ("batches: [clean(persona.batch.batch_key)],", "batches: [],", 'synthetic legacy-batches narrowing'),
           ]
@@ -89,6 +90,8 @@ jobs:
           s=s.replace(old,new)
           p.write_text(s)
           PY
+          grep -Fq "from '../rebuild/student/src/lib/access-scope.mjs'" scripts/cp12-e2e-synthetic-fixture.mjs
+          ! grep -Fq "from '../rebuild/adminops/src/lib/compatibility.mjs'" scripts/cp12-e2e-synthetic-fixture.mjs
           node --check scripts/cp12-e2e-synthetic-fixture.mjs
           sha256sum scripts/cp12-e2e-synthetic-fixture.mjs
           echo CP12_E2E_EXECUTABLE_FROZEN_PASS
