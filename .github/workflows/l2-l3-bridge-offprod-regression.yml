@@ -29,7 +29,7 @@ jobs:
           test -z "$bad" || { echo "UNEXPECTED_CHANGED_FILES"; echo "$bad"; exit 1; }
           grep -Fq "POLICY_VERSION='quiz-release-context-v2.0'" worker/src/index-step10-quiz-bridge.js
           grep -Fq "RELEASE_SOURCE='portal-live-maths11plus-release-v2'" worker/src/index-step10-quiz-bridge.js
-          grep -Fq "maths-level${n}" worker/src/index-step10-quiz-bridge.js
+          grep -Fq 'maths-level${n}' worker/src/index-step10-quiz-bridge.js
           grep -Fq "assignment_id" worker/src/index-step10-quiz-bridge.js
           grep -Fq "AMBIGUOUS_LEVEL" worker/src/index-step10-quiz-bridge.js
           grep -Fq "releasedL2LessonCodes:level===2?lessonCodes:[]" worker/src/index-step10-quiz-bridge.js
