@@ -31,7 +31,7 @@ jobs:
             echo "=== $w settings summary ==="
             curl -fsS -H "$AUTH" "$API/workers/scripts/$w/settings" -o "/tmp/${w}.settings.json"
             jq -e '.success==true' "/tmp/${w}.settings.json" >/dev/null
-            jq -c '.result | {compatibility_date,compatibility_flags,usage_model,bindings:[.bindings[]? | {name,type,service,environment,namespace_id,database_id:id,bucket_name}]}' "/tmp/${w}.settings.json"
+            jq -c '.result | {compatibility_date,compatibility_flags,usage_model,bindings:[.bindings[]? | {name:.name,type:.type,service:.service,environment:.environment,namespace_id:.namespace_id,database_id:(.id // .database_id),bucket_name:.bucket_name}]}' "/tmp/${w}.settings.json"
             echo "=== $w uploaded script sha/markers ==="
             curl -fsS -H "$AUTH" "$API/workers/scripts/$w" -o "/tmp/${w}.script"
             sha256sum "/tmp/${w}.script"
