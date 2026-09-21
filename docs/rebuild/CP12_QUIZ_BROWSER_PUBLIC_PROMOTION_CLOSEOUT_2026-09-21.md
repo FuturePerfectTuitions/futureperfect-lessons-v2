@@ -67,6 +67,21 @@ Before Browser promotion, the production-shaped hidden CP12 E2E had already pass
 - no practice-test or question-history creation from the synthetic acceptance run; and
 - complete cleanup back to the pre-test Portal baseline.
 
+## Post-promotion signed and rendered acceptance
+
+After public promotion, the live production state was exercised again with fresh synthetic L2 and L3 identities.
+
+The post-promotion signed acceptance run `35618996043` passed Portal login, release-context generation, one-time launch/redeem, Quiz identity continuity and complete cleanup for both levels. Its evidence artifact is `cp12-postpromotion-signed-e2e-evidence` (ID `10647313187`, digest `sha256:51aa0df64cca3485d306287e5c3a5098f2f8531a38ee12ce077a7a46c93fa0a4`).
+
+A second rendered-browser run `35619476013` then used Playwright/Chromium against the real production Portal. Both synthetic L2 and L3 students logged in through the rendered login form, opened Maths, and displayed exactly one visible `11+ Practice` card with copy `Take a real exam style GL quiz`. Both cards rendered at `506 × 112` CSS pixels. The run also repeated signed launch/redeem, verified exact cleanup, rechecked the production bundle identity, and rechecked `401 / 401 / 403` security behaviour. Its evidence artifact is `cp12-postpromotion-rendered-browser-evidence` (ID `10647468952`, digest `sha256:56b5adca81bb428a7f83ed7651eeb7f7d2deb41f56cf670911168c4ca6552db6`).
+
+Detailed supplements:
+
+- `docs/rebuild/CP12_QUIZ_BROWSER_POSTPROMOTION_SIGNED_E2E_2026-09-21.md`
+- `docs/rebuild/CP12_QUIZ_BROWSER_RENDERED_VISUAL_ACCEPTANCE_2026-09-21.md`
+
+No real pupil credentials were used for either post-promotion acceptance run.
+
 ## Rollback anchor
 
 The pre-CP12 Browser rollback version remains:
@@ -77,4 +92,4 @@ Rollback is Browser-only. It must not overwrite or revert independently verified
 
 ## Closure decision
 
-CP12 Quiz Browser public promotion is **CLOSED — PASS**. The production Portal now carries the server-authorised Quiz surface from frontend commit `63f37895727e41ada427c9644b41b5a026ed196b`, with eligibility and launch authority remaining server-side and fail-closed.
+CP12 Quiz Browser public promotion is **CLOSED — PASS**. The production Portal now carries the server-authorised Quiz surface from frontend commit `63f37895727e41ada427c9644b41b5a026ed196b`, with eligibility and launch authority remaining server-side and fail-closed. Post-promotion signed L2/L3 acceptance and rendered-browser visual acceptance are also **CLOSED — PASS**.
