@@ -13,45 +13,75 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Inspect prepared catalogue identifiers read-only
+      - name: Inspect prepared catalogue and production entitlement identifiers read-only
         shell: bash
         run: |
           set -Eeuo pipefail
           node --input-type=module <<'NODE'
           import { resolveCurrentScope } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
-          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, ns=process.env.READ_MODELS_KV_ID;
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, ns=process.env.READ_MODELS_KV_ID, d1=process.env.PORTAL_D1_ID;
           const base=`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}`;
+          const headers={Authorization:`Bearer ${token}`};
           async function get(key){
-            const r=await fetch(`${base}/storage/kv/namespaces/${encodeURIComponent(ns)}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
+            const r=await fetch(`${base}/storage/kv/namespaces/${encodeURIComponent(ns)}/values/${encodeURIComponent(key)}`,{headers});
             if(r.status===404)return null;
             if(!r.ok)throw new Error(`KV read ${r.status}`);
             return r.text();
           }
+          async function query(sql){
+            const r=await fetch(`${base}/d1/database/${encodeURIComponent(d1)}/query`,{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({sql})});
+            const j=await r.json();
+            if(!r.ok||j.success!==true)throw new Error(`D1 read ${r.status}`);
+            const block=Array.isArray(j.result)?j.result[0]:j.result;
+            return block?.results||[];
+          }
           const global=await resolveCurrentScope({get},'global');
           if(global?.payload?.kind!=='prepared-global-read-model')throw new Error('global read model invalid');
           console.log(`GLOBAL_VERSION=${global.version}`);
+          const maps={};
           for(const level of [2,3]){
             const view=`maths-level${level}`;
             const rows=global.payload?.catalogues?.[view]?.lessons||[];
             const re=new RegExp(`^L${level}T\\d+M\\d+$`,'i');
             const canonical=[];
             const relevant=[];
+            maps[level]={internal:new Set(),display:new Set()};
             for(const row of rows){
               const lessonId=String(row?.lessonId||'').trim();
               const displayLessonId=String(row?.displayLessonId||'').trim();
+              maps[level].internal.add(lessonId); maps[level].display.add(displayLessonId);
               const code=[lessonId,displayLessonId].find(v=>re.test(v))||'';
               if(code&&canonical.length<5)canonical.push(code.toUpperCase());
               if(re.test(lessonId)||re.test(displayLessonId)) relevant.push({lessonId,displayLessonId,code:code.toUpperCase(),same:lessonId.toUpperCase()===displayLessonId.toUpperCase()});
             }
             console.log(`LEVEL=L${level} catalogueRows=${rows.length} regexRows=${relevant.length} canonical=${JSON.stringify(canonical)}`);
             console.log(JSON.stringify(relevant.slice(0,12)));
-            const lessonIdSet=new Set(rows.map(r=>String(r?.lessonId||'').trim()));
-            for(const code of canonical.slice(0,2)) console.log(`L${level}_PICK=${code} IS_LESSON_ID=${lessonIdSet.has(code)}`);
           }
-          console.log('CP12_L2_CATALOGUE_ID_DIAGNOSTIC_PASS');
+          const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+          const sql=`SELECT le.lesson_id, COUNT(*) AS n
+            FROM lesson_entitlements le
+            JOIN student_batch_assignments a ON a.portal_user_id_norm=le.portal_user_id_norm
+            JOIN batch_definitions b ON b.batch_key=a.batch_key
+            WHERE lower(b.subject)='maths' AND lower(b.stream)='11plus'
+              AND b.maths_level=2
+              AND a.effective_from<='${today}' AND (a.effective_to IS NULL OR '${today}'<a.effective_to)
+              AND (b.active_from IS NULL OR b.active_from<='${today}') AND (b.active_to IS NULL OR '${today}'<b.active_to)
+            GROUP BY le.lesson_id ORDER BY le.lesson_id`;
+          const entitlementRows=await query(sql);
+          let internal=0, display=0, neither=0;
+          for(const row of entitlementRows){
+            const id=String(row.lesson_id||'').trim();
+            if(maps[2].internal.has(id)) internal++; else if(maps[2].display.has(id)) display++; else neither++;
+          }
+          console.log(`ACTIVE_L2_DISTINCT_ENTITLEMENTS=${entitlementRows.length} INTERNAL_ID_MATCHES=${internal} DISPLAY_ID_ONLY_MATCHES=${display} NEITHER=${neither}`);
+          console.log(`ACTIVE_L2_SAMPLE=${JSON.stringify(entitlementRows.slice(0,20).map(r=>r.lesson_id))}`);
+          if(entitlementRows.length<1||internal<1)throw new Error('Could not verify production internal lesson-id convention');
+          if(display>0)throw new Error('Production L2 entitlements unexpectedly use display-only IDs');
+          console.log('CP12_L2_ENTITLEMENT_ID_CONVENTION_PASS');
           NODE
