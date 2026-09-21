@@ -11,7 +11,7 @@ import {
   publishScopeAtomic,
   resolveCurrentScope
 } from '../rebuild/adminops/src/lib/atomic-publisher.mjs';
-import { opaqueAccessScopeId } from '../rebuild/adminops/src/lib/compatibility.mjs';
+import { opaqueAccessScopeId } from '../rebuild/student/src/lib/access-scope.mjs';
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
@@ -159,18 +159,29 @@ function activeBatchSql() {
           ORDER BY batch_key LIMIT 1`;
 }
 
-function canonicalLessonCodes(globalReadModel, level, count = 2) {
+function canonicalLessonFixture(globalReadModel, level, count = 2) {
   const viewId = `maths-level${level}`;
   const lessons = globalReadModel?.catalogues?.[viewId]?.lessons || [];
   const re = new RegExp(`^L${level}T\\d+M\\d+$`, 'i');
-  const out = [];
+  const rows = [];
+  const seenLessonIds = new Set();
+  const seenReleaseCodes = new Set();
   for (const lesson of lessons) {
-    const code = [lesson?.lessonId, lesson?.displayLessonId].map(clean).find(value => re.test(value));
-    if (code && !out.includes(code.toUpperCase())) out.push(code.toUpperCase());
-    if (out.length >= count) break;
+    const lessonId = clean(lesson?.lessonId);
+    const releaseCode = [lesson?.displayLessonId, lesson?.lessonId].map(clean).find(value => re.test(value));
+    if (!lessonId || !releaseCode) continue;
+    const code = releaseCode.toUpperCase();
+    if (seenLessonIds.has(lessonId) || seenReleaseCodes.has(code)) continue;
+    seenLessonIds.add(lessonId);
+    seenReleaseCodes.add(code);
+    rows.push({ lessonId, releaseCode: code });
+    if (rows.length >= count) break;
   }
-  assert(out.length === count, `Could not select ${count} canonical L${level} lessons from prepared global catalogue`);
-  return out;
+  assert(rows.length === count, `Could not select ${count} canonical L${level} lesson fixtures from prepared global catalogue`);
+  return {
+    lessonIds: rows.map(row => row.lessonId),
+    releaseCodes: rows.map(row => row.releaseCode)
+  };
 }
 
 async function accessRowsFor(user) {
@@ -252,9 +263,11 @@ async function preflight() {
   state.baselineLaunchRows = await scalar(portalD1, 'SELECT COUNT(*) AS n FROM quiz_launch_codes');
 
   const nonce = crypto.randomBytes(4).toString('hex');
+  const l2Fixture = canonicalLessonFixture(global.payload, 2, 2);
+  const l3Fixture = canonicalLessonFixture(global.payload, 3, 2);
   state.personas = [
-    { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 2, 2) },
-    { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: canonicalLessonCodes(global.payload, 3, 2) }
+    { level: 2, label: 'L2', user: `cp12e2el2${runId}${nonce}`.toLowerCase(), password: password4(), batch: l2Batch, assignmentId: Number(gaps[0].assignment_id), lessonCodes: l2Fixture.lessonIds, expectedReleaseCodes: l2Fixture.releaseCodes },
+    { level: 3, label: 'L3', user: `cp12e2el3${runId}${nonce}`.toLowerCase(), password: password4(), batch: l3Batch, assignmentId: Number(gaps[1].assignment_id), lessonCodes: l3Fixture.lessonIds, expectedReleaseCodes: l3Fixture.releaseCodes }
   ];
 
   for (const persona of state.personas) {
@@ -289,7 +302,7 @@ async function createPersona(persona) {
     expires: null,
     expiresOn: null,
     trial: false,
-    batches: [clean(persona.batch.batch_key)],
+    batches: [],
     fullLibraries: [],
     blockedLessons: [],
     historicalViews: [],
@@ -307,7 +320,7 @@ async function createPersona(persona) {
   for (const lessonId of persona.lessonCodes) {
     await d1(portalD1, `INSERT INTO lesson_entitlements(
         portal_user_id_norm,lesson_id,core_access,vr_access,source,first_granted_at,last_confirmed_at,source_batch_code,source_lesson_date
-      ) VALUES(?,?,1,0,'excel',?,?,?,?,?)`, [persona.user, lessonId, now, now, persona.batch.batch_key, state.today]);
+      ) VALUES(?,?,1,0,'excel',?,?,?,?)`, [persona.user, lessonId, now, now, persona.batch.batch_key, state.today]);
   }
   persona.entitlementsCreated = true;
 
@@ -347,13 +360,28 @@ async function createPersona(persona) {
 }
 
 async function portalSession(persona) {
-  const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
-    method: 'POST',
-    headers: { Origin: portalRoot, 'content-type': 'application/json' },
-    body: JSON.stringify({ username: persona.user, password: persona.password })
-  });
-  assert(login.response.status === 200 && login.body?.ok === true && login.body?.accountLocked === false, `${persona.label} signed Portal login failed`);
-  return cookieFrom(login.response, 'fpt_session');
+  let lastStatus = 0;
+  let lastError = '';
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
+      method: 'POST',
+      headers: { Origin: portalRoot, 'content-type': 'application/json' },
+      body: JSON.stringify({ username: persona.user, password: persona.password })
+    });
+    lastStatus = login.response.status;
+    lastError = clean(login.body?.error);
+    if (lastStatus === 200 && login.body?.ok === true && login.body?.accountLocked === false) {
+      console.log(`CP12_${persona.label}_EDGE_PROPAGATION_READY_PASS attempts=${attempt}`);
+      return cookieFrom(login.response, 'fpt_session');
+    }
+    const credentialPropagationPending = lastStatus === 401 && lastError === 'LOGIN_INVALID';
+    const readModelPropagationPending = lastStatus === 503 && ['READ_MODEL_POINTER_UNAVAILABLE','READ_MODEL_NO_VERIFIED_VERSION','RUNTIME_UNAVAILABLE'].includes(lastError);
+    if (!credentialPropagationPending && !readModelPropagationPending) {
+      throw new Error(`${persona.label} signed Portal login hard-failed status=${lastStatus} error=${lastError || 'none'}`);
+    }
+    if (attempt < 20) await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw new Error(`${persona.label} signed Portal login propagation timeout status=${lastStatus} error=${lastError || 'none'}`);
 }
 
 async function verifyReleaseContext(persona, context) {
@@ -363,12 +391,12 @@ async function verifyReleaseContext(persona, context) {
   assert(Number(context?.portalAssignmentId) === persona.assignmentId, `${persona.label} portalAssignmentId mismatch`);
   assert(Number.isFinite(Date.parse(clean(context?.generatedAt))), `${persona.label} generatedAt invalid`);
   if (persona.level === 2) {
-    assert(sameSet(context?.releasedL2LessonCodes || [], persona.lessonCodes), 'L2 release list is not exactly the explicit L2 entitlements');
+    const actual = context?.releasedL2LessonCodes || []; if (!sameSet(actual, persona.expectedReleaseCodes)) console.log(`CP12_L2_RELEASE_CONTEXT_MISMATCH expected=${JSON.stringify(persona.expectedReleaseCodes)} actual=${JSON.stringify(actual)}`); assert(sameSet(actual, persona.expectedReleaseCodes), 'L2 release list is not exactly the explicit L2 entitlement release codes');
     assert(Array.isArray(context?.releasedL3LessonCodes) && context.releasedL3LessonCodes.length === 0, 'L2 release context unexpectedly contains L3 lessons');
     assert(Array.isArray(context?.inheritedLevels) && context.inheritedLevels.length === 0, 'L2 release context unexpectedly inherits another level');
   } else {
     assert(Array.isArray(context?.releasedL2LessonCodes) && context.releasedL2LessonCodes.length === 0, 'L3 release context should represent L2 through inheritance, not copied release rows');
-    assert(sameSet(context?.releasedL3LessonCodes || [], persona.lessonCodes), 'L3 release list is not exactly the explicit L3 entitlements');
+    const actual = context?.releasedL3LessonCodes || []; if (!sameSet(actual, persona.expectedReleaseCodes)) console.log(`CP12_L3_RELEASE_CONTEXT_MISMATCH expected=${JSON.stringify(persona.expectedReleaseCodes)} actual=${JSON.stringify(actual)}`); assert(sameSet(actual, persona.expectedReleaseCodes), 'L3 release list is not exactly the explicit L3 entitlement release codes');
     assert(sameSet(context?.inheritedLevels || [], ['L2']), 'L3 release context does not inherit full L2');
   }
 }
