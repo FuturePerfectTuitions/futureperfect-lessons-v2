@@ -1,0 +1,151 @@
+name: TrialEva production diagnostic
+
+on:
+  push:
+    branches:
+      - fix/trial-prepared-access-single-login-2026-09-21
+    paths:
+      - '.github/workflows/trial-eva-production-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LEGACY_WORKER: fpt-portal-v2-worker
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  PROD_HOST: lessons.futureperfect.education
+  TARGET_USER_NORM: trialeva
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read current production state only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const legacy=process.env.LEGACY_WORKER;
+          const student=process.env.STUDENT_WORKER;
+          const browser=process.env.BROWSER_WORKER;
+          const studentsKv=process.env.STUDENTS_KV_ID;
+          const readKv=process.env.READ_MODELS_KV_ID;
+          const db=process.env.PROD_D1_ID;
+          const user=process.env.TARGET_USER_NORM;
+          const host=process.env.PROD_HOST;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}`;
+          const headers={Authorization:`Bearer ${token}`};
+          async function cf(path,init={}){
+            const r=await fetch(`${base}${path}`,{...init,headers:{...headers,...(init.headers||{})}});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok || (body && body.success===false)) throw new Error(`CF ${r.status} ${path}: ${text.slice(0,300)}`);
+            return body?.result ?? text;
+          }
+          async function active(name){
+            const x=await cf(`/workers/scripts/${encodeURIComponent(name)}/deployments`);
+            const rows=Array.isArray(x?.deployments)?x.deployments:(Array.isArray(x)?x:[]);
+            const d=rows[0]||{}; const versions=Array.isArray(d.versions)?d.versions:[];
+            const v=versions.find(v=>Number(v?.percentage||0)===100)||versions[0]||{};
+            return {deploymentId:String(d.id||''),versionId:String(v.version_id||''),createdOn:String(d.created_on||''),annotations:d.annotations||null};
+          }
+          async function settings(name){return cf(`/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function scriptText(name){
+            const r=await fetch(`${base}/workers/scripts/${encodeURIComponent(name)}/content`,{headers});
+            if(!r.ok) throw new Error(`script ${name} ${r.status}`);
+            return await r.text();
+          }
+          async function kvRaw(ns,key){
+            const r=await fetch(`${base}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV ${ns} ${key} ${r.status}`);
+            return await r.text();
+          }
+          async function d1(sql,params=[]){
+            const r=await fetch(`${base}/d1/database/${db}/query`,{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({sql,params})});
+            const body=await r.json(); if(!r.ok||body.success!==true) throw new Error(`D1 ${r.status}: ${JSON.stringify(body.errors||[])}`);
+            return body.result?.[0]?.results||[];
+          }
+
+          const [legacyActive,studentActive,browserActive,legacySettings,browserSettings,legacyScript,studentScript]=await Promise.all([
+            active(legacy),active(student),active(browser),settings(legacy),settings(browser),scriptText(legacy),scriptText(student)
+          ]);
+          const userRaw=await kvRaw(studentsKv,`user:${user}`);
+          const profile=userRaw?JSON.parse(userRaw):null;
+          const consumption=await d1('SELECT consumed_at FROM trial_login_consumptions WHERE portal_user_id_norm = ? LIMIT 1',[user]);
+          const salt=(await kvRaw(readKv,'meta:scope-salt')||'').trim();
+          let prepared={present:false};
+          if(/^[0-9a-f]{64}$/i.test(salt)){
+            const digest=crypto.createHmac('sha256',salt).update(`rebuild-shadow-scope-v1:${user}`).digest('hex').slice(0,40);
+            const scope=`access:u-${digest}`;
+            const encoded=encodeURIComponent(scope).replace(/%/g,'_');
+            const pointerKey=`rm:v1:scope:${encoded}:current`;
+            const ptrRaw=await kvRaw(readKv,pointerKey);
+            if(ptrRaw){
+              const ptr=JSON.parse(ptrRaw);
+              const version=String(ptr?.current?.version||'');
+              const vkey=`rm:v1:scope:${encoded}:version:${encodeURIComponent(version).replace(/%/g,'_')}`;
+              const envRaw=version?await kvRaw(readKv,vkey):null;
+              const env=envRaw?JSON.parse(envRaw):null;
+              const snap=env?.payload?.snapshot||null;
+              prepared={
+                present:Boolean(snap),
+                version,
+                account:snap?{status:snap.account?.status||'',trial:snap.account?.trial===true,trialViews:Array.isArray(snap.account?.trialViews)?snap.account.trialViews:[]}:null,
+                views:snap?((snap.views||[]).map(v=>({viewId:v.viewId,openLessonCount:v.openLessonCount,lockedPreview:v.lockedPreview===true}))):[],
+                lessonAccessCount:snap?Object.keys(snap.lessonAccess||{}).length:0
+              };
+            }
+          }
+          const services=(browserSettings?.bindings||[]).filter(b=>b.type==='service').map(b=>({name:b.name,service:b.service}));
+          const legacyBindings=(legacySettings?.bindings||[]).map(b=>({name:b.name,type:b.type,namespace_id:b.namespace_id||null,id:b.id||b.database_id||null}));
+          const output={
+            marker:'TRIAL_EVA_PRODUCTION_DIAGNOSTIC',
+            readOnly:true,
+            sourceSha:process.env.GITHUB_SHA,
+            workers:{legacy:legacyActive,student:studentActive,browser:browserActive},
+            browserServices:services,
+            legacyBindings,
+            runtimeMarkers:{
+              legacyPreparedPublisher:legacyScript.includes('PREPARED_ACCESS_POST_PUBLISH_VERIFY_FAILED')||legacyScript.includes('preparedAccessVersion'),
+              legacyCurrentReadModelSync:legacyScript.includes('READ_MODEL_RECONCILIATION_NOT_CONFIGURED'),
+              studentTrialRuntime:studentScript.includes('TRIAL_ACCESS_ENDED')
+            },
+            trial:{
+              exists:Boolean(profile),
+              active:String(profile?.accountStatus||profile?.status||'').toLowerCase()==='active',
+              trialViews:Array.isArray(profile?.trialViews)?profile.trialViews:[],
+              consumptionExists:consumption.length===1,
+              prepared
+            }
+          };
+          fs.writeFileSync('/tmp/trial-eva-production-diagnostic.json',JSON.stringify(output,null,2));
+          console.log(JSON.stringify(output,null,2));
+          NODE
+          jq -e '.marker=="TRIAL_EVA_PRODUCTION_DIAGNOSTIC" and .readOnly==true and .trial.exists==true' /tmp/trial-eva-production-diagnostic.json >/dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trial-eva-production-diagnostic
+          path: /tmp/trial-eva-production-diagnostic.json
+          retention-days: 14
+          if-no-files-found: ignore
