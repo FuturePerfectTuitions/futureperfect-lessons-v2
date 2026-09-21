@@ -1,0 +1,70 @@
+name: CP12 synthetic persona diagnostic
+on:
+  push:
+    branches: [feature/cp12-l2-l3-promotion-2026-09-21]
+    paths: ['.github/workflows/cp12-synthetic-persona-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  PORTAL_ROOT: https://lessons.futureperfect.education
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safe KV and assignment diagnostics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          PW="$(jq -er '.sharedLoginPassword' docs/data/phase11/test_personas.json)"
+          for user in testy411m testy511em; do
+            code="$(curl -sS -H "$AUTH" -o "/tmp/${user}.kv" -w '%{http_code}' "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/user%3A${user}")"
+            echo "CP12_KV_PROBE user=$user http=$code"
+            if [ "$code" = 200 ]; then
+              jq -c --arg pw "$PW" --arg user "$user" '{user:$user,isObject:(type=="object"),statusActive:(((.status//"active")|ascii_downcase)=="active"),passwordMatches:(.p==$pw),firstNamePresent:(((.firstName//"")|length)>0),trial:(.trial//false),expires:(.expires//null)}' "/tmp/${user}.kv"
+            fi
+          done
+          unset PW
+
+          TODAY="$(TZ=Europe/London date +%F)"
+          read -r -d '' SQL <<SQL || true
+          SELECT a.portal_user_id_norm,a.assignment_id,a.batch_key,a.effective_from,a.effective_to,
+                 lower(b.subject) AS subject,lower(b.stream) AS stream,
+                 b.active_from,b.active_to,
+                 (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) AS maths_level,
+                 CASE WHEN a.effective_from <= '${TODAY}'
+                           AND (a.effective_to IS NULL OR '${TODAY}' < a.effective_to)
+                           AND (b.active_from IS NULL OR b.active_from <= '${TODAY}')
+                           AND (b.active_to IS NULL OR '${TODAY}' < b.active_to)
+                      THEN 1 ELSE 0 END AS active_today
+          FROM student_batch_assignments a
+          JOIN batch_definitions b ON b.batch_key=a.batch_key
+          WHERE a.portal_user_id_norm IN ('testy411m','testy511em')
+          ORDER BY a.portal_user_id_norm,a.effective_from DESC,a.assignment_id DESC;
+          SQL
+          curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' --data "$(jq -cn --arg sql "$SQL" '{sql:$sql}')" "$API/d1/database/${PORTAL_D1_ID}/query" -o /tmp/assignments.json
+          jq -e '.success==true and .result[0].success==true and ((.result[0].meta.changes//0)==0) and ((.result[0].meta.rows_written//0)==0)' /tmp/assignments.json >/dev/null
+          echo 'CP12_SYNTHETIC_ASSIGNMENT_ROWS_BEGIN'
+          jq -c '.result[0].results[]?' /tmp/assignments.json
+          echo 'CP12_SYNTHETIC_ASSIGNMENT_ROWS_END'
+
+          for spec in 'testy411m:L2' 'testy511em:L3'; do
+            user="${spec%%:*}"; expected="${spec##*:}"
+            payload="$(jq -cn --arg username "$user" --arg password "$(jq -er '.sharedLoginPassword' docs/data/phase11/test_personas.json)" '{username:$username,password:$password}')"
+            code="$(curl -sS -c "/tmp/${user}.cookies" -o "/tmp/${user}.login" -w '%{http_code}' -X POST "$PORTAL_ROOT/api/v2/auth/login" -H "Origin: $PORTAL_ROOT" -H 'Content-Type: application/json' --data "$payload")"
+            echo "CP12_LOGIN_PROBE user=$user http=$code ok=$(jq -r '.ok//false' "/tmp/${user}.login" 2>/dev/null || echo false) error=$(jq -r '.error//""' "/tmp/${user}.login" 2>/dev/null || true)"
+            if [ "$code" = 200 ]; then
+              ecode="$(curl -sS -b "/tmp/${user}.cookies" -o "/tmp/${user}.eligibility" -w '%{http_code}' "$PORTAL_ROOT/api/v2/student/quiz/eligibility" -H "Origin: $PORTAL_ROOT")"
+              echo "CP12_ELIGIBILITY_PROBE user=$user expected=$expected http=$ecode eligible=$(jq -r '.eligible//false' "/tmp/${user}.eligibility" 2>/dev/null || echo false) level=$(jq -r '.currentLevel//""' "/tmp/${user}.eligibility" 2>/dev/null || true) error=$(jq -r '.error//""' "/tmp/${user}.eligibility" 2>/dev/null || true)"
+            fi
+            rm -f "/tmp/${user}.cookies" "/tmp/${user}.login" "/tmp/${user}.eligibility"
+          done
+          echo CP12_SYNTHETIC_PERSONA_DIAGNOSTIC_COMPLETE
