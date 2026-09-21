@@ -1,6 +1,6 @@
 import fastNavigationWorker from './index-phase20-change17.js';
 import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-manual-email-reconciled.js';
-import { handleAdminTrialManager } from './admin-trial-manager.js';
+import { handleAdminTrialManager } from './admin-trial-manager-projected.js';
 import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
 import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
 
@@ -51,10 +51,10 @@ function envWithPermanentParentEmailBcc(env) {
 }
 
 // Parent transactional email remains the outermost production layer. Authenticated
-// Admin Trial operations are handled here before lesson-release import processing,
-// so creating/re-arming a Trial is an immediate KV/D1 operation and never needs a
-// deployment. Student requests then pass through the established navigation and
-// access-control chain unchanged.
+// Admin Trial operations are handled here before lesson-release import processing.
+// Trial mutations synchronously publish the prepared Student-Portal access model,
+// so a successful Admin response means the selected Trial content is immediately
+// available to the rebuilt Student runtime.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
