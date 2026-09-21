@@ -1,0 +1,35 @@
+name: CP12 Pages project diagnostic
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/cp12-pages-project-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Locate production Pages project read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl -fsS -H "$AUTH" "$API/pages/projects" -o /tmp/projects.json
+          jq -e '.success==true' /tmp/projects.json >/dev/null
+          echo '=== PAGES PROJECTS ==='
+          jq -r '.result[] | [.name, (.production_branch//""), ((.domains//[])|join(",")), (.source.type//""), (.source.config.owner//""), (.source.config.repo_name//"")] | @tsv' /tmp/projects.json
+          PROJECT="$(jq -r '.result[] | select(any(.domains[]?; .=="lessons.futureperfect.education")) | .name' /tmp/projects.json | head -n1)"
+          test -n "$PROJECT" || { echo 'LESSONS_PROJECT_NOT_FOUND'; exit 1; }
+          echo "LESSONS_PROJECT=$PROJECT"
+          curl -fsS -H "$AUTH" "$API/pages/projects/$PROJECT" -o /tmp/project.json
+          jq -e '.success==true' /tmp/project.json >/dev/null
+          echo '=== MATCHED PROJECT ==='
+          jq -c '.result | {name,subdomain,domains,production_branch,source,build_config,deployment_configs}' /tmp/project.json | sed -E 's/(api_token|token|secret|password)"?:"[^"]*"/\1":"[REDACTED]"/gi'
+          echo CP12_PAGES_PROJECT_DIAGNOSTIC_COMPLETE
