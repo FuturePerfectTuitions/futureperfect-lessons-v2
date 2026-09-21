@@ -43,16 +43,50 @@ jobs:
           from pathlib import Path
           p=Path('scripts/cp12-e2e-synthetic-fixture.mjs')
           s=p.read_text()
-          old="VALUES(?,?,1,0,'excel',?,?,?,?,?)"
-          new="VALUES(?,?,1,0,'excel',?,?,?,?)"
+          replacements=[
+            ("VALUES(?,?,1,0,'excel',?,?,?,?,?)", "VALUES(?,?,1,0,'excel',?,?,?,?)", 'entitlement placeholder correction'),
+            ("batches: [clean(persona.batch.batch_key)],", "batches: [],", 'synthetic legacy-batches narrowing'),
+          ]
+          for old,new,label in replacements:
+              if s.count(old)!=1:
+                  raise SystemExit(f'expected exactly one {label}, found {s.count(old)}')
+              s=s.replace(old,new)
+          old='''async function portalSession(persona) {
+            const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
+              method: 'POST',
+              headers: { Origin: portalRoot, 'content-type': 'application/json' },
+              body: JSON.stringify({ username: persona.user, password: persona.password })
+            });
+            assert(login.response.status === 200 && login.body?.ok === true && login.body?.accountLocked === false, `${persona.label} signed Portal login failed`);
+            return cookieFrom(login.response, 'fpt_session');
+          }'''.replace('          ','')
+          new='''async function portalSession(persona) {
+            let lastStatus = 0;
+            let lastError = '';
+            for (let attempt = 1; attempt <= 20; attempt += 1) {
+              const login = await jsonFetch(`${portalRoot}/api/v2/auth/login`, {
+                method: 'POST',
+                headers: { Origin: portalRoot, 'content-type': 'application/json' },
+                body: JSON.stringify({ username: persona.user, password: persona.password })
+              });
+              lastStatus = login.response.status;
+              lastError = clean(login.body?.error);
+              if (lastStatus === 200 && login.body?.ok === true && login.body?.accountLocked === false) {
+                console.log(`CP12_${persona.label}_EDGE_PROPAGATION_READY_PASS attempts=${attempt}`);
+                return cookieFrom(login.response, 'fpt_session');
+              }
+              const credentialPropagationPending = lastStatus === 401 && lastError === 'LOGIN_INVALID';
+              const readModelPropagationPending = lastStatus === 503 && ['READ_MODEL_POINTER_UNAVAILABLE','READ_MODEL_NO_VERIFIED_VERSION','RUNTIME_UNAVAILABLE'].includes(lastError);
+              if (!credentialPropagationPending && !readModelPropagationPending) {
+                throw new Error(`${persona.label} signed Portal login hard-failed status=${lastStatus} error=${lastError || 'none'}`);
+              }
+              if (attempt < 20) await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            throw new Error(`${persona.label} signed Portal login propagation timeout status=${lastStatus} error=${lastError || 'none'}`);
+          }'''.replace('          ','')
           if s.count(old)!=1:
-              raise SystemExit(f'expected exactly one entitlement placeholder correction, found {s.count(old)}')
+              raise SystemExit(f'expected exactly one portalSession propagation patch target, found {s.count(old)}')
           s=s.replace(old,new)
-          old2="batches: [clean(persona.batch.batch_key)],"
-          new2="batches: [],"
-          if s.count(old2)!=1:
-              raise SystemExit(f'expected exactly one synthetic legacy-batches narrowing, found {s.count(old2)}')
-          s=s.replace(old2,new2)
           p.write_text(s)
           PY
           node --check scripts/cp12-e2e-synthetic-fixture.mjs
