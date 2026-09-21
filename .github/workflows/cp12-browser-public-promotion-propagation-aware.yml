@@ -23,7 +23,7 @@ env:
   OLD_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
   CANDIDATE_BROWSER_VERSION: ea701c02-93f7-46e9-9182-59a785dc0bee
   CANDIDATE_PREVIEW_ROOT: https://ea701c02-fpt-portal-v2-rebuild-browser-prod.futureperfectlessons.workers.dev
-  EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
+  EXPECTED_BRIDGE_VERSION: 2ae28100-b4c6-40a3-87e2-42aef86c6fdf
   EXPECTED_QUIZ_VERSION: 80d4942e-616c-4539-91f1-9f2daf05cfc1
   PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
 jobs:
@@ -51,9 +51,14 @@ jobs:
           const pct=(d,id)=>d.versions.find(v=>v.versionId===id)?.percentage;
           const mode=process.argv[2]||'pre';
           const student=await deployment(process.env.STUDENT_WORKER),browser=await deployment(process.env.BROWSER_WORKER),bridge=await deployment(process.env.BRIDGE_WORKER),quiz=await deployment(process.env.QUIZ_WORKER);
-          if(pct(student,process.env.EXPECTED_STUDENT_VERSION)!==100)throw new Error('Student version moved');
-          if(pct(bridge,process.env.EXPECTED_BRIDGE_VERSION)!==100)throw new Error('Bridge version moved');
-          if(pct(quiz,process.env.EXPECTED_QUIZ_VERSION)!==100)throw new Error('Quiz version moved');
+          // During normal CP12 promotion, freeze every non-Browser component to its verified anchor.
+          // During emergency rollback, restore/verify the Browser independently so unrelated production drift
+          // cannot mask a successful Browser rollback.
+          if(mode!=='rollback'){
+            if(pct(student,process.env.EXPECTED_STUDENT_VERSION)!==100)throw new Error('Student version moved');
+            if(pct(bridge,process.env.EXPECTED_BRIDGE_VERSION)!==100)throw new Error('Bridge version moved');
+            if(pct(quiz,process.env.EXPECTED_QUIZ_VERSION)!==100)throw new Error('Quiz version moved');
+          }
           if(mode==='pre'&&pct(browser,process.env.OLD_BROWSER_VERSION)!==100)throw new Error(`Pre Browser mismatch ${JSON.stringify(browser.versions)}`);
           if(mode==='split'&&(pct(browser,process.env.OLD_BROWSER_VERSION)!==100||pct(browser,process.env.CANDIDATE_BROWSER_VERSION)!==0))throw new Error(`Split mismatch ${JSON.stringify(browser.versions)}`);
           if(mode==='final'&&pct(browser,process.env.CANDIDATE_BROWSER_VERSION)!==100)throw new Error(`Final Browser mismatch ${JSON.stringify(browser.versions)}`);
