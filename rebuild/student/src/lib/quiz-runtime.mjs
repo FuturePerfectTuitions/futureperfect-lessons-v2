@@ -8,8 +8,9 @@ import { opaqueAccessScopeId } from './access-scope.mjs';
 import { kvReadStore, resolveCurrentScope, sha256Hex } from './read-model-resolver.mjs';
 
 const QUIZ_URL = 'https://quiz.futureperfect.education/';
-const QUIZ_VIEW_ID = 'maths-level3';
-const API_V2_SOURCE = 'portal-api-v2-live-l3-view-v1';
+const VIEW_IDS = Object.freeze({ L2: 'maths-level2', L3: 'maths-level3' });
+const POLICY_VERSION = 'quiz-release-context-v2.0';
+const RELEASE_SOURCE = 'portal-live-maths11plus-release-v2';
 const TTL_MS = 90_000;
 const ADMIN_USER_ID = 'admin';
 
@@ -100,31 +101,76 @@ function viewById(snapshotValue, viewId) {
     .find(view => clean(view?.viewId) === clean(viewId)) || null;
 }
 
-function exactEligibleL3View(snapshotValue, global) {
-  const view = viewById(snapshotValue, QUIZ_VIEW_ID);
-  const catalogue = global?.payload?.catalogues?.[QUIZ_VIEW_ID] || null;
+async function activeMaths11plus(env, portalUserId, nowValue = Date.now()) {
+  if (!env?.DB?.prepare) throw new Error('PORTAL_D1_UNAVAILABLE');
+  const day = londonDate(nowValue);
+  const result = await env.DB.prepare(`
+    SELECT
+      a.assignment_id,
+      a.effective_from,
+      (CASE
+        WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level
+        ELSE b.school_year - 3
+      END) AS maths_level
+    FROM student_batch_assignments a
+    JOIN batch_definitions b ON b.batch_key = a.batch_key
+    WHERE a.portal_user_id_norm = ?
+      AND lower(b.subject) = 'maths'
+      AND lower(b.stream) = '11plus'
+      AND (CASE
+        WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level
+        ELSE b.school_year - 3
+      END) IN (2,3)
+      AND a.effective_from <= ?
+      AND (a.effective_to IS NULL OR ? < a.effective_to)
+      AND (b.active_from IS NULL OR b.active_from <= ?)
+      AND (b.active_to IS NULL OR ? < b.active_to)
+    ORDER BY a.effective_from DESC, a.assignment_id DESC
+  `).bind(norm(portalUserId), day, day, day, day).all();
+
+  const rows = Array.isArray(result?.results) ? result.results : [];
+  if (!rows.length) return null;
+  const levels = [...new Set(rows.map(row => Number(row?.maths_level)).filter(level => level === 2 || level === 3))];
+  if (levels.length !== 1) throw new Error('AMBIGUOUS_MATHS_11PLUS_LEVEL');
+  const portalAssignmentId = Number(rows[0]?.assignment_id);
+  if (!Number.isSafeInteger(portalAssignmentId) || portalAssignmentId <= 0) {
+    throw new Error('PORTAL_ASSIGNMENT_INVALID');
+  }
+  return { currentLevel: `L${levels[0]}`, portalAssignmentId };
+}
+
+function exactEligibleLevelView(snapshotValue, global, currentLevel) {
+  const level = clean(currentLevel).toUpperCase();
+  const viewId = VIEW_IDS[level];
+  const mathsLevel = level === 'L2' ? 2 : level === 'L3' ? 3 : 0;
+  if (!viewId || !mathsLevel) return null;
+  const view = viewById(snapshotValue, viewId);
+  const catalogue = global?.payload?.catalogues?.[viewId] || null;
   if (!view || !catalogue) return null;
   if (norm(view.subject) !== 'maths') return null;
   if (view.current !== true || norm(view.group) !== 'current') return null;
   if (view.lockedPreview === true || view.catalogueAvailable !== true) return null;
   if (norm(catalogue.subject) !== 'maths') return null;
   if (norm(catalogue.stream) !== '11plus') return null;
-  if (Number(catalogue.mathsLevel) !== 3) return null;
-  return { view, catalogue };
+  if (Number(catalogue.mathsLevel) !== mathsLevel) return null;
+  return { viewId, view, catalogue };
 }
 
-function releasedL3LessonCodes(snapshotValue, catalogue) {
+function releasedLessonCodes(snapshotValue, catalogue, currentLevel) {
+  const level = clean(currentLevel).toUpperCase();
+  const re = level === 'L2' ? /^L2T\d+M\d+$/i : level === 'L3' ? /^L3T\d+M\d+$/i : null;
+  if (!re) return [];
   const out = [];
   for (const row of Array.isArray(catalogue?.lessons) ? catalogue.lessons : []) {
     const lessonId = clean(row?.lessonId);
     const state = snapshotValue?.lessonAccess?.[lessonId] || null;
-    if (!state || state.blocked === true || state.core !== true) continue;
+    if (!state || state.blocked === true || state.core !== true || state.preLessonOnly === true) continue;
     const code = [row?.lessonId, row?.displayLessonId]
       .map(clean)
-      .find(value => /^L3T\dM\d+$/i.test(value));
+      .find(value => re.test(value));
     if (code) out.push(code.toUpperCase());
   }
-  return [...new Set(out)];
+  return [...new Set(out)].sort();
 }
 
 async function verifiedPortalContext(request, env, nowValue = Date.now()) {
@@ -155,19 +201,21 @@ async function verifiedPortalContext(request, env, nowValue = Date.now()) {
     return { eligible: false, reason: isTrial(snapshotValue) ? 'TRIAL_EXCLUDED' : 'ACCOUNT_INACTIVE' };
   }
 
-  const level3 = exactEligibleL3View(snapshotValue, global);
-  if (!level3) return { eligible: false, reason: 'NO_CURRENT_L3_MATHS_ACCESS' };
+  const active = await activeMaths11plus(env, session.sub, nowValue);
+  if (!active) return { eligible: false, reason: 'NO_ACTIVE_L2_L3_MATHS_ASSIGNMENT' };
+  const levelView = exactEligibleLevelView(snapshotValue, global, active.currentLevel);
+  if (!levelView) return { eligible: false, reason: 'CURRENT_LEVEL_ACCESS_UNVERIFIED' };
 
-  const lessonCodes = releasedL3LessonCodes(snapshotValue, level3.catalogue);
   return {
     eligible: true,
     session,
     token,
-    snapshot: snapshotValue,
     access,
     global,
-    level3,
-    lessonCodes
+    currentLevel: active.currentLevel,
+    portalAssignmentId: active.portalAssignmentId,
+    levelView,
+    lessonCodes: releasedLessonCodes(snapshotValue, levelView.catalogue, active.currentLevel)
   };
 }
 
@@ -185,7 +233,8 @@ async function eligibility(request, env) {
     return applyCors(json({
       ok: true,
       eligible: context.eligible === true,
-      label: '11+ Practice'
+      label: '11+ Practice',
+      ...(context.eligible ? { currentLevel: context.currentLevel } : {})
     }), request, env);
   } catch (error) {
     if (error instanceof AuthTokenError) {
@@ -212,16 +261,20 @@ async function launch(request, env) {
     ]);
     const expires = new Date(now.getTime() + TTL_MS);
     const releaseContext = {
-      l3Eligible: true,
-      l2Inherited: true,
-      releasedL3LessonCodes: context.lessonCodes,
-      source: API_V2_SOURCE,
+      policyVersion: POLICY_VERSION,
+      currentLevel: context.currentLevel,
+      releasedL2LessonCodes: context.currentLevel === 'L2' ? context.lessonCodes : [],
+      releasedL3LessonCodes: context.currentLevel === 'L3' ? context.lessonCodes : [],
+      inheritedLevels: context.currentLevel === 'L3' ? ['L2'] : [],
+      portalAssignmentId: context.portalAssignmentId,
+      generatedAt: now.toISOString(),
+      source: RELEASE_SOURCE,
       portalSessionIssuer: TOKEN_ISSUER,
       portalSessionKind: 'session',
       portalSessionExpiresAt: new Date(context.session.exp * 1000).toISOString(),
       portalAccessModelVersion: clean(context.access?.version),
       portalGlobalModelVersion: clean(context.global?.version),
-      portalViewId: QUIZ_VIEW_ID
+      portalViewId: context.levelView.viewId
     };
 
     await env.DB.prepare(`
