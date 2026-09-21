@@ -1,0 +1,141 @@
+name: CP12 post-promotion signed L2 L3 E2E
+on:
+  push:
+    branches: [feature/cp12-browser-promotion-2026-09-21]
+    paths: ['.github/workflows/cp12-postpromotion-synthetic-l2-l3-e2e.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cp12-postpromotion-synthetic-l2-l3-e2e-production
+  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  QUIZ_D1_ID: 5b988d3d-341a-492d-8e40-8d4efa66150e
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BRIDGE_WORKER: fpt-portal-v2-worker
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  EXPECTED_STUDENT_VERSION: 51d725cc-d21e-4aad-9c64-24149c640637
+  EXPECTED_BROWSER_VERSION: ea701c02-93f7-46e9-9182-59a785dc0bee
+  EXPECTED_BRIDGE_VERSION: 2ae28100-b4c6-40a3-87e2-42aef86c6fdf
+  EXPECTED_QUIZ_VERSION: 80d4942e-616c-4539-91f1-9f2daf05cfc1
+  EXPECTED_HARNESS_SHA256: 7dcd92695ab9cde73690dcd099ff3c8a4393896eafe57844f8b5ceb84a1fc92b
+  EXPECTED_BROWSER_BUNDLE_SHA256: ee665945ab14c80d2747d603138db8f0b4e2afef84656de04d0025409c2ef0c9
+  PORTAL_ROOT: https://lessons.futureperfect.education
+  QUIZ_ROOT: https://quiz.futureperfect.education
+jobs:
+  postpromotion-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Freeze historical harness and create guarded post-promotion copy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SRC=scripts/cp12-e2e-synthetic-fixture.mjs
+          DST=scripts/cp12-postpromotion-e2e-synthetic-fixture.runtime.mjs
+          ACTUAL_SHA="$(sha256sum "$SRC" | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_HARNESS_SHA256"
+          cp "$SRC" "$DST"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/cp12-postpromotion-e2e-synthetic-fixture.runtime.mjs')
+          s = p.read_text()
+          replacements = [
+              ("Portal root unavailable during withdrawal verification", "Portal root unavailable during post-promotion verification"),
+              ("assert(found.length === 0, `Public Quiz surface was exposed prematurely: ${found.join(', ')}`);",
+               "assert(found.length === markers.length, `Public Quiz surface missing expected markers: ${markers.filter(marker => !found.includes(marker)).join(', ')}`);"),
+              ("portalSurfaceWithdrawn=true", "portalSurfacePromoted=true"),
+          ]
+          for old, new in replacements:
+              if s.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one guarded source marker: {old!r}; found {s.count(old)}')
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          node --check "$DST"
+          git diff --exit-code -- "$SRC"
+          grep -Fq 'portalSurfacePromoted=true' "$DST"
+          grep -Fq 'found.length === markers.length' "$DST"
+          echo "CP12_POSTPROMOTION_RUNTIME_HARNESS_READY originalSha256=$ACTUAL_SHA"
+
+      - name: Re-run authoritative publisher regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/rebuild-checkpoint11-scope-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
+          node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+          echo CP12_POSTPROMOTION_PUBLISHER_REGRESSION_PASS
+
+      - name: Execute signed L2 and L3 production acceptance with mandatory cleanup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/cp12-postpromotion-e2e-synthetic-fixture.runtime.mjs 2>&1 | tee /tmp/cp12-postpromotion-e2e.log
+          grep -Fq 'CP12_L2_SIGNED_LAUNCH_REDEEM_PASS' /tmp/cp12-postpromotion-e2e.log
+          grep -Fq 'CP12_L3_SIGNED_LAUNCH_REDEEM_PASS' /tmp/cp12-postpromotion-e2e.log
+          grep -Fq 'portalSurfacePromoted=true' /tmp/cp12-postpromotion-e2e.log
+          grep -Fq 'CP12_SYNTHETIC_E2E_FINAL_PASS' /tmp/cp12-postpromotion-e2e.log
+          echo CP12_POSTPROMOTION_SIGNED_E2E_PASS
+
+      - name: Independently verify live public Browser bundle and fail-closed security
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fsS -H 'Cache-Control: no-store' "${PORTAL_ROOT}/?cp12post=${GITHUB_RUN_ID}" -o /tmp/cp12-postpromotion-index.html
+          P="$(grep -oE 'src="[^"]+\.js"' /tmp/cp12-postpromotion-index.html | head -n1 | sed -E 's/^src="//;s/"$//')"
+          test -n "$P"
+          case "$P" in
+            http*) U="$P" ;;
+            /*) U="${PORTAL_ROOT}${P}" ;;
+            *) U="${PORTAL_ROOT}/${P}" ;;
+          esac
+          curl -fsS -H 'Cache-Control: no-store' "${U}?cp12post=${GITHUB_RUN_ID}" -o /tmp/cp12-postpromotion-bundle.js
+          ACTUAL_BUNDLE_SHA="$(sha256sum /tmp/cp12-postpromotion-bundle.js | awk '{print $1}')"
+          test "$ACTUAL_BUNDLE_SHA" = "$EXPECTED_BROWSER_BUNDLE_SHA256"
+          for M in '/api/v2/student/quiz/eligibility' '/api/v2/student/quiz/launch' '11+ Practice' 'quiz.futureperfect.education'; do
+            grep -Fq "$M" /tmp/cp12-postpromotion-bundle.js
+          done
+          ELIG="$(curl -sS -H "Origin: ${PORTAL_ROOT}" -o /tmp/cp12-postpromotion-elig.json -w '%{http_code}' "${PORTAL_ROOT}/api/v2/student/quiz/eligibility" || true)"
+          LAUNCH="$(curl -sS -H "Origin: ${PORTAL_ROOT}" -H 'Content-Type: application/json' -X POST -o /tmp/cp12-postpromotion-launch.json -w '%{http_code}' "${PORTAL_ROOT}/api/v2/student/quiz/launch" || true)"
+          HOSTILE="$(curl -sS -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -X POST -o /tmp/cp12-postpromotion-hostile.json -w '%{http_code}' "${PORTAL_ROOT}/api/v2/student/quiz/launch" || true)"
+          test "$ELIG" = 401
+          test "$LAUNCH" = 401
+          test "$HOSTILE" = 403
+          jq -n \
+            --arg marker CP12_POSTPROMOTION_SIGNED_E2E_CLOSED_PASS \
+            --arg browserVersion "$EXPECTED_BROWSER_VERSION" \
+            --arg bridgeVersion "$EXPECTED_BRIDGE_VERSION" \
+            --arg bundleSha256 "$ACTUAL_BUNDLE_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            '{marker:$marker,runId:$runId,browserVersion:$browserVersion,bridgeVersion:$bridgeVersion,bundleSha256:$bundleSha256,l2SignedLaunchRedeem:true,l3SignedLaunchRedeem:true,cleanupVerified:true,portalSurfacePromoted:true,security:{eligibilityUnauthenticated:401,launchUnauthenticated:401,hostileOriginLaunch:403}}' > /tmp/cp12-postpromotion-closeout.json
+          cat /tmp/cp12-postpromotion-closeout.json
+
+      - name: Upload post-promotion acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-postpromotion-signed-e2e-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/cp12-postpromotion-e2e.log
+            /tmp/cp12-postpromotion-index.html
+            /tmp/cp12-postpromotion-bundle.js
+            /tmp/cp12-postpromotion-elig.json
+            /tmp/cp12-postpromotion-launch.json
+            /tmp/cp12-postpromotion-hostile.json
+            /tmp/cp12-postpromotion-closeout.json
