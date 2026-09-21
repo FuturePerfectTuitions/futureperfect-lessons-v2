@@ -1,0 +1,57 @@
+name: CP12 read-only L2 catalogue id diagnostic
+on:
+  push:
+    branches: [feature/cp12-e2e-synthetic-fixture-2026-09-21]
+    paths: ['.github/workflows/cp12-l2-catalogue-id-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Inspect prepared catalogue identifiers read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import { resolveCurrentScope } from './rebuild/adminops/src/lib/atomic-publisher.mjs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, ns=process.env.READ_MODELS_KV_ID;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}`;
+          async function get(key){
+            const r=await fetch(`${base}/storage/kv/namespaces/${encodeURIComponent(ns)}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
+            if(r.status===404)return null;
+            if(!r.ok)throw new Error(`KV read ${r.status}`);
+            return r.text();
+          }
+          const global=await resolveCurrentScope({get},'global');
+          if(global?.payload?.kind!=='prepared-global-read-model')throw new Error('global read model invalid');
+          console.log(`GLOBAL_VERSION=${global.version}`);
+          for(const level of [2,3]){
+            const view=`maths-level${level}`;
+            const rows=global.payload?.catalogues?.[view]?.lessons||[];
+            const re=new RegExp(`^L${level}T\\d+M\\d+$`,'i');
+            const canonical=[];
+            const relevant=[];
+            for(const row of rows){
+              const lessonId=String(row?.lessonId||'').trim();
+              const displayLessonId=String(row?.displayLessonId||'').trim();
+              const code=[lessonId,displayLessonId].find(v=>re.test(v))||'';
+              if(code&&canonical.length<5)canonical.push(code.toUpperCase());
+              if(re.test(lessonId)||re.test(displayLessonId)) relevant.push({lessonId,displayLessonId,code:code.toUpperCase(),same:lessonId.toUpperCase()===displayLessonId.toUpperCase()});
+            }
+            console.log(`LEVEL=L${level} catalogueRows=${rows.length} regexRows=${relevant.length} canonical=${JSON.stringify(canonical)}`);
+            console.log(JSON.stringify(relevant.slice(0,12)));
+            const lessonIdSet=new Set(rows.map(r=>String(r?.lessonId||'').trim()));
+            for(const code of canonical.slice(0,2)) console.log(`L${level}_PICK=${code} IS_LESSON_ID=${lessonIdSet.has(code)}`);
+          }
+          console.log('CP12_L2_CATALOGUE_ID_DIAGNOSTIC_PASS');
+          NODE
