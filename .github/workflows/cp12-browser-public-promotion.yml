@@ -1,0 +1,246 @@
+name: CP12 guarded Browser-only public promotion
+on:
+  push:
+    branches: [feature/cp12-browser-promotion-2026-09-21]
+    paths: ['.github/workflows/cp12-browser-public-promotion.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cp12-browser-public-promotion
+  cancel-in-progress: false
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.129.0
+  PROD_HOST: lessons.futureperfect.education
+  FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  FRONTEND_SHA: 63f37895727e41ada427c9644b41b5a026ed196b
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BRIDGE_WORKER: fpt-portal-v2-worker
+  QUIZ_WORKER: futureperfect-11plus-practice-step10-preview
+  EXPECTED_STUDENT_VERSION: 51d725cc-d21e-4aad-9c64-24149c640637
+  EXPECTED_BROWSER_VERSION: f8a64bc8-8192-4400-9e45-8f1a1de10019
+  EXPECTED_BRIDGE_VERSION: 2631c603-89eb-495c-b0e4-c2d87272a5b2
+  EXPECTED_QUIZ_VERSION: 80d4942e-616c-4539-91f1-9f2daf05cfc1
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fresh read-only production topology and baseline gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          cat > /tmp/cp12-browser-preflight.mjs <<'NODE'
+          import fs from 'node:fs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID), token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const host=clean(process.env.PROD_HOST).toLowerCase();
+          const workers={student:process.env.STUDENT_WORKER,browser:process.env.BROWSER_WORKER,bridge:process.env.BRIDGE_WORKER,quiz:process.env.QUIZ_WORKER};
+          const expected={student:process.env.EXPECTED_STUDENT_VERSION,browser:process.env.EXPECTED_BROWSER_VERSION,bridge:process.env.EXPECTED_BRIDGE_VERSION,quiz:process.env.EXPECTED_QUIZ_VERSION};
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`};
+          async function cf(path,opts={}){const r=await fetch(`${base}${path}`,{...opts,headers:{...headers,...(opts.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{};if(!r.ok||body?.success!==true)throw new Error(`Cloudflare ${opts.method||'GET'} ${path} failed ${r.status}: ${text.slice(0,300)}`);return body;}
+          function deployment(body){const rows=body?.result?.deployments||body?.result||[];const first=Array.isArray(rows)?rows[0]:null;const versions=Array.isArray(first?.versions)?first.versions:[];const active=versions.find(v=>Number(v?.percentage||0)===100)||versions[0];return{deploymentId:clean(first?.id),versionId:clean(active?.version_id),versions:versions.map(v=>({versionId:clean(v?.version_id),percentage:Number(v?.percentage||0)}))};}
+          const actual={};
+          for(const [key,name] of Object.entries(workers)){actual[key]=deployment(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`));if(actual[key].versionId!==expected[key])throw new Error(`${key} Worker moved: ${actual[key].versionId}`);}
+          const settings=(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(workers.browser)}/settings`)).result||{};
+          const bindings=Array.isArray(settings.bindings)?settings.bindings:[];
+          const service=bindings.find(b=>clean(b?.name)==='STAGING_API');
+          const assets=bindings.find(b=>clean(b?.name)==='ASSETS');
+          if(!service||clean(service?.type)!=='service'||clean(service?.service)!==workers.student)throw new Error('Browser STAGING_API service binding drifted.');
+          if(!assets||clean(assets?.type)!=='assets')throw new Error('Browser ASSETS binding drifted.');
+          if(bindings.length!==2)throw new Error(`Browser binding count drifted: ${bindings.length}`);
+          const zones=(await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`)).result||[];
+          const zone=zones.filter(z=>host===clean(z?.name).toLowerCase()||host.endsWith(`.${clean(z?.name).toLowerCase()}`)).sort((a,b)=>clean(b?.name).length-clean(a?.name).length)[0];
+          if(!zone)throw new Error('Production zone not found.');
+          const routes=(await cf(`/zones/${zone.id}/workers/routes`)).result||[];
+          const hostRoutes=routes.filter(r=>clean(r?.pattern).toLowerCase().includes(host));
+          if(hostRoutes.length!==1||clean(hostRoutes[0]?.pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0]?.script)!==workers.browser)throw new Error('Production Browser route drifted.');
+          const q=await cf(`/accounts/${account}/d1/database/${process.env.PORTAL_D1_ID}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql:'SELECT COUNT(*) AS n FROM quiz_launch_codes'})});
+          const block=Array.isArray(q.result)?q.result[0]:q.result;const launchRows=Number(block?.results?.[0]?.n??-1);
+          if(launchRows!==8)throw new Error(`quiz_launch_codes baseline drifted: ${launchRows}`);
+          const root=await fetch(`https://${host}/`,{headers:{'cache-control':'no-store'}});const html=await root.text();
+          if(root.status!==200||!/Future Perfect Tuitions/i.test(html))throw new Error('Current Portal root smoke failed.');
+          if(html.includes('11+ Practice'))throw new Error('Quiz card unexpectedly exposed before CP12 Browser promotion.');
+          const out={marker:'CP12_BROWSER_PREMUTATION_PASS',actual,bindings:bindings.map(b=>({name:b.name,type:b.type,service:b.service||null})),route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},launchRows,portalSurfaceWithdrawn:true};
+          fs.writeFileSync('/tmp/cp12-browser-premutation.json',JSON.stringify(out,null,2));console.log(JSON.stringify(out,null,2));
+          NODE
+          node /tmp/cp12-browser-preflight.mjs
+
+      - name: Checkout exact accepted CP12 frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.FRONTEND_SHA }}
+          path: cp12-frontend
+          persist-credentials: false
+
+      - name: Build and fingerprint exact frontend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C cp12-frontend rev-parse HEAD)" = "$FRONTEND_SHA"
+          cd cp12-frontend
+          npm install --no-package-lock --no-audit --no-fund
+          npm run test:static
+          npm run build
+          grep -R -Fq '/api/v2/student/quiz/eligibility' dist/assets
+          grep -R -Fq '/api/v2/student/quiz/launch' dist/assets
+          grep -R -Fq '11+ Practice' dist/assets
+          grep -R -Fq 'quiz.futureperfect.education' dist/assets
+          cd "$GITHUB_WORKSPACE"
+          rm -rf rebuild/browser-staging/public
+          mkdir -p rebuild/browser-staging/public
+          cp -a cp12-frontend/dist/. rebuild/browser-staging/public/
+          find rebuild/browser-staging/public -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/cp12-browser-files.sha256
+          TREE_SHA="$(sha256sum /tmp/cp12-browser-files.sha256 | awk '{print $1}')"
+          jq -n --arg marker CP12_FRONTEND_BUILD_PASS --arg repository "$FRONTEND_REPO" --arg sha "$FRONTEND_SHA" --arg treeSha "$TREE_SHA" '{marker:$marker,repository:$repository,sha:$sha,builtTreeSha256:$treeSha}' > /tmp/cp12-frontend-provenance.json
+          cat /tmp/cp12-frontend-provenance.json
+
+      - name: Pin Wrangler and create Browser-only production config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          cat > rebuild/browser-staging/wrangler.cp12.toml <<TOML
+          name = "${BROWSER_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+
+          [[services]]
+          binding = "STAGING_API"
+          service = "${STUDENT_WORKER}"
+
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+          node --check rebuild/browser-staging/src/index.js
+          grep -Fq "service = \"${STUDENT_WORKER}\"" rebuild/browser-staging/wrangler.cp12.toml
+
+      - name: Upload new Browser version without traffic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export WRANGLER_OUTPUT_FILE=/tmp/cp12-wrangler-upload.jsonl
+          : > "$WRANGLER_OUTPUT_FILE"
+          npx wrangler versions upload --config rebuild/browser-staging/wrangler.cp12.toml --message "CP12 frontend ${FRONTEND_SHA}" --tag cp12-quiz-surface-2026-09-21
+          NEW_VERSION="$(jq -rs '[.[]|select(.type=="version-upload")|.version_id]|map(select(.!=null and .!=""))|last // empty' "$WRANGLER_OUTPUT_FILE")"
+          if [ -z "$NEW_VERSION" ]; then
+            npx wrangler versions list --name "$BROWSER_WORKER" --json > /tmp/cp12-browser-versions.json
+            NEW_VERSION="$(jq -r --arg tag cp12-quiz-surface-2026-09-21 '[.[]|select((.tag//"")==$tag)][0].id // [.[]|select((.tag//"")==$tag)][0].version_id // empty' /tmp/cp12-browser-versions.json)"
+          fi
+          test -n "$NEW_VERSION"
+          test "$NEW_VERSION" != "$EXPECTED_BROWSER_VERSION"
+          echo "NEW_BROWSER_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "CP12_BROWSER_VERSION_UPLOAD_PASS version=$NEW_VERSION"
+
+      - name: Put new Browser version at zero percent and smoke exact version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler versions deploy "${EXPECTED_BROWSER_VERSION}@100%" "${NEW_BROWSER_VERSION}@0%" --config rebuild/browser-staging/wrangler.cp12.toml -y --message 'CP12 pre-promotion 0% smoke'
+          OVERRIDE="Cloudflare-Workers-Version-Overrides: ${BROWSER_WORKER}=\"${NEW_BROWSER_VERSION}\""
+          READY=0
+          for i in $(seq 1 30); do
+            ROOT_CODE="$(curl -sS -H "$OVERRIDE" -H 'Cache-Control: no-store' -o /tmp/cp12-override-index.html -w '%{http_code}' "https://${PROD_HOST}/" || true)"
+            API_CODE="$(curl -sS -H "$OVERRIDE" -H 'Cache-Control: no-store' -D /tmp/cp12-override-api.headers -o /tmp/cp12-override-api.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/eligibility" || true)"
+            if [ "$ROOT_CODE" = 200 ] && [ "$API_CODE" = 401 ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/cp12-override-api.headers; then READY=1; break; fi
+            sleep 1
+          done
+          test "$READY" = 1
+          JS_PATH="$(grep -oE 'src="[^"]+\.js"' /tmp/cp12-override-index.html | head -n1 | sed -E 's/^src="//;s/"$//')"
+          test -n "$JS_PATH"
+          case "$JS_PATH" in http*) JS_URL="$JS_PATH";; /*) JS_URL="https://${PROD_HOST}${JS_PATH}";; *) JS_URL="https://${PROD_HOST}/${JS_PATH}";; esac
+          curl -fsS -H "$OVERRIDE" -H 'Cache-Control: no-store' "$JS_URL" -o /tmp/cp12-override-bundle.js
+          grep -Fq '/api/v2/student/quiz/eligibility' /tmp/cp12-override-bundle.js
+          grep -Fq '/api/v2/student/quiz/launch' /tmp/cp12-override-bundle.js
+          grep -Fq '11+ Practice' /tmp/cp12-override-bundle.js
+          grep -Fq 'quiz.futureperfect.education' /tmp/cp12-override-bundle.js
+          ALLOWED_CODE="$(curl -sS -H "$OVERRIDE" -H "Origin: https://${PROD_HOST}" -H 'Content-Type: application/json' -X POST -o /tmp/cp12-override-launch.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/launch" || true)"
+          test "$ALLOWED_CODE" = 401
+          HOSTILE_CODE="$(curl -sS -H "$OVERRIDE" -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -X POST -o /tmp/cp12-override-hostile.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/launch" || true)"
+          test "$HOSTILE_CODE" = 403
+          echo CP12_BROWSER_ZERO_PERCENT_EXACT_VERSION_SMOKE_PASS
+
+      - name: Promote exact CP12 Browser version to 100 percent
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler versions deploy "${NEW_BROWSER_VERSION}@100%" --config rebuild/browser-staging/wrangler.cp12.toml -y --message "CP12 public Quiz surface ${FRONTEND_SHA}"
+          echo CP12_BROWSER_PUBLIC_PROMOTION_EXECUTED
+
+      - name: Final public production verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/cp12-final-verify.mjs <<'NODE'
+          import fs from 'node:fs';
+          const clean=v=>String(v??'').trim();
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID),token=clean(process.env.CLOUDFLARE_API_TOKEN),host=clean(process.env.PROD_HOST).toLowerCase();
+          const workers={student:process.env.STUDENT_WORKER,browser:process.env.BROWSER_WORKER,bridge:process.env.BRIDGE_WORKER,quiz:process.env.QUIZ_WORKER};
+          const expected={student:process.env.EXPECTED_STUDENT_VERSION,browser:process.env.NEW_BROWSER_VERSION,bridge:process.env.EXPECTED_BRIDGE_VERSION,quiz:process.env.EXPECTED_QUIZ_VERSION};
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          async function cf(path,opts={}){const r=await fetch(`${base}${path}`,{...opts,headers:{...headers,...(opts.headers||{})}});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{};if(!r.ok||body?.success!==true)throw new Error(`Cloudflare ${path} failed ${r.status}: ${text.slice(0,300)}`);return body;}
+          function deployment(body){const rows=body?.result?.deployments||body?.result||[];const first=Array.isArray(rows)?rows[0]:null;const versions=Array.isArray(first?.versions)?first.versions:[];const active=versions.find(v=>Number(v?.percentage||0)===100)||versions[0];return{deploymentId:clean(first?.id),versionId:clean(active?.version_id),versions:versions.map(v=>({versionId:clean(v?.version_id),percentage:Number(v?.percentage||0)}))};}
+          const actual={};for(const [k,n] of Object.entries(workers)){actual[k]=deployment(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(n)}/deployments`));if(actual[k].versionId!==expected[k])throw new Error(`${k} final version mismatch: ${actual[k].versionId}`);}
+          const settings=(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(workers.browser)}/settings`)).result||{};const bindings=Array.isArray(settings.bindings)?settings.bindings:[];
+          const service=bindings.find(b=>clean(b?.name)==='STAGING_API'),assets=bindings.find(b=>clean(b?.name)==='ASSETS');
+          if(bindings.length!==2||clean(service?.type)!=='service'||clean(service?.service)!==workers.student||clean(assets?.type)!=='assets')throw new Error('Browser bindings changed during promotion.');
+          const zones=(await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`)).result||[];const zone=zones.filter(z=>host===clean(z?.name).toLowerCase()||host.endsWith(`.${clean(z?.name).toLowerCase()}`)).sort((a,b)=>clean(b?.name).length-clean(a?.name).length)[0];if(!zone)throw new Error('Zone missing.');
+          const routes=(await cf(`/zones/${zone.id}/workers/routes`)).result||[];const hostRoutes=routes.filter(r=>clean(r?.pattern).toLowerCase().includes(host));if(hostRoutes.length!==1||clean(hostRoutes[0]?.pattern).toLowerCase()!==`${host}/*`||clean(hostRoutes[0]?.script)!==workers.browser)throw new Error('Browser route changed.');
+          const q=await cf(`/accounts/${account}/d1/database/${process.env.PORTAL_D1_ID}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql:'SELECT COUNT(*) AS n FROM quiz_launch_codes'})});const block=Array.isArray(q.result)?q.result[0]:q.result;const launchRows=Number(block?.results?.[0]?.n??-1);if(launchRows!==8)throw new Error(`launch-code count changed: ${launchRows}`);
+          const root=await fetch(`https://${host}/`,{headers:{'cache-control':'no-store'}});const html=await root.text();if(root.status!==200||!/Future Perfect Tuitions/i.test(html))throw new Error('Public root failed after promotion.');
+          const m=html.match(/src=["']([^"']+\.js)["']/i);if(!m)throw new Error('Public bundle script missing.');const jsUrl=new URL(m[1],`https://${host}/`);const bundle=await (await fetch(jsUrl,{headers:{'cache-control':'no-store'}})).text();
+          for(const marker of ['/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch','11+ Practice','quiz.futureperfect.education'])if(!bundle.includes(marker))throw new Error(`Public bundle missing ${marker}`);
+          const eligibility=await fetch(`https://${host}/api/v2/student/quiz/eligibility`,{headers:{Origin:`https://${host}`}});if(eligibility.status!==401)throw new Error(`Unauth eligibility expected 401, got ${eligibility.status}`);
+          const launch=await fetch(`https://${host}/api/v2/student/quiz/launch`,{method:'POST',headers:{Origin:`https://${host}`,'content-type':'application/json'}});if(launch.status!==401)throw new Error(`Unauth launch expected 401, got ${launch.status}`);
+          const hostile=await fetch(`https://${host}/api/v2/student/quiz/launch`,{method:'POST',headers:{Origin:'https://evil.example','content-type':'application/json'}});if(hostile.status!==403)throw new Error(`Hostile origin expected 403, got ${hostile.status}`);
+          const out={marker:'CP12_BROWSER_PUBLIC_VERIFY_PASS',frontendSha:process.env.FRONTEND_SHA,actual,bindings:bindings.map(b=>({name:b.name,type:b.type,service:b.service||null})),route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},launchRows,publicBundle:{url:jsUrl.toString(),quizMarkers:true},security:{unauthEligibility:eligibility.status,unauthLaunch:launch.status,hostileOrigin:hostile.status}};
+          fs.writeFileSync('/tmp/cp12-browser-public-verify.json',JSON.stringify(out,null,2));console.log(JSON.stringify(out,null,2));
+          NODE
+          node /tmp/cp12-final-verify.mjs
+          echo CP12_BROWSER_PUBLIC_PROMOTION_PASS
+
+      - name: Emergency rollback Browser deployment on any failure
+        if: failure()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" >/dev/null 2>&1 || true
+          npx wrangler versions deploy "${EXPECTED_BROWSER_VERSION}@100%" --name "$BROWSER_WORKER" -y --message 'CP12 emergency rollback to pre-promotion Browser version'
+          sleep 2
+          curl -fsS -H 'Cache-Control: no-store' "https://${PROD_HOST}/" -o /tmp/cp12-rollback-index.html
+          if grep -Fq '11+ Practice' /tmp/cp12-rollback-index.html; then echo 'Rollback root unexpectedly contains direct Quiz marker' >&2; exit 1; fi
+          echo "CP12_BROWSER_EMERGENCY_ROLLBACK_PASS version=${EXPECTED_BROWSER_VERSION}"
+
+      - name: Upload CP12 Browser promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cp12-browser-public-promotion-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/cp12-browser-premutation.json
+            /tmp/cp12-frontend-provenance.json
+            /tmp/cp12-browser-files.sha256
+            /tmp/cp12-wrangler-upload.jsonl
+            /tmp/cp12-override-api.headers
+            /tmp/cp12-override-api.json
+            /tmp/cp12-override-launch.json
+            /tmp/cp12-override-hostile.json
+            /tmp/cp12-browser-public-verify.json
