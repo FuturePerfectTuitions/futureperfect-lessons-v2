@@ -1,0 +1,60 @@
+name: CP12 live frontend diagnostic
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/cp12-live-frontend-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fingerprint live Portal frontend read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT='https://lessons.futureperfect.education/'
+          curl -fsS -D /tmp/live.headers "$ROOT" -o /tmp/live.html
+          echo '=== RESPONSE HEADERS ==='
+          grep -Ei '^(HTTP/|server:|cf-|etag:|last-modified:|cache-control:|content-type:|x-|via:)' /tmp/live.headers || true
+          echo '=== LIVE HTML SHA ==='
+          sha256sum /tmp/live.html
+          echo '=== REPO PHASE11 SHA ==='
+          sha256sum phase11.html
+          if cmp -s /tmp/live.html phase11.html; then echo 'LIVE_HTML_EQUALS_PHASE11=YES'; else echo 'LIVE_HTML_EQUALS_PHASE11=NO'; fi
+          echo '=== LIVE TITLE/BODY/SCRIPTS ==='
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          t=Path('/tmp/live.html').read_text(errors='replace')
+          title=re.search(r'<title>(.*?)</title>',t,re.I|re.S)
+          body=re.search(r'<body[^>]*>',t,re.I)
+          print('TITLE=',title.group(1).strip() if title else '')
+          print('BODY=',body.group(0) if body else '')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',t,re.I)
+          for r in refs: print('SCRIPT',r)
+          print('QUIZ_MARKERS', {m:(m in t) for m in ['11+ Practice','quiz.futureperfect.education','/api/v1/student/quiz/eligibility','/api/v1/student/quiz/launch']})
+          PY
+          echo '=== LIVE ASSET MATCHES ==='
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,urllib.parse,subprocess,hashlib,os
+          root='https://lessons.futureperfect.education/'
+          html=Path('/tmp/live.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I)
+          for i,ref in enumerate(refs):
+              if ref.startswith('http') and 'lessons.futureperfect.education' not in ref: continue
+              url=urllib.parse.urljoin(root,ref)
+              p=Path(f'/tmp/a{i}.js')
+              subprocess.run(['curl','-fsS',url,'-o',str(p)],check=True)
+              local=Path(urllib.parse.urlparse(ref).path.lstrip('/'))
+              live_sha=hashlib.sha256(p.read_bytes()).hexdigest()
+              if local.exists():
+                  local_sha=hashlib.sha256(local.read_bytes()).hexdigest()
+                  print(f'ASSET {ref} live={live_sha} repo={local_sha} match={live_sha==local_sha}')
+              else:
+                  print(f'ASSET {ref} live={live_sha} repo=MISSING match=False')
+          PY
+          echo CP12_LIVE_FRONTEND_DIAGNOSTIC_COMPLETE
