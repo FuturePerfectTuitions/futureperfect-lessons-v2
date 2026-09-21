@@ -1,0 +1,51 @@
+name: CP12 live bundle introspection
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/cp12-live-bundle-introspection.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect public production bundle read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT='https://lessons.futureperfect.education'
+          JS='/assets/portal-CeIaLZ5y.js'
+          curl -fsS "$ROOT$JS" -o /tmp/portal.js
+          echo '=== SIZE / SHA ==='
+          wc -c /tmp/portal.js
+          sha256sum /tmp/portal.js
+          echo '=== FIRST 500 ==='
+          head -c 500 /tmp/portal.js; echo
+          echo '=== LAST 1000 ==='
+          tail -c 1000 /tmp/portal.js; echo
+          echo '=== API PATHS ==='
+          grep -oE '/api/v[0-9]+/[A-Za-z0-9_./?=&-]+' /tmp/portal.js | sort -u || true
+          echo '=== ABSOLUTE URLS ==='
+          grep -oE 'https://[^"'"'"'` )]+' /tmp/portal.js | sort -u | head -100 || true
+          echo '=== SOURCE MAP PROBES ==='
+          for u in "$ROOT$JS.map" "$ROOT/assets/portal-CeIaLZ5y.js.map"; do
+            code="$(curl -sS -o /tmp/map -w '%{http_code}' "$u")"
+            echo "$code $u bytes=$(wc -c </tmp/map)"
+            if [ "$code" = 200 ]; then head -c 300 /tmp/map; echo; fi
+          done
+          echo '=== UI STRING CONTEXTS ==='
+          python3 - <<'PY'
+          from pathlib import Path
+          t=Path('/tmp/portal.js').read_text(errors='replace')
+          needles=['Student Portal','Choose a subject','Just shared with you','Maths','English','Log out','quiz','11+']
+          for n in needles:
+              print('---',n,'---')
+              start=0; shown=0
+              while shown<5:
+                  i=t.lower().find(n.lower(),start)
+                  if i<0: break
+                  print(t[max(0,i-220):i+420].replace('\n',' '))
+                  start=i+len(n); shown+=1
+          PY
+          echo CP12_LIVE_BUNDLE_INTROSPECTION_COMPLETE
