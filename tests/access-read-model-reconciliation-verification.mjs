@@ -173,6 +173,11 @@ const pre = await refreshStudentAccessReadModel(env, 'pre', { asOfDate:'2026-09-
 let prePayload = await currentPayload(kv, `access:${pre.scopeId}`);
 assert.equal(prePayload.snapshot.lessonAccess.Y5E2.preLessonOnly, true);
 assert.equal(prePayload.snapshot.lessonAccess.Y5E2.core, false);
+assert.equal(
+  prePayload.snapshot.lessonAccess.Y5E2.vr,
+  true,
+  'PreLesson-only vr_access=1 must remain visible in the prepared access model'
+);
 
 db.prelessons = [];
 db.entitlements.push({

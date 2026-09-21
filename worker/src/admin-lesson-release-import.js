@@ -319,9 +319,11 @@ async function grantPrelesson(env, item, validation) {
   }
 
   const now = new Date().toISOString();
+  // Year 4/5 11+ English batch membership is the authoritative VR gate.
+  // The legacy student profile vrEligible flag may be stale or absent and must
+  // not suppress lesson-specific VR PreLesson resources.
   const vrAccess = validation.subject === 'english' &&
-    elevenPlusBatch(item.batchKey) &&
-    validation.student?.vrEligible === true ? 1 : 0;
+    elevenPlusBatch(item.batchKey) ? 1 : 0;
 
   const clearExisting = env.DB.prepare(
     `DELETE FROM online_prelesson_entitlements WHERE portal_user_id_norm = ? AND lesson_id = ?`

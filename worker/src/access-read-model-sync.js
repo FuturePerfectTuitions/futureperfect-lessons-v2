@@ -385,6 +385,12 @@ function preLessonOnlyIds(rows) {
     .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();
 }
 
+function preLessonVrLessonIds(rows) {
+  return [...new Set((Array.isArray(rows) ? rows : [])
+    .filter(row => Number(row?.vr_access ?? row?.vrAccess ?? 0) === 1)
+    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean))].sort();
+}
+
 function manualCoreLessonIds(user) { return manualIds(user, 'core'); }
 function manualVrLessonIds(user) { return manualIds(user, 'vr'); }
 
@@ -434,13 +440,14 @@ function accessDerivedViewIds(input, catalogue) {
   return sortedViewIds([...views]);
 }
 
-function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds, preLessonIds, temporaryLessonAccess, blockedIds }) {
+function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds, preLessonIds, preLessonVrIds, temporaryLessonAccess, blockedIds }) {
   const full = new Set(fullViews);
   const earned = new Set(entitlementIds);
   const earnedVr = new Set(vrEntitlementIds);
   const manualCore = new Set(manualCoreIds);
   const manualVr = new Set(manualVrIds);
   const preOnly = new Set(preLessonIds);
+  const preVr = new Set(preLessonVrIds);
   const blocked = new Set(blockedIds);
   const temporary = new Map();
 
@@ -457,7 +464,7 @@ function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementId
 
   const allLessonIds = new Set([
     ...Object.keys(catalogue?.lessonToViews || {}),
-    ...earned, ...earnedVr, ...manualCore, ...manualVr, ...preOnly, ...temporary.keys(), ...blocked
+    ...earned, ...earnedVr, ...manualCore, ...manualVr, ...preOnly, ...preVr, ...temporary.keys(), ...blocked
   ]);
   const access = {};
   for (const lessonId of [...allLessonIds].sort()) {
@@ -465,7 +472,7 @@ function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementId
     const fullLibrary = views.some(viewId => full.has(viewId));
     const temp = temporary.get(lessonId);
     const core = fullLibrary || earned.has(lessonId) || manualCore.has(lessonId) || Boolean(temp?.core);
-    const vr = earnedVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);
+    const vr = earnedVr.has(lessonId) || preVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);
     const preLessonOnly = !core && (preOnly.has(lessonId) || Boolean(temp?.preLessonOnly));
     const isBlocked = blocked.has(lessonId);
     if (!core && !vr && !preLessonOnly && !isBlocked) continue;
@@ -511,6 +518,7 @@ function compileAccessSnapshot(input, catalogue, options = {}) {
   const manualCoreIds = manualCoreLessonIds(user);
   const manualVrIds = manualVrLessonIds(user);
   const preLessonIds = preLessonOnlyIds(input?.onlinePreLessonEntitlements);
+  const preLessonVrIds = preLessonVrLessonIds(input?.onlinePreLessonEntitlements);
   const blockedIds = blockedLessonIds(user);
   const previewViews = configuredPreviewViewIds(user, currentRows);
 
@@ -519,7 +527,7 @@ function compileAccessSnapshot(input, catalogue, options = {}) {
 
   const access = lessonAccessMap({
     catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds,
-    preLessonIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds
+    preLessonIds, preLessonVrIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds
   });
 
   const currentSet = new Set(currentViews);
@@ -823,6 +831,9 @@ function assertCanonicalAccessProjected(input, compiled) {
     .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));
   const pre = new Set((input?.onlinePreLessonEntitlements || [])
     .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));
+  const preVr = new Set((input?.onlinePreLessonEntitlements || [])
+    .filter(row => Number(row?.vr_access ?? row?.vrAccess ?? 0) === 1)
+    .map(row => clean(row?.lesson_id ?? row?.lessonId)).filter(Boolean));
   const access = compiled?.snapshot?.lessonAccess || {};
   for (const lessonId of full) {
     const state = access[lessonId];
@@ -839,6 +850,8 @@ function assertCanonicalAccessProjected(input, compiled) {
       if (!state?.blocked || state?.preLessonOnly) throw new Error(`READ_MODEL_BLOCKED_PRELESSON_PARITY_FAILED:${lessonId}`);
     } else if (!state?.preLessonOnly || state?.core) {
       throw new Error(`READ_MODEL_PRELESSON_PARITY_FAILED:${lessonId}`);
+    } else if (preVr.has(lessonId) && !state?.vr) {
+      throw new Error(`READ_MODEL_PRELESSON_VR_PARITY_FAILED:${lessonId}`);
     }
   }
 }
