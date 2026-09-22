@@ -3,6 +3,7 @@ const PATHS = Object.freeze({
   list: '/api/v1/admin/trials/list',
   rearm: '/api/v1/admin/trials/rearm',
   disable: '/api/v1/admin/trials/disable',
+  delete: '/api/v1/admin/trials/delete',
   resetPasswords: '/api/v1/admin/trials/reset-passwords'
 });
 
@@ -194,6 +195,7 @@ function buildTrialRecord({ portalUserId, firstName, loginPassword, answerPasswo
     manualLessonAccess: {},
     specialAccess: [],
     trialViews: views,
+    trialDeletedAt: null,
     trialCreatedAt: existing?.trialCreatedAt || now,
     trialUpdatedAt: now,
     trialLastAction: existing ? 'updated' : 'created',
@@ -234,7 +236,9 @@ async function requireTrial(env, portalUserId) {
   if (!validPortalUserId(id)) return { error:'INVALID_TRIAL_ID' };
   const key = `user:${idNorm}`;
   const user = await env.STUDENTS_KV.get(key, { type:'json' });
-  if (!user || !isTrialId(user.portalUserId || id)) return { error:'TRIAL_NOT_FOUND' };
+  if (!user || !isTrialId(user.portalUserId || id) || clean(user.trialDeletedAt)) {
+    return { error:'TRIAL_NOT_FOUND' };
+  }
   return { id:id || clean(user.portalUserId), idNorm, key, user };
 }
 
@@ -271,7 +275,8 @@ async function handleCreate(request, env) {
 
   const portalUserIdNorm = norm(portalUserId);
   const key = `user:${portalUserIdNorm}`;
-  if (await env.STUDENTS_KV.get(key, { type:'json' })) {
+  const existing = await env.STUDENTS_KV.get(key, { type:'json' });
+  if (existing && !clean(existing.trialDeletedAt)) {
     return json({ ok:false, error:'ACCOUNT_ALREADY_EXISTS', portalUserId }, 409, request, env);
   }
 
@@ -290,6 +295,7 @@ async function handleCreate(request, env) {
     readback.loginPassword === loginPassword &&
     readback.answerPassword === answerPassword &&
     normaliseTrialViews(readback.trialViews).join('|') === trialViews.join('|') &&
+    !clean(readback.trialDeletedAt) &&
     !consumed
   );
   if (!verified) return json({ ok:false, error:'PROVISION_VERIFY_FAILED' }, 500, request, env);
@@ -312,7 +318,7 @@ async function listKvTrialUsers(env) {
   } while (cursor && keys.length < MAX_TRIALS);
 
   const users = await Promise.all(keys.slice(0, MAX_TRIALS).map(key => env.STUDENTS_KV.get(key, { type:'json' })));
-  return users.filter(user => user && isTrialId(user.portalUserId));
+  return users.filter(user => user && isTrialId(user.portalUserId) && !clean(user.trialDeletedAt));
 }
 
 async function handleList(request, env) {
@@ -343,6 +349,7 @@ async function handleRearm(request, env) {
     accountStatus:'active',
     expires:'',
     expiresOn:null,
+    trialDeletedAt:null,
     trialUpdatedAt:now,
     trialLastAction:'rearmed',
     trialLastActionAt:now
@@ -369,6 +376,32 @@ async function handleDisable(request, env) {
   await env.STUDENTS_KV.put(found.key, JSON.stringify(updated));
   const consumed = await consumptionFor(env, found.idNorm);
   return json({ ok:true, ...publicTrial(updated, consumed?.consumed_at || '') }, 200, request, env);
+}
+
+async function handleDelete(request, env) {
+  const body = await readJson(request);
+  const found = await requireTrial(env, body?.portalUserId);
+  if (found.error) return json({ ok:false, error:found.error }, found.error === 'TRIAL_NOT_FOUND' ? 404 : 400, request, env);
+
+  await cleanTrialSessionState(env, found.idNorm, true);
+  const now = new Date().toISOString();
+  const updated = {
+    ...found.user,
+    status:'withdrawn',
+    accountStatus:'withdrawn',
+    trialDeletedAt:now,
+    trialUpdatedAt:now,
+    trialLastAction:'deleted',
+    trialLastActionAt:now
+  };
+  await env.STUDENTS_KV.put(found.key, JSON.stringify(updated));
+  return json({
+    ok:true,
+    portalUserId:clean(updated.portalUserId),
+    firstName:clean(updated.firstName || updated.name),
+    deleted:true,
+    deletedAt:now
+  }, 200, request, env);
 }
 
 async function handleResetPasswords(request, env) {
@@ -418,6 +451,7 @@ export async function handleAdminTrialManager(request, env) {
   if (url.pathname === PATHS.list) return handleList(request, env);
   if (url.pathname === PATHS.rearm) return handleRearm(request, env);
   if (url.pathname === PATHS.disable) return handleDisable(request, env);
+  if (url.pathname === PATHS.delete) return handleDelete(request, env);
   return handleResetPasswords(request, env);
 }
 
