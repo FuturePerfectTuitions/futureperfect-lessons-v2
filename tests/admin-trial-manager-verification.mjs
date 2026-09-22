@@ -12,6 +12,7 @@ import {
 } from '../worker/src/admin-trial-manager.js';
 
 const source = fs.readFileSync('worker/src/admin-trial-manager.js', 'utf8');
+const projected = fs.readFileSync('worker/src/admin-trial-manager-projected.js', 'utf8');
 const outerWorker = fs.readFileSync('worker/src/index-phase20-change17-parent-email.js', 'utf8');
 const html = fs.readFileSync('admin-import.html', 'utf8');
 const browser = fs.readFileSync('assets/admin-trials.js', 'utf8');
@@ -20,6 +21,7 @@ assert.equal(PATHS.create, '/api/v1/admin/trials/create');
 assert.equal(PATHS.list, '/api/v1/admin/trials/list');
 assert.equal(PATHS.rearm, '/api/v1/admin/trials/rearm');
 assert.equal(PATHS.disable, '/api/v1/admin/trials/disable');
+assert.equal(PATHS.delete, '/api/v1/admin/trials/delete');
 assert.equal(PATHS.resetPasswords, '/api/v1/admin/trials/reset-passwords');
 
 assert.equal(validPortalUserId('TrialEva'), true);
@@ -57,6 +59,7 @@ assert.equal(record.loginPassword, 'x9By');
 assert.equal(record.answerPassword, 'SW8g');
 assert.equal(record.vrEligible, true);
 assert.equal(record.schoolYear, 4);
+assert.equal(record.trialDeletedAt, null);
 assert.deepEqual(record.trialViews, ['maths-level1', 'maths-level2', 'english-year4-11plus']);
 assert.deepEqual(record.fullLibraries, []);
 assert.deepEqual(record.batches, []);
@@ -64,10 +67,15 @@ assert.deepEqual(record.batches, []);
 assert.match(source, /DELETE FROM trial_login_consumptions/);
 assert.match(source, /DELETE FROM student_sessions WHERE portal_user_id_norm = \?/);
 assert.match(source, /prefix:'user:trial'/);
+assert.match(source, /trialDeletedAt/);
+assert.match(source, /trialLastAction:'deleted'/);
+assert.match(source, /!clean\(user\.trialDeletedAt\)/);
 assert.match(source, /ACCOUNT_ALREADY_EXISTS/);
 assert.match(source, /PROVISION_VERIFY_FAILED/);
 assert.doesNotMatch(source, /Csl1[^'"\n]*['"]/);
 
+assert.match(projected, /PATHS\.delete/);
+assert.match(projected, /publishTrialPreparedAccess/);
 assert.match(outerWorker, /handleAdminTrialManager/);
 assert.match(outerWorker, /const trialAdminResponse = await handleAdminTrialManager\(request, env\)/);
 
@@ -82,7 +90,10 @@ assert.match(html, /assets\/admin-trials\.js/);
 assert.match(browser, /\/api\/v1\/admin\/trials\/create/);
 assert.match(browser, /\/api\/v1\/admin\/trials\/rearm/);
 assert.match(browser, /\/api\/v1\/admin\/trials\/disable/);
+assert.match(browser, /\/api\/v1\/admin\/trials\/delete/);
 assert.match(browser, /\/api\/v1\/admin\/trials\/reset-passwords/);
+assert.match(browser, /button\('Delete', 'delete'/);
+assert.match(browser, /was deleted from Existing Trial logins/);
 assert.match(browser, /Answer Pack password/);
 assert.match(browser, /one Trial login is still unused/);
 
