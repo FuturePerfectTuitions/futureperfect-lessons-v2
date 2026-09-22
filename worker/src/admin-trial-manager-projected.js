@@ -30,6 +30,13 @@ function errorResponse(request, env, error) {
   return new Response(JSON.stringify({ ok:false, error:'TRIAL_PREPARED_ACCESS_PUBLISH_FAILED', detail:clean(error?.message) }), { status:500, headers });
 }
 
+async function removeDeletedTrialProfile(env, portalUserId) {
+  const key = `user:${norm(portalUserId)}`;
+  await env.STUDENTS_KV.delete(key);
+  const readback = await env.STUDENTS_KV.get(key, { type:'json' });
+  if (readback) throw new Error('TRIAL_PROFILE_DELETE_VERIFY_FAILED');
+}
+
 export async function handleAdminTrialManager(request, env) {
   const url = new URL(request.url);
   if (!Object.values(PATHS).includes(url.pathname)) return null;
@@ -42,17 +49,20 @@ export async function handleAdminTrialManager(request, env) {
   const portalUserId = clean(responseBody?.portalUserId || body?.portalUserId);
   if (!portalUserId) return errorResponse(request, env, new Error('TRIAL_PREPARED_PORTAL_USER_REQUIRED'));
 
-  // Disabled and deleted Trials retain only a withdrawn prepared model. The
-  // Student runtime also checks account status; this synchronous publication
-  // closes the content surface before Admin reports the mutation as complete.
+  // Disable/delete first publishes a withdrawn prepared model so no Student
+  // content remains usable. Delete then removes the private Trial KV profile
+  // entirely, keeping Existing Trial logins short instead of accumulating
+  // hidden tombstones indefinitely.
   try {
     const result = await publishTrialPreparedAccess(env, norm(portalUserId));
+    if (url.pathname === PATHS.delete) await removeDeletedTrialProfile(env, portalUserId);
     const headers = new Headers(response.headers);
     headers.set('x-fpt-trial-prepared-access', result.reused ? 'verified-reused' : 'published');
+    if (url.pathname === PATHS.delete) headers.set('x-fpt-trial-profile', 'deleted');
     return new Response(response.body, { status:response.status, statusText:response.statusText, headers });
   } catch (error) {
     return errorResponse(request, env, error);
   }
 }
 
-export { PATHS };
+export { PATHS, removeDeletedTrialProfile };
