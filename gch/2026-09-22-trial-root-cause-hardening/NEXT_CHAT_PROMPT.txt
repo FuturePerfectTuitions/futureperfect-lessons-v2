@@ -1,0 +1,7 @@
+Continue the FPT Portal V2 **Trial provisioning root-cause hardening** project from the attached/GitHub GCH.
+
+Read `00_START_HERE_GCH.md` and `GCH_STATE.json` first, then read **every file** in the nested `FPT_Portal_V2_AUTHORITATIVE_FULL_v4.2_2026-09-21_VALIDATED.zip` before changing anything. Treat that v4.2 pack as the highest current Portal authority, with this GCH as the later continuation-state snapshot.
+
+Owner requirement is binding: **no patch work and no Eva-specific fix**. The goal is that every newly created Trial account works correctly on first use. Fix the systemic Trial provisioning lifecycle so Admin success guarantees selected Trial views are compiled, published and read-back verified in the Student-serving access model. Preserve all existing capabilities, especially the friendly exhausted-Trial upsell message, one-login rule, Trial delete/re-arm/reset semantics, online 11+ English PreLesson VR, protected Answer Packs, public Quiz withdrawal, Create Student Login, Lesson Release Import, Replace Resource and parent-email behaviour.
+
+Start with read-only production topology/provenance and capability reconciliation. Do not mutate production until the GCH stop conditions are cleared and I explicitly authorise the production root-fix deployment.
