@@ -10,9 +10,15 @@ on:
       - 'worker/src/admin-trial-manager.js'
       - 'worker/src/admin-trial-manager-projected.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'worker/src/access-read-model-sync.js'
+      - 'worker/src/admin-lesson-release-import.js'
+      - 'worker/src/index-step10-quiz-bridge.js'
       - 'tests/admin-student-manager-verification.mjs'
       - 'tests/admin-trial-manager-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
+      - 'tests/access-read-model-reconciliation-verification.mjs'
+      - 'tests/admin-lesson-release-import-verification.mjs'
+      - 'tests/cp12-quiz-redeem-v2.mjs'
       - '.github/workflows/admin-console-enhancements-ci.yml'
   workflow_dispatch:
 
@@ -22,7 +28,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +42,9 @@ jobs:
           node --check worker/src/admin-trial-manager.js
           node --check worker/src/admin-trial-manager-projected.js
           node --check worker/src/index-phase20-change17-parent-email.js
+          node --check worker/src/access-read-model-sync.js
+          node --check worker/src/admin-lesson-release-import.js
+          node --check worker/src/index-step10-quiz-bridge.js
       - name: Admin verification suite
         run: |
           set -Eeuo pipefail
@@ -43,4 +52,10 @@ jobs:
           node tests/admin-trial-manager-verification.mjs
           node tests/admin-tools-ui-verification.mjs
           node tests/admin-import-auto-process-static-verification.mjs
-          echo ADMIN_CONSOLE_ENHANCEMENTS_CI_PASS
+      - name: PreLesson VR and CP12 regression suite
+        run: |
+          set -Eeuo pipefail
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          echo ADMIN_PRELESSON_COMBINED_CI_PASS
