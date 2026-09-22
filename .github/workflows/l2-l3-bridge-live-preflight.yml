@@ -1,0 +1,78 @@
+name: L2 L3 hidden bridge live preflight
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/l2-l3-bridge-live-preflight.yml']
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.134.0
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  PORTAL_ROOT: https://lessons.futureperfect.education/
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fresh read-only live state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json | tee /tmp/portal-deploy.json
+          LIVE_VERSION="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/portal-deploy.json | head -n1)"
+          test -n "$LIVE_VERSION"
+          echo "LIVE_PORTAL_VERSION=$LIVE_VERSION"
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}/settings" -o /tmp/settings.json
+          jq -r '[.result.bindings[].name] | sort | join(",")' /tmp/settings.json | sed 's/^/PORTAL_BINDINGS=/'
+          jq -e --arg id "$PORTAL_D1_ID" '.result.bindings[] | select((.id==$id or .database_id==$id))' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/settings.json >/dev/null
+      - name: Read-only Portal D1 bridge prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          q(){ local sql="$1"; curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' --data "$(jq -n --arg sql "$sql" '{sql:$sql}')" "$API/d1/database/$PORTAL_D1_ID/query"; }
+          schema="$(q "PRAGMA table_info(student_batch_assignments)")"
+          test "$(jq '[.result[0].results[].name]|index("assignment_id")!=null' <<<"$schema")" = true
+          launch="$(q "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='quiz_launch_codes'")"
+          test "$(jq -r '.result[0].results[0].n' <<<"$launch")" = 1
+          fk="$(q "PRAGMA foreign_key_check")"
+          test "$(jq '.result[0].results|length' <<<"$fk")" = 0
+          ambiguous="$(q "SELECT COUNT(*) AS n FROM (SELECT a.portal_user_id_norm FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE lower(b.subject)='maths' AND lower(b.stream)='11plus' AND a.effective_from<=date('now') AND (a.effective_to IS NULL OR date('now')<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=date('now')) AND (b.active_to IS NULL OR date('now')<b.active_to) AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) GROUP BY a.portal_user_id_norm HAVING COUNT(DISTINCT (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END))>1)")"
+          test "$(jq -r '.result[0].results[0].n' <<<"$ambiguous")" = 0
+      - name: Confirm hidden bridge displaced and Portal Quiz withdrawn
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ORIGIN='https://lessons.futureperfect.education'
+          ec="$(curl -sS -H "Origin: $ORIGIN" -o /tmp/e.json -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
+          lc="$(curl -sS -X POST -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data '{}' -o /tmp/l.json -w '%{http_code}' "$BASE/api/v1/student/quiz/launch")"
+          rc="$(curl -sS -X POST -H 'Content-Type: application/json' --data '{"code":"preflight-invalid"}' -o /tmp/r.json -w '%{http_code}' "$BASE/api/v1/quiz-bridge/redeem")"
+          echo "BRIDGE_BEFORE eligibility=$ec launch=$lc redeem=$rc"
+          test "$ec" = 501
+          test "$lc" = 501
+          test "$rc" = 501
+          curl -fsS "$PORTAL_ROOT" -o /tmp/portal.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,subprocess,urllib.parse,os
+          html=Path('/tmp/portal.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I)
+          text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/p{i}.js'; subprocess.run(['curl','-fsS',urllib.parse.urljoin(os.environ['PORTAL_ROOT'],ref),'-o',p],check=True); text+=Path(p).read_text(errors='replace')
+          markers=['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch']
+          found=[m for m in markers if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PRESENT '+repr(found))
+          print('PORTAL_WITHDRAWAL_PASS')
+          PY

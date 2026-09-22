@@ -1,0 +1,62 @@
+name: Apply L2 L3 hidden bridge patch
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/l2-l3-apply-bridge-patch.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/l2-l3-quiz-bridge-2026-09-21
+          fetch-depth: 0
+      - name: Apply exact guarded bridge replacements
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/src/index-step10-quiz-bridge.js')
+          s=p.read_text()
+          reps=[]
+          reps.append((
+            "const API_V2_SOURCE='portal-api-v2-live-l3-view-v1';",
+            "const API_V2_SOURCE='portal-api-v2-live-l3-view-v1';\nconst POLICY_VERSION='quiz-release-context-v2.0';\nconst RELEASE_SOURCE='portal-live-maths11plus-release-v2';"
+          ))
+          reps.append((
+            "async function l3Active(env,user){const d=today();return env.DB.prepare(`SELECT a.batch_key FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(b.subject)='maths' AND lower(b.stream)='11plus' AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END)=3 AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to) LIMIT 1`).bind(user,d,d,d,d).first();}",
+            "async function activeMaths11plus(env,user){const d=today();const rows=(await env.DB.prepare(`SELECT a.assignment_id,a.effective_from,(CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) AS maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(b.subject)='maths' AND lower(b.stream)='11plus' AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to) ORDER BY a.effective_from DESC,a.assignment_id DESC`).bind(user,d,d,d,d).all())?.results||[];if(!rows.length)return {ok:false,reason:'NOT_ELIGIBLE'};const levels=[...new Set(rows.map(r=>Number(r.maths_level)).filter(n=>n===2||n===3))];if(levels.length!==1)return {ok:false,reason:'AMBIGUOUS_LEVEL'};const assignmentId=Number(rows[0]?.assignment_id);if(!Number.isSafeInteger(assignmentId)||assignmentId<=0)return {ok:false,reason:'ASSIGNMENT_INVALID'};return {ok:true,currentLevel:`L${levels[0]}`,portalAssignmentId:assignmentId};}"
+          ))
+          reps.append((
+            "async function released(request,env,ctx){const u=new URL(request.url);u.pathname='/api/v1/student/views/maths-level3/lessons';u.search='';const r=await currentWorker.fetch(new Request(u.toString(),{method:'GET',headers:request.headers}),env,ctx);const b=await r.clone().json().catch(()=>null);if(!r.ok||!b?.ok||!Array.isArray(b.lessons))return null;const out=[];for(const lesson of b.lessons){if(lesson?.locked===true||String(lesson?.accessMode||'').toLowerCase()==='prelesson')continue;const found=[lesson.lessonId,lesson.displayLessonId].map(clean).find(x=>/^L3T\\dM\\d+$/i.test(x));if(found)out.push(found.toUpperCase());}return [...new Set(out)];}",
+            "async function released(request,env,ctx,level){const n=Number(level);if(n!==2&&n!==3)return null;const u=new URL(request.url);u.pathname=`/api/v1/student/views/maths-level${n}/lessons`;u.search='';const r=await currentWorker.fetch(new Request(u.toString(),{method:'GET',headers:request.headers}),env,ctx);const b=await r.clone().json().catch(()=>null);if(!r.ok||!b?.ok||!Array.isArray(b.lessons))return null;const re=n===2?/^L2T\\d+M\\d+$/i:/^L3T\\d+M\\d+$/i;const out=[];for(const lesson of b.lessons){const state=norm(lesson?.state),mode=norm(lesson?.accessMode);if(lesson?.locked===true||lesson?.blocked===true||state==='locked'||state==='blocked'||mode==='prelesson')continue;const found=[lesson.lessonId,lesson.displayLessonId].map(clean).find(x=>re.test(x));if(found)out.push(found.toUpperCase());}return [...new Set(out)].sort();}"
+          ))
+          reps.append((
+            "async function eligibility(request,env,ctx){const s=await portalSession(request,env,ctx);if(!s)return reply(request,env,{ok:false,eligible:false},401);let active=null;try{active=await l3Active(env,s.user);}catch{return reply(request,env,{ok:false,eligible:false,error:'ELIGIBILITY_UNAVAILABLE'},503);}return reply(request,env,{ok:true,eligible:Boolean(active),label:'11+ Practice'});}",
+            "async function eligibility(request,env,ctx){const s=await portalSession(request,env,ctx);if(!s)return reply(request,env,{ok:false,eligible:false},401);let active;try{active=await activeMaths11plus(env,s.user);}catch{return reply(request,env,{ok:false,eligible:false,error:'ELIGIBILITY_UNAVAILABLE'},503);}if(!active.ok){const status=active.reason==='NOT_ELIGIBLE'?200:503;return reply(request,env,{ok:status===200,eligible:false,...(status===503?{error:active.reason}:{})},status);}return reply(request,env,{ok:true,eligible:true,label:'11+ Practice',currentLevel:active.currentLevel});}"
+          ))
+          reps.append((
+            "async function launch(request,env,ctx){const origin=request.headers.get('Origin')||'';if(!origins(env).has(origin))return reply(request,env,{error:'ORIGIN_NOT_ALLOWED'},403);const s=await portalSession(request,env,ctx);if(!s)return reply(request,env,{error:'SESSION_INVALID'},401);if(!(await l3Active(env,s.user)))return reply(request,env,{error:'NOT_ELIGIBLE'},403);const lessonCodes=await released(request,env,ctx);if(!lessonCodes)return reply(request,env,{error:'RELEASE_CONTEXT_UNAVAILABLE'},503);const raw=code(),hash=await sha(raw),now=new Date(),expires=new Date(now.getTime()+TTL_MS);const context={l3Eligible:true,l2Inherited:true,releasedL3LessonCodes:lessonCodes,source:'portal-live-l3-view-v1'};await env.DB.prepare(`INSERT INTO quiz_launch_codes(code_hash,portal_user_id_norm,portal_session_token_hash,release_context_json,created_at,expires_at,used_at) VALUES(?,?,?,?,?,?,NULL)`).bind(hash,s.user,s.tokenHash,JSON.stringify(context),now.toISOString(),expires.toISOString()).run();return reply(request,env,{ok:true,launchUrl:`${QUIZ_URL}launch?code=${encodeURIComponent(raw)}`,expiresAt:expires.toISOString()});}",
+            "async function launch(request,env,ctx){const origin=request.headers.get('Origin')||'';if(!origins(env).has(origin))return reply(request,env,{error:'ORIGIN_NOT_ALLOWED'},403);const s=await portalSession(request,env,ctx);if(!s)return reply(request,env,{error:'SESSION_INVALID'},401);let active;try{active=await activeMaths11plus(env,s.user);}catch{return reply(request,env,{error:'ELIGIBILITY_UNAVAILABLE'},503);}if(!active.ok)return reply(request,env,{error:active.reason},active.reason==='NOT_ELIGIBLE'?403:503);const level=active.currentLevel==='L2'?2:active.currentLevel==='L3'?3:0;const lessonCodes=await released(request,env,ctx,level);if(!lessonCodes)return reply(request,env,{error:'RELEASE_CONTEXT_UNAVAILABLE'},503);const raw=code(),hash=await sha(raw),now=new Date(),expires=new Date(now.getTime()+TTL_MS);const context={policyVersion:POLICY_VERSION,currentLevel:active.currentLevel,releasedL2LessonCodes:level===2?lessonCodes:[],releasedL3LessonCodes:level===3?lessonCodes:[],inheritedLevels:level===3?['L2']:[],portalAssignmentId:active.portalAssignmentId,generatedAt:now.toISOString(),source:RELEASE_SOURCE};await env.DB.prepare(`INSERT INTO quiz_launch_codes(code_hash,portal_user_id_norm,portal_session_token_hash,release_context_json,created_at,expires_at,used_at) VALUES(?,?,?,?,?,?,NULL)`).bind(hash,s.user,s.tokenHash,JSON.stringify(context),now.toISOString(),expires.toISOString()).run();return reply(request,env,{ok:true,launchUrl:`${QUIZ_URL}launch?code=${encodeURIComponent(raw)}`,expiresAt:expires.toISOString()});}"
+          ))
+          for old,new in reps:
+            count=s.count(old)
+            if count!=1: raise SystemExit(f'expected one match, got {count}: {old[:120]!r}')
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          node --check worker/src/index-step10-quiz-bridge.js
+          git diff --check
+          git diff -- worker/src/index-step10-quiz-bridge.js
+      - name: Commit bridge source patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add worker/src/index-step10-quiz-bridge.js
+          git commit -m 'Make hidden Quiz bridge L2/L3 release-context aware'
+          git push origin HEAD:feature/l2-l3-quiz-bridge-2026-09-21

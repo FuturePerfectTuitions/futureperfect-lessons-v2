@@ -1,0 +1,57 @@
+name: L2 L3 hidden bridge off-production regression
+on:
+  push:
+    branches: [feature/l2-l3-quiz-bridge-2026-09-21]
+    paths: ['.github/workflows/l2-l3-bridge-offprod-regression.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Syntax and scope boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/index-step10-quiz-bridge.js
+          git diff --check 3b39037233427f94c8d5ef869c1fb5d9f17ea8a0..HEAD
+          changed="$(git diff --name-only 3b39037233427f94c8d5ef869c1fb5d9f17ea8a0..HEAD)"
+          echo "$changed"
+          bad="$(printf '%s\n' "$changed" | grep -Ev '^(worker/src/index-step10-quiz-bridge\.js|\.github/workflows/l2-l3-(apply-bridge-patch|bridge-offprod-regression)\.yml)$' || true)"
+          test -z "$bad" || { echo "UNEXPECTED_CHANGED_FILES"; echo "$bad"; exit 1; }
+          grep -Fq "POLICY_VERSION='quiz-release-context-v2.0'" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "RELEASE_SOURCE='portal-live-maths11plus-release-v2'" worker/src/index-step10-quiz-bridge.js
+          grep -Fq 'maths-level${n}' worker/src/index-step10-quiz-bridge.js
+          grep -Fq "assignment_id" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "AMBIGUOUS_LEVEL" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "releasedL2LessonCodes:level===2?lessonCodes:[]" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "releasedL3LessonCodes:level===3?lessonCodes:[]" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "inheritedLevels:level===3?['L2']:[]" worker/src/index-step10-quiz-bridge.js
+      - name: Live Portal D1 read-only assignment and integrity checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          q(){ local sql="$1"; curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' --data "$(jq -n --arg sql "$sql" '{sql:$sql}')" "$API/d1/database/$PORTAL_D1_ID/query"; }
+          schema="$(q "PRAGMA table_info(student_batch_assignments)")"
+          test "$(jq '[.result[0].results[].name]|index("assignment_id")!=null' <<<"$schema")" = true
+          test "$(jq '[.result[0].results[].name]|index("portal_user_id_norm")!=null' <<<"$schema")" = true
+          fk="$(q "PRAGMA foreign_key_check")"
+          test "$(jq '.result[0].results|length' <<<"$fk")" = 0
+          ambiguous="$(q "SELECT COUNT(*) AS n FROM (SELECT a.portal_user_id_norm FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE lower(b.subject)='maths' AND lower(b.stream)='11plus' AND a.effective_from<=date('now') AND (a.effective_to IS NULL OR date('now')<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=date('now')) AND (b.active_to IS NULL OR date('now')<b.active_to) AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) GROUP BY a.portal_user_id_norm HAVING COUNT(DISTINCT (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END))>1)")"
+          test "$(jq -r '.result[0].results[0].n' <<<"$ambiguous")" = 0
+      - name: Student surface untouched by bridge branch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -z "$(git diff --name-only 3b39037233427f94c8d5ef869c1fb5d9f17ea8a0..HEAD -- docs site public frontend 2>/dev/null || true)"
+          echo BRIDGE_OFFPROD_PASS
