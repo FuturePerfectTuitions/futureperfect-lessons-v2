@@ -1,0 +1,46 @@
+name: Admin console enhancements CI
+
+on:
+  push:
+    branches:
+      - feat/admin-student-create-trial-delete-release-first-2026-09-22
+    paths:
+      - 'assets/admin-trials.js'
+      - 'worker/src/admin-student-manager.js'
+      - 'worker/src/admin-trial-manager.js'
+      - 'worker/src/admin-trial-manager-projected.js'
+      - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'tests/admin-student-manager-verification.mjs'
+      - 'tests/admin-trial-manager-verification.mjs'
+      - 'tests/admin-tools-ui-verification.mjs'
+      - '.github/workflows/admin-console-enhancements-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          set -Eeuo pipefail
+          node --check assets/admin-trials.js
+          node --check worker/src/admin-student-manager.js
+          node --check worker/src/admin-trial-manager.js
+          node --check worker/src/admin-trial-manager-projected.js
+          node --check worker/src/index-phase20-change17-parent-email.js
+      - name: Admin verification suite
+        run: |
+          set -Eeuo pipefail
+          node tests/admin-student-manager-verification.mjs
+          node tests/admin-trial-manager-verification.mjs
+          node tests/admin-tools-ui-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          echo ADMIN_CONSOLE_ENHANCEMENTS_CI_PASS
