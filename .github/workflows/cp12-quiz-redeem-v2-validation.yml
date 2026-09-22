@@ -1,0 +1,31 @@
+name: CP12 Quiz redeem v2 validation
+on:
+  push:
+    branches: [feature/cp12-quiz-redeem-v2-2026-09-21]
+    paths:
+      - 'worker/src/index-step10-quiz-bridge.js'
+      - 'tests/cp12-quiz-redeem-v2.mjs'
+      - 'tests/step10-quiz-bridge-static-verification.mjs'
+      - '.github/workflows/cp12-quiz-redeem-v2-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and bridge regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/index-step10-quiz-bridge.js
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          grep -Fq "const RELEASE_SOURCE='portal-live-maths11plus-release-v2'" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "context?.source===API_V2_SOURCE||context?.source===RELEASE_SOURCE" worker/src/index-step10-quiz-bridge.js
+          echo CP12_QUIZ_REDEEM_VALIDATION_PASS

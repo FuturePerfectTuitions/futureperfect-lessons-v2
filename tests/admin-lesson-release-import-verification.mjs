@@ -106,7 +106,7 @@ class MemoryDB {
 }
 
 const students = new Map([
-  ['user:pre0101', { name:'Synthetic Online', vrEligible:true, blockedLessons:[] }],
+  ['user:pre0101', { name:'Synthetic Online', vrEligible:false, blockedLessons:[] }],
   ['user:full0202', { name:'Synthetic Full', vrEligible:false, blockedLessons:[] }]
 ]);
 
@@ -273,6 +273,11 @@ assert.equal(confirm.body.summary.total, 2);
 assert.equal(confirm.body.summary.succeeded, 2);
 assert.equal(confirm.body.summary.failed, 0);
 assert.equal(db.prelessons.size, 1);
+assert.equal(
+  [...db.prelessons.values()][0]?.vr_access,
+  1,
+  '11+ English online PreLesson must grant VR from batch semantics even when legacy vrEligible is false'
+);
 assert.equal(db.entitlements.get('full0202|Y3M1')?.core_access, 1);
 assert.equal(
   db.entitlements.get('full0202|Y3M1')?.source_batch_code,

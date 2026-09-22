@@ -1,0 +1,149 @@
+name: CP12 bridge guarded deploy
+on:
+  push:
+    branches: [feature/cp12-quiz-redeem-v2-2026-09-21]
+    paths: ['.github/workflows/cp12-bridge-guarded-deploy.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.134.0
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  EXPECTED_OLD_VERSION: 095ab555-2f27-4c0b-851a-a10dd10158c8
+  BASE: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+  PORTAL_ROOT: https://lessons.futureperfect.education/
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: CP12 source and regression gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/index-step10-quiz-bridge.js
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/admin-resource-replace-verification.mjs
+          node tests/admin-tools-ui-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-superuser-static-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          node tests/phase12-batch-aware-worker-verification.mjs
+          node tests/phase13-excel-sync-verification.mjs
+          grep -Fq "const RELEASE_SOURCE='portal-live-maths11plus-release-v2'" worker/src/index-step10-quiz-bridge.js
+          grep -Fq 'cp12SignedV2LaunchStillValid' worker/src/index-step10-quiz-bridge.js
+      - name: Guarded hidden bridge cutover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          ORIGIN='https://lessons.futureperfect.education'
+          DEPLOYED=0
+          rollback(){
+            code=$?
+            if [ "$DEPLOYED" = 1 ]; then
+              echo "CP12_BRIDGE_VERIFY_FAILED_ROLLING_BACK_TO=$EXPECTED_OLD_VERSION" >&2
+              npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$EXPECTED_OLD_VERSION@100%" --name "$WORKER_NAME" --message 'Rollback CP12 signed L2 L3 bridge redemption' -y || true
+              sleep 4
+            fi
+            exit "$code"
+          }
+          trap rollback ERR
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/before.json
+          OLD="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/before.json | head -n1)"
+          echo "CP12_BRIDGE_ROLLBACK_ANCHOR=$OLD"
+          test "$OLD" = "$EXPECTED_OLD_VERSION"
+
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}/settings" -o /tmp/settings-before.json
+          jq -e '.success==true' /tmp/settings-before.json >/dev/null
+          jq -c '[.result.bindings[] | {name,type,service,environment,namespace_id,database_id:(.id // .database_id),bucket_name,text:(if .type=="plain_text" then .text else null end)}] | sort_by(.name)' /tmp/settings-before.json > /tmp/bindings-before.json
+          jq -e --arg id "$PORTAL_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/settings-before.json >/dev/null
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$PORTAL_D1_ID" --remote --command="SELECT COUNT(*) AS n FROM quiz_launch_codes;" --json > /tmp/rows-before.json
+          ROWS_BEFORE="$(jq -r '.[0].results[0].n' /tmp/rows-before.json)"
+          test "$ROWS_BEFORE" = 8
+          echo "QUIZ_LAUNCH_ROWS_BEFORE=$ROWS_BEFORE"
+
+          # Public Student Portal must remain withdrawn throughout the hidden bridge change.
+          curl -fsS "$PORTAL_ROOT" -o /tmp/portal-before.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,subprocess,urllib.parse,os
+          root=os.environ['PORTAL_ROOT']; html=Path('/tmp/portal-before.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I); text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/before{i}.js'; subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',p],check=True); text+=Path(p).read_text(errors='replace')
+          found=[m for m in ['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'] if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PRESENT_BEFORE '+repr(found))
+          print('PORTAL_WITHDRAWAL_BEFORE_PASS')
+          PY
+
+          WORKER_ENTRYPOINT=src/index-step10-quiz-bridge.js DEPLOY_MESSAGE='CP12 signed L2 L3 bridge redemption compatibility' bash ops/deploy_current_worker_preserve.sh
+          DEPLOYED=1
+          sleep 5
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/after.json
+          NEW="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/after.json | head -n1)"
+          test -n "$NEW"; test "$NEW" != "$OLD"
+          echo "CP12_BRIDGE_NEW_VERSION=$NEW"
+
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}/settings" -o /tmp/settings-after.json
+          jq -e '.success==true' /tmp/settings-after.json >/dev/null
+          jq -c '[.result.bindings[] | {name,type,service,environment,namespace_id,database_id:(.id // .database_id),bucket_name,text:(if .type=="plain_text" then .text else null end)}] | sort_by(.name)' /tmp/settings-after.json > /tmp/bindings-after.json
+          cmp /tmp/bindings-before.json /tmp/bindings-after.json
+          jq -e --arg id "$PORTAL_D1_ID" '.result.bindings[] | select(.name=="DB" and (.id==$id or .database_id==$id))' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/settings-after.json >/dev/null
+
+          curl -fsS -H "$AUTH" "$API/workers/scripts/${WORKER_NAME}" -o /tmp/script-after.bin
+          grep -aFq 'portal-live-maths11plus-release-v2' /tmp/script-after.bin
+          grep -aFq 'portal-api-v2-live-l3-view-v1' /tmp/script-after.bin
+          grep -aFq 'PORTAL_SESSION_INVALID' /tmp/script-after.bin
+
+          admin="$(curl -sS -X POST -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data '{}' -o /tmp/admin.json -w '%{http_code}' "$BASE/api/v1/admin/trials/list")"
+          test "$admin" = 401; grep -Fq 'UNAUTHORISED' /tmp/admin.json
+          protected="$(curl -sS -H "Origin: $ORIGIN" -D /tmp/ph -o /tmp/pb -w '%{http_code}' "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
+          test "$protected" = 410
+          grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/ph
+
+          eligibility="$(curl -sS -H "Origin: $ORIGIN" -o /tmp/e.json -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
+          launch="$(curl -sS -X POST -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data '{}' -o /tmp/l.json -w '%{http_code}' "$BASE/api/v1/student/quiz/launch")"
+          redeem="$(curl -sS -X POST -H 'Content-Type: application/json' --data '{"code":"cp12-invalid"}' -o /tmp/r.json -w '%{http_code}' "$BASE/api/v1/quiz-bridge/redeem")"
+          test "$eligibility" = 401; grep -Fq '"eligible":false' /tmp/e.json
+          test "$launch" = 401; grep -Fq 'SESSION_INVALID' /tmp/l.json
+          test "$redeem" = 401; grep -Fq 'UNAUTHORIZED' /tmp/r.json
+
+          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute "$PORTAL_D1_ID" --remote --command="SELECT COUNT(*) AS n FROM quiz_launch_codes;" --json > /tmp/rows-after.json
+          ROWS_AFTER="$(jq -r '.[0].results[0].n' /tmp/rows-after.json)"
+          echo "QUIZ_LAUNCH_ROWS_AFTER=$ROWS_AFTER"
+          test "$ROWS_AFTER" = "$ROWS_BEFORE"
+
+          curl -fsS "$PORTAL_ROOT" -o /tmp/portal-after.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,subprocess,urllib.parse,os
+          root=os.environ['PORTAL_ROOT']; html=Path('/tmp/portal-after.html').read_text(errors='replace')
+          refs=re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I); text=''
+          for i,ref in enumerate(refs):
+              p=f'/tmp/after{i}.js'; subprocess.run(['curl','-fsS',urllib.parse.urljoin(root,ref),'-o',p],check=True); text+=Path(p).read_text(errors='replace')
+          found=[m for m in ['11+ Practice','quiz.futureperfect.education','/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch'] if m in text]
+          if found: raise SystemExit('QUIZ_SURFACE_PRESENT_AFTER '+repr(found))
+          print('PORTAL_WITHDRAWAL_AFTER_PASS')
+          PY
+
+          trap - ERR
+          echo CP12_BRIDGE_GUARDED_DEPLOY_PASS
