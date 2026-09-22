@@ -1,0 +1,28 @@
+name: Trial full L2 Quiz Student CI
+on:
+  push:
+    branches: [fix/trial-11plus-full-l2-quiz-student-2026-09-22]
+    paths:
+      - 'rebuild/student/src/index.js'
+      - 'rebuild/student/src/lib/trial-quiz-runtime.mjs'
+      - 'tests/trial-full-l2-quiz-runtime.mjs'
+      - '.github/workflows/trial-full-l2-quiz-student-ci.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Trial Quiz overlay and existing CP12 runtime
+        run: |
+          set -Eeuo pipefail
+          node --check rebuild/student/src/lib/trial-quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node tests/trial-full-l2-quiz-runtime.mjs
+          node tests/cp12-l2-l3-quiz-runtime.mjs
+          echo TRIAL_FULL_L2_STUDENT_CI_PASS
