@@ -2,21 +2,32 @@ import currentWorker from './index-phase23-protected-view-stability.js';
 import phase18Worker from './index-phase18-online-prelesson.js';
 import { canonicalCatalogueRowsForView } from './index-phase12.js';
 import { classifyPhase11AnswerIndex } from './phase11-resources.js';
+import { VIEW_CURRICULA } from './phase11-navigation-cache.js';
 
+const TRIAL_RUNTIME_ACCESS_VERSION = 'trial-runtime-access-v2';
 const TRIAL_VR_MESSAGE = 'Trial access includes lesson descriptions, lesson videos and all VR resources for this 11+ year.';
 
-const TRIAL_VR_RULES = Object.freeze({
-  'english-year4-11plus': Object.freeze({
-    schoolYear: 4,
-    fullLibrary: 'ENGLISH_Y4_11PLUS_FULL',
-    batch: 'Y4E11'
-  }),
-  'english-year5-11plus': Object.freeze({
-    schoolYear: 5,
-    fullLibrary: 'ENGLISH_Y5_11PLUS_FULL',
-    batch: 'Y5E11'
-  })
+const TRIAL_VIEW_RULES = Object.freeze({
+  'maths-year2': Object.freeze({ subject:'maths', label:'Year 2', rank:20, schoolYear:2, fullLibrary:'MATHS_Y2_FULL', batch:'Y2M' }),
+  'maths-year3': Object.freeze({ subject:'maths', label:'Year 3', rank:30, schoolYear:3, fullLibrary:'MATHS_Y3_FULL', batch:'Y3M' }),
+  'maths-year4': Object.freeze({ subject:'maths', label:'Year 4', rank:40, schoolYear:4, fullLibrary:'MATHS_Y4_FULL', batch:'Y4M' }),
+  'maths-level1': Object.freeze({ subject:'maths', label:'L1', rank:41, schoolYear:4, fullLibrary:'MATHS_L1_FULL', batch:'Y4M11' }),
+  'maths-year5': Object.freeze({ subject:'maths', label:'Year 5', rank:50, schoolYear:5, fullLibrary:'MATHS_Y5_FULL', batch:'Y5M' }),
+  'maths-level2': Object.freeze({ subject:'maths', label:'L2', rank:51, schoolYear:4, fullLibrary:'MATHS_L2_FULL', batch:'Y4M11' }),
+  'maths-year6': Object.freeze({ subject:'maths', label:'Year 6', rank:60, schoolYear:6, fullLibrary:'MATHS_Y6_FULL', batch:'Y6M' }),
+  'maths-level3': Object.freeze({ subject:'maths', label:'L3', rank:61, schoolYear:5, fullLibrary:'MATHS_L3_FULL', batch:'Y5M11' }),
+  'english-year2': Object.freeze({ subject:'english', label:'Year 2', rank:20, schoolYear:2, fullLibrary:'ENGLISH_Y2_FULL', batch:'Y2E' }),
+  'english-year3': Object.freeze({ subject:'english', label:'Year 3', rank:30, schoolYear:3, fullLibrary:'ENGLISH_Y3_FULL', batch:'Y3E' }),
+  'english-year4': Object.freeze({ subject:'english', label:'Year 4', rank:40, schoolYear:4, fullLibrary:'ENGLISH_Y4_FULL', batch:'Y4E' }),
+  'english-year4-11plus': Object.freeze({ subject:'english', label:'Year 4 11+', rank:41, schoolYear:4, fullLibrary:'ENGLISH_Y4_11PLUS_FULL', batch:'Y4E11', vr:true }),
+  'english-year5': Object.freeze({ subject:'english', label:'Year 5', rank:50, schoolYear:5, fullLibrary:'ENGLISH_Y5_FULL', batch:'Y5E' }),
+  'english-year5-11plus': Object.freeze({ subject:'english', label:'Year 5 11+', rank:51, schoolYear:5, fullLibrary:'ENGLISH_Y5_11PLUS_FULL', batch:'Y5E11', vr:true }),
+  'english-year6': Object.freeze({ subject:'english', label:'Year 6', rank:60, schoolYear:6, fullLibrary:'ENGLISH_Y6_FULL', batch:'Y6E' })
 });
+
+const TRIAL_VR_RULES = Object.freeze(Object.fromEntries(
+  Object.entries(TRIAL_VIEW_RULES).filter(([, rule]) => rule.vr === true)
+));
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
@@ -29,6 +40,7 @@ function json(body, status = 200, extraHeaders = {}) {
   const headers = new Headers(extraHeaders);
   headers.set('content-type', 'application/json; charset=utf-8');
   headers.set('cache-control', 'no-store');
+  headers.set('x-fpt-trial-runtime-access', TRIAL_RUNTIME_ACCESS_VERSION);
   return new Response(JSON.stringify(body), { status, headers });
 }
 
@@ -36,6 +48,7 @@ function jsonLike(response, body) {
   const headers = new Headers(response.headers);
   headers.set('content-type', 'application/json; charset=utf-8');
   headers.set('cache-control', 'no-store');
+  headers.set('x-fpt-trial-runtime-access', TRIAL_RUNTIME_ACCESS_VERSION);
   headers.delete('content-length');
   return new Response(JSON.stringify(body), {
     status: response.status,
@@ -60,8 +73,11 @@ async function sessionTrialContext(request, env, ctx) {
   const user = await env.STUDENTS_KV.get(`user:${portalUserIdNorm}`, { type: 'json' });
   if (!user) return null;
   const allowedViews = new Set(
-    (Array.isArray(user.trialViews) ? user.trialViews : []).map(norm).filter(Boolean)
+    (Array.isArray(user.trialViews) ? user.trialViews : [])
+      .map(norm)
+      .filter(viewId => TRIAL_VIEW_RULES[viewId])
   );
+  if (!allowedViews.size) return null;
   return { portalUserIdNorm, user, allowedViews };
 }
 
@@ -70,10 +86,13 @@ function eligibleTrialVrViews(context) {
   return [...context.allowedViews].filter(viewId => TRIAL_VR_RULES[viewId]);
 }
 
-function overlayTrialVrEnv(env, portalUserIdNorm, viewIds) {
+function overlayTrialAccessEnv(env, portalUserIdNorm, viewIds) {
   if (!env?.STUDENTS_KV || !portalUserIdNorm) return env;
-  const rules = [...new Set(viewIds.map(norm))].map(viewId => TRIAL_VR_RULES[viewId]).filter(Boolean);
+  const selected = [...new Set((Array.isArray(viewIds) ? viewIds : []).map(norm))]
+    .filter(viewId => TRIAL_VIEW_RULES[viewId]);
+  const rules = selected.map(viewId => TRIAL_VIEW_RULES[viewId]);
   if (!rules.length) return env;
+
   const source = env.STUDENTS_KV;
   const targetKey = `user:${portalUserIdNorm}`;
   const kv = new Proxy(source, {
@@ -90,22 +109,14 @@ function overlayTrialVrEnv(env, portalUserIdNorm, viewIds) {
         if (!wantsJson) {
           try { user = JSON.parse(String(value)); } catch { return value; }
         }
-        const fullLibraries = new Set(
-          (Array.isArray(user.fullLibraries) ? user.fullLibraries : []).map(value => clean(value).toUpperCase()).filter(Boolean)
-        );
-        const batches = new Set(
-          (Array.isArray(user.batches) ? user.batches : []).map(value => clean(value)).filter(Boolean)
-        );
-        for (const rule of rules) {
-          fullLibraries.add(rule.fullLibrary);
-          batches.add(rule.batch);
-        }
         const overlaid = {
           ...user,
-          schoolYear: rules[0].schoolYear,
-          vrEligible: true,
-          fullLibraries: [...fullLibraries],
-          batches: [...batches]
+          schoolYear: rules.length === 1 ? rules[0].schoolYear : user.schoolYear,
+          vrEligible: rules.some(rule => rule.vr === true),
+          fullLibraries: [...new Set(rules.map(rule => rule.fullLibrary).filter(Boolean))],
+          batches: [...new Set(rules.map(rule => rule.batch).filter(Boolean))],
+          upsellViews: [],
+          trialViews: selected
         };
         return wantsJson ? overlaid : JSON.stringify(overlaid);
       };
@@ -115,14 +126,135 @@ function overlayTrialVrEnv(env, portalUserIdNorm, viewIds) {
     get(target, prop) {
       if (prop === 'STUDENTS_KV') return kv;
       if (prop === 'PHASE12_BYPASS_SESSION_PROFILE') return true;
+      if (prop === 'TRIAL_RUNTIME_ACCESS_VERSION') return TRIAL_RUNTIME_ACCESS_VERSION;
       const value = Reflect.get(target, prop, target);
       return typeof value === 'function' ? value.bind(target) : value;
     }
   });
 }
 
+function overlayTrialVrEnv(env, portalUserIdNorm, viewIds) {
+  return overlayTrialAccessEnv(env, portalUserIdNorm, viewIds);
+}
+
+function findHomeView(body, viewId) {
+  for (const subject of Array.isArray(body?.subjects) ? body.subjects : []) {
+    const view = (Array.isArray(subject?.views) ? subject.views : [])
+      .find(item => norm(item?.viewId) === norm(viewId));
+    if (view) return view;
+  }
+  return null;
+}
+
+function trialHomeSummary(viewId, sourceView = null) {
+  const rule = TRIAL_VIEW_RULES[norm(viewId)];
+  if (!rule) return null;
+  const canonicalCount = canonicalCatalogueRowsForView(viewId).length;
+  const sourceVisible = Math.max(
+    0,
+    Number(sourceView?.visibleLessonCount || 0),
+    Number(sourceView?.openLessonCount || 0) + Number(sourceView?.lockedLessonCount || 0)
+  );
+  const liveCount = Math.max(0, Number(sourceView?.trialCatalogueCount || 0));
+  const count = Math.max(canonicalCount, sourceVisible, liveCount);
+  return {
+    ...(sourceView && typeof sourceView === 'object' ? sourceView : {}),
+    viewId:norm(viewId),
+    subject:rule.subject,
+    label:clean(sourceView?.label) || rule.label,
+    catalogueAvailable:count > 0,
+    visibleLessonCount:count,
+    openLessonCount:count,
+    lockedLessonCount:0,
+    lockedPreview:false,
+    current:true,
+    group:'current',
+    source:'trial'
+  };
+}
+
+function reconcileTrialHomeBody(body, allowedViews, resolvedViews = new Map()) {
+  if (!body || typeof body !== 'object') return body;
+  if (!Array.isArray(body.subjects)) body.subjects = [];
+  const selected = [...new Set((Array.isArray(allowedViews) ? allowedViews : [...(allowedViews || [])]).map(norm))]
+    .filter(viewId => TRIAL_VIEW_RULES[viewId]);
+
+  for (const subjectName of ['maths', 'english']) {
+    let subject = body.subjects.find(item => norm(item?.subject) === subjectName);
+    if (!subject) {
+      subject = { subject:subjectName, label:subjectName === 'maths' ? 'Maths' : 'English', views:[] };
+      body.subjects.push(subject);
+    }
+    subject.views = selected
+      .filter(viewId => TRIAL_VIEW_RULES[viewId].subject === subjectName)
+      .sort((left, right) => TRIAL_VIEW_RULES[left].rank - TRIAL_VIEW_RULES[right].rank || left.localeCompare(right))
+      .map(viewId => trialHomeSummary(viewId, resolvedViews.get(viewId)))
+      .filter(Boolean);
+  }
+  return body;
+}
+
+async function handleTrialHome(request, env, ctx, context) {
+  const baseResponse = await currentWorker.fetch(request, env, ctx);
+  if (!baseResponse.ok) return baseResponse;
+  const body = await baseResponse.clone().json().catch(() => null);
+  if (!body?.ok) return baseResponse;
+
+  const resolved = new Map();
+  for (const viewId of context.allowedViews) {
+    const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
+    const response = await currentWorker.fetch(request, overlayEnv, ctx);
+    if (!response.ok) continue;
+    const altBody = await response.clone().json().catch(() => null);
+    const view = findHomeView(altBody, viewId);
+    const count = await liveCatalogueCount(overlayEnv, viewId);
+    if (view || count > 0) resolved.set(viewId, { ...(view || {}), trialCatalogueCount:count });
+  }
+
+  reconcileTrialHomeBody(body, context.allowedViews, resolved);
+  body.trial = true;
+  body.trialViews = [...context.allowedViews];
+  return jsonLike(baseResponse, body);
+}
+
 function lessonInView(viewId, lessonId) {
   return canonicalCatalogueRowsForView(viewId).some(row => String(row.lessonId) === String(lessonId));
+}
+
+function curriculumLessonIds(raw) {
+  const items = Array.isArray(raw)
+    ? raw
+    : (Array.isArray(raw?.lessonIds) ? raw.lessonIds
+      : (Array.isArray(raw?.lessons) ? raw.lessons
+        : (Array.isArray(raw?.items) ? raw.items : [])));
+  return items
+    .map(item => typeof item === 'string' ? clean(item) : clean(item?.lessonId))
+    .filter(Boolean);
+}
+
+async function liveCatalogueLessonIds(env, viewId) {
+  const ids = new Set();
+  const curricula = VIEW_CURRICULA[norm(viewId)] || [];
+  if (env?.LESSONS_KV && curricula.length) {
+    for (const code of curricula) {
+      let raw = null;
+      try { raw = await env.LESSONS_KV.get(`curriculum:${code}`, { type:'json' }); } catch {}
+      for (const lessonId of curriculumLessonIds(raw)) ids.add(lessonId);
+    }
+  }
+  if (!ids.size) {
+    for (const row of canonicalCatalogueRowsForView(viewId)) ids.add(String(row.lessonId));
+  }
+  return ids;
+}
+
+async function liveLessonInView(env, viewId, lessonId) {
+  const ids = await liveCatalogueLessonIds(env, viewId);
+  return ids.has(String(lessonId));
+}
+
+async function liveCatalogueCount(env, viewId) {
+  return (await liveCatalogueLessonIds(env, viewId)).size;
 }
 
 function parseResourceRequest(url) {
@@ -157,19 +289,22 @@ function isVrResource(parsed) {
   return parsed.kind === 'answer' && isVrAnswerIndex(parsed.index);
 }
 
-async function handleTrialVrList(request, env, ctx) {
-  const response = await currentWorker.fetch(request, env, ctx);
-  if (!response.ok) return response;
+async function handleTrialList(request, env, ctx, context, viewId) {
+  const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
+  const response = await currentWorker.fetch(request, overlayEnv, ctx);
+  if (!response.ok || !TRIAL_VR_RULES[viewId]) return response;
   const body = await response.clone().json().catch(() => null);
   if (!body?.ok || !Array.isArray(body.lessons)) return response;
   body.lessons = body.lessons.map(lesson => ({ ...lesson, accessMessage: TRIAL_VR_MESSAGE }));
   return jsonLike(response, body);
 }
 
-async function handleTrialVrDetail(request, env, ctx, context, viewId, lessonId) {
-  const baseResponse = await currentWorker.fetch(request, env, ctx);
-  if (!baseResponse.ok || !lessonInView(viewId, lessonId)) return baseResponse;
-  const overlayEnv = overlayTrialVrEnv(env, context.portalUserIdNorm, [viewId]);
+async function handleTrialDetail(request, env, ctx, context, viewId, lessonId) {
+  const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
+  const baseResponse = await currentWorker.fetch(request, overlayEnv, ctx);
+  if (!TRIAL_VR_RULES[viewId] || !baseResponse.ok) return baseResponse;
+  if (!(await liveLessonInView(overlayEnv, viewId, lessonId))) return baseResponse;
+
   const vrResponse = await phase18Worker.fetch(request, overlayEnv, ctx);
   if (!vrResponse.ok) return baseResponse;
   const [baseBody, vrBody] = await Promise.all([
@@ -191,18 +326,21 @@ async function handleTrialVrDetail(request, env, ctx, context, viewId, lessonId)
   return jsonLike(baseResponse, baseBody);
 }
 
-async function handleTrialVrResource(request, env, ctx, context, viewId, parsed) {
-  if (!lessonInView(viewId, parsed.lessonId)) {
+async function handleTrialResource(request, env, ctx, context, viewId, parsed) {
+  const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
+  if (!(await liveLessonInView(overlayEnv, viewId, parsed.lessonId))) {
     return json({ error: 'LESSON_NOT_VISIBLE' }, 404);
   }
-  const overlayEnv = overlayTrialVrEnv(env, context.portalUserIdNorm, [viewId]);
-  return phase18Worker.fetch(request, overlayEnv, ctx);
+  if (TRIAL_VR_RULES[viewId] && isVrResource(parsed)) {
+    return phase18Worker.fetch(request, overlayEnv, ctx);
+  }
+  return currentWorker.fetch(request, overlayEnv, ctx);
 }
 
 async function handleTrialAnswerView(request, env, ctx, context) {
-  const views = eligibleTrialVrViews(context);
+  const views = [...context.allowedViews];
   if (!views.length) return currentWorker.fetch(request, env, ctx);
-  const overlayEnv = overlayTrialVrEnv(env, context.portalUserIdNorm, views);
+  const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, views);
   return currentWorker.fetch(request, overlayEnv, ctx);
 }
 
@@ -232,11 +370,18 @@ async function handleAdminTrialList(request, env, ctx) {
 }
 
 export {
+  TRIAL_RUNTIME_ACCESS_VERSION,
+  TRIAL_VIEW_RULES,
   TRIAL_VR_RULES,
+  eligibleTrialVrViews,
   isVrAnswerIndex,
   isVrResource,
   lessonInView,
-  overlayTrialVrEnv
+  liveLessonInView,
+  overlayTrialAccessEnv,
+  overlayTrialVrEnv,
+  reconcileTrialHomeBody,
+  trialHomeSummary
 };
 
 export default {
@@ -251,39 +396,48 @@ export default {
       return currentWorker.fetch(request, env, ctx);
     }
 
-    const viewId = norm(url.searchParams.get('viewId'));
     const listMatch = url.pathname.match(/^\/api\/v1\/student\/views\/([^/]+)\/lessons$/);
     const detailMatch = url.pathname.match(/^\/api\/v1\/student\/lessons\/([^/]+)$/);
     const parsedResource = parseResourceRequest(url);
     const answerView = /^\/api\/v1\/student\/answer-view\/[^/]+$/.test(url.pathname);
+    const homeOrNavigation = request.method === 'GET' &&
+      (url.pathname === '/api/v1/student/home' || url.pathname === '/api/v1/student/navigation');
 
-    if (!listMatch && !detailMatch && !parsedResource && !answerView) {
+    if (!homeOrNavigation && !listMatch && !detailMatch && !parsedResource && !answerView) {
       return currentWorker.fetch(request, env, ctx);
     }
 
     const context = await sessionTrialContext(request, env, ctx);
     if (!context) return currentWorker.fetch(request, env, ctx);
 
+    if (homeOrNavigation) {
+      return handleTrialHome(request, env, ctx, context);
+    }
+
     if (answerView && request.method === 'GET') {
       return handleTrialAnswerView(request, env, ctx, context);
     }
 
-    if (!TRIAL_VR_RULES[viewId] || !context.allowedViews.has(viewId)) {
+    let viewId = norm(url.searchParams.get('viewId'));
+    if (listMatch) {
+      try { viewId = norm(decodeURIComponent(listMatch[1])); } catch { viewId = ''; }
+    }
+    if (!viewId || !TRIAL_VIEW_RULES[viewId] || !context.allowedViews.has(viewId)) {
       return currentWorker.fetch(request, env, ctx);
     }
 
     if (listMatch && request.method === 'GET') {
-      return handleTrialVrList(request, env, ctx);
+      return handleTrialList(request, env, ctx, context, viewId);
     }
 
     if (detailMatch && request.method === 'GET') {
       let lessonId = '';
       try { lessonId = decodeURIComponent(detailMatch[1]); } catch { lessonId = ''; }
-      return handleTrialVrDetail(request, env, ctx, context, viewId, lessonId);
+      return handleTrialDetail(request, env, ctx, context, viewId, lessonId);
     }
 
-    if (parsedResource && isVrResource(parsedResource)) {
-      return handleTrialVrResource(request, env, ctx, context, viewId, parsedResource);
+    if (parsedResource) {
+      return handleTrialResource(request, env, ctx, context, viewId, parsedResource);
     }
 
     return currentWorker.fetch(request, env, ctx);

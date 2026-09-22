@@ -7,10 +7,12 @@ on:
       - 'assets/admin-replace-resource.js'
       - 'worker/src/admin-resource-replace.js'
       - 'worker/src/index-admin-tools.js'
+      - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
+      - 'tests/trial-runtime-access-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
       - '.github/workflows/admin-tools-replace-resource-static-verification.yml'
   pull_request:
@@ -19,10 +21,12 @@ on:
       - 'assets/admin-replace-resource.js'
       - 'worker/src/admin-resource-replace.js'
       - 'worker/src/index-admin-tools.js'
+      - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
+      - 'tests/trial-runtime-access-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
       - '.github/workflows/admin-tools-replace-resource-static-verification.yml'
 
@@ -42,6 +46,7 @@ jobs:
         run: |
           node --check worker/src/admin-resource-replace.js
           node --check worker/src/index-admin-tools.js
+          node --check worker/src/index-phase24-trial-vr.js
           node --check assets/admin-replace-resource.js
           node --check assets/admin-trials.js
       - name: Replace Resource verification
@@ -53,3 +58,4 @@ jobs:
           node --experimental-default-type=module tests/admin-trial-manager-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/admin-superuser-static-verification.mjs
+          node tests/trial-runtime-access-verification.mjs

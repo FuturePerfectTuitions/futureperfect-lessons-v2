@@ -30,6 +30,7 @@ on:
       - 'tests/parent-email-completed-status-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
       - 'tests/protected-view-stability-static-verification.mjs'
+      - 'tests/trial-runtime-access-verification.mjs'
       - '.github/workflows/admin-superuser-production-deploy.yml'
 
 permissions:
@@ -78,8 +79,24 @@ jobs:
           node tests/parent-email-completed-status-verification.mjs
           node tests/admin-superuser-static-verification.mjs
           node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          node tests/trial-runtime-access-verification.mjs
       - name: Deploy Worker preserving bindings and secrets
         run: bash ops/deploy_current_worker_preserve.sh
+      - name: Verify Trial runtime access implementation is deployed
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/admin-live-worker.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/admin-live-worker.bin
+          grep -aFq '/api/v1/student/home' /tmp/admin-live-worker.bin
+          grep -aFq 'MATHS_L1_FULL' /tmp/admin-live-worker.bin
+          grep -aFq 'MATHS_L2_FULL' /tmp/admin-live-worker.bin
+          grep -aFq 'ENGLISH_Y4_11PLUS_FULL' /tmp/admin-live-worker.bin
+          echo 'TRIAL_RUNTIME_ACCESS_LIVE_MARKER_PASS'
       - name: Verify live Admin routes are protected
         run: |
           set -euo pipefail
