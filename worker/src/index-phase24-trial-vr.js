@@ -2,6 +2,7 @@ import currentWorker from './index-phase23-protected-view-stability.js';
 import phase18Worker from './index-phase18-online-prelesson.js';
 import { canonicalCatalogueRowsForView } from './index-phase12.js';
 import { classifyPhase11AnswerIndex } from './phase11-resources.js';
+import { VIEW_CURRICULA } from './phase11-navigation-cache.js';
 
 const TRIAL_RUNTIME_ACCESS_VERSION = 'trial-runtime-access-v2';
 const TRIAL_VR_MESSAGE = 'Trial access includes lesson descriptions, lesson videos and all VR resources for this 11+ year.';
@@ -12,9 +13,9 @@ const TRIAL_VIEW_RULES = Object.freeze({
   'maths-year4': Object.freeze({ subject:'maths', label:'Year 4', rank:40, schoolYear:4, fullLibrary:'MATHS_Y4_FULL', batch:'Y4M' }),
   'maths-level1': Object.freeze({ subject:'maths', label:'L1', rank:41, schoolYear:4, fullLibrary:'MATHS_L1_FULL', batch:'Y4M11' }),
   'maths-year5': Object.freeze({ subject:'maths', label:'Year 5', rank:50, schoolYear:5, fullLibrary:'MATHS_Y5_FULL', batch:'Y5M' }),
-  'maths-level2': Object.freeze({ subject:'maths', label:'L2', rank:51, schoolYear:5, fullLibrary:'MATHS_L2_FULL', batch:'Y5M11' }),
+  'maths-level2': Object.freeze({ subject:'maths', label:'L2', rank:51, schoolYear:4, fullLibrary:'MATHS_L2_FULL', batch:'Y4M11' }),
   'maths-year6': Object.freeze({ subject:'maths', label:'Year 6', rank:60, schoolYear:6, fullLibrary:'MATHS_Y6_FULL', batch:'Y6M' }),
-  'maths-level3': Object.freeze({ subject:'maths', label:'L3', rank:61, schoolYear:6, fullLibrary:'MATHS_L3_FULL', batch:'Y6M11' }),
+  'maths-level3': Object.freeze({ subject:'maths', label:'L3', rank:61, schoolYear:5, fullLibrary:'MATHS_L3_FULL', batch:'Y5M11' }),
   'english-year2': Object.freeze({ subject:'english', label:'Year 2', rank:20, schoolYear:2, fullLibrary:'ENGLISH_Y2_FULL', batch:'Y2E' }),
   'english-year3': Object.freeze({ subject:'english', label:'Year 3', rank:30, schoolYear:3, fullLibrary:'ENGLISH_Y3_FULL', batch:'Y3E' }),
   'english-year4': Object.freeze({ subject:'english', label:'Year 4', rank:40, schoolYear:4, fullLibrary:'ENGLISH_Y4_FULL', batch:'Y4E' }),
@@ -148,7 +149,14 @@ function findHomeView(body, viewId) {
 function trialHomeSummary(viewId, sourceView = null) {
   const rule = TRIAL_VIEW_RULES[norm(viewId)];
   if (!rule) return null;
-  const count = canonicalCatalogueRowsForView(viewId).length;
+  const canonicalCount = canonicalCatalogueRowsForView(viewId).length;
+  const sourceVisible = Math.max(
+    0,
+    Number(sourceView?.visibleLessonCount || 0),
+    Number(sourceView?.openLessonCount || 0) + Number(sourceView?.lockedLessonCount || 0)
+  );
+  const liveCount = Math.max(0, Number(sourceView?.trialCatalogueCount || 0));
+  const count = Math.max(canonicalCount, sourceVisible, liveCount);
   return {
     ...(sourceView && typeof sourceView === 'object' ? sourceView : {}),
     viewId:norm(viewId),
@@ -199,7 +207,8 @@ async function handleTrialHome(request, env, ctx, context) {
     if (!response.ok) continue;
     const altBody = await response.clone().json().catch(() => null);
     const view = findHomeView(altBody, viewId);
-    if (view) resolved.set(viewId, view);
+    const count = await liveCatalogueCount(overlayEnv, viewId);
+    if (view || count > 0) resolved.set(viewId, { ...(view || {}), trialCatalogueCount:count });
   }
 
   reconcileTrialHomeBody(body, context.allowedViews, resolved);
@@ -210,6 +219,42 @@ async function handleTrialHome(request, env, ctx, context) {
 
 function lessonInView(viewId, lessonId) {
   return canonicalCatalogueRowsForView(viewId).some(row => String(row.lessonId) === String(lessonId));
+}
+
+function curriculumLessonIds(raw) {
+  const items = Array.isArray(raw)
+    ? raw
+    : (Array.isArray(raw?.lessonIds) ? raw.lessonIds
+      : (Array.isArray(raw?.lessons) ? raw.lessons
+        : (Array.isArray(raw?.items) ? raw.items : [])));
+  return items
+    .map(item => typeof item === 'string' ? clean(item) : clean(item?.lessonId))
+    .filter(Boolean);
+}
+
+async function liveCatalogueLessonIds(env, viewId) {
+  const ids = new Set();
+  const curricula = VIEW_CURRICULA[norm(viewId)] || [];
+  if (env?.LESSONS_KV && curricula.length) {
+    for (const code of curricula) {
+      let raw = null;
+      try { raw = await env.LESSONS_KV.get(`curriculum:${code}`, { type:'json' }); } catch {}
+      for (const lessonId of curriculumLessonIds(raw)) ids.add(lessonId);
+    }
+  }
+  if (!ids.size) {
+    for (const row of canonicalCatalogueRowsForView(viewId)) ids.add(String(row.lessonId));
+  }
+  return ids;
+}
+
+async function liveLessonInView(env, viewId, lessonId) {
+  const ids = await liveCatalogueLessonIds(env, viewId);
+  return ids.has(String(lessonId));
+}
+
+async function liveCatalogueCount(env, viewId) {
+  return (await liveCatalogueLessonIds(env, viewId)).size;
 }
 
 function parseResourceRequest(url) {
@@ -257,7 +302,8 @@ async function handleTrialList(request, env, ctx, context, viewId) {
 async function handleTrialDetail(request, env, ctx, context, viewId, lessonId) {
   const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
   const baseResponse = await currentWorker.fetch(request, overlayEnv, ctx);
-  if (!TRIAL_VR_RULES[viewId] || !baseResponse.ok || !lessonInView(viewId, lessonId)) return baseResponse;
+  if (!TRIAL_VR_RULES[viewId] || !baseResponse.ok) return baseResponse;
+  if (!(await liveLessonInView(overlayEnv, viewId, lessonId))) return baseResponse;
 
   const vrResponse = await phase18Worker.fetch(request, overlayEnv, ctx);
   if (!vrResponse.ok) return baseResponse;
@@ -281,10 +327,10 @@ async function handleTrialDetail(request, env, ctx, context, viewId, lessonId) {
 }
 
 async function handleTrialResource(request, env, ctx, context, viewId, parsed) {
-  if (!lessonInView(viewId, parsed.lessonId)) {
+  const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
+  if (!(await liveLessonInView(overlayEnv, viewId, parsed.lessonId))) {
     return json({ error: 'LESSON_NOT_VISIBLE' }, 404);
   }
-  const overlayEnv = overlayTrialAccessEnv(env, context.portalUserIdNorm, [viewId]);
   if (TRIAL_VR_RULES[viewId] && isVrResource(parsed)) {
     return phase18Worker.fetch(request, overlayEnv, ctx);
   }
@@ -331,6 +377,7 @@ export {
   isVrAnswerIndex,
   isVrResource,
   lessonInView,
+  liveLessonInView,
   overlayTrialAccessEnv,
   overlayTrialVrEnv,
   reconcileTrialHomeBody,
