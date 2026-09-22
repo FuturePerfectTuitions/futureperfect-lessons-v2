@@ -89,3 +89,5 @@ jobs:
           NODE
 
           echo 'TRIAL_ADMIN_ACTIONS_READONLY_DIAGNOSTIC_PASS'
+
+# Rerun marker: production preflight fix merged at 495e1b0c2ed38507e1f8e54e9d10373febe5b29a
