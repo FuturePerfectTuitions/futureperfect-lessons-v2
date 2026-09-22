@@ -1,0 +1,48 @@
+name: Browser production content diagnostic
+
+on:
+  push:
+    branches:
+      - fix/trial-prepared-access-single-login-2026-09-21
+    paths:
+      - '.github/workflows/browser-prod-content-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch active browser worker content read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BROWSER_WORKER/content" \
+            -o /tmp/browser-worker-content.raw
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/browser-worker-content.raw')
+          data=p.read_bytes()
+          print(f'BROWSER_CONTENT_BYTES={len(data)}')
+          for needle in [b'This part of the portal could not be loaded', b'TRIAL_ACCESS_ENDED', b'Student Login', b'login-error']:
+              print(needle.decode('utf-8'), data.find(needle))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-prod-content-diagnostic
+          path: /tmp/browser-worker-content.raw
+          retention-days: 2
