@@ -80,6 +80,10 @@ assert.match(projected, /removeDeletedTrialProfile/);
 assert.match(projected, /env\.STUDENTS_KV\.delete\(key\)/);
 assert.match(projected, /TRIAL_PROFILE_DELETE_VERIFY_FAILED/);
 assert.match(projected, /x-fpt-trial-profile/);
+// The projected wrapper must never treat browser OPTIONS preflight as a state-changing
+// Trial mutation; otherwise it tries to publish without a Portal User ID and returns 500.
+assert.match(projected, /request\.method === 'POST' && projectedMutation\(url\.pathname\)/);
+assert.match(projected, /if \(!response \|\| !isProjectedMutation \|\| !response\.ok\) return response/);
 assert.match(outerWorker, /handleAdminTrialManager/);
 assert.match(outerWorker, /const trialAdminResponse = await handleAdminTrialManager\(request, env\)/);
 
