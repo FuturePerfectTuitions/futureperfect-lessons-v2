@@ -31,7 +31,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BROWSER_WORKER/content" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BROWSER_WORKER/content/v2" \
             -o /tmp/browser-worker-content.raw
           python - <<'PY'
           from pathlib import Path
