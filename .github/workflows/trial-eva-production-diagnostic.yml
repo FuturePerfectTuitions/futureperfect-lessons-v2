@@ -138,3 +138,5 @@ jobs:
           path: /tmp/trial-eva-production-diagnostic.json
           retention-days: 14
           if-no-files-found: ignore
+
+# Read-only production diagnostic rerun requested after live TrialEva portal still showed 0/0 on 2026-09-22.
