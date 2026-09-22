@@ -1,0 +1,214 @@
+name: Trial full L2 quiz Browser production deploy v2
+
+on:
+  push:
+    branches: [deploy/trial-full-l2-quiz-browser-2026-09-22]
+    paths: ['.github/workflows/trial-full-l2-quiz-browser-production-deploy-v2.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trial-full-l2-quiz-browser-production
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.129.0
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  FRONTEND_BASELINE_SHA: 63f37895727e41ada427c9644b41b5a026ed196b
+  FRONTEND_SHA: 7d522548ba21683d74841f6a901ef0a83ae240a3
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Capture live Browser rollback anchor and topology
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > /tmp/state.mjs <<'NODE'
+          import fs from 'node:fs';
+          const c=v=>String(v??'').trim(), account=c(process.env.CLOUDFLARE_ACCOUNT_ID), token=c(process.env.CLOUDFLARE_API_TOKEN), browser=c(process.env.BROWSER_WORKER), student=c(process.env.STUDENT_WORKER), host=c(process.env.PROD_HOST).toLowerCase(), base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`};
+          async function cf(path){const r=await fetch(`${base}${path}`,{headers});const t=await r.text();let j;try{j=JSON.parse(t)}catch{};if(!r.ok||j?.success!==true)throw new Error(`CF ${path} ${r.status}: ${t.slice(0,250)}`);return j;}
+          function deps(j){const r=j?.result;return Array.isArray(r?.deployments)?r.deployments:(Array.isArray(r)?r:[]);}
+          async function deployment(){const d=deps(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/deployments`))[0];if(!d)throw new Error('Browser deployment missing');return {deploymentId:c(d.id),versions:(d.versions||[]).map(v=>({id:c(v.version_id),percentage:Number(v.percentage||0)}))};}
+          async function topology(){const s=(await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(browser)}/settings`)).result||{},b=Array.isArray(s.bindings)?s.bindings:[];if(!b.some(x=>c(x.name)==='ASSETS'&&c(x.type)==='assets')||!b.some(x=>c(x.name)==='STAGING_API'&&c(x.type)==='service'&&c(x.service)===student))throw new Error(`Binding drift ${JSON.stringify(b)}`);const zones=(await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`)).result||[],z=zones.filter(x=>host===c(x.name).toLowerCase()||host.endsWith(`.${c(x.name).toLowerCase()}`)).sort((a,b)=>c(b.name).length-c(a.name).length)[0];if(!z)throw new Error('zone missing');const rs=(await cf(`/zones/${z.id}/workers/routes`)).result||[],r=rs.filter(x=>c(x.pattern).toLowerCase().includes(host));if(r.length!==1||c(r[0].pattern).toLowerCase()!==`${host}/*`||c(r[0].script)!==browser)throw new Error(`Route drift ${JSON.stringify(r)}`);return {bindings:b.map(x=>({name:x.name,type:x.type,service:x.service||null})),route:{pattern:r[0].pattern,script:r[0].script}};}
+          const mode=process.argv[2]||'capture', d=await deployment(), t=await topology();
+          if(mode==='capture'){const live=d.versions.filter(v=>v.percentage===100&&v.id);if(live.length!==1)throw new Error(`Expected one 100% Browser version ${JSON.stringify(d)}`);fs.appendFileSync(process.env.GITHUB_ENV,`OLD_BROWSER_VERSION=${live[0].id}\n`);fs.writeFileSync('/tmp/prestate.json',JSON.stringify({marker:'TRIAL_FULL_L2_V2_PRESTATE_PASS',...d,...t},null,2));}
+          if(mode==='final'){const id=c(process.env.CANDIDATE_BROWSER_VERSION);if(!id||!d.versions.some(v=>v.id===id&&v.percentage===100))throw new Error(`Candidate not 100% ${JSON.stringify(d)}`);fs.writeFileSync('/tmp/finalstate.json',JSON.stringify({marker:'TRIAL_FULL_L2_V2_FINAL_STATE_PASS',...d,...t},null,2));}
+          if(mode==='rollback'){const id=c(process.env.OLD_BROWSER_VERSION);if(!id||!d.versions.some(v=>v.id===id&&v.percentage===100))throw new Error(`Rollback failed ${JSON.stringify(d)}`);fs.writeFileSync('/tmp/rollbackstate.json',JSON.stringify({marker:'TRIAL_FULL_L2_V2_ROLLBACK_PASS',...d,...t},null,2));}
+          NODE
+          node /tmp/state.mjs capture
+          cat /tmp/prestate.json
+
+      - name: Checkout and build exact accepted Trial frontend
+        uses: actions/checkout@v4
+        with:
+          repository: FuturePerfectTuitions/futureperfect-lessons-test
+          ref: ${{ env.FRONTEND_SHA }}
+          path: frontend
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Trial UI semantics and build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_SHA"
+          git -C frontend merge-base --is-ancestor "$FRONTEND_BASELINE_SHA" "$FRONTEND_SHA"
+          grep -Fq 'data-subject="maths"' frontend/src/app.js
+          grep -Fq "if (subject === 'maths') void revealMathsPracticeCard();" frontend/src/app.js
+          grep -Fq "payload?.eligible !== true" frontend/src/app.js
+          grep -Fq '11+ Practice' frontend/src/app.js
+          grep -Fq 'Take a real exam style GL quiz' frontend/src/app.js
+          grep -Fq 'quiz.futureperfect.education' frontend/src/app.js
+          cd frontend
+          npm install --no-package-lock --no-audit --no-fund
+          npm run test:static
+          npm run build
+          cd "$GITHUB_WORKSPACE"
+          LOCAL_JS="$(find frontend/dist/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name '*protected*' | head -n1)"; test -n "$LOCAL_JS"
+          LOCAL_BUNDLE_SHA="$(sha256sum "$LOCAL_JS"|awk '{print $1}')"
+          echo "LOCAL_BUNDLE_SHA=$LOCAL_BUNDLE_SHA" >> "$GITHUB_ENV"
+          for m in '/api/v2/student/quiz/eligibility' '/api/v2/student/quiz/launch' '11+ Practice' 'quiz.futureperfect.education'; do grep -Fq "$m" "$LOCAL_JS"; done
+          jq -n --arg frontendSha "$FRONTEND_SHA" --arg bundleSha "$LOCAL_BUNDLE_SHA" '{marker:"TRIAL_FULL_L2_V2_BUILD_PASS",frontendSha:$frontendSha,bundleSha256:$bundleSha,eligibleTrialWithoutMathsViewSupported:true}' > /tmp/build.json
+
+      - name: Upload fresh no-traffic Browser candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}"
+          rm -rf rebuild/browser-staging/public && mkdir -p rebuild/browser-staging/public
+          cp -a frontend/dist/. rebuild/browser-staging/public/
+          cat > rebuild/browser-staging/wrangler.trial-full-l2-v2.toml <<TOML
+          name = "${BROWSER_WORKER}"
+          main = "src/index.js"
+          compatibility_date = "2026-08-20"
+          workers_dev = true
+          [[services]]
+          binding = "STAGING_API"
+          service = "${STUDENT_WORKER}"
+          [assets]
+          directory = "./public"
+          binding = "ASSETS"
+          run_worker_first = true
+          TOML
+          npx wrangler versions upload --config rebuild/browser-staging/wrangler.trial-full-l2-v2.toml --message "Trial full L2 quiz Browser v2 ${FRONTEND_SHA}" | tee /tmp/upload.log
+          CANDIDATE_BROWSER_VERSION="$(grep -oE 'Worker Version ID: [0-9a-f-]+' /tmp/upload.log | tail -n1 | awk '{print $4}')"
+          test -n "$CANDIDATE_BROWSER_VERSION"; test "$CANDIDATE_BROWSER_VERSION" != "$OLD_BROWSER_VERSION"
+          CANDIDATE_PREVIEW_ROOT="https://${CANDIDATE_BROWSER_VERSION%%-*}-${BROWSER_WORKER}.futureperfectlessons.workers.dev"
+          echo "CANDIDATE_BROWSER_VERSION=$CANDIDATE_BROWSER_VERSION" >> "$GITHUB_ENV"
+          echo "CANDIDATE_PREVIEW_ROOT=$CANDIDATE_PREVIEW_ROOT" >> "$GITHUB_ENV"
+          echo "Candidate $CANDIDATE_BROWSER_VERSION preview $CANDIDATE_PREVIEW_ROOT"
+
+      - name: Smoke candidate directly on immutable version preview
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          READY=0
+          for i in $(seq 1 30); do
+            ROOT="$(curl -sS -H 'Cache-Control: no-store' -o /tmp/candidate-index.html -w '%{http_code}' "${CANDIDATE_PREVIEW_ROOT}/?trialfullL2v2=${GITHUB_RUN_ID}-${i}" || true)"
+            ELIG="$(curl -sS -H "Origin: https://${PROD_HOST}" -D /tmp/candidate-elig.headers -o /tmp/candidate-elig.json -w '%{http_code}' "${CANDIDATE_PREVIEW_ROOT}/api/v2/student/quiz/eligibility" || true)"
+            if [ "$ROOT" = 200 ] && [ "$ELIG" = 401 ] && grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/candidate-elig.headers; then READY=1; break; fi
+            sleep 1
+          done
+          test "$READY" = 1
+          P="$(grep -oE 'src="[^"]+\.js"' /tmp/candidate-index.html|head -n1|sed -E 's/^src="//;s/"$//')"; test -n "$P"
+          case "$P" in http*) U="$P";; /*) U="${CANDIDATE_PREVIEW_ROOT}${P}";; *) U="${CANDIDATE_PREVIEW_ROOT}/${P}";; esac
+          curl -fsS -H 'Cache-Control: no-store' "${U}?trialfullL2v2=${GITHUB_RUN_ID}" -o /tmp/candidate-bundle.js
+          test "$(sha256sum /tmp/candidate-bundle.js|awk '{print $1}')" = "$LOCAL_BUNDLE_SHA"
+          ALLOWED="$(curl -sS -H "Origin: https://${PROD_HOST}" -H 'Content-Type: application/json' -X POST -o /tmp/candidate-launch.json -w '%{http_code}' "${CANDIDATE_PREVIEW_ROOT}/api/v2/student/quiz/launch" || true)"
+          HOSTILE="$(curl -sS -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -X POST -o /tmp/candidate-hostile.json -w '%{http_code}' "${CANDIDATE_PREVIEW_ROOT}/api/v2/student/quiz/launch" || true)"
+          test "$ALLOWED" = 401
+          test "$HOSTILE" = 403
+          echo TRIAL_FULL_L2_V2_CANDIDATE_SMOKE_PASS
+
+      - name: Promote candidate to production
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npx wrangler versions deploy "${CANDIDATE_BROWSER_VERSION}@100%" --config rebuild/browser-staging/wrangler.trial-full-l2-v2.toml -y --message "Trial full L2 quiz public Browser v2 ${FRONTEND_SHA}" | tee /tmp/promote.log
+          sleep 2
+          node /tmp/state.mjs final
+
+      - name: Verify exact public bytes, security and stability
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          MATCH=0
+          for i in $(seq 1 60); do
+            ROOT="$(curl -sS -H 'Cache-Control: no-store' -o /tmp/public-index.html -w '%{http_code}' "https://${PROD_HOST}/?trialfullL2v2=${GITHUB_RUN_ID}-public-${i}" || true)"
+            if [ "$ROOT" = 200 ]; then
+              P="$(grep -oE 'src="[^"]+\.js"' /tmp/public-index.html|head -n1|sed -E 's/^src="//;s/"$//' || true)"
+              if [ -n "$P" ]; then case "$P" in http*) U="$P";; /*) U="https://${PROD_HOST}${P}";; *) U="https://${PROD_HOST}/${P}";; esac; if curl -fsS -H 'Cache-Control: no-store' "${U}?trialfullL2v2=${GITHUB_RUN_ID}-${i}" -o /tmp/public-bundle.js; then GOT="$(sha256sum /tmp/public-bundle.js|awk '{print $1}')"; [ "$GOT" = "$LOCAL_BUNDLE_SHA" ] && MATCH=1 && break; fi; fi
+            fi
+            sleep 2
+          done
+          test "$MATCH" = 1
+          for m in '/api/v2/student/quiz/eligibility' '/api/v2/student/quiz/launch' '11+ Practice' 'quiz.futureperfect.education'; do grep -Fq "$m" /tmp/public-bundle.js; done
+          ELIG="$(curl -sS -H "Origin: https://${PROD_HOST}" -o /tmp/public-elig.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/eligibility" || true)"
+          LAUNCH="$(curl -sS -H "Origin: https://${PROD_HOST}" -H 'Content-Type: application/json' -X POST -o /tmp/public-launch.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/launch" || true)"
+          HOSTILE="$(curl -sS -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -X POST -o /tmp/public-hostile.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/launch" || true)"
+          test "$ELIG" = 401; test "$LAUNCH" = 401; test "$HOSTILE" = 403
+          node /tmp/state.mjs final
+          sleep 5
+          curl -fsS -H 'Cache-Control: no-store' "https://${PROD_HOST}/?trialfullL2v2=${GITHUB_RUN_ID}-stable" -o /tmp/stable-index.html
+          P="$(grep -oE 'src="[^"]+\.js"' /tmp/stable-index.html|head -n1|sed -E 's/^src="//;s/"$//')"; case "$P" in http*) U="$P";; /*) U="https://${PROD_HOST}${P}";; *) U="https://${PROD_HOST}/${P}";; esac
+          curl -fsS -H 'Cache-Control: no-store' "${U}?trialfullL2v2=${GITHUB_RUN_ID}-stable" -o /tmp/stable-bundle.js
+          test "$(sha256sum /tmp/stable-bundle.js|awk '{print $1}')" = "$LOCAL_BUNDLE_SHA"
+          node /tmp/state.mjs final
+          jq -n --arg frontendSha "$FRONTEND_SHA" --arg old "$OLD_BROWSER_VERSION" --arg candidate "$CANDIDATE_BROWSER_VERSION" --arg sha "$LOCAL_BUNDLE_SHA" '{marker:"TRIAL_FULL_L2_BROWSER_PRODUCTION_PASS",frontendSha:$frontendSha,rollbackAnchor:$old,browserVersion:$candidate,bundleSha256:$sha,versionPreviewSmoke:true,publicPropagationVerified:true,stableRecheck:true,security:{unauthenticatedEligibility:401,unauthenticatedLaunch:401,hostileOriginLaunch:403},realTrialLoginConsumed:false}' > /tmp/closeout.json
+          cat /tmp/closeout.json
+
+      - name: Emergency rollback exact prior Browser version
+        if: failure()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${OLD_BROWSER_VERSION:-}" ]; then
+            npm install --no-save --no-package-lock "wrangler@${WRANGLER_VERSION}" >/dev/null 2>&1 || true
+            npx wrangler versions deploy "${OLD_BROWSER_VERSION}@100%" --name "$BROWSER_WORKER" -y --message 'Trial full L2 quiz v2 emergency rollback' | tee /tmp/rollback.log
+            sleep 2
+            node /tmp/state.mjs rollback
+          fi
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trial-full-l2-quiz-browser-production-evidence-v2
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/prestate.json
+            /tmp/finalstate.json
+            /tmp/rollbackstate.json
+            /tmp/build.json
+            /tmp/upload.log
+            /tmp/promote.log
+            /tmp/rollback.log
+            /tmp/candidate-index.html
+            /tmp/candidate-bundle.js
+            /tmp/candidate-elig.headers
+            /tmp/candidate-elig.json
+            /tmp/candidate-launch.json
+            /tmp/candidate-hostile.json
+            /tmp/public-index.html
+            /tmp/public-bundle.js
+            /tmp/public-elig.json
+            /tmp/public-launch.json
+            /tmp/public-hostile.json
+            /tmp/stable-index.html
+            /tmp/stable-bundle.js
+            /tmp/closeout.json
