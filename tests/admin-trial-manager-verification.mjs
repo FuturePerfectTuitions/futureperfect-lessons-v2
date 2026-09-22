@@ -76,6 +76,10 @@ assert.doesNotMatch(source, /Csl1[^'"\n]*['"]/);
 
 assert.match(projected, /PATHS\.delete/);
 assert.match(projected, /publishTrialPreparedAccess/);
+assert.match(projected, /removeDeletedTrialProfile/);
+assert.match(projected, /env\.STUDENTS_KV\.delete\(key\)/);
+assert.match(projected, /TRIAL_PROFILE_DELETE_VERIFY_FAILED/);
+assert.match(projected, /x-fpt-trial-profile/);
 assert.match(outerWorker, /handleAdminTrialManager/);
 assert.match(outerWorker, /const trialAdminResponse = await handleAdminTrialManager\(request, env\)/);
 
