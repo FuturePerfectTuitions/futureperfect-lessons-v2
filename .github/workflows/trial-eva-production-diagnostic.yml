@@ -139,4 +139,4 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-# Read-only production diagnostic rerun requested after live TrialEva portal still showed 0/0 on 2026-09-22.
+# Read-only production diagnostic rerun after TrialEva prepared-access repair on 2026-09-22.
