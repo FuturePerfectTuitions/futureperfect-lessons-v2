@@ -1,0 +1,167 @@
+name: Trial prepared access reconcile only
+
+on:
+  push:
+    branches:
+      - fix/trial-prepared-access-single-login-2026-09-21
+    paths:
+      - '.github/workflows/trial-prepared-access-reconcile-only.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROD_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  PROD_LESSONS_KV_ID: 38997572bc8a4cd9a7f966015a580b09
+  PROD_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  TARGET_USER_NORM: trialeva
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify reconciliation source syntax
+        run: node --check scripts/reconcile-trial-prepared-access-live.mjs
+
+      - name: Capture TrialEva one-login consumption before repair
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const db=process.env.PROD_D1_ID;
+          const user=process.env.TARGET_USER_NORM;
+          const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${db}/query`,{
+            method:'POST',
+            headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
+            body:JSON.stringify({sql:'SELECT consumed_at FROM trial_login_consumptions WHERE portal_user_id_norm = ? LIMIT 1',params:[user]})
+          });
+          const body=await r.json();
+          if(!r.ok||body.success!==true) throw new Error(`D1 precheck failed: ${JSON.stringify(body.errors||[])}`);
+          const rows=body.result?.[0]?.results||[];
+          if(rows.length!==1 || !rows[0]?.consumed_at) throw new Error('TrialEva must have exactly one existing consumed_at row before reconciliation.');
+          fs.writeFileSync('/tmp/trialeva-consumption-before.txt',String(rows[0].consumed_at));
+          console.log('TRIALEVA_CONSUMPTION_PRECHECK_PASS');
+          NODE
+
+      - name: Reconcile existing Trial prepared access only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/reconcile-trial-prepared-access-live.mjs
+          jq -e '.marker == "TRIAL_PREPARED_ACCESS_RECONCILIATION_PASS" and .preservedConsumption == true' /tmp/trial-prepared-access-reconciliation.json >/dev/null
+          echo 'TRIAL_PREPARED_ACCESS_RECONCILIATION_REPORT_PASS'
+
+      - name: Verify TrialEva prepared access and one-login preservation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const studentsKv=process.env.PROD_STUDENTS_KV_ID;
+          const readKv=process.env.PROD_READ_MODELS_KV_ID;
+          const db=process.env.PROD_D1_ID;
+          const user=process.env.TARGET_USER_NORM;
+          const expected=['maths-level1','maths-level2','english-year4-11plus'];
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}`;
+          const headers={Authorization:`Bearer ${token}`};
+
+          async function kvRaw(ns,key){
+            const r=await fetch(`${base}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV ${ns} ${key} ${r.status}`);
+            return await r.text();
+          }
+          async function d1(sql,params=[]){
+            const r=await fetch(`${base}/d1/database/${db}/query`,{
+              method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({sql,params})
+            });
+            const body=await r.json();
+            if(!r.ok||body.success!==true) throw new Error(`D1 ${r.status}: ${JSON.stringify(body.errors||[])}`);
+            return body.result?.[0]?.results||[];
+          }
+          function sameSet(a,b){
+            return a.length===b.length && [...a].sort().every((value,index)=>value===[...b].sort()[index]);
+          }
+
+          const profileRaw=await kvRaw(studentsKv,`user:${user}`);
+          if(!profileRaw) throw new Error('TrialEva canonical profile missing after reconciliation.');
+          const profile=JSON.parse(profileRaw);
+          const canonicalViews=Array.isArray(profile.trialViews)?profile.trialViews.map(String):[];
+          if(!sameSet(canonicalViews,expected)) throw new Error(`Canonical TrialEva views changed or are unexpected: ${JSON.stringify(canonicalViews)}`);
+
+          const salt=(await kvRaw(readKv,'meta:scope-salt')||'').trim();
+          if(!/^[0-9a-f]{64}$/i.test(salt)) throw new Error('Read-model scope salt missing/invalid.');
+          const digest=crypto.createHmac('sha256',salt).update(`rebuild-shadow-scope-v1:${user}`).digest('hex').slice(0,40);
+          const scope=`access:u-${digest}`;
+          const encoded=encodeURIComponent(scope).replace(/%/g,'_');
+          const pointerKey=`rm:v1:scope:${encoded}:current`;
+          const pointerRaw=await kvRaw(readKv,pointerKey);
+          if(!pointerRaw) throw new Error('TrialEva prepared-access pointer missing after reconciliation.');
+          const pointer=JSON.parse(pointerRaw);
+          const version=String(pointer?.current?.version||'');
+          if(!version) throw new Error('TrialEva prepared-access version missing after reconciliation.');
+          const versionKey=`rm:v1:scope:${encoded}:version:${encodeURIComponent(version).replace(/%/g,'_')}`;
+          const envelopeRaw=await kvRaw(readKv,versionKey);
+          if(!envelopeRaw) throw new Error('TrialEva prepared-access envelope missing after reconciliation.');
+          const envelope=JSON.parse(envelopeRaw);
+          const snapshot=envelope?.payload?.snapshot;
+          if(!snapshot) throw new Error('TrialEva prepared-access snapshot missing after reconciliation.');
+
+          const preparedViews=Array.isArray(snapshot.account?.trialViews)?snapshot.account.trialViews.map(String):[];
+          if(!sameSet(preparedViews,expected)) throw new Error(`Prepared TrialEva trialViews mismatch: ${JSON.stringify(preparedViews)}`);
+          const viewRows=Array.isArray(snapshot.views)?snapshot.views:[];
+          const viewIds=viewRows.map(v=>String(v?.viewId||''));
+          if(!expected.every(id=>viewIds.includes(id))) throw new Error(`Prepared TrialEva views missing expected selections: ${JSON.stringify(viewIds)}`);
+          for(const id of expected){
+            const row=viewRows.find(v=>String(v?.viewId||'')===id);
+            if(Number(row?.openLessonCount||0)<=0) throw new Error(`Prepared TrialEva view ${id} has no open lessons.`);
+          }
+          const lessonAccessCount=Object.keys(snapshot.lessonAccess||{}).length;
+          if(lessonAccessCount<=0) throw new Error('Prepared TrialEva lessonAccess is empty after reconciliation.');
+
+          const consumption=await d1('SELECT consumed_at FROM trial_login_consumptions WHERE portal_user_id_norm = ? LIMIT 1',[user]);
+          if(consumption.length!==1 || !consumption[0]?.consumed_at) throw new Error('TrialEva consumption row missing after reconciliation.');
+          const before=fs.readFileSync('/tmp/trialeva-consumption-before.txt','utf8').trim();
+          const after=String(consumption[0].consumed_at).trim();
+          if(before!==after) throw new Error(`TrialEva consumed_at changed during reconciliation: before=${before} after=${after}`);
+
+          const result={
+            marker:'TRIALEVA_PREPARED_ACCESS_POST_RECONCILE_PASS',
+            canonicalViews,
+            preparedViews,
+            preparedViewIds:viewIds,
+            lessonAccessCount,
+            consumedAtPreserved:true,
+            version
+          };
+          fs.writeFileSync('/tmp/trialeva-post-reconcile.json',JSON.stringify(result,null,2));
+          console.log(JSON.stringify(result,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trial-prepared-access-reconcile-only
+          path: |
+            /tmp/trial-prepared-access-reconciliation.json
+            /tmp/trialeva-post-reconcile.json
+          retention-days: 14
+          if-no-files-found: ignore
