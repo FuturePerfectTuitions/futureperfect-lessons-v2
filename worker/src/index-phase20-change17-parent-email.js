@@ -1,6 +1,7 @@
 import fastNavigationWorker from './index-phase20-change17.js';
 import { handleAdminLessonReleaseImport } from './admin-lesson-release-import-manual-email-reconciled.js';
 import { handleAdminTrialManager } from './admin-trial-manager-projected.js';
+import { handleAdminStudentManager } from './admin-student-manager.js';
 import { FPT_EMAIL_SIGNATURE_PNG_BASE64 } from './parent-email-signature.js';
 import { repairLiveStudentCatalogueResponse } from './live-student-catalogue-overlay.js';
 
@@ -51,16 +52,18 @@ function envWithPermanentParentEmailBcc(env) {
 }
 
 // Parent transactional email remains the outermost production layer. Authenticated
-// Admin Trial operations are handled here before lesson-release import processing.
-// Trial mutations synchronously publish the prepared Student-Portal access model,
-// so a successful Admin response means the selected Trial content is immediately
-// available to the rebuilt Student runtime.
+// Admin account operations are handled here before lesson-release import processing.
+// Student provisioning publishes the prepared Student-Portal access model before a
+// successful response; Trial mutations use the same prepared-access boundary.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === EMAIL_SIGNATURE_PATH && (request.method === 'GET' || request.method === 'HEAD')) {
       return emailSignatureResponse(request);
     }
+
+    const studentAdminResponse = await handleAdminStudentManager(request, env);
+    if (studentAdminResponse) return studentAdminResponse;
 
     const trialAdminResponse = await handleAdminTrialManager(request, env);
     if (trialAdminResponse) return trialAdminResponse;
