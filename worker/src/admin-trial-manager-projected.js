@@ -40,9 +40,13 @@ async function removeDeletedTrialProfile(env, portalUserId) {
 export async function handleAdminTrialManager(request, env) {
   const url = new URL(request.url);
   if (!Object.values(PATHS).includes(url.pathname)) return null;
-  const body = projectedMutation(url.pathname) ? await bodyFromClone(request) : null;
+
+  // Only successful POST mutations need prepared-access publication. OPTIONS is
+  // the browser CORS preflight and must pass straight through unchanged.
+  const isProjectedMutation = request.method === 'POST' && projectedMutation(url.pathname);
+  const body = isProjectedMutation ? await bodyFromClone(request) : null;
   const response = await handleBaseTrialManager(request, env);
-  if (!response || !projectedMutation(url.pathname) || !response.ok) return response;
+  if (!response || !isProjectedMutation || !response.ok) return response;
 
   let responseBody = null;
   try { responseBody = await response.clone().json(); } catch {}
