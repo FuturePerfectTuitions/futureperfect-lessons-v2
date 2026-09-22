@@ -10,7 +10,11 @@ async function bodyFromClone(request) {
 }
 
 function projectedMutation(pathname) {
-  return pathname === PATHS.create || pathname === PATHS.rearm || pathname === PATHS.disable || pathname === PATHS.resetPasswords;
+  return pathname === PATHS.create ||
+    pathname === PATHS.rearm ||
+    pathname === PATHS.disable ||
+    pathname === PATHS.delete ||
+    pathname === PATHS.resetPasswords;
 }
 
 function errorResponse(request, env, error) {
@@ -38,9 +42,9 @@ export async function handleAdminTrialManager(request, env) {
   const portalUserId = clean(responseBody?.portalUserId || body?.portalUserId);
   if (!portalUserId) return errorResponse(request, env, new Error('TRIAL_PREPARED_PORTAL_USER_REQUIRED'));
 
-  // A disabled trial must not retain a usable prepared model.  The Student
-  // runtime also checks account status, but publishing the withdrawn canonical
-  // state closes the content surface immediately and deterministically.
+  // Disabled and deleted Trials retain only a withdrawn prepared model. The
+  // Student runtime also checks account status; this synchronous publication
+  // closes the content surface before Admin reports the mutation as complete.
   try {
     const result = await publishTrialPreparedAccess(env, norm(portalUserId));
     const headers = new Headers(response.headers);
