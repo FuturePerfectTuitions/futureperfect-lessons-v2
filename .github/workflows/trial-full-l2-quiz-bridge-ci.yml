@@ -1,0 +1,27 @@
+name: Trial full L2 Quiz Bridge CI
+on:
+  push:
+    branches: [fix/trial-11plus-full-l2-quiz-bridge-2026-09-22]
+    paths:
+      - 'worker/src/index-step10-quiz-bridge-trial-demo.js'
+      - 'tests/trial-full-l2-quiz-bridge.mjs'
+      - '.github/workflows/trial-full-l2-quiz-bridge-ci.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Trial Quiz bridge overlay and existing bridge validation
+        run: |
+          set -Eeuo pipefail
+          node --check worker/src/index-step10-quiz-bridge-trial-demo.js
+          node tests/trial-full-l2-quiz-bridge.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/admin-trial-manager-verification.mjs
+          echo TRIAL_FULL_L2_BRIDGE_CI_PASS
