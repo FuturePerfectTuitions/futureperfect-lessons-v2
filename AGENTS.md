@@ -6,14 +6,15 @@ Before changing or diagnosing **any** FPT Portal V2, Admin Console, Trial, stude
 
 1. `gch/portal-v2-current/GCH_STATE.json`
 2. `gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json`
+3. `gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json`
 
-The base GCH is the machine-oriented continuation authority reconciling the historical v4.2 Master with current repository topology and the 22 September 2026 Admin/Trial work. The 23 September Replace Resource override is higher authority only for the scope it explicitly supersedes; all non-conflicting base GCH content remains binding. Together, their business invariants, preservation ledger, known open defects, failure signatures, change-impact rules, stop conditions and verification matrix are binding unless the owner explicitly changes them.
+The base GCH is the machine-oriented continuation authority reconciling the historical v4.2 Master with current repository topology and the 22 September 2026 Admin/Trial work. The 23 September Replace Resource override is higher authority only for the scope it explicitly supersedes; all non-conflicting base GCH content remains binding. The full-site workflow file is the current end-to-end execution map for the entire Portal/Admin website and ties each major workflow to its canonical state, prepared projection, public API/browser verification and preservation obligations. Together, these files form the current Portal V2 GCH authority set unless the owner explicitly changes them.
 
 Do not start from an old Master ZIP, old Phase file, branch age, screenshot similarity, Admin UI state, D1/KV state or repository `main` alone. Freshly prove the live route/deployment/source lineage and trace the complete source/write -> canonical state -> prepared projection -> public API -> browser chain before mutation. If behaviour/topology/data authority/routes/workflows/open-defect status change, update the applicable GCH authority file in the same coherent change.
 
 In particular, do not claim the Trial one-successful-login rule is fully enforced until the GCH open gate is actually closed and verified. Normal-student multi-device behaviour must not be changed merely to repair Trial semantics.
 
-For **Replace Resource**, do not regress to source-only success. The current required contract is recorded in `GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json`: success requires both the canonical resource and the current prepared lesson projection to publish/read back the replacement; projection failure must fail closed rather than show a false Admin success.
+For **Replace Resource**, do not regress to source-only success. The current required contract is recorded in `GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json` and incorporated into `WEBSITE_WORKFLOW_2026-09-23.json`: success requires both the canonical resource and the current prepared lesson projection to publish/read back the replacement; projection failure must fail closed rather than show a false Admin success. The Y5E2 incident was owner-browser-verified as working on 2026-09-23 and is closed evidence for this invariant.
 
 ## Important repository boundary
 
