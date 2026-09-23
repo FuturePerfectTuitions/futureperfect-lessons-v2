@@ -1,0 +1,115 @@
+{
+  "schema": "fpt.portal.gch.override.v1",
+  "documentType": "MACHINE_ORIENTED_CONTINUATION_AUTHORITY_OVERRIDE",
+  "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
+  "effectiveDate": "2026-09-23",
+  "scope": "ADMIN_LEGACY.ReplaceResource",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "precedence": "This file supersedes only conflicting Replace Resource limitation/open-defect statements in the base GCH. All non-conflicting base GCH invariants remain binding.",
+  "reason": "The 2026-09-23 Y5E2 incident proved that the pre-fix Admin Replace Resource path updated canonical LESSONS_KV/R2 state but could leave the student-facing prepared lesson in READ_MODELS_KV pointing at the old object key.",
+  "rootCause": {
+    "classification": "SOURCE_TO_PREPARED_PROJECTION_CONSISTENCY_DEFECT",
+    "preFixBehaviour": "Admin Replace Resource uploaded and hash-verified the new R2 object and updated the selected canonical LESSONS_KV resource, but successful completion did not require the current prepared lesson projection to be republished and verified.",
+    "failureSignature": "Canonical lesson contains the new replacement r2Key while the current prepared lesson scope lesson:<lessonId> still contains the previous resource objectKey.",
+    "importantRule": "Admin source success is not student-visible completion. Replace Resource must complete the canonical -> prepared projection chain before reporting success."
+  },
+  "permanentImplementation": {
+    "repo": "FuturePerfectTuitions/futureperfect-lessons-v2",
+    "baseHandler": "worker/src/admin-resource-replace.js",
+    "consistencyWrapper": "worker/src/admin-resource-replace-consistency.js",
+    "productionEntrypoint": "worker/src/index-admin-tools.js",
+    "marker": "replace-resource-consistency-v1",
+    "productionMergeCommit": "169b6f29d71fa192acf2c38bb8931b8c383755ae",
+    "finalGuardCommit": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
+    "requiredSuccessChain": [
+      "authenticate Admin operation",
+      "upload a unique replacement PDF to MATERIALS_R2",
+      "read back the uploaded bytes and verify SHA-256",
+      "guard and update only the selected canonical LESSONS_KV resource r2Key",
+      "read back canonical lesson and verify exactly the intended new object key",
+      "resolve the current prepared lesson scope lesson:<lessonId> from READ_MODELS_KV",
+      "replace exactly one matching prepared resource objectKey",
+      "publish a new prepared read-model version atomically with previous-version rollback pointer",
+      "read back the current prepared scope and verify old key count is zero and new key count is one",
+      "return success only after canonical and prepared verification both pass"
+    ],
+    "failureSemantics": {
+      "preparedPublicationFailure": "Fail the Admin operation; do not report success.",
+      "canonicalRollback": "Restore the canonical lesson resource to the previous object key when prepared projection publication fails and canonical rollback can be verified.",
+      "preparedPointerRollback": "Restore the previous prepared pointer when a partially published prepared change must be unwound.",
+      "newR2Cleanup": "Delete the newly uploaded replacement object only when rollback gates prove it is safe to do so.",
+      "failureMarker": "RESOURCE_REPLACE_PROJECTION_FAILED"
+    },
+    "preservationRules": [
+      "Do not change student entitlements or release state during resource replacement.",
+      "Retain the previous R2 object on successful replacement.",
+      "Do not weaken protected Answer Pack controls.",
+      "Do not change normal-student or Trial session semantics.",
+      "Do not use resource replacement as a mechanism for lesson release or access repair."
+    ]
+  },
+  "deploymentGuard": {
+    "workflow": ".github/workflows/admin-superuser-production-deploy.yml",
+    "permanentRequirements": [
+      "Changes to worker/src/admin-resource-replace-consistency.js trigger the production Admin deploy workflow.",
+      "The wrapper receives node --check syntax validation before deployment.",
+      "Current source wiring must import ./admin-resource-replace-consistency.js from worker/src/index-admin-tools.js.",
+      "After deployment, the live Worker package must contain replace-resource-consistency-v1 and RESOURCE_REPLACE_PROJECTION_FAILED or the workflow fails."
+    ],
+    "staticCiWorkflow": ".github/workflows/admin-tools-replace-resource-static-verification.yml",
+    "staticCiRequirements": [
+      "The consistency wrapper is a watched path for push and pull_request.",
+      "The wrapper is syntax checked.",
+      "CI verifies the Admin entrypoint imports the consistency wrapper and verifies the live-marker/failure-marker strings remain present."
+    ]
+  },
+  "incidentCloseout": {
+    "lessonId": "Y5E2",
+    "oldPreparedObjectKey": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf",
+    "newCanonicalAndPreparedObjectKey": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2__replacement_20260923T095852Z_fxpjpy.pdf",
+    "replacementPdfSha256RecordedFromValidatedReplacement": "969da13f1c157e513629abb81ce0097d28c493d147bf43cfda13d23e29984389",
+    "repairVerification": {
+      "canonicalNewKeyCount": 1,
+      "canonicalOldKeyCount": 0,
+      "preparedNewKeyCount": 1,
+      "preparedOldKeyCount": 0,
+      "canonicalSourcesMutatedByRepair": false,
+      "repairWriteTarget": "READ_MODELS_KV_ONLY",
+      "oldR2ObjectRetained": true
+    },
+    "repairRun": {
+      "workflowRunId": 35854303803,
+      "workflowHeadSha": "5c90260d0d9a1bf18ee209c09203a1a65f125b15",
+      "result": "SUCCESS",
+      "evidenceArtifactName": "y5e2-resource-reconciliation-evidence",
+      "evidenceArtifactId": 10746946804
+    },
+    "note": "The final repair verification was idempotent: by the guarded run, the prepared scope already contained the new key and no old key; the run independently read back and proved the correct state."
+  },
+  "finalProductionVerification": {
+    "workflow": ".github/workflows/admin-superuser-production-deploy.yml",
+    "runId": 35854434444,
+    "headSha": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
+    "result": "SUCCESS",
+    "verified": [
+      "production source syntax",
+      "production Admin wiring and regression suite",
+      "Worker deployment with bindings/secrets preserved",
+      "live Replace Resource consistency implementation marker",
+      "live Trial runtime marker",
+      "live Admin routes remain unauthorised without an Admin session",
+      "live protected-view stability wrapper"
+    ]
+  },
+  "supersededBaseStatements": [
+    "adminWorkflows.replaceResource.currentGeneralLimitation",
+    "Any open defect asserting that successful Replace Resource cannot automatically publish and verify the prepared lesson projection"
+  ],
+  "currentRequiredBehaviour": "A future Admin Console Replace Resource operation is successful only when the intended canonical resource and the current student-facing prepared lesson both point to the verified replacement object. If the prepared projection cannot be published and read back correctly, the operation must fail rather than present a false success state.",
+  "futureVerificationMatrix": [
+    "For any Replace Resource code change, run static CI and production deploy guard.",
+    "For an actual replacement, verify the returned operation succeeded only after the wrapper completed prepared publication.",
+    "When incident-driven, verify representative live /api/v2 resource delivery/browser behaviour before closing the incident if credentials/test persona are available.",
+    "Never infer student-visible success solely from R2 presence, LESSONS_KV state, or the Admin Console success message."
+  ]
+}
