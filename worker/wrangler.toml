@@ -1,5 +1,5 @@
 name = "fpt-portal-v2-worker"
-main = "src/index-admin-tools.js"
+main = "src/index-step10-quiz-bridge.js"
 compatibility_date = "2026-08-20"
 keep_vars = true
 
@@ -21,6 +21,12 @@ binding = "READ_MODELS_KV"
 id = "77b35165c8694087bc1b0515c35a7e89"
 
 # Canonical Portal V2 production entrypoint.
+# The Step 10 quiz bridge is the outer composition wrapper. It owns only the
+# path-scoped 11+ Practice eligibility/launch/redeem compatibility routes and
+# delegates every other request unchanged to Admin Tools. Keeping this wrapper
+# canonical prevents a later Admin deploy from accidentally removing the active
+# quiz redemption route.
+#
 # Admin Tools wraps Phase 24 only to add authenticated operational routes such as
 # Replace Resource. Every non-admin-resource request is delegated unchanged to
 # Phase 24. Production student/lesson KV, D1, R2 bindings and secrets remain
