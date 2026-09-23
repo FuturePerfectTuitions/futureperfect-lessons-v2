@@ -39,7 +39,7 @@ jobs:
           jq -e '.success == true' /tmp/settings.json >/dev/null
           LESSONS_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
           READ_MODELS_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV") | .namespace_id' /tmp/settings.json)"
-          BUCKET="$(jq -r '.result.bindings[] | select(.name=="PDFS_BUCKET") | .bucket_name' /tmp/settings.json)"
+          BUCKET="$(jq -r '.result.bindings[] | select(.name=="MATERIALS_R2") | .bucket_name' /tmp/settings.json)"
           test -n "$LESSONS_ID"; test "$LESSONS_ID" != "null"
           test -n "$READ_MODELS_ID"; test "$READ_MODELS_ID" != "null"
           test -n "$BUCKET"; test "$BUCKET" != "null"
@@ -87,7 +87,7 @@ jobs:
             --slurpfile pointer /tmp/pointer.json \
             --slurpfile envelope /tmp/envelope.json \
             --slurpfile settings /tmp/settings.json \
-            '{observedAt:$observedAt,mode:"READ_ONLY",worker:$worker,deployedPackageSha256:$packageSha,bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,pdfsBucket:$bucket},bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),targetLesson:$lesson,canonicalLesson:$canonical[0],preparedLessonKeyList:($keys[0].result // []),preparedLessonPointer:$pointer[0],preparedLessonEnvelope:$envelope[0]}' \
+            '{observedAt:$observedAt,mode:"READ_ONLY",worker:$worker,deployedPackageSha256:$packageSha,bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,materialsR2:$bucket},bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),targetLesson:$lesson,canonicalLesson:$canonical[0],preparedLessonKeyList:($keys[0].result // []),preparedLessonPointer:$pointer[0],preparedLessonEnvelope:$envelope[0]}' \
             > gch/evidence/replace-resource-live-readonly-2026-09-23.json
 
       - name: Commit sanitized evidence
