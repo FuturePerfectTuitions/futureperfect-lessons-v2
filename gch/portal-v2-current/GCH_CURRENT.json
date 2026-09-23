@@ -6,7 +6,7 @@
   "authorityVersion": "5.3-replace-resource-preflight",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout, shared-Worker quiz-bridge composition repair, and the newly diagnosed Replace Resource CORS-preflight transport defect.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout, shared-Worker quiz-bridge composition repair, and the Replace Resource CORS-preflight production repair.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -22,11 +22,11 @@
     },
     "replaceResourceOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
-      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus the 2026-09-23 CORS-preflight defect and repair gate"
+      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus the 2026-09-23 CORS-preflight defect, production repair evidence and remaining owner-retry closure gate"
     },
     "quizBridgeCompositionOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
-      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition, quiz redeem-route preservation incident, guarded repair and owner-verified closeout state"
+      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition, quiz redeem-route preservation incident/repair and owner-verified closeout state"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
@@ -47,7 +47,7 @@
   "latestOpenRepair": {
     "name": "Replace Resource CORS preflight passthrough",
     "date": "2026-09-23",
-    "status": "FIX_IMPLEMENTED_PENDING_PRODUCTION_DEPLOY_AND_OWNER_RETRY",
+    "status": "PRODUCTION_FIX_PASS_PENDING_OWNER_RETRY_AND_STUDENT_RESOURCE_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
     "incidentLesson": "Y6M1.4",
     "displayLessonCode": "L3T2M24",
@@ -56,13 +56,20 @@
     "productionVersionDiagnosed": "a1d50246-d014-486f-aa32-57956c816640",
     "rootCause": "The Replace Resource consistency wrapper treated OPTIONS preflight as a successful replacement response, then rejected it for missing lessonId/oldR2Key/newR2Key and returned HTTP 500, so the browser never sent the replacement POST.",
     "stateSafety": "Read-only diagnostics proved canonical and prepared homework pointers remained on the original L3T2M24 object key; the failed browser attempt did not complete a replacement mutation.",
-    "fix": "Consistency processing is now gated to POST only; OPTIONS/non-POST requests pass through to the base handler. Dedicated regression coverage and a permanent preflight marker were added.",
+    "fix": "Consistency processing is gated to POST only. OPTIONS preserves the base handler's HTTP 200/body/CORS semantics and carries a runtime-observable preflight guard marker header.",
+    "productionRepair": {
+      "mergeCommit": "391aa015c2cbeda8649315e72726707f259b6a2a",
+      "workflowRun": 35889526505,
+      "rollbackAnchor": "a1d50246-d014-486f-aa32-57956c816640",
+      "deployedVersion": "f62a9638-b2a5-40c7-ac14-dac2d6312c23",
+      "result": "PASS",
+      "livePreflight": "HTTP 200 with expected CORS and {ok:true}; convergence observed after Cloudflare propagation",
+      "sharedWorkerRegressionGate": "PASS",
+      "rollbackInvoked": false
+    },
     "closureRequires": [
-      "static CI PASS",
-      "guarded production deploy PASS",
-      "live GitHub Pages-origin OPTIONS preflight HTTP 200 with CORS",
       "owner retries L3T2M24 replacement successfully",
-      "student-facing replacement is verified before final closeout"
+      "student-facing replacement is verified to resolve to the intended replacement before final closeout"
     ]
   },
   "latestClosedRepair": {

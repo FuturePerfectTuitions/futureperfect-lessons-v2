@@ -104,7 +104,7 @@
     "note": "The final repair verification was idempotent: by the guarded run, the prepared scope already contained the new key and no old key; the run independently read back and proved the correct state. The owner subsequently verified the student-facing result and closed the incident."
   },
   "preflightIncident20260923": {
-    "status": "MARKER_LIVENESS_HOTFIX_PREPARED_PENDING_REDEPLOY_AND_OWNER_RETRY",
+    "status": "PRODUCTION_FIX_PASS_PENDING_OWNER_RETRY_AND_STUDENT_RESOURCE_VERIFICATION",
     "displayLessonCode": "L3T2M24",
     "canonicalLessonId": "Y6M1.4",
     "title": "Linear Sequences",
@@ -145,28 +145,52 @@
     },
     "markerLivenessHotfix": {
       "branch": "fix/replace-resource-preflight-marker-live-2026-09-23",
+      "mergeCommit": "391aa015c2cbeda8649315e72726707f259b6a2a",
       "strategy": "Reference the preflight guard marker in the actual OPTIONS response as x-fpt-replace-resource-preflight-guard while preserving the base response status, body and CORS semantics.",
-      "testRequirement": "The dedicated preflight regression test must assert the diagnostic header equals replace-resource-preflight-pass-v1."
+      "testRequirement": "The dedicated preflight regression test asserts the diagnostic header equals replace-resource-preflight-pass-v1."
+    },
+    "successfulProductionRepair": {
+      "workflowRun": 35889526505,
+      "sourceHeadSha": "391aa015c2cbeda8649315e72726707f259b6a2a",
+      "rollbackAnchor": "a1d50246-d014-486f-aa32-57956c816640",
+      "deployedVersion": "f62a9638-b2a5-40c7-ac14-dac2d6312c23",
+      "result": "PASS",
+      "sourceSyntaxAndRegressionTests": "PASS",
+      "bindingsPreserved": "PASS",
+      "sharedWorkerCompositionMarkers": "PASS",
+      "quizBridgeRedeemProtected": "PASS_HTTP_401_UNAUTHORIZED",
+      "replaceConsistencyMarkers": "PASS",
+      "livePreflight": {
+        "origin": "https://futureperfecttuitions.github.io",
+        "attempt1": "HTTP_500_OLD_VERSION_DURING_PROPAGATION",
+        "attempt2": "HTTP_500_OLD_VERSION_DURING_PROPAGATION",
+        "attempt3": "HTTP_200_OK_TRUE_WITH_EXPECTED_CORS",
+        "finalResult": "PASS"
+      },
+      "trialRuntimeMarker": "PASS",
+      "adminRoutesProtected": "PASS_HTTP_401_UNAUTHORISED",
+      "protectedViewRegression": "PASS_HTTP_410_ANSWER_VIEW_INVALID",
+      "rollbackInvoked": false,
+      "meaning": "The production Worker now contains the POST-only Replace Resource consistency path and a successful cross-origin preflight contract. All shared Worker preservation checks passed."
     },
     "closureGate": [
-      "static CI PASS including the dedicated OPTIONS regression test and diagnostic header assertion",
-      "guarded shared Worker production deployment PASS with rollback anchor",
-      "live OPTIONS preflight from https://futureperfecttuitions.github.io returns HTTP 200 with CORS allow-origin/allow-headers/allow-methods",
-      "deployed Worker contains replace-resource-preflight-pass-v1",
       "owner retries L3T2M24 replacement and confirms the Admin operation succeeds",
       "student-facing resource is verified to resolve to the intended replacement before final incident closeout"
     ]
   },
   "finalProductionVerification": {
     "workflow": ".github/workflows/admin-superuser-production-deploy.yml",
-    "runId": 35854434444,
-    "headSha": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
-    "result": "SUCCESS",
+    "runId": 35889526505,
+    "headSha": "391aa015c2cbeda8649315e72726707f259b6a2a",
+    "deployedVersion": "f62a9638-b2a5-40c7-ac14-dac2d6312c23",
+    "result": "SUCCESS_PENDING_OWNER_CONTENT_RETRY",
     "verified": [
       "production source syntax",
-      "production Admin wiring and regression suite",
+      "production Admin/quiz-bridge/shared-worker regression suite",
       "Worker deployment with bindings/secrets preserved",
-      "live Replace Resource consistency implementation marker",
+      "live shared-worker composition markers",
+      "live Replace Resource consistency and preflight markers",
+      "live GitHub Pages-origin Replace Resource OPTIONS preflight converged to HTTP 200 with expected CORS and {ok:true}",
       "live Trial runtime marker",
       "live Admin routes remain unauthorised without an Admin session",
       "live protected-view stability wrapper"
