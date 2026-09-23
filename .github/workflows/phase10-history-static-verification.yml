@@ -7,6 +7,7 @@ on:
       - phase10.html
       - assets/phase10-history.js
       - worker/src/index-phase10-history.js
+      - worker/src/index-step10-quiz-bridge.js
       - worker/src/index-admin-tools.js
       - worker/src/index-phase24-trial-vr.js
       - worker/wrangler.toml
@@ -38,7 +39,13 @@ jobs:
           node --check tests/phase10-history-browser-verification.mjs
           bash -n tests/phase10-history-api-verification.sh
           grep -Fq 'assets/phase10-history.js' phase10.html
-          if grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
+          if grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml; then
+            node --check worker/src/index-step10-quiz-bridge.js
+            node --check worker/src/index-admin-tools.js
+            node --check worker/src/index-phase24-trial-vr.js
+            grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+            grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          elif grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
             node --check worker/src/index-admin-tools.js
             node --check worker/src/index-phase24-trial-vr.js
             grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
