@@ -58,16 +58,23 @@ assert.ok(!phase10.includes('assets/phase11-resources.js'));
 assert.ok(!phase10.includes('assets/phase11-other.js'));
 assert.ok(!phase10.includes('assets/phase11-protected-bridge.js'));
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
+const usesQuizBridge = wrangler.includes('main = "src/index-step10-quiz-bridge.js"');
 const usesAdminTools = wrangler.includes('main = "src/index-admin-tools.js"');
 assert.ok(
-  usesAdminTools ||
+  usesQuizBridge ||
+    usesAdminTools ||
     wrangler.includes('main = "src/index-phase10-history.js"') ||
     wrangler.includes('main = "src/index-phase12.js"') ||
     wrangler.includes('main = "src/index-phase13.js"') ||
     wrangler.includes('main = "src/index-phase17.js"'),
-  'catalogue lock verification must run against the current Admin Tools wrapper or an approved earlier Phase 10/12/13/17 entrypoint'
+  'catalogue lock verification must run against the current Quiz Bridge composition, the Admin Tools wrapper, or an approved earlier Phase 10/12/13/17 entrypoint'
 );
-if (usesAdminTools) {
+if (usesQuizBridge) {
+  const quizBridge = fs.readFileSync('worker/src/index-step10-quiz-bridge.js', 'utf8');
+  const adminTools = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
+  assert.ok(quizBridge.includes("import currentWorker from './index-admin-tools.js';"), 'Quiz Bridge must preserve the Admin Tools wrapper beneath the canonical production entrypoint.');
+  assert.ok(adminTools.includes("import currentWorker from './index-phase24-trial-vr.js';"), 'Admin Tools wrapper must preserve the current Phase 24 production chain.');
+} else if (usesAdminTools) {
   const adminTools = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
   assert.ok(adminTools.includes("import currentWorker from './index-phase24-trial-vr.js';"), 'Admin Tools wrapper must preserve the current Phase 24 production chain.');
 } else if (wrangler.includes('main = "src/index-phase17.js"')) {
