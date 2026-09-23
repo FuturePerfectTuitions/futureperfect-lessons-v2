@@ -6,6 +6,7 @@ on:
       - 'admin-import.html'
       - 'assets/admin-replace-resource.js'
       - 'worker/src/admin-resource-replace.js'
+      - 'worker/src/admin-resource-replace-consistency.js'
       - 'worker/src/index-admin-tools.js'
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
@@ -20,6 +21,7 @@ on:
       - 'admin-import.html'
       - 'assets/admin-replace-resource.js'
       - 'worker/src/admin-resource-replace.js'
+      - 'worker/src/admin-resource-replace-consistency.js'
       - 'worker/src/index-admin-tools.js'
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
@@ -45,10 +47,14 @@ jobs:
       - name: Syntax checks
         run: |
           node --check worker/src/admin-resource-replace.js
+          node --check worker/src/admin-resource-replace-consistency.js
           node --check worker/src/index-admin-tools.js
           node --check worker/src/index-phase24-trial-vr.js
           node --check assets/admin-replace-resource.js
           node --check assets/admin-trials.js
+          grep -Fq "./admin-resource-replace-consistency.js" worker/src/index-admin-tools.js
+          grep -Fq "replace-resource-consistency-v1" worker/src/admin-resource-replace-consistency.js
+          grep -Fq "RESOURCE_REPLACE_PROJECTION_FAILED" worker/src/admin-resource-replace-consistency.js
       - name: Replace Resource verification
         run: node tests/admin-resource-replace-verification.mjs
       - name: Admin Tools UI verification
