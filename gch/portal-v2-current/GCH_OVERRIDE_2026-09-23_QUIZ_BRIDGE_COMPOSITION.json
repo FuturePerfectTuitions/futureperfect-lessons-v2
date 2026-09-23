@@ -70,11 +70,27 @@
     ]
   },
   "verificationState": {
-    "repositoryStatic": "PENDING",
+    "repositoryStatic": "PASS",
     "productionDeployment": "PENDING",
     "productionBridgeRoute": "PENDING",
     "sharedCapabilityRegression": "PENDING",
     "representativeStudentBrowserLaunch": "PENDING"
+  },
+  "repositoryStaticEvidence": {
+    "codeHead": "6f17533631c7e39847f02f9389e4ba589490498a",
+    "runs": {
+      "phase11GuardedCloudflareWorkflow": 35883197300,
+      "phase13ExcelSyncStatic": 35883197140,
+      "phase11ScreenPalStatic": 35883197185,
+      "phase10HistoryStatic": 35883197459,
+      "phase10Static": 35883197276,
+      "phase11CatalogueStatic": 35883197183,
+      "adminToolsReplaceResourceStatic": 35883197334,
+      "adminLessonReleaseImport": 35883197565,
+      "portalGchAuthorityValidation": 35883197258,
+      "step10GateCHiddenBackendDeploy": 35883197199
+    },
+    "result": "All triggered non-production/static compatibility gates for the composed shared Worker code head completed successfully; production deploy remains unopened until merge to main."
   },
   "stopConditions": [
     "Do not claim the incident CLOSED until the production Worker readback contains both quiz bridge and preserved Admin/Trial/Replace Resource/protected-view markers.",
