@@ -169,7 +169,6 @@ updated.fullLibraries = [...existingLibraries, ...missingLibraries];
 
 let canonicalWritten = false;
 let rollbackInvoked = false;
-let prepared = null;
 try {
   if (missingLibraries.length) {
     await kvPut(studentsId, userKey, JSON.stringify(updated));
@@ -191,17 +190,18 @@ try {
   const scopeSalt = clean(await env.READ_MODELS_KV.get('meta:scope-salt'));
   if (!scopeSalt) throw new Error('READ_MODEL_SCOPE_SALT_MISSING');
   const scopeId = await opaqueAccessScopeId(portalUserIdNorm, scopeSalt);
-  prepared = await resolveCurrentScope(env.READ_MODELS_KV, `access:${scopeId}`);
-  if (!prepared?.payload) throw new Error('AAR1811_PREPARED_ACCESS_MISSING');
+  const prepared = await resolveCurrentScope(env.READ_MODELS_KV, `access:${scopeId}`);
+  const snapshot = prepared?.payload?.snapshot;
+  if (!snapshot) throw new Error('AAR1811_PREPARED_ACCESS_MISSING');
 
-  const preparedFullViews = new Set((prepared.payload.fullViewIds || []).map(norm));
+  const preparedFullViews = new Set((snapshot.fullViewIds || []).map(norm));
   for (const requiredView of requiredViews) {
     if (!preparedFullViews.has(requiredView)) throw new Error(`AAR1811_PREPARED_FULL_VIEW_MISSING:${requiredView}`);
   }
 
   const failedCore = [];
   for (const lessonId of year6LessonIds) {
-    const state = prepared.payload.lessonAccess?.[lessonId];
+    const state = snapshot.lessonAccess?.[lessonId];
     if (!state?.core || state?.blocked === true || state?.preLessonOnly === true) failedCore.push(lessonId);
   }
   if (failedCore.length) throw new Error(`AAR1811_YEAR6_CORE_PARITY_FAILED:${failedCore.length}`);
