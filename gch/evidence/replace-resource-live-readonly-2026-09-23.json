@@ -1,0 +1,758 @@
+{
+  "observedAt": "2026-09-23T10:41:07Z",
+  "mode": "READ_ONLY",
+  "worker": "fpt-portal-v2-worker",
+  "deployedPackageSha256": "767befebb2fede5e06cb18f31cef21bb09d86255bb76d77a1c1fa498f6b806e4",
+  "bindings": {
+    "lessonsKv": "49619b1a24b244bc8aaa6223fcd24e80",
+    "readModelsKv": "77b35165c8694087bc1b0515c35a7e89",
+    "materialsR2": "fpt-materials-dev"
+  },
+  "bindingInventory": [
+    {
+      "name": "ADMIN_IMPORT_PASSWORD",
+      "type": "secret_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "ADMIN_IMPORT_SESSION_SECRET",
+      "type": "secret_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "ALLOWED_ORIGINS",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "CHECKPOINT4_SHADOW_MODE",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "DB",
+      "type": "d1",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": "97250a54-fa91-45ad-a002-3c4566b1fc38",
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "DEV_LOGIN_ALLOWLIST",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "EMAIL",
+      "type": "send_email",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "ENVIRONMENT",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "EXCEL_SYNC_TOKEN",
+      "type": "secret_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "LESSONS_KV",
+      "type": "kv_namespace",
+      "namespace_id": "49619b1a24b244bc8aaa6223fcd24e80",
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "MATERIALS_R2",
+      "type": "r2_bucket",
+      "namespace_id": null,
+      "bucket_name": "fpt-materials-dev",
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "MOCK_DAILY_PASSWORDS",
+      "type": "secret_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "PARENT_EMAIL_TEST_TO",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "PROD_LOGIN_ALLOWLIST",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "QUIZ_BRIDGE_SECRET",
+      "type": "secret_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "READ_MODELS_KV",
+      "type": "kv_namespace",
+      "namespace_id": "77b35165c8694087bc1b0515c35a7e89",
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "STUDENT_LOGIN_ENABLED",
+      "type": "plain_text",
+      "namespace_id": null,
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    },
+    {
+      "name": "STUDENTS_KV",
+      "type": "kv_namespace",
+      "namespace_id": "c9723c8806334e4ea54d1b456d31b794",
+      "bucket_name": null,
+      "database_id": null,
+      "service": null,
+      "environment": null
+    }
+  ],
+  "targetLesson": "Y5E2",
+  "canonicalLesson": {
+    "active": true,
+    "contentStatus": {
+      "description": "available",
+      "mainVideo": "available",
+      "ownerConfirmedPending": false
+    },
+    "core": {
+      "homeworks": [
+        {
+          "pairId": "Y5E2-hw-01",
+          "homework": {
+            "displayName": "Y5T1E01 Homework Descriptive Writing Settings and Atmosphere.pdf",
+            "r2Key": "english/year5/Y5T1E01/homework/sheets/Y5T1E01 Homework Descriptive Writing Settings and Atmosphere.pdf"
+          },
+          "answerPack": {
+            "displayName": "Y5T1E01 Answer Pack Homework Descriptive Writing Settings and Atmosphere.pdf",
+            "r2Key": "english/year5/Y5T1E01/homework/answers/Y5T1E01 Answer Pack Homework Descriptive Writing Settings and Atmosphere.pdf"
+          }
+        },
+        {
+          "pairId": "Y5E2-hw-02",
+          "homework": {
+            "displayName": "Y5T1E01 Mandatory Homework Reading The Curse of Cogston House Story.pdf",
+            "r2Key": "english/year5/Y5T1E01/homework/sheets/Y5T1E01 Mandatory Homework Reading The Curse of Cogston House Story.pdf"
+          },
+          "answerPack": {
+            "displayName": "Y5T1E01 Answer Pack Mandatory Homework Reading The Curse of Cogston House Story.pdf",
+            "r2Key": "english/year5/Y5T1E01/homework/answers/Y5T1E01 Answer Pack Mandatory Homework Reading The Curse of Cogston House Story.pdf"
+          }
+        }
+      ],
+      "otherResources": [],
+      "preLessonSheets": [],
+      "video": {
+        "contentUrl": "https://screenpal.com/content/video/cOjFjgnvHxc",
+        "embedUrl": "https://go.screenpal.com/player/cOjFjgnvHxc?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+        "screenpal": "cOjFjgnvHxc",
+        "watchUrl": "https://go.screenpal.com/watch/cOjFjgnvHxc"
+      }
+    },
+    "description": "In this lesson, students develop their descriptive writing skills by learning how writers create vivid settings and effective atmospheres. They explore how carefully chosen vocabulary, figurative language and sensory description can help readers visualise a setting and experience its mood.\n\nThis lesson includes:\n✔ Understanding setting and atmosphere\n✔ Exploring how setting creates mood\n✔ Using adjectives and expanded noun phrases\n✔ Choosing powerful verbs and adverbs\n✔ Using similes and metaphors\n✔ Using personification and alliteration\n✔ Understanding and applying pathetic fallacy\n✔ Describing settings using the five senses\n✔ Selecting precise vocabulary to create different atmospheres\n✔ Writing and reviewing detailed setting descriptions\n\nStudents begin by exploring the difference between setting and atmosphere. They learn that the setting tells the reader where a story takes place, while atmosphere refers to the tone or mood created within that setting.\n\nStudents consider how settings in familiar stories can create different feelings, such as excitement, isolation, mystery or danger. They then analyse an atmospheric graveyard extract and identify language that describes the physical setting as well as words and phrases that create an eerie and unsettling mood.\n\nStudents will:\n✔ Identify details that establish a setting\n✔ Recognise vocabulary that creates atmosphere\n✔ Analyse adjectives and noun phrases\n✔ Identify powerful verb choices\n✔ Recognise personification and metaphor\n✔ Understand how alliteration can strengthen description\n✔ Identify adverbial phrases within descriptive writing\n\nThe lesson introduces pathetic fallacy, where weather or nature is used to reflect or reinforce the mood of a scene. Students examine examples such as a moaning wind and consider how natural surroundings can make a setting feel threatening, peaceful, mysterious or tense.\n\nStudents then apply these techniques to visual settings. They identify interesting details within images, decide what atmosphere those details could create and write their own setting descriptions using adjectives, noun phrases, powerful verbs, adverbs, similes, metaphors, personification and alliteration. For additional challenge, they incorporate pathetic fallacy.\n\nThe lesson also explores how detailed description is more effective than simply stating where a character is. Students compare different descriptions and investigate how precise vocabulary helps readers build a stronger mental picture of a setting.\n\nStudents practise describing a range of environments, including an old house, a lagoon, a crowded arena and a setting in space. They consider how individual word choices can make a location appear peaceful, neglected, exciting, threatening or mysterious.\n\nThe lesson then focuses on sensory description. Students learn how writers can use sight, sound, smell, touch and feelings to make a setting seem more vivid and immersive.\n\nStudents will:\n✔ Describe what can be seen within a setting\n✔ Include sounds that contribute to the atmosphere\n✔ Use smells to make descriptions more immersive\n✔ Describe textures and physical sensations\n✔ Explain how a setting makes a character feel\n✔ Select vocabulary that matches the intended mood\n\nStudents apply the five senses to settings including an autumn forest, a beach and a mysterious house. They also explore a vocabulary bank containing precise words for sights, sounds, smells, sensations and emotions.\n\nBy the end of the lesson, students will confidently describe settings using powerful and precise vocabulary, use a range of figurative and descriptive techniques, apply the five senses and deliberately create atmosphere for the reader.",
+    "displayIds": {
+      "english-year5": "Y5T1E01",
+      "english-year5-11plus": "Y5T1EE01"
+    },
+    "lessonId": "Y5E2",
+    "metadataProvenance": {
+      "description": "legacy_lessons_kv",
+      "resources": "phase11_reviewed_r2_manifest",
+      "title": "canonical_source_folder",
+      "video": "legacy_lessons_kv+owner_confirmed_screenpal_template"
+    },
+    "order": 1,
+    "phase11OtherResources": {
+      "elevenPlus": []
+    },
+    "phase11Resources": {
+      "core": {
+        "preLessonPairs": [],
+        "cumulativeHomeworks": [],
+        "supplementaryAnswers": []
+      },
+      "elevenPlus": {
+        "preLessonPairs": [],
+        "homeworks": [],
+        "cumulativeHomeworks": [],
+        "supplementaryAnswers": []
+      },
+      "vr": {
+        "supplementaryAnswers": []
+      }
+    },
+    "schemaVersion": 2,
+    "subject": "english",
+    "title": "Descriptive Writing Settings and Atmosphere",
+    "vr": {
+      "homeworkVideo": null,
+      "preLessonVideo": null,
+      "homeworks": [
+        {
+          "pairId": "Y5E2-vr-hw-01",
+          "homework": {
+            "displayName": "FAR210225Y5E2.pdf",
+            "r2Key": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2__replacement_20260923T095852Z_fxpjpy.pdf"
+          },
+          "answerPack": {
+            "displayName": "Answer Key - FAR210225Y5T1EE01VRH01A.pdf",
+            "r2Key": "english/year5/Y5T1E01/vr/homework/answers/Answer Key - FAR210225Y5T1EE01VRH01A.pdf"
+          }
+        }
+      ],
+      "preLesson": [
+        {
+          "pairId": "Y5E2-vr-pre-01",
+          "sheet": {
+            "displayName": "FAR070225Y5T1EE01VRP01.pdf",
+            "r2Key": "english/year5/Y5T1E01/vr/prelesson/sheets/FAR070225Y5T1EE01VRP01.pdf"
+          },
+          "answerKey": {
+            "displayName": "Answer key FAR070225Y5T1EE01VRP01A.pdf",
+            "r2Key": "english/year5/Y5T1E01/vr/prelesson/answers/Answer key FAR070225Y5T1EE01VRP01A.pdf"
+          }
+        }
+      ]
+    }
+  },
+  "preparedLessonKeyList": [
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp11-l-59de26ec61c73513-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp11-l-59de26ec61c73513-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-ui-5f97f6f60f7499c5-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E20:version:cp12-vr-all-124251849fadd03f-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp11-l-3d5ec9b96508e689-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp11-l-3d5ec9b96508e689-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-ui-c98e020bc10b785a-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E21:version:cp12-vr-all-de3555a7ecd582df-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp11-l-b2dc99083ccfb573-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp11-l-b2dc99083ccfb573-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-ui-98a0d63688cf8b31-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E22:version:cp12-vr-all-9dd321aea99273ea-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp11-l-bdc7db36f5691ed7-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp11-l-bdc7db36f5691ed7-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-ui-bf25eb988f66d167-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E23:version:cp12-vr-all-3b27a94613958eac-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp11-l-62228cc0d81db036-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp11-l-62228cc0d81db036-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-ui-572a7aeef10e833b-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E24:version:cp12-vr-all-ff3d0e67c852fe63-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp11-l-f7fc1aca939550c9-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp11-l-f7fc1aca939550c9-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-ui-d794a2684eb17f15-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E25:version:cp12-vr-all-ec9992308a3b79fd-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp11-l-ea9febd387e178dc-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp11-l-ea9febd387e178dc-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-ui-b08d832634183db6-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E26:version:cp12-vr-all-3355dfded03bc8d7-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp11-l-5abf47435a6c56e9-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp11-l-5abf47435a6c56e9-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-ui-8f3b188a1203a293-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E27:version:cp12-vr-all-898e508f3e325547-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp11-l-751e6b0143639c06-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp11-l-751e6b0143639c06-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-ui-efc20eea4bd094b1-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E28:version:cp12-vr-all-c7076d23e0d94a80-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp11-l-7a75e679f842c250-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp11-l-7a75e679f842c250-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-ui-4e95d4de0b7f3552-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E29:version:cp12-vr-all-b40c3cb9a89134c1-34874713150"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:current"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp11-l-b0a315e9f0192c84-34814701610"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp11-l-b0a315e9f0192c84-34817814356"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34882088606"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34932834264"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34934878943"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34936745158"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34940297852"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34947302939"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-ui-0cdaf84f0988b1b8-34949406556"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:cp12-vr-929ee620a38fe155-34859100378"
+    },
+    {
+      "name": "rm:v1:scope:lesson_3AY5E2:version:ops-y5e2-vr-dc79ca1e6f242274-35194691986"
+    }
+  ],
+  "preparedLessonPointer": {
+    "current": {
+      "envelopeSha256": "5506b7f405041da0808643c7cc27b3b0742111c6660bc604ce9a6eed9cc41d37",
+      "sha256": "dc79ca1e6f242274b84260136bc61b960d6782747edf1595e9c28234be2c991a",
+      "version": "ops-y5e2-vr-dc79ca1e6f242274-35194691986"
+    },
+    "kind": "prepared-read-model-pointer",
+    "previous": {
+      "envelopeSha256": "f1e130b922d279cc06f32358c9cad9748f678e36182d1dbe67b852802fb34294",
+      "sha256": "0cdaf84f0988b1b8699f8f733a93093156cef470b4041c80781fe8329f00e520",
+      "version": "cp12-ui-0cdaf84f0988b1b8-34949406556"
+    },
+    "schemaVersion": 1,
+    "scope": "lesson:Y5E2",
+    "updatedAt": "2026-09-17T07:29:05.377Z"
+  },
+  "preparedLessonEnvelope": {
+    "kind": "prepared-read-model-envelope",
+    "payload": {
+      "description": "In this lesson, students develop their descriptive writing skills by learning how writers create vivid settings and effective atmospheres. They explore how carefully chosen vocabulary, figurative language and sensory description can help readers visualise a setting and experience its mood.\n\nThis lesson includes:\n✔ Understanding setting and atmosphere\n✔ Exploring how setting creates mood\n✔ Using adjectives and expanded noun phrases\n✔ Choosing powerful verbs and adverbs\n✔ Using similes and metaphors\n✔ Using personification and alliteration\n✔ Understanding and applying pathetic fallacy\n✔ Describing settings using the five senses\n✔ Selecting precise vocabulary to create different atmospheres\n✔ Writing and reviewing detailed setting descriptions\n\nStudents begin by exploring the difference between setting and atmosphere. They learn that the setting tells the reader where a story takes place, while atmosphere refers to the tone or mood created within that setting.\n\nStudents consider how settings in familiar stories can create different feelings, such as excitement, isolation, mystery or danger. They then analyse an atmospheric graveyard extract and identify language that describes the physical setting as well as words and phrases that create an eerie and unsettling mood.\n\nStudents will:\n✔ Identify details that establish a setting\n✔ Recognise vocabulary that creates atmosphere\n✔ Analyse adjectives and noun phrases\n✔ Identify powerful verb choices\n✔ Recognise personification and metaphor\n✔ Understand how alliteration can strengthen description\n✔ Identify adverbial phrases within descriptive writing\n\nThe lesson introduces pathetic fallacy, where weather or nature is used to reflect or reinforce the mood of a scene. Students examine examples such as a moaning wind and consider how natural surroundings can make a setting feel threatening, peaceful, mysterious or tense.\n\nStudents then apply these techniques to visual settings. They identify interesting details within images, decide what atmosphere those details could create and write their own setting descriptions using adjectives, noun phrases, powerful verbs, adverbs, similes, metaphors, personification and alliteration. For additional challenge, they incorporate pathetic fallacy.\n\nThe lesson also explores how detailed description is more effective than simply stating where a character is. Students compare different descriptions and investigate how precise vocabulary helps readers build a stronger mental picture of a setting.\n\nStudents practise describing a range of environments, including an old house, a lagoon, a crowded arena and a setting in space. They consider how individual word choices can make a location appear peaceful, neglected, exciting, threatening or mysterious.\n\nThe lesson then focuses on sensory description. Students learn how writers can use sight, sound, smell, touch and feelings to make a setting seem more vivid and immersive.\n\nStudents will:\n✔ Describe what can be seen within a setting\n✔ Include sounds that contribute to the atmosphere\n✔ Use smells to make descriptions more immersive\n✔ Describe textures and physical sensations\n✔ Explain how a setting makes a character feel\n✔ Select vocabulary that matches the intended mood\n\nStudents apply the five senses to settings including an autumn forest, a beach and a mysterious house. They also explore a vocabulary bank containing precise words for sights, sounds, smells, sensations and emotions.\n\nBy the end of the lesson, students will confidently describe settings using powerful and precise vocabulary, use a range of figurative and descriptive techniques, apply the five senses and deliberately create atmosphere for the reader.",
+      "kind": "prepared-lesson-detail",
+      "lessonId": "Y5E2",
+      "resourceCount": 9,
+      "resources": [
+        {
+          "displayName": "Y5T1E01 Homework Descriptive Writing Settings and Atmosphere.pdf",
+          "objectKey": "english/year5/Y5T1E01/homework/sheets/Y5T1E01 Homework Descriptive Writing Settings and Atmosphere.pdf",
+          "presentationGroup": "core-homework",
+          "type": "homework"
+        },
+        {
+          "displayName": "Y5T1E01 Answer Pack Homework Descriptive Writing Settings and Atmosphere.pdf",
+          "objectKey": "english/year5/Y5T1E01/homework/answers/Y5T1E01 Answer Pack Homework Descriptive Writing Settings and Atmosphere.pdf",
+          "presentationGroup": "core-homework",
+          "protected": true,
+          "type": "answer-pack"
+        },
+        {
+          "displayName": "Y5T1E01 Mandatory Homework Reading The Curse of Cogston House Story.pdf",
+          "objectKey": "english/year5/Y5T1E01/homework/sheets/Y5T1E01 Mandatory Homework Reading The Curse of Cogston House Story.pdf",
+          "presentationGroup": "core-homework",
+          "type": "homework"
+        },
+        {
+          "displayName": "Y5T1E01 Answer Pack Mandatory Homework Reading The Curse of Cogston House Story.pdf",
+          "objectKey": "english/year5/Y5T1E01/homework/answers/Y5T1E01 Answer Pack Mandatory Homework Reading The Curse of Cogston House Story.pdf",
+          "presentationGroup": "core-homework",
+          "protected": true,
+          "type": "answer-pack"
+        },
+        {
+          "displayName": "FAR070225Y5T1EE01VRP01.pdf",
+          "objectKey": "english/year5/Y5T1E01/vr/prelesson/sheets/FAR070225Y5T1EE01VRP01.pdf",
+          "presentationGroup": "vr-prelesson",
+          "presentationScopes": [
+            "vr"
+          ],
+          "type": "prelesson"
+        },
+        {
+          "displayName": "Answer key FAR070225Y5T1EE01VRP01A.pdf",
+          "objectKey": "english/year5/Y5T1E01/vr/prelesson/answers/Answer key FAR070225Y5T1EE01VRP01A.pdf",
+          "presentationGroup": "vr-prelesson",
+          "presentationScopes": [
+            "vr"
+          ],
+          "protected": true,
+          "type": "answer-pack"
+        },
+        {
+          "displayName": "FAR210225Y5E2.pdf",
+          "objectKey": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf",
+          "presentationGroup": "vr-homework",
+          "presentationScopes": [
+            "vr"
+          ],
+          "type": "homework"
+        },
+        {
+          "displayName": "Answer Key - FAR210225Y5T1EE01VRH01A.pdf",
+          "objectKey": "english/year5/Y5T1E01/vr/homework/answers/Answer Key - FAR210225Y5T1EE01VRH01A.pdf",
+          "presentationGroup": "vr-homework",
+          "presentationScopes": [
+            "vr"
+          ],
+          "protected": true,
+          "type": "answer-pack"
+        }
+      ],
+      "schemaVersion": 1,
+      "title": "Descriptive Writing Settings and Atmosphere",
+      "videoVariants": {
+        "elevenPlus": {
+          "displayName": "Lesson Video",
+          "targetUrl": "https://go.screenpal.com/player/cOjFjgnvHxc?ff=1&ahc=1&dcc=1&tl=1&bg=transparent"
+        },
+        "normal": {
+          "displayName": "Lesson Video",
+          "targetUrl": "https://go.screenpal.com/player/cOjFjgnvHxc?ff=1&ahc=1&dcc=1&tl=1&bg=transparent"
+        }
+      }
+    },
+    "schemaVersion": 1,
+    "scope": "lesson:Y5E2",
+    "sha256": "dc79ca1e6f242274b84260136bc61b960d6782747edf1595e9c28234be2c991a",
+    "version": "ops-y5e2-vr-dc79ca1e6f242274-35194691986"
+  }
+}
