@@ -20,6 +20,16 @@ function jsonFrom(response, body, status = response.status) {
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+function withPreflightGuardMarker(response) {
+  const headers = new Headers(response.headers);
+  headers.set('x-fpt-replace-resource-preflight-guard', PREFLIGHT_GUARD_MARKER);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 function countR2Key(value, key) {
   if (!value || typeof value !== 'object') return 0;
   if (Array.isArray(value)) return value.reduce((sum, item) => sum + countR2Key(item, key), 0);
@@ -136,11 +146,14 @@ async function publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key) {
 async function handleAdminResourceRequest(request, env, ctx) {
   const url = new URL(request.url);
   // Only a real replacement POST is subject to canonical->prepared consistency
-  // processing. In particular, CORS OPTIONS must pass through untouched to the
-  // base handler; treating its {ok:true} preflight response as a replacement
-  // success causes a 500 and makes browser fetch() fail before the POST is sent.
+  // processing. CORS OPTIONS keeps the base handler's status/body/CORS semantics
+  // and receives only a diagnostic header so production can prove the guard is live.
   if (url.pathname !== REPLACE_PATH || request.method !== 'POST') {
-    return baseHandleAdminResourceRequest(request, env, ctx);
+    const response = await baseHandleAdminResourceRequest(request, env, ctx);
+    if (url.pathname === REPLACE_PATH && request.method === 'OPTIONS') {
+      return withPreflightGuardMarker(response);
+    }
+    return response;
   }
 
   const baseResponse = await baseHandleAdminResourceRequest(request, env, ctx);
