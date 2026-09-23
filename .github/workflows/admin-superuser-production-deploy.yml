@@ -1,5 +1,5 @@
 name: Admin superuser production deploy
-# Production Worker gate for authenticated Admin operations and protected-view stability.
+# Production Worker gate for authenticated Admin operations, quiz-bridge compatibility and protected-view stability.
 
 on:
   push:
@@ -14,6 +14,7 @@ on:
       - 'worker/src/admin-lesson-release-import.js'
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
+      - 'worker/src/index-step10-quiz-bridge.js'
       - 'worker/src/index-admin-tools.js'
       - 'worker/src/index-phase20-change16.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
@@ -23,6 +24,9 @@ on:
       - 'worker/src/index-phase23-protected-view-stability.js'
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
+      - 'tests/step10-quiz-bridge-static-verification.mjs'
+      - 'tests/cp12-quiz-redeem-v2.mjs'
+      - 'tests/shared-worker-entrypoint-preservation.mjs'
       - 'tests/admin-trial-manager-verification.mjs'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
@@ -46,7 +50,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Portal Admin Tools with guarded Replace Resource operation
+      DEPLOY_MESSAGE: Portal composed Quiz Bridge and Admin Tools
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,6 +58,7 @@ jobs:
           node-version: '22'
       - name: Verify production source syntax
         run: |
+          node --check worker/src/index-step10-quiz-bridge.js
           node --check worker/src/admin-trial-manager.js
           node --check worker/src/admin-resource-replace.js
           node --check worker/src/admin-resource-replace-consistency.js
@@ -73,6 +78,9 @@ jobs:
           node --check assets/phase23-protected-view-stability.js
       - name: Verify production wiring
         run: |
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
           node --experimental-default-type=module tests/admin-trial-manager-verification.mjs
           node tests/admin-resource-replace-verification.mjs
           node tests/admin-tools-ui-verification.mjs
@@ -82,10 +90,60 @@ jobs:
           node tests/admin-superuser-static-verification.mjs
           node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
           node tests/trial-runtime-access-verification.mjs
+          grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
           grep -Fq "./admin-resource-replace-consistency.js" worker/src/index-admin-tools.js
           grep -Fq "replace-resource-consistency-v1" worker/src/admin-resource-replace-consistency.js
+      - name: Capture production rollback anchor
+        id: rollback
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/portal-before.json
+          OLD="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/portal-before.json | head -n1)"
+          test -n "$OLD"
+          echo "old_version=$OLD" >> "$GITHUB_OUTPUT"
+          echo "PORTAL_COMPOSED_ROLLBACK_ANCHOR=$OLD"
       - name: Deploy Worker preserving bindings and secrets
         run: bash ops/deploy_current_worker_preserve.sh
+      - name: Verify composed Worker implementation is live
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/admin-live-worker.bin
+          grep -aFq 'portal-live-maths11plus-release-v2' /tmp/admin-live-worker.bin
+          grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/admin-live-worker.bin
+          grep -aFq 'PORTAL_SESSION_INVALID' /tmp/admin-live-worker.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/admin-live-worker.bin
+          grep -aFq 'RESOURCE_REPLACE_PROJECTION_FAILED' /tmp/admin-live-worker.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/admin-live-worker.bin
+          echo 'SHARED_WORKER_COMPOSED_LIVE_MARKER_PASS'
+      - name: Verify live quiz bridge route is present and protected
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --data '{"code":"composition-probe-invalid"}' \
+              --output /tmp/quiz-redeem-body.json \
+              --write-out '%{http_code}' \
+              "$BASE/api/v1/quiz-bridge/redeem")"
+            echo "Quiz bridge verification attempt $attempt returned HTTP $code"
+            cat /tmp/quiz-redeem-body.json || true
+            if test "$code" = '401' && grep -Fq 'UNAUTHORIZED' /tmp/quiz-redeem-body.json; then
+              echo 'QUIZ_BRIDGE_REDEEM_ROUTE_LIVE_PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Live quiz bridge route verification did not converge.' >&2
+          cat /tmp/quiz-redeem-body.json >&2 || true
+          exit 1
       - name: Verify Replace Resource consistency implementation is live
         run: |
           set -euo pipefail
@@ -183,5 +241,12 @@ jobs:
           cat /tmp/protected-view-headers.txt >&2 || true
           cat /tmp/protected-view-body.json >&2 || true
           exit 1
+      - name: Roll back production Worker if any verification failed
+        if: ${{ failure() && steps.rollback.outputs.old_version != '' }}
+        run: |
+          set -euo pipefail
+          OLD='${{ steps.rollback.outputs.old_version }}'
+          echo "ROLLING_BACK_SHARED_WORKER_TO=$OLD" >&2
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD@100%" --name "$WORKER_NAME" --message 'Rollback composed Quiz Bridge and Admin Tools deploy' -y
       - name: Complete
-        run: echo ADMIN_TOOLS_REPLACE_RESOURCE_PRODUCTION_DEPLOY_PASS
+        run: echo ADMIN_TOOLS_QUIZ_BRIDGE_PRODUCTION_DEPLOY_PASS
