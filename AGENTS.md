@@ -2,15 +2,18 @@
 
 ## Portal V2 continuation authority — mandatory first read
 
-Before changing or diagnosing **any** FPT Portal V2, Admin Console, Trial, student-auth/session, access/read-model, lesson-release, resource, protected-answer, PreLesson/VR, parent-email or quiz-bridge behaviour, read this file in full and then read:
+Before changing or diagnosing **any** FPT Portal V2, Admin Console, Trial, student-auth/session, access/read-model, lesson-release, resource, protected-answer, PreLesson/VR, parent-email or quiz-bridge behaviour, read this file in full and then read, in this order:
 
-`gch/portal-v2-current/GCH_STATE.json`
+1. `gch/portal-v2-current/GCH_STATE.json`
+2. `gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json`
 
-That GCH is the current machine-oriented continuation authority. It reconciles the historical v4.2 Master with current repository topology and the 22 September 2026 Admin/Trial work. Its business invariants, preservation ledger, known open defects, failure signatures, change-impact rules, stop conditions and verification matrix are binding unless the owner explicitly changes them.
+The base GCH is the machine-oriented continuation authority reconciling the historical v4.2 Master with current repository topology and the 22 September 2026 Admin/Trial work. The 23 September Replace Resource override is higher authority only for the scope it explicitly supersedes; all non-conflicting base GCH content remains binding. Together, their business invariants, preservation ledger, known open defects, failure signatures, change-impact rules, stop conditions and verification matrix are binding unless the owner explicitly changes them.
 
-Do not start from an old Master ZIP, old Phase file, branch age, screenshot similarity, Admin UI state, D1/KV state or repository `main` alone. Freshly prove the live route/deployment/source lineage and trace the complete source/write -> canonical state -> prepared projection -> public API -> browser chain before mutation. If behaviour/topology/data authority/routes/workflows/open-defect status change, update `gch/portal-v2-current/GCH_STATE.json` in the same coherent change.
+Do not start from an old Master ZIP, old Phase file, branch age, screenshot similarity, Admin UI state, D1/KV state or repository `main` alone. Freshly prove the live route/deployment/source lineage and trace the complete source/write -> canonical state -> prepared projection -> public API -> browser chain before mutation. If behaviour/topology/data authority/routes/workflows/open-defect status change, update the applicable GCH authority file in the same coherent change.
 
 In particular, do not claim the Trial one-successful-login rule is fully enforced until the GCH open gate is actually closed and verified. Normal-student multi-device behaviour must not be changed merely to repair Trial semantics.
+
+For **Replace Resource**, do not regress to source-only success. The current required contract is recorded in `GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json`: success requires both the canonical resource and the current prepared lesson projection to publish/read back the replacement; projection failure must fail closed rather than show a false Admin success.
 
 ## Important repository boundary
 
