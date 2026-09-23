@@ -20,6 +20,7 @@
     "productionEntrypoint": "worker/src/index-admin-tools.js",
     "marker": "replace-resource-consistency-v1",
     "preflightGuardMarker": "replace-resource-preflight-pass-v1",
+    "preflightGuardHeader": "x-fpt-replace-resource-preflight-guard",
     "productionMergeCommit": "169b6f29d71fa192acf2c38bb8931b8c383755ae",
     "finalGuardCommit": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
     "requiredSuccessChain": [
@@ -35,7 +36,7 @@
       "return success only after canonical and prepared verification both pass"
     ],
     "transportBoundary": {
-      "rule": "The canonical-to-prepared consistency transaction applies only to an actual POST /api/v1/admin/resources/replace operation. OPTIONS CORS preflight and all other non-POST methods must pass through unchanged to the base Admin resource handler.",
+      "rule": "The canonical-to-prepared consistency transaction applies only to an actual POST /api/v1/admin/resources/replace operation. OPTIONS CORS preflight and all other non-POST methods must preserve the base Admin resource handler's status/body/CORS semantics. OPTIONS may additionally carry the diagnostic x-fpt-replace-resource-preflight-guard header so production can prove the guard survived bundling.",
       "why": "Browser preflight is transport negotiation, not a replacement success response; interpreting its {ok:true} body as a replacement result prevents the browser from sending the actual POST.",
       "browserFailureSignature": "Admin Console displays Replacement failed: Failed to fetch while the live OPTIONS request returns a non-2xx response.",
       "permanentMarker": "replace-resource-preflight-pass-v1"
@@ -62,7 +63,7 @@
       "Changes to worker/src/admin-resource-replace-consistency.js trigger the production Admin deploy workflow.",
       "The wrapper receives node --check syntax validation before deployment.",
       "Current source wiring must import ./admin-resource-replace-consistency.js from worker/src/index-admin-tools.js.",
-      "After deployment, the live Worker package must contain replace-resource-consistency-v1 and RESOURCE_REPLACE_PROJECTION_FAILED or the workflow fails.",
+      "After deployment, the live Worker package must contain replace-resource-consistency-v1, replace-resource-preflight-pass-v1 and RESOURCE_REPLACE_PROJECTION_FAILED or the workflow fails.",
       "Replace Resource OPTIONS preflight from the Admin Console origin must remain HTTP 200 with the expected Access-Control-Allow-* headers."
     ],
     "staticCiWorkflow": ".github/workflows/admin-tools-replace-resource-static-verification.yml",
@@ -70,7 +71,7 @@
       "The consistency wrapper is a watched path for push and pull_request.",
       "The wrapper is syntax checked.",
       "CI verifies the Admin entrypoint imports the consistency wrapper and verifies the live-marker/failure-marker strings remain present.",
-      "CI executes tests/admin-resource-replace-consistency-verification.mjs and proves OPTIONS preflight is passed through unchanged rather than treated as a replacement result."
+      "CI executes tests/admin-resource-replace-consistency-verification.mjs and proves OPTIONS preflight preserves HTTP 200, CORS and {ok:true} while exposing the diagnostic guard header instead of being treated as a replacement result."
     ]
   },
   "incidentCloseout": {
@@ -103,7 +104,7 @@
     "note": "The final repair verification was idempotent: by the guarded run, the prepared scope already contained the new key and no old key; the run independently read back and proved the correct state. The owner subsequently verified the student-facing result and closed the incident."
   },
   "preflightIncident20260923": {
-    "status": "FIX_IMPLEMENTED_PENDING_PRODUCTION_DEPLOY_AND_OWNER_RETRY",
+    "status": "MARKER_LIVENESS_HOTFIX_PREPARED_PENDING_REDEPLOY_AND_OWNER_RETRY",
     "displayLessonCode": "L3T2M24",
     "canonicalLessonId": "Y6M1.4",
     "title": "Linear Sequences",
@@ -127,11 +128,31 @@
     },
     "rootCause": "worker/src/admin-resource-replace-consistency.js applied replacement-success validation to every request whose pathname was /api/v1/admin/resources/replace, including OPTIONS. The base handler correctly returned {ok:true} for OPTIONS, but the wrapper then required lessonId/oldR2Key/newR2Key, returned HTTP 500 RESOURCE_REPLACE_INCOMPLETE_SUCCESS_RESPONSE, and the browser therefore aborted the actual POST and surfaced TypeError: Failed to fetch.",
     "mutationAssessment": "The failed browser attempt did not reach the replacement POST. Canonical LESSONS_KV and current prepared READ_MODELS_KV remained on the original homework object key. The read-only 2.2 MB multipart probe also proved the edge/route accepts a payload of this order of size when the request reaches the Worker, so the observed incident is not explained by the replacement PDF being around 2 MB.",
-    "fix": "Apply consistency processing only when pathname is /api/v1/admin/resources/replace AND request.method is POST. Pass OPTIONS and every other non-POST method directly to the base resource handler. Add a dedicated preflight regression test and permanent preflight marker.",
+    "fix": "Apply consistency processing only when pathname is /api/v1/admin/resources/replace AND request.method is POST. Preserve base OPTIONS status/body/CORS semantics and attach the diagnostic preflight guard header so the marker remains live in the bundled Worker.",
+    "firstProductionDeployAttempt": {
+      "workflowRun": 35888883615,
+      "sourceHeadSha": "5e1efe589ef1c4894a04ec639a4f463fe82307b6",
+      "rollbackAnchor": "a1d50246-d014-486f-aa32-57956c816640",
+      "temporaryDeployedVersion": "12f0a262-c2b7-42ff-9ef8-15a021e55e77",
+      "result": "FAIL_CLOSED_AND_ROLLED_BACK",
+      "applicationSourceChecks": "PASS",
+      "deploymentUpload": "PASS",
+      "failureStage": "Verify composed Worker implementation is live",
+      "failureCause": "The preflight guard marker constant was exported but not referenced by runtime code and was tree-shaken from the bundled Worker, so the live marker grep failed before the live preflight test ran.",
+      "automaticRollback": "PASS",
+      "productionAfterRollback": "a1d50246-d014-486f-aa32-57956c816640",
+      "meaning": "The deployment guard behaved correctly. The application fix was not left partially deployed; production returned to the known prior version."
+    },
+    "markerLivenessHotfix": {
+      "branch": "fix/replace-resource-preflight-marker-live-2026-09-23",
+      "strategy": "Reference the preflight guard marker in the actual OPTIONS response as x-fpt-replace-resource-preflight-guard while preserving the base response status, body and CORS semantics.",
+      "testRequirement": "The dedicated preflight regression test must assert the diagnostic header equals replace-resource-preflight-pass-v1."
+    },
     "closureGate": [
-      "static CI PASS including the dedicated OPTIONS regression test",
+      "static CI PASS including the dedicated OPTIONS regression test and diagnostic header assertion",
       "guarded shared Worker production deployment PASS with rollback anchor",
       "live OPTIONS preflight from https://futureperfecttuitions.github.io returns HTTP 200 with CORS allow-origin/allow-headers/allow-methods",
+      "deployed Worker contains replace-resource-preflight-pass-v1",
       "owner retries L3T2M24 replacement and confirms the Admin operation succeeds",
       "student-facing resource is verified to resolve to the intended replacement before final incident closeout"
     ]
@@ -155,10 +176,11 @@
     "adminWorkflows.replaceResource.currentGeneralLimitation",
     "Any open defect asserting that successful Replace Resource cannot automatically publish and verify the prepared lesson projection"
   ],
-  "currentRequiredBehaviour": "A future Admin Console Replace Resource operation is successful only when the intended canonical resource and the current student-facing prepared lesson both point to the verified replacement object. If the prepared projection cannot be published and read back correctly, the operation must fail rather than present a false success state. CORS OPTIONS preflight is transport negotiation and must pass through the base handler; it must never be interpreted as a replacement success response.",
+  "currentRequiredBehaviour": "A future Admin Console Replace Resource operation is successful only when the intended canonical resource and the current student-facing prepared lesson both point to the verified replacement object. If the prepared projection cannot be published and read back correctly, the operation must fail rather than present a false success state. CORS OPTIONS preflight is transport negotiation and must preserve the base handler's successful status/body/CORS semantics; it must never be interpreted as a replacement success response.",
   "futureVerificationMatrix": [
     "For any Replace Resource code change, run static CI and production deploy guard.",
     "Verify OPTIONS /api/v1/admin/resources/replace from the Admin Console origin returns HTTP 200 with CORS before relying on browser POST behaviour.",
+    "Verify the live OPTIONS response exposes x-fpt-replace-resource-preflight-guard: replace-resource-preflight-pass-v1 so the runtime guard is directly observable.",
     "For an actual replacement, verify the returned operation succeeded only after the wrapper completed prepared publication.",
     "When incident-driven, verify representative live /api/v2 resource delivery/browser behaviour before closing the incident if credentials/test persona are available.",
     "Never infer student-visible success solely from R2 presence, LESSONS_KV state, or the Admin Console success message."
