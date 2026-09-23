@@ -1,0 +1,101 @@
+{
+  "schema": "fpt.portal.gch.override.quiz-bridge-composition.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "REPAIR_PREPARED_PENDING_PRODUCTION_VERIFICATION",
+  "effectiveDate": "2026-09-23",
+  "scope": "fpt-portal-v2-worker shared production entrypoint and path-scoped 11+ Practice bridge preservation",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "fullSiteWorkflow": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
+  "precedence": "This override supersedes conflicting statements about the production fpt-portal-v2-worker top-level entrypoint and quiz-bridge preservation only. All non-conflicting Portal V2 and Replace Resource authority remains binding.",
+  "incident": {
+    "classification": "SHARED_WORKER_COMPOSITION_REGRESSION",
+    "confirmedProductionLineage": [
+      {
+        "date": "2026-09-21",
+        "workflowRun": 35587624586,
+        "worker": "fpt-portal-v2-worker",
+        "entrypoint": "worker/src/index-step10-quiz-bridge.js",
+        "deployedVersion": "2631c603-89eb-495c-b0e4-c2d87272a5b2",
+        "result": "QUIZ_BRIDGE_PRESENT"
+      },
+      {
+        "date": "2026-09-23",
+        "workflowRun": 35854434444,
+        "worker": "fpt-portal-v2-worker",
+        "entrypoint": "worker/src/index-admin-tools.js",
+        "deployedVersion": "53ee943f-fdd2-4d47-99ed-814bd7dcf227",
+        "result": "ADMIN_AND_REPLACE_RESOURCE_PASS_BUT_OUTER_QUIZ_BRIDGE_WRAPPER_NOT_DEPLOYED"
+      }
+    ],
+    "rootCause": "The shared production deployment script correctly derived worker/wrangler.toml, but that canonical config still named index-admin-tools.js. A later Admin/Replace Resource deployment therefore replaced the previously deployed index-step10-quiz-bridge.js outer wrapper. The bridge source itself delegates non-quiz traffic to index-admin-tools.js, so the capabilities should have been composed rather than alternated.",
+    "studentSymptom": "A valid public Student Worker launch can reach the Quiz hostname, but Quiz server-to-server redemption against /api/v1/quiz-bridge/redeem cannot succeed when the shared Worker is deployed without the bridge wrapper; the Quiz then shows its invalid-link fail-closed page."
+  },
+  "publicQuizRuntimeBoundary": {
+    "portalLaunchOwner": "fpt-portal-v2-rebuild-student-prod via /api/v2/student/quiz/eligibility and /api/v2/student/quiz/launch",
+    "bridgeRedeemOwner": "fpt-portal-v2-worker via /api/v1/quiz-bridge/redeem",
+    "quizWorker": "futureperfect-11plus-practice-step10-preview",
+    "releaseContext": "quiz-release-context-v2.0 / portal-live-maths11plus-release-v2",
+    "l2l3Authority": "The canonical 11+ Practice production authority records L2 actual-release-only access, L3 full-L2 inheritance plus released L3 gates, and stable cross-level history. Do not infer the live Quiz runtime from the stale default-branch standalone source.",
+    "quizWorkerMutationRequiredForThisIncident": false
+  },
+  "requiredProductionTopology": {
+    "worker": "fpt-portal-v2-worker",
+    "canonicalWranglerEntrypoint": "src/index-step10-quiz-bridge.js",
+    "compositionChain": [
+      "index-step10-quiz-bridge.js",
+      "index-admin-tools.js",
+      "index-phase24-trial-vr.js",
+      "index-phase23-protected-view-stability.js",
+      "existing lower production chain"
+    ],
+    "delegationInvariant": "The quiz bridge owns only its exact compatibility paths and delegates every other request to Admin Tools unchanged.",
+    "futureDeployInvariant": "Any ordinary shared Worker production deploy must preserve the composed quiz bridge and Admin/Trial/protected-view/Replace Resource capabilities in the same bundle. Deploying index-admin-tools.js alone is prohibited unless a separately authorised rollback explicitly intends to remove the bridge."
+  },
+  "implementation": {
+    "branch": "fix/quiz-bridge-composed-production-2026-09-23",
+    "wranglerChange": "worker/wrangler.toml canonical main changed to src/index-step10-quiz-bridge.js",
+    "staticRegression": "tests/shared-worker-entrypoint-preservation.mjs plus updated step10 bridge static verification",
+    "productionWorkflow": ".github/workflows/admin-superuser-production-deploy.yml",
+    "workflowGuards": [
+      "bridge source syntax and bridge regression tests",
+      "canonical wrangler entrypoint assertion",
+      "bridge-to-Admin composition assertion",
+      "pre-deploy production rollback version capture",
+      "binding/secret preservation through ops/deploy_current_worker_preserve.sh",
+      "deployed bridge, Replace Resource and Trial implementation marker readback",
+      "live unauthenticated quiz redeem route must return protected 401 contract",
+      "live Admin protected-route checks",
+      "live protected Answer Pack viewer check",
+      "automatic rollback to captured version if post-deploy verification fails"
+    ]
+  },
+  "verificationState": {
+    "repositoryStatic": "PASS",
+    "productionDeployment": "PENDING",
+    "productionBridgeRoute": "PENDING",
+    "sharedCapabilityRegression": "PENDING",
+    "representativeStudentBrowserLaunch": "PENDING"
+  },
+  "repositoryStaticEvidence": {
+    "codeHead": "6f17533631c7e39847f02f9389e4ba589490498a",
+    "runs": {
+      "phase11GuardedCloudflareWorkflow": 35883197300,
+      "phase13ExcelSyncStatic": 35883197140,
+      "phase11ScreenPalStatic": 35883197185,
+      "phase10HistoryStatic": 35883197459,
+      "phase10Static": 35883197276,
+      "phase11CatalogueStatic": 35883197183,
+      "adminToolsReplaceResourceStatic": 35883197334,
+      "adminLessonReleaseImport": 35883197565,
+      "portalGchAuthorityValidation": 35883197258,
+      "step10GateCHiddenBackendDeploy": 35883197199
+    },
+    "result": "All triggered non-production/static compatibility gates for the composed shared Worker code head completed successfully; production deploy remains unopened until merge to main."
+  },
+  "stopConditions": [
+    "Do not claim the incident CLOSED until the production Worker readback contains both quiz bridge and preserved Admin/Trial/Replace Resource/protected-view markers.",
+    "Do not claim end-to-end student closeout until a representative eligible student can launch 11+ Practice without the invalid-link failure.",
+    "If the guarded production workflow fails, retain or restore the captured pre-deploy Worker version and diagnose before another mutation.",
+    "Do not mutate the Quiz question bank or Quiz Worker merely to repair this Portal shared-worker composition incident."
+  ]
+}

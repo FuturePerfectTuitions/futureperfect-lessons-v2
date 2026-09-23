@@ -19,9 +19,9 @@ assert.match(migration, /CREATE TABLE IF NOT EXISTS quiz_launch_codes/);
 assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_quiz_launch_expiry/);
 assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_quiz_launch_user/);
 
-// Gate C deploys the bridge with WORKER_ENTRYPOINT override. The canonical checked-in
-// production config stays unchanged so the established regression suites continue to
-// assert the normal Portal chain independently of the hidden bridge rollout.
-assert.match(wrangler, /main\s*=\s*"src\/index-admin-tools\.js"/);
+// The shared production Worker must keep the bridge as its outer wrapper because
+// it delegates every non-quiz request to Admin Tools. This makes an ordinary Admin
+// deployment preserve the active redeem route instead of replacing it.
+assert.match(wrangler, /main\s*=\s*"src\/index-step10-quiz-bridge\.js"/);
 
 console.log('STEP10_QUIZ_BRIDGE_STATIC_VERIFICATION_PASS');

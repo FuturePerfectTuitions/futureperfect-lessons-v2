@@ -3,15 +3,16 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-23",
-  "authorityVersion": "5.1-full-site-workflow",
+  "authorityVersion": "5.2-quiz-bridge-composition",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout and the subsequent shared-Worker quiz-bridge composition regression diagnosis.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
     "gch/portal-v2-current/GCH_STATE.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
     "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json"
   ],
   "authorityComposition": {
@@ -23,9 +24,13 @@
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
       "role": "higher authority only for Replace Resource statements it explicitly supersedes"
     },
+    "quizBridgeCompositionOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
+      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition, quiz redeem-route preservation incident and guarded repair state"
+    },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
-      "role": "website-wide end-to-end execution map tying Admin/source writes to canonical state, prepared projections, public API/browser verification, rollback and preservation obligations"
+      "role": "website-wide end-to-end execution map tying Admin/source writes to canonical state, prepared projections, public API/browser verification, rollback and preservation obligations; conflicting shared-worker entrypoint statements are superseded by the quiz bridge composition override"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Trace the complete write -> canonical -> prepared -> public API -> browser chain for student-visible changes. Preserve every shared Worker capability. Fail closed when projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever the authority set, workflow topology or closed/open gate status changes.",
@@ -38,6 +43,14 @@
     "productionWorkflowRun": 35854434444,
     "ownerBrowserVerification": "PASS",
     "permanentInvariant": "Admin Replace Resource success is valid only after both the canonical lesson resource and the current student-facing prepared lesson point to the verified replacement object; projection failure must fail closed."
+  },
+  "latestOpenRepair": {
+    "name": "Shared Worker quiz bridge composition restoration",
+    "date": "2026-09-23",
+    "status": "PREPARED_PENDING_PRODUCTION_VERIFICATION",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
+    "rootCause": "The 2026-09-23 Admin deployment used index-admin-tools.js as the top-level Worker entrypoint and therefore replaced the previously active quiz bridge wrapper instead of composing it.",
+    "requiredCloseout": "Guarded production deployment of the composed index-step10-quiz-bridge.js -> index-admin-tools.js chain, live bridge/Admin/Trial/protected-view regression PASS, then representative eligible student launch verification."
   },
   "websiteWorkflowCoverage": [
     "student authentication and logout",

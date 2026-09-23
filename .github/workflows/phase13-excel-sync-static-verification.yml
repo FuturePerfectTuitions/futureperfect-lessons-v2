@@ -7,6 +7,7 @@ on:
       - worker/src/index-phase13.js
       - worker/src/index-phase12.js
       - worker/src/index-phase17.js
+      - worker/src/index-step10-quiz-bridge.js
       - worker/src/index-admin-tools.js
       - worker/src/index-phase24-trial-vr.js
       - worker/wrangler.toml
@@ -21,6 +22,7 @@ on:
       - worker/src/index-phase13.js
       - worker/src/index-phase12.js
       - worker/src/index-phase17.js
+      - worker/src/index-step10-quiz-bridge.js
       - worker/src/index-admin-tools.js
       - worker/src/index-phase24-trial-vr.js
       - worker/wrangler.toml
@@ -54,7 +56,13 @@ jobs:
           node --check worker/src/index-phase12.js
           node tests/phase12-batch-aware-worker-verification.mjs
           node tests/phase13-excel-sync-verification.mjs
-          if grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
+          if grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml; then
+            node --check worker/src/index-step10-quiz-bridge.js
+            node --check worker/src/index-admin-tools.js
+            node --check worker/src/index-phase24-trial-vr.js
+            grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+            grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          elif grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
             node --check worker/src/index-admin-tools.js
             node --check worker/src/index-phase24-trial-vr.js
             grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
