@@ -33,14 +33,29 @@ jobs:
           root = Path('gch/portal-v2-current')
           current = json.loads((root / 'GCH_CURRENT.json').read_text())
           base = json.loads((root / 'GCH_STATE.json').read_text())
-          override = json.loads((root / 'GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json').read_text())
+          replace_override = json.loads((root / 'GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json').read_text())
+          quiz_override = json.loads((root / 'GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json').read_text())
           workflow = json.loads((root / 'WEBSITE_WORKFLOW_2026-09-23.json').read_text())
 
           assert current['status'] == 'AUTHORITATIVE_CURRENT'
-          assert current['authorityVersion'] == '5.1-full-site-workflow'
+          assert current['authorityVersion'] == '5.2-quiz-bridge-composition'
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
-          assert override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
+          assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
+          assert quiz_override['status'] in {
+              'REPAIR_PREPARED_PENDING_PRODUCTION_VERIFICATION',
+              'PRODUCTION_REPAIR_PASS_PENDING_STUDENT_BROWSER_VERIFICATION',
+              'CLOSED_PASS_OWNER_VERIFIED'
+          }
           assert workflow['status'] == 'AUTHORITATIVE_CURRENT_WORKFLOW'
+
+          expected_quiz_path = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json'
+          assert current['authorityComposition']['quizBridgeCompositionOverride']['path'] == expected_quiz_path
+          assert expected_quiz_path in current['readOrder']
+          assert quiz_override['requiredProductionTopology']['canonicalWranglerEntrypoint'] == 'src/index-step10-quiz-bridge.js'
+          assert quiz_override['requiredProductionTopology']['compositionChain'][0] == 'index-step10-quiz-bridge.js'
+          assert quiz_override['requiredProductionTopology']['compositionChain'][1] == 'index-admin-tools.js'
+          assert quiz_override['publicQuizRuntimeBoundary']['releaseContext'] == 'quiz-release-context-v2.0 / portal-live-maths11plus-release-v2'
+          assert quiz_override['publicQuizRuntimeBoundary']['quizWorkerMutationRequiredForThisIncident'] is False
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
@@ -53,8 +68,8 @@ jobs:
           assert rr['closedIncidentEvidence']['preparedOldKeyCount'] == 0
           assert rr['closedIncidentEvidence']['preparedNewKeyCount'] == 1
 
-          assert override['incidentCloseout']['ownerBrowserVerification']['result'] == 'PASS'
-          assert override['permanentImplementation']['failureSemantics']['failureMarker'] == 'RESOURCE_REPLACE_PROJECTION_FAILED'
+          assert replace_override['incidentCloseout']['ownerBrowserVerification']['result'] == 'PASS'
+          assert replace_override['permanentImplementation']['failureSemantics']['failureMarker'] == 'RESOURCE_REPLACE_PROJECTION_FAILED'
           assert 'prepared' in current['nonNegotiableCompletionRule'].lower()
 
           agents = Path('AGENTS.md').read_text()
