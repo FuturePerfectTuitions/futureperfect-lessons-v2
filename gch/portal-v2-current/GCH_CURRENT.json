@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-23",
-  "authorityVersion": "5.2-quiz-bridge-composition",
+  "authorityVersion": "5.3-replace-resource-preflight",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout and the shared-Worker quiz-bridge composition repair, hardening and owner-verified browser closeout.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout, shared-Worker quiz-bridge composition repair, and the newly diagnosed Replace Resource CORS-preflight transport defect.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -22,7 +22,7 @@
     },
     "replaceResourceOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
-      "role": "higher authority only for Replace Resource statements it explicitly supersedes"
+      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus the 2026-09-23 CORS-preflight defect and repair gate"
     },
     "quizBridgeCompositionOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
@@ -44,7 +44,27 @@
     "ownerBrowserVerification": "PASS",
     "permanentInvariant": "Admin Replace Resource success is valid only after both the canonical lesson resource and the current student-facing prepared lesson point to the verified replacement object; projection failure must fail closed."
   },
-  "latestOpenRepair": null,
+  "latestOpenRepair": {
+    "name": "Replace Resource CORS preflight passthrough",
+    "date": "2026-09-23",
+    "status": "FIX_IMPLEMENTED_PENDING_PRODUCTION_DEPLOY_AND_OWNER_RETRY",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
+    "incidentLesson": "Y6M1.4",
+    "displayLessonCode": "L3T2M24",
+    "uiFailure": "Replacement failed: Failed to fetch",
+    "diagnosticWorkflowRun": 35887723841,
+    "productionVersionDiagnosed": "a1d50246-d014-486f-aa32-57956c816640",
+    "rootCause": "The Replace Resource consistency wrapper treated OPTIONS preflight as a successful replacement response, then rejected it for missing lessonId/oldR2Key/newR2Key and returned HTTP 500, so the browser never sent the replacement POST.",
+    "stateSafety": "Read-only diagnostics proved canonical and prepared homework pointers remained on the original L3T2M24 object key; the failed browser attempt did not complete a replacement mutation.",
+    "fix": "Consistency processing is now gated to POST only; OPTIONS/non-POST requests pass through to the base handler. Dedicated regression coverage and a permanent preflight marker were added.",
+    "closureRequires": [
+      "static CI PASS",
+      "guarded production deploy PASS",
+      "live GitHub Pages-origin OPTIONS preflight HTTP 200 with CORS",
+      "owner retries L3T2M24 replacement successfully",
+      "student-facing replacement is verified before final closeout"
+    ]
+  },
   "latestClosedRepair": {
     "name": "Shared Worker quiz bridge composition restoration",
     "date": "2026-09-23",
@@ -63,7 +83,7 @@
     "lesson release import and prepared access publication",
     "ordinary student login provisioning",
     "Trial Login Manager create/inspect/delete/rearm semantics",
-    "Replace Resource end-to-end transaction and rollback",
+    "Replace Resource end-to-end transaction, CORS preflight and rollback",
     "resource open/capability delivery",
     "protected Answer Pack viewer controls",
     "online 11+ English PreLesson VR projection",
@@ -71,12 +91,13 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Completion requires the applicable prepared projection publication/readback and, for incident closeout, live API/browser verification where available.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Completion requires the applicable prepared projection publication/readback and, for incident closeout, live API/browser verification where available. Browser transport negotiation such as CORS OPTIONS is not an application mutation and must remain a successful pass-through prerequisite to the actual Admin POST.",
   "nextChangeProtocol": [
     "classify surface",
     "prove live owner/version/bindings",
     "identify canonical and prepared authorities",
     "trace read/write workflow",
+    "verify browser preflight/transport for cross-origin Admin mutations",
     "define rollback",
     "mutate only after gates pass",
     "verify canonical readback",
