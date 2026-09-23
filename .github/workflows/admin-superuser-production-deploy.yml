@@ -10,6 +10,7 @@ on:
       - 'assets/admin-replace-resource.js'
       - 'worker/src/admin-trial-manager.js'
       - 'worker/src/admin-resource-replace.js'
+      - 'worker/src/admin-resource-replace-consistency.js'
       - 'worker/src/admin-lesson-release-import.js'
       - 'worker/src/admin-lesson-release-import-email.js'
       - 'worker/src/parent-email.js'
@@ -22,6 +23,7 @@ on:
       - 'worker/src/index-phase23-protected-view-stability.js'
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
+      - 'scripts/reconcile-y5e2-resource-replacement-live.mjs'
       - 'tests/admin-trial-manager-verification.mjs'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
@@ -46,6 +48,12 @@ jobs:
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
       DEPLOY_MESSAGE: Portal Admin Tools with guarded Replace Resource operation
+      TARGET_LESSON: Y5E2
+      EXPECTED_LESSONS_KV_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      OLD_R2_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf
+      NEW_R2_KEY: english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2__replacement_20260923T095852Z_fxpjpy.pdf
+      EXPECTED_NEW_PDF_SHA256: 969da13f1c157e513629abb81ce0097d28c493d147bf43cfda13d23e29984389
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,6 +63,7 @@ jobs:
         run: |
           node --check worker/src/admin-trial-manager.js
           node --check worker/src/admin-resource-replace.js
+          node --check worker/src/admin-resource-replace-consistency.js
           node --check worker/src/admin-lesson-release-import.js
           node --check worker/src/admin-lesson-release-import-email.js
           node --check worker/src/parent-email.js
@@ -66,6 +75,7 @@ jobs:
           node --check worker/src/index-phase23-protected-view-stability.js
           node --check worker/src/index-phase24-trial-vr.js
           node --check worker/src/index-phase20-change16.js
+          node --check scripts/reconcile-y5e2-resource-replacement-live.mjs
           node --check assets/admin-trials.js
           node --check assets/admin-replace-resource.js
           node --check assets/phase23-protected-view-stability.js
@@ -80,8 +90,38 @@ jobs:
           node tests/admin-superuser-static-verification.mjs
           node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
           node tests/trial-runtime-access-verification.mjs
+          grep -Fq "./admin-resource-replace-consistency.js" worker/src/index-admin-tools.js
+          grep -Fq "replace-resource-consistency-v1" worker/src/admin-resource-replace-consistency.js
       - name: Deploy Worker preserving bindings and secrets
         run: bash ops/deploy_current_worker_preserve.sh
+      - name: Verify Replace Resource consistency implementation is live
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/admin-live-worker.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/admin-live-worker.bin
+          grep -aFq 'RESOURCE_REPLACE_PROJECTION_FAILED' /tmp/admin-live-worker.bin
+          echo 'REPLACE_RESOURCE_CONSISTENCY_LIVE_MARKER_PASS'
+      - name: Reconcile the stale Y5E2 prepared resource once
+        run: |
+          set -euo pipefail
+          node scripts/reconcile-y5e2-resource-replacement-live.mjs
+          jq -e '
+            .marker == "Y5E2_RESOURCE_RECONCILIATION_PASS" and
+            .status == "PASS" and
+            .canonicalNewKeyCount == 1 and
+            .canonicalOldKeyCount == 0 and
+            .preparedOldKeyCount == 0 and
+            .preparedNewKeyCount == 1 and
+            .canonicalSourcesMutated == false and
+            .writeTarget == "READ_MODELS_KV_ONLY" and
+            .safeToRerun == true
+          ' /tmp/y5e2-resource-reconciliation.json >/dev/null
+          echo 'Y5E2_PREPARED_RESOURCE_RECONCILIATION_PASS'
       - name: Verify Trial runtime access implementation is deployed
         run: |
           set -euo pipefail
@@ -132,15 +172,16 @@ jobs:
               && grep -Fq 'UNAUTHORISED' /tmp/admin-resource-body.json; then
               echo 'ADMIN_TRIAL_ROUTE_PROTECTED_LIVE_PASS'
               echo 'ADMIN_RESOURCE_ROUTE_PROTECTED_LIVE_PASS'
-              exit 0
+              break
+            fi
+            if test "$attempt" = '12'; then
+              echo 'Live Admin route verification did not converge.' >&2
+              cat /tmp/admin-trial-body.json >&2 || true
+              cat /tmp/admin-resource-body.json >&2 || true
+              exit 1
             fi
             sleep 5
           done
-
-          echo 'Live Admin route verification did not converge.' >&2
-          cat /tmp/admin-trial-body.json >&2 || true
-          cat /tmp/admin-resource-body.json >&2 || true
-          exit 1
       - name: Verify live protected viewer wrapper
         run: |
           set -euo pipefail
@@ -169,3 +210,11 @@ jobs:
           exit 1
       - name: Complete
         run: echo ADMIN_TOOLS_REPLACE_RESOURCE_PRODUCTION_DEPLOY_PASS
+      - name: Upload Y5E2 reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: y5e2-resource-reconciliation-evidence
+          retention-days: 30
+          if-no-files-found: ignore
+          path: /tmp/y5e2-resource-reconciliation.json
