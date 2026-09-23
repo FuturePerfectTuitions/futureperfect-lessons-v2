@@ -11,6 +11,7 @@ on:
       - assets/phase10.css
       - worker/src/index-phase10.js
       - worker/src/index-phase10-history.js
+      - worker/src/index-step10-quiz-bridge.js
       - worker/src/index-admin-tools.js
       - worker/src/index-phase24-trial-vr.js
       - worker/wrangler.toml
@@ -51,7 +52,13 @@ jobs:
           grep -Fq 'assets/phase10.js' phase10.html
           grep -Fq 'assets/phase10-counts.js' phase10.html
           grep -Fq 'assets/phase10-history.js' phase10.html
-          if grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
+          if grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml; then
+            node --check worker/src/index-step10-quiz-bridge.js
+            node --check worker/src/index-admin-tools.js
+            node --check worker/src/index-phase24-trial-vr.js
+            grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+            grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          elif grep -Fq 'main = "src/index-admin-tools.js"' worker/wrangler.toml; then
             node --check worker/src/index-admin-tools.js
             node --check worker/src/index-phase24-trial-vr.js
             grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
