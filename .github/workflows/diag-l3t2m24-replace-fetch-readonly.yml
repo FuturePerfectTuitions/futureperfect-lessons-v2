@@ -1,0 +1,201 @@
+name: L3T2M24 Replace Resource read-only diagnostic
+
+on:
+  push:
+    branches:
+      - diag/l3t2m24-replace-fetch-2026-09-23
+    paths:
+      - .github/workflows/diag-l3t2m24-replace-fetch-readonly.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WORKER_URL: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+      LESSON_ID: Y6M1.4
+      PREPARED_SCOPE: lesson:Y6M1.4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Confirm read-only credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'DIAG_CREDENTIALS_PRESENT'
+
+      - name: Capture current production deployment and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest deployments status --name "$WORKER_NAME" --json | tee /tmp/deploy.json
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq '{success, result:{bindings:[.result.bindings[] | {name,type,namespace_id,bucket_name,database_name,database_id,service}]}}' /tmp/settings.json
+          jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json > /tmp/lessons_kv_id
+          jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV") | .namespace_id' /tmp/settings.json > /tmp/read_models_kv_id
+          test -s /tmp/lessons_kv_id
+          test -s /tmp/read_models_kv_id
+
+      - name: Verify deployed composition and Replace Resource markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/worker-package.bin
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path('/tmp/worker-package.bin').read_bytes()
+          markers=[
+            b'replace-resource-consistency-v1',
+            b'RESOURCE_REPLACE_PROJECTION_FAILED',
+            b'/api/v1/quiz-bridge/redeem',
+            b'/api/v1/admin/resources/replace'
+          ]
+          for m in markers:
+              print(m.decode()+':', 'PASS' if m in b else 'MISSING')
+          if any(m not in b for m in markers):
+              raise SystemExit('DEPLOYED_MARKER_MISSING')
+          PY
+
+      - name: Read canonical Y6M1.4 resource state
+        shell: bash
+        run: |
+          set -euo pipefail
+          LESSONS_KV_ID="$(cat /tmp/lessons_kv_id)"
+          npx --yes wrangler@latest kv key get "lesson:${LESSON_ID}" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/lesson.json
+          python3 - <<'PY'
+          import json
+          p='/tmp/lesson.json'
+          obj=json.load(open(p))
+          out=[]
+          def walk(v,path=()):
+              if isinstance(v,dict):
+                  if v.get('r2Key'):
+                      out.append({
+                          'path':'.'.join(map(str,path)),
+                          'resourceId':v.get('resourceId'),
+                          'displayName':v.get('displayName'),
+                          'r2Key':v.get('r2Key')
+                      })
+                  for k,x in v.items():
+                      if k!='r2Key': walk(x,path+(k,))
+              elif isinstance(v,list):
+                  for i,x in enumerate(v): walk(x,path+(i,))
+          walk(obj)
+          print('CANONICAL_LESSON_ID', obj.get('lessonId'))
+          print('CANONICAL_TITLE', obj.get('title'))
+          print('CANONICAL_RESOURCES')
+          print(json.dumps(out,indent=2))
+          selected=[x for x in out if 'L3T2M24 Homework Linear Sequences.pdf' in str(x.get('displayName') or '') or str(x.get('r2Key') or '').endswith('/L3T2M24 Homework Linear Sequences.pdf')]
+          print('TARGET_RESOURCE_MATCH_COUNT',len(selected))
+          print('TARGET_RESOURCE_STATE',json.dumps(selected,indent=2))
+          PY
+
+      - name: Read current prepared Y6M1.4 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          READ_MODELS_KV_ID="$(cat /tmp/read_models_kv_id)"
+          POINTER_KEY='rm:v1:scope:lesson_3AY6M1.4:current'
+          echo "PREPARED_POINTER_KEY=$POINTER_KEY"
+          set +e
+          npx --yes wrangler@latest kv key get "$POINTER_KEY" --namespace-id "$READ_MODELS_KV_ID" --remote > /tmp/pointer.json
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] || [ ! -s /tmp/pointer.json ]; then
+            echo 'PREPARED_POINTER_UNAVAILABLE'
+            exit 0
+          fi
+          cat /tmp/pointer.json | jq '{kind,scope,current,previous,updatedAt}'
+          python3 - <<'PY' > /tmp/version_key
+          import json, urllib.parse
+          p=json.load(open('/tmp/pointer.json'))
+          v=(p.get('current') or {}).get('version','')
+          enc=urllib.parse.quote(v,safe="~()*!.'-").replace('%','_')
+          print('rm:v1:scope:lesson_3AY6M1.4:version:'+enc)
+          PY
+          VERSION_KEY="$(cat /tmp/version_key)"
+          npx --yes wrangler@latest kv key get "$VERSION_KEY" --namespace-id "$READ_MODELS_KV_ID" --remote > /tmp/envelope.json
+          python3 - <<'PY'
+          import json
+          env=json.load(open('/tmp/envelope.json'))
+          payload=env.get('payload') or {}
+          resources=payload.get('resources') or []
+          slim=[]
+          for r in resources:
+              if isinstance(r,dict):
+                  slim.append({k:r.get(k) for k in ('resourceId','displayName','kind','objectKey') if k in r})
+          print('PREPARED_SCOPE',env.get('scope'))
+          print('PREPARED_VERSION',env.get('version'))
+          print('PREPARED_RESOURCE_COUNT',len(slim))
+          print('PREPARED_RESOURCES')
+          print(json.dumps(slim,indent=2))
+          selected=[r for r in slim if 'L3T2M24 Homework Linear Sequences.pdf' in str(r.get('displayName') or '') or str(r.get('objectKey') or '').endswith('/L3T2M24 Homework Linear Sequences.pdf')]
+          print('PREPARED_TARGET_MATCH_COUNT',len(selected))
+          print('PREPARED_TARGET_STATE',json.dumps(selected,indent=2))
+          PY
+
+      - name: Verify live CORS preflight contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for origin in 'https://futureperfecttuitions.github.io' 'https://futureperfect.education'; do
+            echo "=== ORIGIN $origin ==="
+            curl --silent --show-error --dump-header /tmp/h.txt --output /tmp/b.txt \
+              --request OPTIONS "$WORKER_URL/api/v1/admin/resources/replace" \
+              --header "Origin: $origin" \
+              --header 'Access-Control-Request-Method: POST' \
+              --header 'Access-Control-Request-Headers: authorization' \
+              --write-out 'HTTP=%{http_code}\n'
+            tr -d '\r' < /tmp/h.txt | grep -Ei '^(HTTP/|access-control-allow-origin:|access-control-allow-headers:|access-control-allow-methods:|vary:)' || true
+            cat /tmp/b.txt; echo
+          done
+
+      - name: Verify large multipart reaches protected route without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/diag.pdf')
+          p.write_bytes(b'%PDF-1.4\n% diagnostic only\n'+b'0'*(2200000))
+          print('DIAG_UPLOAD_BYTES',p.stat().st_size)
+          PY
+          origin='https://futureperfecttuitions.github.io'
+          curl --silent --show-error --dump-header /tmp/post-h.txt --output /tmp/post-b.txt \
+            --request POST "$WORKER_URL/api/v1/admin/resources/replace" \
+            --header "Origin: $origin" \
+            --header 'Authorization: Bearer deliberately-invalid-diagnostic-token' \
+            --form 'lessonId=Y6M1.4' \
+            --form 'resourcePath=["resources",0]' \
+            --form 'expectedR2Key=diagnostic-do-not-match' \
+            --form 'file=@/tmp/diag.pdf;type=application/pdf' \
+            --write-out 'HTTP=%{http_code}\n'
+          tr -d '\r' < /tmp/post-h.txt | grep -Ei '^(HTTP/|access-control-allow-origin:|content-type:|cf-ray:)' || true
+          cat /tmp/post-b.txt; echo
+          python3 - <<'PY'
+          import json
+          b=json.load(open('/tmp/post-b.txt'))
+          assert b.get('error')=='UNAUTHORISED', b
+          print('LARGE_MULTIPART_EDGE_AND_CORS_PASS')
+          PY
+
+      - name: Diagnostic complete
+        run: echo 'L3T2M24_REPLACE_READONLY_DIAGNOSTIC_COMPLETE'
