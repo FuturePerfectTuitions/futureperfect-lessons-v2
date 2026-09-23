@@ -44,8 +44,27 @@ jobs:
           test -n "$READ_MODELS_ID"; test "$READ_MODELS_ID" != "null"
           test -n "$BUCKET"; test "$BUCKET" != "null"
 
-          curl -fsS -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}" -o /tmp/worker-package.bin
+          curl -fsS -D /tmp/worker-package-headers.txt -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}" -o /tmp/worker-package.bin
           PACKAGE_SHA="$(sha256sum /tmp/worker-package.bin | awk '{print $1}')"
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib, json, re
+          headers=open('/tmp/worker-package-headers.txt','rb').read().decode('latin-1','replace')
+          body=open('/tmp/worker-package.bin','rb').read()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          ct=m.group(1).strip() if m else ''
+          modules=[]
+          if ct.lower().startswith('multipart/'):
+              msg=BytesParser(policy=default).parsebytes(('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body)
+              for part in msg.iter_parts():
+                  name=part.get_filename() or part.get_param('name',header='content-disposition') or part.get_param('name') or '(unnamed)'
+                  payload=part.get_payload(decode=True) or b''
+                  modules.append({'name':name,'sha256':hashlib.sha256(payload).hexdigest(),'bytes':len(payload)})
+          else:
+              modules=[{'name':'single-script','sha256':hashlib.sha256(body).hexdigest(),'bytes':len(body)}]
+          json.dump({'contentType':ct,'modules':modules},open('/tmp/module-inventory.json','w'),indent=2)
+          PY
 
           enc_canon="$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote("lesson:"+os.environ["TARGET_LESSON"], safe=""))')"
           curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${LESSONS_ID}/values/${enc_canon}" > /tmp/canonical.json
@@ -87,7 +106,8 @@ jobs:
             --slurpfile pointer /tmp/pointer.json \
             --slurpfile envelope /tmp/envelope.json \
             --slurpfile settings /tmp/settings.json \
-            '{observedAt:$observedAt,mode:"READ_ONLY",worker:$worker,deployedPackageSha256:$packageSha,bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,materialsR2:$bucket},bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),targetLesson:$lesson,canonicalLesson:$canonical[0],preparedLessonKeyList:($keys[0].result // []),preparedLessonPointer:$pointer[0],preparedLessonEnvelope:$envelope[0]}' \
+            --slurpfile modules /tmp/module-inventory.json \
+            '{observedAt:$observedAt,mode:"READ_ONLY",worker:$worker,deployedPackageSha256:$packageSha,deployedPackage:$modules[0],bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,materialsR2:$bucket},bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),targetLesson:$lesson,canonicalLesson:$canonical[0],preparedLessonKeyList:($keys[0].result // []),preparedLessonPointer:$pointer[0],preparedLessonEnvelope:$envelope[0]}' \
             > gch/evidence/replace-resource-live-readonly-2026-09-23.json
 
       - name: Commit sanitized evidence
