@@ -1,6 +1,11 @@
 name: One-off Aar1811 full Year 6 access
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ops/grant-aar1811-year6-full.mjs'
+      - '.github/workflows/grant-aar1811-year6-full.yml'
   push:
     branches: [main]
     paths:
@@ -21,12 +26,9 @@ env:
   EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
 
 jobs:
-  apply:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,6 +44,20 @@ jobs:
           grep -Fq "MATHS_Y6_FULL" worker/src/access-read-model-sync.js
           grep -Fq "'english-year6'" worker/src/access-read-model-sync.js
           grep -Fq "ENGLISH_Y6_FULL" worker/src/access-read-model-sync.js
+
+  apply:
+    if: github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Require production credentials
         shell: bash
         run: |
