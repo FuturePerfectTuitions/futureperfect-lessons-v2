@@ -75,7 +75,9 @@
     "staticRegression": "tests/shared-worker-entrypoint-preservation.mjs plus updated step10 bridge static verification",
     "productionWorkflow": ".github/workflows/admin-superuser-production-deploy.yml",
     "legacyGateCWorkflow": ".github/workflows/step10-gate-c-hidden-backend-deploy.yml",
-    "legacyGateCProductionDeployDisposition": "RETIRED_TO_PULL_REQUEST_VERIFICATION_ONLY_IN_fix/retire-legacy-step10-production-deploy-2026-09-23",
+    "legacyGateCProductionDeployDisposition": "RETIRED_TO_PULL_REQUEST_VERIFICATION_ONLY_ON_MAIN",
+    "followupHardeningPr": 212,
+    "followupHardeningMergeCommit": "60f9fa8df9639f1596539b377d40171edd20555e",
     "workflowGuards": [
       "bridge source syntax and bridge regression tests",
       "canonical wrangler entrypoint assertion",
@@ -108,9 +110,12 @@
       "adminToolsReplaceResourceStatic": 35883197334,
       "adminLessonReleaseImport": 35883197565,
       "portalGchAuthorityValidation": 35883197258,
-      "step10GateCHiddenBackendDeploy": 35883197199
+      "step10GateCHiddenBackendDeploy": 35883197199,
+      "followupStep10CompatibilityVerification": 35883971491,
+      "followupAuthorityValidationBeforeMerge": 35884420423,
+      "followupAuthorityValidationAfterMerge": 35884493573
     },
-    "result": "All triggered non-production/static compatibility gates for the composed shared Worker code head completed successfully before merge."
+    "result": "All triggered non-production/static compatibility gates for the composed shared Worker repair and the duplicate-deploy retirement completed successfully."
   },
   "productionEvidence": {
     "canonicalDeployRun": 35883457258,
@@ -133,7 +138,8 @@
     "bridgeUnauthenticatedContract": "POST /api/v1/quiz-bridge/redeem returned HTTP 401 with UNAUTHORIZED after propagation",
     "bindingPreservation": "PASS_WITH_EMAIL_AND_READ_MODELS",
     "rollbackTriggered": false,
-    "legacyGateCFailureInterpretation": "The historical Gate C job first redeployed the same canonical composed Worker and passed existing Portal regression checks. It then failed because it still asserted obsolete /api/v1/student/quiz/eligibility and /api/v1/student/quiz/launch routes on the shared Worker. Current authority assigns public launch to the Student Worker /api/v2 routes, so this is a stale workflow assertion, not evidence that the composed production bridge failed."
+    "legacyGateCFailureInterpretation": "The historical Gate C job first redeployed the same canonical composed Worker and passed existing Portal regression checks. It then failed because it still asserted obsolete /api/v1/student/quiz/eligibility and /api/v1/student/quiz/launch routes on the shared Worker. Current authority assigns public launch to the Student Worker /api/v2 routes, so this is a stale workflow assertion, not evidence that the composed production bridge failed.",
+    "followupHardeningMergeTriggeredProductionDeploy": false
   },
   "stopConditions": [
     "Do not claim end-to-end student closeout until a representative eligible student can launch 11+ Practice without the invalid-link failure.",
