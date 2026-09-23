@@ -1,21 +1,38 @@
 {
   "schema": "fpt.portal.website-workflow.v1",
   "documentType": "MACHINE_ORIENTED_FULL_SITE_WORKFLOW_AUTHORITY",
-  "status": "DRAFT_PENDING_GCH_LINKAGE",
+  "status": "AUTHORITATIVE_CURRENT_WORKFLOW",
   "effectiveDate": "2026-09-23",
   "scope": "ENTIRE_FPT_PORTAL_V2_WEBSITE_AND_ADMIN_OPERATIONS",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "replaceResourceOverride": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
   "purpose": "Provide one end-to-end operational and engineering workflow map for the full FPT Portal V2 system, including the permanent Replace Resource consistency change verified by the owner on 2026-09-23.",
   "authorityRules": {
     "mustReadFirst": [
       "AGENTS.md",
       "gch/portal-v2-current/GCH_STATE.json",
+      "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
       "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json"
     ],
+    "precedence": "Explicit new owner instruction and fresh live proof remain highest authority. This workflow consolidates the website-wide execution model; the Replace Resource override supersedes conflicting base statements only within its declared scope; all non-conflicting base GCH invariants remain binding.",
     "freshRuntimeProofOverridesRepositoryAssumption": true,
     "adminSuccessIsNotStudentVisibilityProof": true,
     "canonicalStateIsNotPreparedVisibilityProof": true,
     "studentVisibleMutationCompletionChain": "admin/source write -> canonical readback -> prepared compile/reconcile -> atomic prepared publication -> prepared readback/parity -> live public API -> representative browser verification",
     "failClosed": true
+  },
+  "provenance": {
+    "productionReplaceResourceImplementation": {
+      "finalGuardCommit": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
+      "productionWorkflowRun": 35854434444,
+      "result": "SUCCESS"
+    },
+    "ownerVerification": {
+      "date": "2026-09-23",
+      "statement": "Verified, this worked.",
+      "classification": "REPRESENTATIVE_OWNER_BROWSER_VERIFICATION_PASS",
+      "scope": "Y5E2 Replace Resource incident closeout"
+    }
   },
   "systemTopology": {
     "studentFrontend": {
