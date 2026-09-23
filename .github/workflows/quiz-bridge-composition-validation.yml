@@ -9,9 +9,7 @@ on:
       - 'worker/src/index-admin-tools.js'
       - 'worker/src/admin-resource-replace-consistency.js'
       - 'ops/deploy_current_worker_preserve.sh'
-      - 'tests/step10-quiz-bridge-static-verification.mjs'
-      - 'tests/cp12-quiz-redeem-v2.mjs'
-      - 'tests/shared-worker-entrypoint-preservation.mjs'
+      - 'tests/**'
       - '.github/workflows/admin-superuser-production-deploy.yml'
       - '.github/workflows/quiz-bridge-composition-validation.yml'
 
