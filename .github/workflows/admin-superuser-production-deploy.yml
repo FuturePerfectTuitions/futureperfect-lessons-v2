@@ -29,6 +29,7 @@ on:
       - 'tests/shared-worker-entrypoint-preservation.mjs'
       - 'tests/admin-trial-manager-verification.mjs'
       - 'tests/admin-resource-replace-verification.mjs'
+      - 'tests/admin-resource-replace-consistency-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-lesson-release-import-verification.mjs'
       - 'tests/parent-email-import-verification.mjs'
@@ -83,6 +84,7 @@ jobs:
           node tests/shared-worker-entrypoint-preservation.mjs
           node --experimental-default-type=module tests/admin-trial-manager-verification.mjs
           node tests/admin-resource-replace-verification.mjs
+          node tests/admin-resource-replace-consistency-verification.mjs
           node tests/admin-tools-ui-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/parent-email-import-verification.mjs
@@ -94,6 +96,7 @@ jobs:
           grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
           grep -Fq "./admin-resource-replace-consistency.js" worker/src/index-admin-tools.js
           grep -Fq "replace-resource-consistency-v1" worker/src/admin-resource-replace-consistency.js
+          grep -Fq "replace-resource-preflight-pass-v1" worker/src/admin-resource-replace-consistency.js
       - name: Capture production rollback anchor
         id: rollback
         run: |
@@ -118,6 +121,7 @@ jobs:
           grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/admin-live-worker.bin
           grep -aFq 'PORTAL_SESSION_INVALID' /tmp/admin-live-worker.bin
           grep -aFq 'replace-resource-consistency-v1' /tmp/admin-live-worker.bin
+          grep -aFq 'replace-resource-preflight-pass-v1' /tmp/admin-live-worker.bin
           grep -aFq 'RESOURCE_REPLACE_PROJECTION_FAILED' /tmp/admin-live-worker.bin
           grep -aFq 'trial-runtime-access-v2' /tmp/admin-live-worker.bin
           echo 'SHARED_WORKER_COMPOSED_LIVE_MARKER_PASS'
@@ -154,8 +158,40 @@ jobs:
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/admin-live-worker.bin
           grep -aFq 'replace-resource-consistency-v1' /tmp/admin-live-worker.bin
+          grep -aFq 'replace-resource-preflight-pass-v1' /tmp/admin-live-worker.bin
           grep -aFq 'RESOURCE_REPLACE_PROJECTION_FAILED' /tmp/admin-live-worker.bin
           echo 'REPLACE_RESOURCE_CONSISTENCY_LIVE_MARKER_PASS'
+      - name: Verify live Replace Resource CORS preflight
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error \
+              --request OPTIONS \
+              --header "Origin: $ORIGIN" \
+              --header 'Access-Control-Request-Method: POST' \
+              --header 'Access-Control-Request-Headers: authorization' \
+              --dump-header /tmp/replace-preflight-headers.txt \
+              --output /tmp/replace-preflight-body.json \
+              --write-out '%{http_code}' \
+              "$BASE/api/v1/admin/resources/replace")"
+            echo "Replace Resource preflight verification attempt $attempt returned HTTP $code"
+            cat /tmp/replace-preflight-body.json || true
+            if test "$code" = '200' \
+              && grep -iFq "access-control-allow-origin: $ORIGIN" /tmp/replace-preflight-headers.txt \
+              && grep -iEq '^access-control-allow-headers:.*authorization' /tmp/replace-preflight-headers.txt \
+              && grep -iEq '^access-control-allow-methods:.*POST' /tmp/replace-preflight-headers.txt \
+              && grep -Fq '"ok":true' /tmp/replace-preflight-body.json; then
+              echo 'REPLACE_RESOURCE_PREFLIGHT_LIVE_PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Live Replace Resource preflight verification did not converge.' >&2
+          cat /tmp/replace-preflight-headers.txt >&2 || true
+          cat /tmp/replace-preflight-body.json >&2 || true
+          exit 1
       - name: Verify Trial runtime access implementation is deployed
         run: |
           set -euo pipefail
