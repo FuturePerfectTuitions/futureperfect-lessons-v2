@@ -6,7 +6,7 @@
   "authorityVersion": "5.2-quiz-bridge-composition",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout and the subsequent shared-Worker quiz-bridge composition regression diagnosis.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout and the shared-Worker quiz-bridge composition repair, hardening and owner-verified browser closeout.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -26,7 +26,7 @@
     },
     "quizBridgeCompositionOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
-      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition, quiz redeem-route preservation incident and guarded repair state"
+      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition, quiz redeem-route preservation incident, guarded repair and owner-verified closeout state"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
@@ -44,13 +44,18 @@
     "ownerBrowserVerification": "PASS",
     "permanentInvariant": "Admin Replace Resource success is valid only after both the canonical lesson resource and the current student-facing prepared lesson point to the verified replacement object; projection failure must fail closed."
   },
-  "latestOpenRepair": {
+  "latestOpenRepair": null,
+  "latestClosedRepair": {
     "name": "Shared Worker quiz bridge composition restoration",
     "date": "2026-09-23",
-    "status": "PREPARED_PENDING_PRODUCTION_VERIFICATION",
+    "status": "CLOSED_PASS_OWNER_VERIFIED",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
     "rootCause": "The 2026-09-23 Admin deployment used index-admin-tools.js as the top-level Worker entrypoint and therefore replaced the previously active quiz bridge wrapper instead of composing it.",
-    "requiredCloseout": "Guarded production deployment of the composed index-step10-quiz-bridge.js -> index-admin-tools.js chain, live bridge/Admin/Trial/protected-view regression PASS, then representative eligible student launch verification."
+    "productionDeploymentRun": 35883457258,
+    "hardeningMergeCommit": "60f9fa8df9639f1596539b377d40171edd20555e",
+    "ownerBrowserVerification": "PASS",
+    "closeoutCommit": "1dbf2dd99b1f4071b2299b2fa847c12d11fc12ca",
+    "permanentInvariant": "The shared production Worker must retain the composed index-step10-quiz-bridge.js -> index-admin-tools.js chain; legacy Gate C remains verification-only and must not become a second production deploy path."
   },
   "websiteWorkflowCoverage": [
     "student authentication and logout",
