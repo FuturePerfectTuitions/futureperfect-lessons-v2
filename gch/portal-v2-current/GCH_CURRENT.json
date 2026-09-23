@@ -1,0 +1,70 @@
+{
+  "schema": "fpt.portal.gch.current-manifest.v1",
+  "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
+  "status": "AUTHORITATIVE_CURRENT",
+  "effectiveDate": "2026-09-23",
+  "authorityVersion": "5.1-full-site-workflow",
+  "humanReadableZipRequired": false,
+  "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system after the 2026-09-23 Replace Resource consistency closeout.",
+  "readOrder": [
+    "AGENTS.md",
+    "gch/portal-v2-current/GCH_CURRENT.json",
+    "gch/portal-v2-current/GCH_STATE.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
+    "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json"
+  ],
+  "authorityComposition": {
+    "base": {
+      "path": "gch/portal-v2-current/GCH_STATE.json",
+      "role": "base business invariants, topology, preservation ledger, open gates, stop conditions and historical reconciliation"
+    },
+    "replaceResourceOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
+      "role": "higher authority only for Replace Resource statements it explicitly supersedes"
+    },
+    "fullSiteWorkflow": {
+      "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
+      "role": "website-wide end-to-end execution map tying Admin/source writes to canonical state, prepared projections, public API/browser verification, rollback and preservation obligations"
+    }
+  },
+  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Trace the complete write -> canonical -> prepared -> public API -> browser chain for student-visible changes. Preserve every shared Worker capability. Fail closed when projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever the authority set, workflow topology or closed/open gate status changes.",
+  "latestClosedChange": {
+    "name": "Replace Resource canonical-to-prepared consistency",
+    "date": "2026-09-23",
+    "status": "CLOSED_PASS_OWNER_VERIFIED",
+    "incidentLesson": "Y5E2",
+    "productionGuardCommit": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
+    "productionWorkflowRun": 35854434444,
+    "ownerBrowserVerification": "PASS",
+    "permanentInvariant": "Admin Replace Resource success is valid only after both the canonical lesson resource and the current student-facing prepared lesson point to the verified replacement object; projection failure must fail closed."
+  },
+  "websiteWorkflowCoverage": [
+    "student authentication and logout",
+    "student home/subjects/views/lesson navigation",
+    "lesson release import and prepared access publication",
+    "ordinary student login provisioning",
+    "Trial Login Manager create/inspect/delete/rearm semantics",
+    "Replace Resource end-to-end transaction and rollback",
+    "resource open/capability delivery",
+    "protected Answer Pack viewer controls",
+    "online 11+ English PreLesson VR projection",
+    "manual parent email boundary",
+    "quiz bridge/path-scoped compatibility preservation",
+    "shared Worker deployment preservation and regression verification"
+  ],
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Completion requires the applicable prepared projection publication/readback and, for incident closeout, live API/browser verification where available.",
+  "nextChangeProtocol": [
+    "classify surface",
+    "prove live owner/version/bindings",
+    "identify canonical and prepared authorities",
+    "trace read/write workflow",
+    "define rollback",
+    "mutate only after gates pass",
+    "verify canonical readback",
+    "verify prepared parity/readback",
+    "verify public API/browser when applicable",
+    "run shared-capability regressions",
+    "record evidence and update GCH authority"
+  ]
+}

@@ -84,7 +84,13 @@
       "evidenceArtifactName": "y5e2-resource-reconciliation-evidence",
       "evidenceArtifactId": 10746946804
     },
-    "note": "The final repair verification was idempotent: by the guarded run, the prepared scope already contained the new key and no old key; the run independently read back and proved the correct state."
+    "ownerBrowserVerification": {
+      "date": "2026-09-23",
+      "result": "PASS",
+      "statement": "Verified, this worked.",
+      "meaning": "The owner verified the repaired Replace Resource behaviour through the live student-facing experience after the production fix."
+    },
+    "note": "The final repair verification was idempotent: by the guarded run, the prepared scope already contained the new key and no old key; the run independently read back and proved the correct state. The owner subsequently verified the student-facing result and closed the incident."
   },
   "finalProductionVerification": {
     "workflow": ".github/workflows/admin-superuser-production-deploy.yml",
