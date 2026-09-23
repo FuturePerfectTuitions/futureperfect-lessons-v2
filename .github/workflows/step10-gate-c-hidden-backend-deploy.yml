@@ -1,20 +1,22 @@
-name: Step 10 Gate C hidden backend deploy
+name: Step 10 Gate C bridge compatibility verification
 
-# 2026-09-18: restore the approved hidden Step 10 wrapper after the later
-# parent-email production deployment replaced the live Worker entrypoint.
+# Historical Gate C originally deployed the shared production Worker directly.
+# As of 2026-09-23 the canonical production deployment owner is
+# admin-superuser-production-deploy.yml, which deploys the composed
+# Quiz Bridge -> Admin Tools -> current Portal chain with rollback and live
+# compatibility checks. This workflow is intentionally verification-only so
+# a change to the Step 10 bridge cannot race a second production deployment.
 on:
   pull_request:
     paths:
       - 'worker/src/index-step10-quiz-bridge.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'worker/src/index-phase24-trial-vr.js'
+      - 'worker/wrangler.toml'
       - 'worker/migrations/0011_quiz_launch_codes.sql'
       - 'tests/step10-quiz-bridge-static-verification.mjs'
-      - '.github/workflows/step10-gate-c-hidden-backend-deploy.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'worker/src/index-step10-quiz-bridge.js'
-      - 'worker/migrations/0011_quiz_launch_codes.sql'
-      - 'tests/step10-quiz-bridge-static-verification.mjs'
+      - 'tests/cp12-quiz-redeem-v2.mjs'
+      - 'tests/shared-worker-entrypoint-preservation.mjs'
       - '.github/workflows/step10-gate-c-hidden-backend-deploy.yml'
 
 permissions:
@@ -33,7 +35,14 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker/src/index-step10-quiz-bridge.js
+          node --check worker/src/index-admin-tools.js
+          node --check worker/src/index-phase24-trial-vr.js
           node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+          grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
       - name: Re-run established Portal regressions
         run: |
           set -euo pipefail
@@ -46,82 +55,4 @@ jobs:
           node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
           node tests/phase12-batch-aware-worker-verification.mjs
           node tests/phase13-excel-sync-verification.mjs
-
-  deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
-      WRANGLER_VERSION: 4.134.0
-      WORKER_ENTRYPOINT: src/index-step10-quiz-bridge.js
-      DEPLOY_MESSAGE: Step 10 Gate C hidden 11+ Practice bridge
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Preflight production bridge prerequisites
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/step10-worker-settings.json
-          jq -e '.success == true' /tmp/step10-worker-settings.json >/dev/null
-          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and ((.type//"")|test("secret";"i")))' /tmp/step10-worker-settings.json >/dev/null
-          npx --yes wrangler@"$WRANGLER_VERSION" d1 execute fpt_portal_v2_db --remote --command 'SELECT COUNT(*) AS launch_code_rows FROM quiz_launch_codes;' --yes
-          echo STEP10_GATE_C_PREREQUISITES_PASS
-      - name: Deploy bridge preserving all production bindings and secrets
-        run: bash ops/deploy_current_worker_preserve.sh
-      - name: Verify existing Portal protected routes
-        run: |
-          set -euo pipefail
-          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
-          ORIGIN='https://lessons.futureperfect.education'
-          for attempt in $(seq 1 12); do
-            admin_code="$(curl --silent --show-error --request POST --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --data '{}' --output /tmp/step10-admin.json --write-out '%{http_code}' "$BASE/api/v1/admin/trials/list")"
-            protected_code="$(curl --silent --show-error --header "Origin: $ORIGIN" --dump-header /tmp/step10-protected-headers.txt --output /tmp/step10-protected.json --write-out '%{http_code}' "$BASE/api/v1/student/answer-view/invalid-protected-view-token")"
-            if test "$admin_code" = '401' \
-              && grep -Fq 'UNAUTHORISED' /tmp/step10-admin.json \
-              && test "$protected_code" = '410' \
-              && grep -iFq 'x-fpt-protected-view-stability: phase23-protected-view-stability-v3' /tmp/step10-protected-headers.txt \
-              && grep -Fq 'ANSWER_VIEW_INVALID' /tmp/step10-protected.json; then
-              echo STEP10_EXISTING_PORTAL_REGRESSION_PASS
-              break
-            fi
-            if test "$attempt" = '12'; then
-              echo 'Existing Portal regression verification failed.' >&2
-              cat /tmp/step10-admin.json >&2 || true
-              cat /tmp/step10-protected.json >&2 || true
-              exit 1
-            fi
-            sleep 5
-          done
-      - name: Verify hidden bridge routes and shared-secret handshake
-        run: |
-          set -euo pipefail
-          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
-          ORIGIN='https://lessons.futureperfect.education'
-
-          eligibility_code="$(curl --silent --show-error --header "Origin: $ORIGIN" --output /tmp/step10-eligibility.json --write-out '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
-          launch_code="$(curl --silent --show-error --request POST --header "Origin: $ORIGIN" --header 'Content-Type: application/json' --data '{}' --output /tmp/step10-launch.json --write-out '%{http_code}' "$BASE/api/v1/student/quiz/launch")"
-          redeem_code="$(curl --silent --show-error --request POST --header 'Content-Type: application/json' --data '{"code":"gate-c-public-unauthorised-probe"}' --output /tmp/step10-redeem.json --write-out '%{http_code}' "$BASE/api/v1/quiz-bridge/redeem")"
-
-          test "$eligibility_code" = '401'
-          grep -Fq '"eligible":false' /tmp/step10-eligibility.json
-          test "$launch_code" = '401'
-          grep -Fq 'SESSION_INVALID' /tmp/step10-launch.json
-          test "$redeem_code" = '401'
-          grep -Fq 'UNAUTHORIZED' /tmp/step10-redeem.json
-
-          quiz_probe_code="$(curl --silent --show-error --max-redirs 0 --output /tmp/step10-quiz-probe.html --write-out '%{http_code}' 'https://quiz.futureperfect.education/launch?code=gate-c-invalid-shared-secret-probe')"
-          test "$quiz_probe_code" = '410'
-          grep -Fq 'practice link is no longer valid' /tmp/step10-quiz-probe.html
-          echo STEP10_SHARED_SECRET_HANDSHAKE_PASS
-      - name: Complete
-        run: echo STEP10_GATE_C_HIDDEN_BACKEND_DEPLOY_PASS
+          echo STEP10_GATE_C_COMPATIBILITY_VERIFICATION_PASS
