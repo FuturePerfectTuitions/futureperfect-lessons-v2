@@ -1,4 +1,5 @@
 name: Reconcile Y5E2 stale prepared resource
+# Guarded one-time repair for the stale read-model left by the pre-fix Replace Resource operation.
 
 on:
   push:
@@ -129,10 +130,6 @@ jobs:
           const newMatches = resources.filter(item => clean(item?.objectKey) === env.NEW_R2_KEY);
 
           let wrote = false;
-          let publishedVersion = originalPointer.current.version;
-          let payloadSha256 = originalPointer.current.sha256 || '';
-          let envelopeSha256 = originalPointer.current.envelopeSha256 || '';
-
           if (oldMatches.length === 0 && newMatches.length === 1) {
             // Idempotent success: a prior run already reconciled this exact resource.
           } else {
@@ -145,8 +142,8 @@ jobs:
             nextResources[0].objectKey = env.NEW_R2_KEY;
 
             const payloadText = stableStringify(nextPayload);
-            payloadSha256 = sha256(payloadText);
-            publishedVersion = `resource-reconcile-y5e2-${Date.now()}`;
+            const payloadSha256 = sha256(payloadText);
+            const publishedVersion = `resource-reconcile-y5e2-${Date.now()}`;
             const nextEnvelope = {
               schemaVersion: 1,
               kind: 'prepared-read-model-envelope',
@@ -156,7 +153,7 @@ jobs:
               payload: nextPayload
             };
             const nextEnvelopeText = stableStringify(nextEnvelope);
-            envelopeSha256 = sha256(nextEnvelopeText);
+            const envelopeSha256 = sha256(nextEnvelopeText);
             const candidate = { version: publishedVersion, sha256: payloadSha256, envelopeSha256 };
             const previous = originalPointer.current?.version ? {
               version: clean(originalPointer.current.version),
