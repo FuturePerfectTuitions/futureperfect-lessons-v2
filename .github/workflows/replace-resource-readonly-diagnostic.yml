@@ -46,33 +46,16 @@ jobs:
 
           curl -fsS -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}" -o /tmp/worker-package.bin
           PACKAGE_SHA="$(sha256sum /tmp/worker-package.bin | awk '{print $1}')"
-          curl -fsS -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}/deployments" > /tmp/deployments.json || true
 
-          canon_key="lesson:${TARGET_LESSON}"
-          enc_canon="$(python3 - <<'PY'
-import os, urllib.parse
-print(urllib.parse.quote('lesson:'+os.environ['TARGET_LESSON'], safe=''))
-PY
-)"
+          enc_canon="$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote("lesson:"+os.environ["TARGET_LESSON"], safe=""))')"
           curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${LESSONS_ID}/values/${enc_canon}" > /tmp/canonical.json
           jq -e . /tmp/canonical.json >/dev/null
 
-          scope="lesson_3A${TARGET_LESSON}"
-          prefix="rm:v1:scope:${scope}"
-          qprefix="$(python3 - <<'PY'
-import os, urllib.parse
-print(urllib.parse.quote('rm:v1:scope:lesson_3A'+os.environ['TARGET_LESSON'], safe=''))
-PY
-)"
+          qprefix="$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote("rm:v1:scope:lesson_3A"+os.environ["TARGET_LESSON"], safe=""))')"
           curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${READ_MODELS_ID}/keys?limit=1000&prefix=${qprefix}" > /tmp/lesson-keys.json
           jq -e '.success == true' /tmp/lesson-keys.json >/dev/null
 
-          pointer_key="rm:v1:scope:${scope}:current"
-          epointer="$(python3 - <<'PY'
-import os, urllib.parse
-print(urllib.parse.quote('rm:v1:scope:lesson_3A'+os.environ['TARGET_LESSON']+':current', safe=''))
-PY
-)"
+          epointer="$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote("rm:v1:scope:lesson_3A"+os.environ["TARGET_LESSON"]+":current", safe=""))')"
           pstatus="$(curl -sS -o /tmp/pointer.json -w '%{http_code}' -H "$AUTH" "$BASE/storage/kv/namespaces/${READ_MODELS_ID}/values/${epointer}")"
           if [ "$pstatus" = "200" ]; then
             jq -e . /tmp/pointer.json >/dev/null
@@ -83,13 +66,7 @@ PY
           fi
 
           if [ -n "$current_version" ]; then
-            eversion="$(python3 - "$current_version" <<'PY'
-import os, sys, urllib.parse
-v=sys.argv[1]
-key='rm:v1:scope:lesson_3A'+os.environ['TARGET_LESSON']+':version:'+urllib.parse.quote(v, safe='').replace('%','_')
-print(urllib.parse.quote(key, safe=''))
-PY
-)"
+            eversion="$(CURRENT_VERSION="$current_version" python3 -c 'import os,urllib.parse; v=os.environ["CURRENT_VERSION"]; key="rm:v1:scope:lesson_3A"+os.environ["TARGET_LESSON"]+":version:"+urllib.parse.quote(v,safe="").replace("%","_"); print(urllib.parse.quote(key,safe=""))')"
             curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${READ_MODELS_ID}/values/${eversion}" > /tmp/envelope.json
             jq -e . /tmp/envelope.json >/dev/null
           else
@@ -110,19 +87,8 @@ PY
             --slurpfile pointer /tmp/pointer.json \
             --slurpfile envelope /tmp/envelope.json \
             --slurpfile settings /tmp/settings.json \
-            '{
-              observedAt:$observedAt,
-              mode:"READ_ONLY",
-              worker:$worker,
-              deployedPackageSha256:$packageSha,
-              bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,pdfsBucket:$bucket},
-              bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),
-              targetLesson:$lesson,
-              canonicalLesson:$canonical[0],
-              preparedLessonKeyList:($keys[0].result // []),
-              preparedLessonPointer:$pointer[0],
-              preparedLessonEnvelope:$envelope[0]
-            }' > gch/evidence/replace-resource-live-readonly-2026-09-23.json
+            '{observedAt:$observedAt,mode:"READ_ONLY",worker:$worker,deployedPackageSha256:$packageSha,bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,pdfsBucket:$bucket},bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),targetLesson:$lesson,canonicalLesson:$canonical[0],preparedLessonKeyList:($keys[0].result // []),preparedLessonPointer:$pointer[0],preparedLessonEnvelope:$envelope[0]}' \
+            > gch/evidence/replace-resource-live-readonly-2026-09-23.json
 
       - name: Commit sanitized evidence
         shell: bash
