@@ -1,0 +1,65 @@
+name: Portal V2 GCH authority validation
+
+on:
+  push:
+    paths:
+      - 'AGENTS.md'
+      - 'gch/portal-v2-current/**'
+      - '.github/workflows/portal-gch-authority-validation.yml'
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'gch/portal-v2-current/**'
+      - '.github/workflows/portal-gch-authority-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate machine-readable authority set
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('gch/portal-v2-current')
+          current = json.loads((root / 'GCH_CURRENT.json').read_text())
+          base = json.loads((root / 'GCH_STATE.json').read_text())
+          override = json.loads((root / 'GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json').read_text())
+          workflow = json.loads((root / 'WEBSITE_WORKFLOW_2026-09-23.json').read_text())
+
+          assert current['status'] == 'AUTHORITATIVE_CURRENT'
+          assert current['authorityVersion'] == '5.1-full-site-workflow'
+          assert base['status'] == 'AUTHORITATIVE_CURRENT'
+          assert override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
+          assert workflow['status'] == 'AUTHORITATIVE_CURRENT_WORKFLOW'
+
+          for rel in current['readOrder'][1:]:
+              assert Path(rel).exists(), rel
+
+          rr = workflow['websiteWorkflows']['replaceResource']
+          assert rr['status'] == 'PERMANENT_CONSISTENCY_FIX_LIVE_AND_OWNER_VERIFIED_2026-09-23'
+          assert rr['closedIncidentEvidence']['ownerBrowserVerification'] == 'PASS'
+          assert rr['closedIncidentEvidence']['canonicalOldKeyCount'] == 0
+          assert rr['closedIncidentEvidence']['canonicalNewKeyCount'] == 1
+          assert rr['closedIncidentEvidence']['preparedOldKeyCount'] == 0
+          assert rr['closedIncidentEvidence']['preparedNewKeyCount'] == 1
+
+          assert override['incidentCloseout']['ownerBrowserVerification']['result'] == 'PASS'
+          assert override['permanentImplementation']['failureSemantics']['failureMarker'] == 'RESOURCE_REPLACE_PROJECTION_FAILED'
+          assert 'prepared' in current['nonNegotiableCompletionRule'].lower()
+
+          agents = Path('AGENTS.md').read_text()
+          for required in current['readOrder'][1:]:
+              assert required in agents, required
+
+          print('PORTAL_GCH_AUTHORITY_VALIDATION_PASS')
+          PY
