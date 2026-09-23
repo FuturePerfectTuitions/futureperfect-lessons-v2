@@ -1,8 +1,18 @@
 {
-  "observedAt": "2026-09-23T10:41:07Z",
+  "observedAt": "2026-09-23T10:51:34Z",
   "mode": "READ_ONLY",
   "worker": "fpt-portal-v2-worker",
-  "deployedPackageSha256": "767befebb2fede5e06cb18f31cef21bb09d86255bb76d77a1c1fa498f6b806e4",
+  "deployedPackageSha256": "3c6a5be250b2a42975153d372da9297c64801c7f81e5658abff408be56553ada",
+  "deployedPackage": {
+    "contentType": "multipart/form-data; boundary=6de5816e3ada164fd0380d0c3deb42a0647124c1871a31a65910b6a2bb6b",
+    "modules": [
+      {
+        "name": "index-step10-quiz-bridge-trial-demo.js",
+        "sha256": "0e5e842733d2c4faba98ce15ce4152f5723dbfea604e3a631f4fc40b2a8a30a1",
+        "bytes": 858731
+      }
+    ]
+  },
   "bindings": {
     "lessonsKv": "49619b1a24b244bc8aaa6223fcd24e80",
     "readModelsKv": "77b35165c8694087bc1b0515c35a7e89",
