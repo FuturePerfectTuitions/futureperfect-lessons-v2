@@ -6,7 +6,7 @@
   "scope": "ADMIN_LEGACY.ReplaceResource",
   "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
   "precedence": "This file supersedes only conflicting Replace Resource limitation/open-defect statements in the base GCH. All non-conflicting base GCH invariants remain binding.",
-  "reason": "The 2026-09-23 Y5E2 incident proved that the pre-fix Admin Replace Resource path updated canonical LESSONS_KV/R2 state but could leave the student-facing prepared lesson in READ_MODELS_KV pointing at the old object key.",
+  "reason": "The 2026-09-23 Y5E2 incident proved that the pre-fix Admin Replace Resource path updated canonical LESSONS_KV/R2 state but could leave the student-facing prepared lesson in READ_MODELS_KV pointing at the old object key. A later L3T2M24 incident additionally proved that the consistency wrapper must never reinterpret CORS OPTIONS preflight as a completed replacement transaction.",
   "rootCause": {
     "classification": "SOURCE_TO_PREPARED_PROJECTION_CONSISTENCY_DEFECT",
     "preFixBehaviour": "Admin Replace Resource uploaded and hash-verified the new R2 object and updated the selected canonical LESSONS_KV resource, but successful completion did not require the current prepared lesson projection to be republished and verified.",
@@ -19,6 +19,7 @@
     "consistencyWrapper": "worker/src/admin-resource-replace-consistency.js",
     "productionEntrypoint": "worker/src/index-admin-tools.js",
     "marker": "replace-resource-consistency-v1",
+    "preflightGuardMarker": "replace-resource-preflight-pass-v1",
     "productionMergeCommit": "169b6f29d71fa192acf2c38bb8931b8c383755ae",
     "finalGuardCommit": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
     "requiredSuccessChain": [
@@ -33,6 +34,12 @@
       "read back the current prepared scope and verify old key count is zero and new key count is one",
       "return success only after canonical and prepared verification both pass"
     ],
+    "transportBoundary": {
+      "rule": "The canonical-to-prepared consistency transaction applies only to an actual POST /api/v1/admin/resources/replace operation. OPTIONS CORS preflight and all other non-POST methods must pass through unchanged to the base Admin resource handler.",
+      "why": "Browser preflight is transport negotiation, not a replacement success response; interpreting its {ok:true} body as a replacement result prevents the browser from sending the actual POST.",
+      "browserFailureSignature": "Admin Console displays Replacement failed: Failed to fetch while the live OPTIONS request returns a non-2xx response.",
+      "permanentMarker": "replace-resource-preflight-pass-v1"
+    },
     "failureSemantics": {
       "preparedPublicationFailure": "Fail the Admin operation; do not report success.",
       "canonicalRollback": "Restore the canonical lesson resource to the previous object key when prepared projection publication fails and canonical rollback can be verified.",
@@ -45,7 +52,8 @@
       "Retain the previous R2 object on successful replacement.",
       "Do not weaken protected Answer Pack controls.",
       "Do not change normal-student or Trial session semantics.",
-      "Do not use resource replacement as a mechanism for lesson release or access repair."
+      "Do not use resource replacement as a mechanism for lesson release or access repair.",
+      "Do not wrap OPTIONS preflight in replacement consistency processing."
     ]
   },
   "deploymentGuard": {
@@ -54,13 +62,15 @@
       "Changes to worker/src/admin-resource-replace-consistency.js trigger the production Admin deploy workflow.",
       "The wrapper receives node --check syntax validation before deployment.",
       "Current source wiring must import ./admin-resource-replace-consistency.js from worker/src/index-admin-tools.js.",
-      "After deployment, the live Worker package must contain replace-resource-consistency-v1 and RESOURCE_REPLACE_PROJECTION_FAILED or the workflow fails."
+      "After deployment, the live Worker package must contain replace-resource-consistency-v1 and RESOURCE_REPLACE_PROJECTION_FAILED or the workflow fails.",
+      "Replace Resource OPTIONS preflight from the Admin Console origin must remain HTTP 200 with the expected Access-Control-Allow-* headers."
     ],
     "staticCiWorkflow": ".github/workflows/admin-tools-replace-resource-static-verification.yml",
     "staticCiRequirements": [
       "The consistency wrapper is a watched path for push and pull_request.",
       "The wrapper is syntax checked.",
-      "CI verifies the Admin entrypoint imports the consistency wrapper and verifies the live-marker/failure-marker strings remain present."
+      "CI verifies the Admin entrypoint imports the consistency wrapper and verifies the live-marker/failure-marker strings remain present.",
+      "CI executes tests/admin-resource-replace-consistency-verification.mjs and proves OPTIONS preflight is passed through unchanged rather than treated as a replacement result."
     ]
   },
   "incidentCloseout": {
@@ -92,6 +102,40 @@
     },
     "note": "The final repair verification was idempotent: by the guarded run, the prepared scope already contained the new key and no old key; the run independently read back and proved the correct state. The owner subsequently verified the student-facing result and closed the incident."
   },
+  "preflightIncident20260923": {
+    "status": "FIX_IMPLEMENTED_PENDING_PRODUCTION_DEPLOY_AND_OWNER_RETRY",
+    "displayLessonCode": "L3T2M24",
+    "canonicalLessonId": "Y6M1.4",
+    "title": "Linear Sequences",
+    "reportedUiError": "Replacement failed: Failed to fetch",
+    "diagnosticWorkflowRun": 35887723841,
+    "diagnosticHeadSha": "d59240762d66fd8de4f1dc685effb5955de40935",
+    "productionVersionObserved": "a1d50246-d014-486f-aa32-57956c816640",
+    "readOnlyFindings": {
+      "deployedReplaceConsistencyMarker": "PASS",
+      "deployedProjectionFailureMarker": "PASS",
+      "deployedQuizBridgeMarker": "PASS",
+      "canonicalHomeworkObjectKey": "maths/year6/L3T2M24/homework/sheets/L3T2M24 Homework Linear Sequences.pdf",
+      "preparedHomeworkObjectKey": "maths/year6/L3T2M24/homework/sheets/L3T2M24 Homework Linear Sequences.pdf",
+      "canonicalAndPreparedStillMatchOldObject": true,
+      "githubPagesOriginPreflightHttpStatus": 500,
+      "githubPagesOriginPreflightBodyError": "RESOURCE_REPLACE_INCOMPLETE_SUCCESS_RESPONSE",
+      "githubPagesOriginCorsHeadersPresent": true,
+      "largeMultipartDiagnosticBytes": 2200027,
+      "largeMultipartInvalidAuthHttpStatus": 401,
+      "largeMultipartCorsPresent": true
+    },
+    "rootCause": "worker/src/admin-resource-replace-consistency.js applied replacement-success validation to every request whose pathname was /api/v1/admin/resources/replace, including OPTIONS. The base handler correctly returned {ok:true} for OPTIONS, but the wrapper then required lessonId/oldR2Key/newR2Key, returned HTTP 500 RESOURCE_REPLACE_INCOMPLETE_SUCCESS_RESPONSE, and the browser therefore aborted the actual POST and surfaced TypeError: Failed to fetch.",
+    "mutationAssessment": "The failed browser attempt did not reach the replacement POST. Canonical LESSONS_KV and current prepared READ_MODELS_KV remained on the original homework object key. The read-only 2.2 MB multipart probe also proved the edge/route accepts a payload of this order of size when the request reaches the Worker, so the observed incident is not explained by the replacement PDF being around 2 MB.",
+    "fix": "Apply consistency processing only when pathname is /api/v1/admin/resources/replace AND request.method is POST. Pass OPTIONS and every other non-POST method directly to the base resource handler. Add a dedicated preflight regression test and permanent preflight marker.",
+    "closureGate": [
+      "static CI PASS including the dedicated OPTIONS regression test",
+      "guarded shared Worker production deployment PASS with rollback anchor",
+      "live OPTIONS preflight from https://futureperfecttuitions.github.io returns HTTP 200 with CORS allow-origin/allow-headers/allow-methods",
+      "owner retries L3T2M24 replacement and confirms the Admin operation succeeds",
+      "student-facing resource is verified to resolve to the intended replacement before final incident closeout"
+    ]
+  },
   "finalProductionVerification": {
     "workflow": ".github/workflows/admin-superuser-production-deploy.yml",
     "runId": 35854434444,
@@ -111,9 +155,10 @@
     "adminWorkflows.replaceResource.currentGeneralLimitation",
     "Any open defect asserting that successful Replace Resource cannot automatically publish and verify the prepared lesson projection"
   ],
-  "currentRequiredBehaviour": "A future Admin Console Replace Resource operation is successful only when the intended canonical resource and the current student-facing prepared lesson both point to the verified replacement object. If the prepared projection cannot be published and read back correctly, the operation must fail rather than present a false success state.",
+  "currentRequiredBehaviour": "A future Admin Console Replace Resource operation is successful only when the intended canonical resource and the current student-facing prepared lesson both point to the verified replacement object. If the prepared projection cannot be published and read back correctly, the operation must fail rather than present a false success state. CORS OPTIONS preflight is transport negotiation and must pass through the base handler; it must never be interpreted as a replacement success response.",
   "futureVerificationMatrix": [
     "For any Replace Resource code change, run static CI and production deploy guard.",
+    "Verify OPTIONS /api/v1/admin/resources/replace from the Admin Console origin returns HTTP 200 with CORS before relying on browser POST behaviour.",
     "For an actual replacement, verify the returned operation succeeded only after the wrapper completed prepared publication.",
     "When incident-driven, verify representative live /api/v2 resource delivery/browser behaviour before closing the incident if credentials/test persona are available.",
     "Never infer student-visible success solely from R2 presence, LESSONS_KV state, or the Admin Console success message."

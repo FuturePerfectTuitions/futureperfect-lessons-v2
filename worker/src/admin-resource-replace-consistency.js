@@ -7,6 +7,7 @@ import {
 
 const REPLACE_PATH = '/api/v1/admin/resources/replace';
 const CONSISTENCY_MARKER = 'replace-resource-consistency-v1';
+const PREFLIGHT_GUARD_MARKER = 'replace-resource-preflight-pass-v1';
 
 const clean = value => String(value ?? '').trim();
 const cloneJson = value => JSON.parse(JSON.stringify(value));
@@ -134,7 +135,13 @@ async function publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key) {
 
 async function handleAdminResourceRequest(request, env, ctx) {
   const url = new URL(request.url);
-  if (url.pathname !== REPLACE_PATH) return baseHandleAdminResourceRequest(request, env, ctx);
+  // Only a real replacement POST is subject to canonical->prepared consistency
+  // processing. In particular, CORS OPTIONS must pass through untouched to the
+  // base handler; treating its {ok:true} preflight response as a replacement
+  // success causes a 500 and makes browser fetch() fail before the POST is sent.
+  if (url.pathname !== REPLACE_PATH || request.method !== 'POST') {
+    return baseHandleAdminResourceRequest(request, env, ctx);
+  }
 
   const baseResponse = await baseHandleAdminResourceRequest(request, env, ctx);
   if (!baseResponse.ok) return baseResponse;
@@ -209,6 +216,7 @@ async function handleAdminResourceRequest(request, env, ctx) {
 
 export {
   CONSISTENCY_MARKER,
+  PREFLIGHT_GUARD_MARKER,
   handleAdminResourceRequest,
   projectPreparedPayload
 };
