@@ -1,0 +1,47 @@
+name: Quiz bridge composition validation
+
+on:
+  push:
+    branches: [fix/quiz-bridge-composed-production-2026-09-23]
+    paths:
+      - 'worker/wrangler.toml'
+      - 'worker/src/index-step10-quiz-bridge.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'worker/src/admin-resource-replace-consistency.js'
+      - 'ops/deploy_current_worker_preserve.sh'
+      - 'tests/step10-quiz-bridge-static-verification.mjs'
+      - 'tests/cp12-quiz-redeem-v2.mjs'
+      - 'tests/shared-worker-entrypoint-preservation.mjs'
+      - '.github/workflows/admin-superuser-production-deploy.yml'
+      - '.github/workflows/quiz-bridge-composition-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate composed shared Worker
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-step10-quiz-bridge.js
+          node --check worker/src/index-admin-tools.js
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+          node --experimental-default-type=module tests/admin-trial-manager-verification.mjs
+          node tests/admin-resource-replace-verification.mjs
+          node tests/admin-tools-ui-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-completed-status-verification.mjs
+          node tests/admin-superuser-static-verification.mjs
+          node --experimental-default-type=module tests/protected-view-stability-static-verification.mjs
+          node tests/trial-runtime-access-verification.mjs
+          echo QUIZ_BRIDGE_COMPOSITION_STATIC_PASS
