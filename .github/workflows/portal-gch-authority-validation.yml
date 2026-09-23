@@ -38,7 +38,10 @@ jobs:
           workflow = json.loads((root / 'WEBSITE_WORKFLOW_2026-09-23.json').read_text())
 
           assert current['status'] == 'AUTHORITATIVE_CURRENT'
-          assert current['authorityVersion'] == '5.2-quiz-bridge-composition'
+          assert current['authorityVersion'] in {
+              '5.2-quiz-bridge-composition',
+              '5.3-replace-resource-preflight'
+          }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
           assert quiz_override['status'] in {
@@ -70,6 +73,12 @@ jobs:
 
           assert replace_override['incidentCloseout']['ownerBrowserVerification']['result'] == 'PASS'
           assert replace_override['permanentImplementation']['failureSemantics']['failureMarker'] == 'RESOURCE_REPLACE_PROJECTION_FAILED'
+          assert replace_override['permanentImplementation']['preflightGuardMarker'] == 'replace-resource-preflight-pass-v1'
+          preflight = replace_override['preflightIncident20260923']
+          assert preflight['canonicalLessonId'] == 'Y6M1.4'
+          assert preflight['readOnlyFindings']['githubPagesOriginPreflightHttpStatus'] == 500
+          assert preflight['readOnlyFindings']['canonicalAndPreparedStillMatchOldObject'] is True
+          assert 'OPTIONS' in replace_override['permanentImplementation']['transportBoundary']['rule']
           assert 'prepared' in current['nonNegotiableCompletionRule'].lower()
 
           agents = Path('AGENTS.md').read_text()
