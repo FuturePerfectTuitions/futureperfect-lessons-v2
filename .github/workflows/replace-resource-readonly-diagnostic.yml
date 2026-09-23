@@ -1,0 +1,139 @@
+name: Replace Resource prepared-model read-only diagnostic
+
+on:
+  push:
+    branches:
+      - fix/replace-resource-prepared-2026-09-23
+    paths:
+      - .github/workflows/replace-resource-readonly-diagnostic.yml
+      - .github/replace-resource-readonly-diagnostic.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      TARGET_LESSON: Y5E2
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/replace-resource-prepared-2026-09-23
+
+      - name: Read live production state only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          curl -fsS -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}/settings" > /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          LESSONS_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
+          READ_MODELS_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV") | .namespace_id' /tmp/settings.json)"
+          BUCKET="$(jq -r '.result.bindings[] | select(.name=="PDFS_BUCKET") | .bucket_name' /tmp/settings.json)"
+          test -n "$LESSONS_ID"; test "$LESSONS_ID" != "null"
+          test -n "$READ_MODELS_ID"; test "$READ_MODELS_ID" != "null"
+          test -n "$BUCKET"; test "$BUCKET" != "null"
+
+          curl -fsS -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}" -o /tmp/worker-package.bin
+          PACKAGE_SHA="$(sha256sum /tmp/worker-package.bin | awk '{print $1}')"
+          curl -fsS -H "$AUTH" "$BASE/workers/scripts/${WORKER_NAME}/deployments" > /tmp/deployments.json || true
+
+          canon_key="lesson:${TARGET_LESSON}"
+          enc_canon="$(python3 - <<'PY'
+import os, urllib.parse
+print(urllib.parse.quote('lesson:'+os.environ['TARGET_LESSON'], safe=''))
+PY
+)"
+          curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${LESSONS_ID}/values/${enc_canon}" > /tmp/canonical.json
+          jq -e . /tmp/canonical.json >/dev/null
+
+          scope="lesson_3A${TARGET_LESSON}"
+          prefix="rm:v1:scope:${scope}"
+          qprefix="$(python3 - <<'PY'
+import os, urllib.parse
+print(urllib.parse.quote('rm:v1:scope:lesson_3A'+os.environ['TARGET_LESSON'], safe=''))
+PY
+)"
+          curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${READ_MODELS_ID}/keys?limit=1000&prefix=${qprefix}" > /tmp/lesson-keys.json
+          jq -e '.success == true' /tmp/lesson-keys.json >/dev/null
+
+          pointer_key="rm:v1:scope:${scope}:current"
+          epointer="$(python3 - <<'PY'
+import os, urllib.parse
+print(urllib.parse.quote('rm:v1:scope:lesson_3A'+os.environ['TARGET_LESSON']+':current', safe=''))
+PY
+)"
+          pstatus="$(curl -sS -o /tmp/pointer.json -w '%{http_code}' -H "$AUTH" "$BASE/storage/kv/namespaces/${READ_MODELS_ID}/values/${epointer}")"
+          if [ "$pstatus" = "200" ]; then
+            jq -e . /tmp/pointer.json >/dev/null
+            current_version="$(jq -r '.current.version // empty' /tmp/pointer.json)"
+          else
+            printf 'null\n' > /tmp/pointer.json
+            current_version=""
+          fi
+
+          if [ -n "$current_version" ]; then
+            eversion="$(python3 - "$current_version" <<'PY'
+import os, sys, urllib.parse
+v=sys.argv[1]
+key='rm:v1:scope:lesson_3A'+os.environ['TARGET_LESSON']+':version:'+urllib.parse.quote(v, safe='').replace('%','_')
+print(urllib.parse.quote(key, safe=''))
+PY
+)"
+            curl -fsS -H "$AUTH" "$BASE/storage/kv/namespaces/${READ_MODELS_ID}/values/${eversion}" > /tmp/envelope.json
+            jq -e . /tmp/envelope.json >/dev/null
+          else
+            printf 'null\n' > /tmp/envelope.json
+          fi
+
+          mkdir -p gch/evidence
+          jq -n \
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg worker "$WORKER_NAME" \
+            --arg packageSha "$PACKAGE_SHA" \
+            --arg lessonsKv "$LESSONS_ID" \
+            --arg readModelsKv "$READ_MODELS_ID" \
+            --arg bucket "$BUCKET" \
+            --arg lesson "$TARGET_LESSON" \
+            --slurpfile canonical /tmp/canonical.json \
+            --slurpfile keys /tmp/lesson-keys.json \
+            --slurpfile pointer /tmp/pointer.json \
+            --slurpfile envelope /tmp/envelope.json \
+            --slurpfile settings /tmp/settings.json \
+            '{
+              observedAt:$observedAt,
+              mode:"READ_ONLY",
+              worker:$worker,
+              deployedPackageSha256:$packageSha,
+              bindings:{lessonsKv:$lessonsKv,readModelsKv:$readModelsKv,pdfsBucket:$bucket},
+              bindingInventory:($settings[0].result.bindings | map({name,type,namespace_id,bucket_name,database_id,service,environment})),
+              targetLesson:$lesson,
+              canonicalLesson:$canonical[0],
+              preparedLessonKeyList:($keys[0].result // []),
+              preparedLessonPointer:$pointer[0],
+              preparedLessonEnvelope:$envelope[0]
+            }' > gch/evidence/replace-resource-live-readonly-2026-09-23.json
+
+      - name: Commit sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gch/evidence/replace-resource-live-readonly-2026-09-23.json
+          if git diff --cached --quiet; then
+            echo "No evidence delta to commit."
+          else
+            git commit -m "Record Replace Resource live read-only evidence"
+            git push origin HEAD:fix/replace-resource-prepared-2026-09-23
+          fi
