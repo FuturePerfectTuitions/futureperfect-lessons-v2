@@ -11,6 +11,7 @@ on:
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-resource-replace-verification.mjs'
+      - 'tests/admin-resource-replace-consistency-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
       - 'tests/trial-runtime-access-verification.mjs'
@@ -26,6 +27,7 @@ on:
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
       - 'tests/admin-resource-replace-verification.mjs'
+      - 'tests/admin-resource-replace-consistency-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
       - 'tests/trial-runtime-access-verification.mjs'
@@ -55,8 +57,11 @@ jobs:
           grep -Fq "./admin-resource-replace-consistency.js" worker/src/index-admin-tools.js
           grep -Fq "replace-resource-consistency-v1" worker/src/admin-resource-replace-consistency.js
           grep -Fq "RESOURCE_REPLACE_PROJECTION_FAILED" worker/src/admin-resource-replace-consistency.js
+          grep -Fq "replace-resource-preflight-pass-v1" worker/src/admin-resource-replace-consistency.js
       - name: Replace Resource verification
-        run: node tests/admin-resource-replace-verification.mjs
+        run: |
+          node tests/admin-resource-replace-verification.mjs
+          node tests/admin-resource-replace-consistency-verification.mjs
       - name: Admin Tools UI verification
         run: node tests/admin-tools-ui-verification.mjs
       - name: Existing Admin regressions
