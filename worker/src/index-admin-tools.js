@@ -3,7 +3,7 @@ import {
   liveBatchCompatEnv,
   needsCompatibility
 } from './index-phase25-english-batch-code-compat.js';
-import { handleAdminResourceRequest } from './admin-resource-replace.js';
+import { handleAdminResourceRequest } from './admin-resource-replace-consistency.js';
 
 export default {
   async fetch(request, env, ctx) {
