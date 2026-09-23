@@ -29,6 +29,11 @@ assert.equal(response.headers.get('access-control-allow-origin'), origin);
 assert.match(response.headers.get('access-control-allow-methods') || '', /POST/);
 assert.match(response.headers.get('access-control-allow-methods') || '', /OPTIONS/);
 assert.match(response.headers.get('access-control-allow-headers') || '', /authorization/i);
+assert.equal(
+  response.headers.get('x-fpt-replace-resource-preflight-guard'),
+  PREFLIGHT_GUARD_MARKER,
+  'Preflight must expose the permanent guard marker so the deployed bundle can be verified'
+);
 let data = await response.json();
 assert.deepEqual(data, { ok: true }, 'Consistency wrapper must not reinterpret preflight as a replacement success');
 
