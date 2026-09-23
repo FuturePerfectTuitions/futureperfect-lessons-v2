@@ -1,0 +1,226 @@
+{
+  "schema": "fpt.portal.website-workflow.v1",
+  "documentType": "MACHINE_ORIENTED_FULL_SITE_WORKFLOW_AUTHORITY",
+  "status": "DRAFT_PENDING_GCH_LINKAGE",
+  "effectiveDate": "2026-09-23",
+  "scope": "ENTIRE_FPT_PORTAL_V2_WEBSITE_AND_ADMIN_OPERATIONS",
+  "purpose": "Provide one end-to-end operational and engineering workflow map for the full FPT Portal V2 system, including the permanent Replace Resource consistency change verified by the owner on 2026-09-23.",
+  "authorityRules": {
+    "mustReadFirst": [
+      "AGENTS.md",
+      "gch/portal-v2-current/GCH_STATE.json",
+      "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json"
+    ],
+    "freshRuntimeProofOverridesRepositoryAssumption": true,
+    "adminSuccessIsNotStudentVisibilityProof": true,
+    "canonicalStateIsNotPreparedVisibilityProof": true,
+    "studentVisibleMutationCompletionChain": "admin/source write -> canonical readback -> prepared compile/reconcile -> atomic prepared publication -> prepared readback/parity -> live public API -> representative browser verification",
+    "failClosed": true
+  },
+  "systemTopology": {
+    "studentFrontend": {
+      "repo": "FuturePerfectTuitions/futureperfect-lessons-test",
+      "host": "https://lessons.futureperfect.education",
+      "role": "canonical live student-facing HTML/CSS/JS shell"
+    },
+    "backendAdminOps": {
+      "repo": "FuturePerfectTuitions/futureperfect-lessons-v2",
+      "productionWorker": "fpt-portal-v2-worker",
+      "adminEntrypoint": "worker/src/index-admin-tools.js",
+      "adminApiPrefix": "/api/v1/admin/"
+    },
+    "studentApi": {
+      "publicPrefix": "/api/v2/",
+      "identity": "signed fpt_session",
+      "preparedAuthority": "READ_MODELS_KV"
+    },
+    "dataStores": {
+      "STUDENTS_KV": "current student/trial credential and profile source where applicable",
+      "LESSONS_KV": "canonical lesson/resource definitions",
+      "READ_MODELS_KV": "prepared student-visible projections",
+      "D1": "canonical release/entitlement/session/operational tables where applicable",
+      "MATERIALS_R2": "PDF/resource binary objects"
+    }
+  },
+  "globalChangeProtocol": {
+    "beforeMutation": [
+      "classify target surface: live student frontend, public-v2 student API, legacy Admin, or path-scoped compatibility",
+      "prove live route and deployment ownership",
+      "identify canonical data owner and prepared projection owner",
+      "trace write path and read path end to end",
+      "load preservation requirements and current GCH stop conditions",
+      "define rollback anchor and verification evidence"
+    ],
+    "afterMutation": [
+      "canonical readback",
+      "prepared projection compile/reconciliation",
+      "prepared pointer/version readback and parity verification",
+      "live API verification where route is public",
+      "representative browser verification for student-facing behaviour",
+      "shared-worker regression checks",
+      "record evidence and update GCH in same coherent change"
+    ]
+  },
+  "websiteWorkflows": {
+    "studentAuthentication": {
+      "normalStudent": {
+        "login": "POST /api/v2/auth/login",
+        "logout": "POST /api/v2/auth/logout",
+        "session": "signed fpt_session",
+        "requiredBehaviour": "normal students preserve approved multi-device semantics unless explicitly changed by owner"
+      },
+      "trialStudent": {
+        "adminCreation": "Admin Trial Login Manager",
+        "requiredBehaviour": "separate trial contract; do not alter normal-student semantics when repairing trial consumption/rearm logic",
+        "verification": "Admin state plus actual login/consumption/rearm runtime checks"
+      }
+    },
+    "studentHomeAndNavigation": {
+      "routes": [
+        "GET /api/v2/student/home",
+        "GET /api/v2/student/subjects",
+        "GET /api/v2/student/views/:viewId/lessons",
+        "GET /api/v2/student/lessons/:lessonId"
+      ],
+      "authority": "READ_MODELS_KV prepared access",
+      "rules": [
+        "server authorization owns visibility/access, not UI presentation",
+        "Current/Previous/full catalogue and locked previews must preserve approved semantics",
+        "subject/year/level display mapping must remain distinct from backend identifiers"
+      ]
+    },
+    "lessonReleaseImport": {
+      "adminSurface": "Lesson Release Import",
+      "source": "workFP.csv",
+      "canonicalWrite": "D1 release/access state",
+      "preparedWrite": "reconcile and atomically publish affected student access scopes",
+      "completionGate": "do not treat canonical release as student-visible completion until prepared readback/parity succeeds",
+      "emailBoundary": "parent email remains a separate deliberate action"
+    },
+    "createStudentLogin": {
+      "adminSurface": "Create Student Login",
+      "canonicalWrites": ["student credential/profile", "current batch/join-date access state"],
+      "preparedWrite": "publish and verify student access projection",
+      "preserve": ["existing entitlement rules", "VR/PreLesson rules", "answer protection", "normal-student session semantics"]
+    },
+    "trialLoginManager": {
+      "adminSurface": "Trial Login Manager",
+      "operations": ["create", "inspect", "delete", "rearm"],
+      "completionGate": "Admin action must be verified against actual trial login runtime and prepared access, not merely Admin UI state"
+    },
+    "replaceResource": {
+      "status": "PERMANENT_CONSISTENCY_FIX_LIVE_AND_OWNER_VERIFIED_2026-09-23",
+      "adminSurface": "Replace Resource",
+      "canonicalLessonExample": "Y5E2",
+      "displayLessonExample": "Y5T1E01",
+      "rootCauseClosed": "legacy flow could upload/hash-verify a new R2 PDF and update LESSONS_KV while the current prepared lesson in READ_MODELS_KV still referenced the old R2 object; Admin therefore reported success while students downloaded stale content",
+      "requiredTransaction": [
+        "validate signed Admin session and selected resource",
+        "write replacement PDF to a new unique R2 object key",
+        "read back replacement object and verify SHA-256",
+        "guardedly update only the selected canonical LESSONS_KV resource objectKey/r2Key",
+        "read back canonical lesson and verify exact old/new reference counts",
+        "reconcile the current prepared lesson payload in READ_MODELS_KV so the matching resource points to the new R2 object",
+        "publish a new immutable prepared-read-model envelope/version",
+        "atomically move the prepared scope pointer to the new version while retaining previous pointer metadata for rollback",
+        "read back prepared pointer/version and verify old reference count is zero and new reference count is exactly one",
+        "return Admin success only after canonical and prepared verification both pass"
+      ],
+      "failureSemantics": {
+        "preparedPublicationFailure": "Admin operation fails closed with RESOURCE_REPLACE_PROJECTION_FAILED rather than claiming success",
+        "rollback": "guarded canonical/prepared restoration where possible; old R2 object retained",
+        "entitlementsChanged": false
+      },
+      "deploymentGuards": [
+        "production source includes replace-resource-consistency-v1",
+        "production deploy verifies RESOURCE_REPLACE_PROJECTION_FAILED marker is present",
+        "static CI syntax-checks and verifies admin-resource-replace-consistency.js and production import wiring",
+        "shared-worker regression checks remain mandatory"
+      ],
+      "closedIncidentEvidence": {
+        "date": "2026-09-23",
+        "lesson": "Y5E2",
+        "oldR2Key": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf",
+        "newR2Key": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2__replacement_20260923T095852Z_fxpjpy.pdf",
+        "newPdfSha256": "969da13f1c157e513629abb81ce0097d28c493d147bf43cfda13d23e29984389",
+        "canonicalOldKeyCount": 0,
+        "canonicalNewKeyCount": 1,
+        "preparedOldKeyCount": 0,
+        "preparedNewKeyCount": 1,
+        "ownerBrowserVerification": "PASS",
+        "productionDeployRun": 35854434444,
+        "productionDeployHeadSha": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
+        "oneOffRepairDisposition": "temporary Y5E2 reconciliation machinery removed after production state was repaired; permanent generic consistency path remains"
+      },
+      "futureInvariant": "A Replace Resource success response is invalid unless the student-consumed prepared lesson points to the verified replacement object. Source-only success must never return success."
+    },
+    "resourceOpenAndDelivery": {
+      "open": "POST /api/v2/student/resource/open",
+      "delivery": "GET /api/v2/student/resource?cap=...",
+      "authority": "prepared lesson/resource state plus server-issued capability",
+      "rule": "resource identity must come from current prepared projection; do not bypass prepared authority with a stale canonical-only assumption"
+    },
+    "protectedAnswerPacks": {
+      "required": [
+        "per-child Answer Pack password enforcement",
+        "protected viewer/session/lease sequencing",
+        "rate limiting and invalid-token behaviour",
+        "Admin tools must not bypass answer protection"
+      ],
+      "sharedWorkerRegression": true
+    },
+    "online11PlusEnglishPreLessonVr": {
+      "canonical": "online_prelesson_entitlements.vr_access",
+      "prepared": "lessonAccess[lessonId].vr=true when canonical vr_access=1",
+      "rule": "online Year 4/5 11+ English PRELESSON_ONLY access includes lesson-specific VR PreLesson access where content exists"
+    },
+    "parentEmail": {
+      "trigger": "manual deliberate action after import/provisioning when required",
+      "notARepairMechanism": true,
+      "duplicateSafetyRequired": true
+    },
+    "quizBridgeCompatibility": {
+      "statusRule": "preserve current withdrawal/eligibility/launch constraints recorded by the quiz project authority; Portal changes must not accidentally expose or alter quiz behaviour",
+      "paths": ["/api/v1/student/quiz/eligibility", "/api/v1/student/quiz/launch", "/api/v1/quiz-bridge/redeem"]
+    }
+  },
+  "sharedWorkerPreservationMatrix": {
+    "mustRemainOperationalAfterAnyAdminWorkerDeploy": [
+      "Admin sign-in/session",
+      "Lesson Release Import",
+      "Create Student Login",
+      "Trial Login Manager",
+      "Replace Resource",
+      "manual Parent Email send",
+      "public-v2 student auth/home/navigation/resource delivery",
+      "protected answer-view compatibility",
+      "online 11+ English PreLesson VR behaviour",
+      "path-scoped quiz compatibility/withdrawal"
+    ],
+    "deploymentFailureDefinition": "target feature may pass but deployment still fails acceptance if any preserved capability regresses"
+  },
+  "verificationMatrix": {
+    "static": [
+      "syntax checks",
+      "Admin route wiring tests",
+      "Replace Resource consistency wrapper import/marker checks",
+      "Trial runtime source checks",
+      "protected-view regression checks"
+    ],
+    "production": [
+      "prove current Worker deployment and bindings",
+      "verify required implementation markers in deployed Worker",
+      "verify Admin routes reject unauthenticated requests",
+      "verify protected viewer invalid-token contract",
+      "for student-visible mutations, verify prepared state and live API/browser result"
+    ]
+  },
+  "stopConditions": [
+    "live route owner cannot be proved",
+    "canonical and prepared authorities disagree and the correct mutation target cannot be established",
+    "proposed shared-worker deploy would remove or overwrite an active capability",
+    "student-visible mutation cannot prove prepared parity/readback",
+    "rollback anchor is unavailable for a production mutation",
+    "owner authorization is required by a higher authority and has not been given"
+  ]
+}
