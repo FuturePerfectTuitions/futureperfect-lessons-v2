@@ -110,6 +110,7 @@ async function liveCatalogueForView(env, viewId) {
   for (let index = 0; index < lessonIds.length; index += 1) {
     const record = records[index];
     if (!record || record.active === false) continue;
+    if (!hasView(record, viewId)) continue;
     const shownId = displayLessonId(record, viewId);
     rows.push({
       lessonId: lessonIds[index],
