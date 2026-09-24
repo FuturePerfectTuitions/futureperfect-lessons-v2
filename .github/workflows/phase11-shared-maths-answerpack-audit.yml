@@ -1,0 +1,161 @@
+name: Phase 11 shared Maths Answer Pack read-only audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/phase11-shared-maths-answerpack-audit.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+  BUCKET: fpt-materials-dev
+  WRANGLER_VERSION: 4.125.0
+
+jobs:
+  audit:
+    if: github.head_ref == 'phase11-shared-maths-answerpack-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Guard read-only V2 development R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="development")' /tmp/settings.json >/dev/null
+          jq -e --arg b "$BUCKET" '.result.bindings[] | select(.name=="MATERIALS_R2" and .type=="r2_bucket" and .bucket_name==$b)' /tmp/settings.json >/dev/null
+          echo 'Read-only V2 R2 guard: PASS'
+
+      - name: Build canonical shared Answer Pack inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/shared-answer-audit
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { loadPhase11Catalogue, validatePhase11Catalogue } from './scripts/phase11-catalogue.mjs';
+          const c = loadPhase11Catalogue();
+          validatePhase11Catalogue(c);
+          const pairs = [
+            ['maths-year4','maths-level1'],
+            ['maths-year5','maths-level2'],
+            ['maths-year6','maths-level3']
+          ];
+          const rows=[];
+          for (const [yearView,levelView] of pairs) {
+            for (const [lessonId, lesson] of Object.entries(c.lessons)) {
+              const yearCode = lesson?.displayIds?.[yearView];
+              const levelCode = lesson?.displayIds?.[levelView];
+              if (!yearCode || !levelCode) continue;
+              for (const [i, hw] of (lesson?.core?.homeworks || []).entries()) {
+                const ap=hw?.answerPack;
+                if (!ap?.r2Key) continue;
+                rows.push({yearView,levelView,lessonId,answerIndex:i+1,yearCode,levelCode,displayName:ap.displayName,r2Key:ap.r2Key});
+              }
+            }
+          }
+          fs.writeFileSync('/tmp/shared-answer-audit/candidates.json', JSON.stringify(rows,null,2));
+          fs.writeFileSync('/tmp/shared-answer-audit/candidates.tsv', rows.map((r,i)=>[
+            i+1,r.yearView,r.levelView,r.lessonId,r.answerIndex,r.yearCode,r.levelCode,r.r2Key
+          ].join('\t')).join('\n')+'\n');
+          const byPair={};
+          for (const r of rows) {
+            const k=`${r.yearView}<->${r.levelView}`;
+            byPair[k]=(byPair[k]||0)+1;
+          }
+          console.log(JSON.stringify({candidateAnswerPacks:rows.length,byPair},null,2));
+          NODE
+
+      - name: Download and scan all shared Answer Pack PDFs read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock wrangler@${WRANGLER_VERSION} >/dev/null
+          python -m pip install --quiet 'PyMuPDF==1.26.7'
+          : >/tmp/shared-answer-audit/results.tsv
+          while IFS=$'\t' read -r n yearView levelView lessonId answerIndex yearCode levelCode r2Key; do
+            out="/tmp/shared-answer-audit/${n}.pdf"
+            ./node_modules/.bin/wrangler r2 object get "${BUCKET}/${r2Key}" --file="$out" --remote >/tmp/r2-get.log
+            python - "$n" "$yearView" "$levelView" "$lessonId" "$answerIndex" "$yearCode" "$levelCode" "$r2Key" "$out" >>/tmp/shared-answer-audit/results.tsv <<'PY'
+          import fitz, hashlib, sys
+          n,year_view,level_view,lesson_id,answer_index,year_code,level_code,r2_key,path=sys.argv[1:]
+          data=open(path,'rb').read()
+          doc=fitz.open(path)
+          text='\n'.join(page.get_text('text') for page in doc)
+          span_level=0
+          span_year=0
+          for page in doc:
+              for block in page.get_text('dict').get('blocks',[]):
+                  for line in block.get('lines',[]):
+                      for span in line.get('spans',[]):
+                          t=span.get('text','')
+                          span_level += t.count(level_code)
+                          span_year += t.count(year_code)
+          vals=[n,year_view,level_view,lesson_id,answer_index,year_code,level_code,str(doc.page_count),str(text.count(level_code)),str(text.count(year_code)),str(span_level),str(span_year),hashlib.sha256(data).hexdigest(),r2_key]
+          print('\t'.join(vals))
+          PY
+          done </tmp/shared-answer-audit/candidates.tsv
+
+      - name: Summarize actual PDF code occurrences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, json
+          from collections import defaultdict
+          rows=[]
+          with open('/tmp/shared-answer-audit/results.tsv',newline='') as f:
+              for r in csv.reader(f,delimiter='\t'):
+                  rows.append({
+                      'n':int(r[0]),'yearView':r[1],'levelView':r[2],'lessonId':r[3],'answerIndex':int(r[4]),
+                      'yearCode':r[5],'levelCode':r[6],'pages':int(r[7]),'levelTextCount':int(r[8]),'yearTextCount':int(r[9]),
+                      'levelSpanCount':int(r[10]),'yearSpanCount':int(r[11]),'sha256':r[12],'r2Key':r[13]
+                  })
+          by=defaultdict(lambda:{'answerPacks':0,'containsLevelCode':0,'containsYearCode':0,'containsNeither':0,'splitOrNonSpanLevel':0})
+          for r in rows:
+              k=f"{r['yearView']}<->{r['levelView']}"
+              s=by[k]; s['answerPacks']+=1
+              if r['levelTextCount']>0: s['containsLevelCode']+=1
+              if r['yearTextCount']>0: s['containsYearCode']+=1
+              if r['levelTextCount']==0 and r['yearTextCount']==0: s['containsNeither']+=1
+              if r['levelTextCount']>r['levelSpanCount']: s['splitOrNonSpanLevel']+=1
+          result={'total':len(rows),'byPair':dict(by),'needsCorrection':[r for r in rows if r['levelTextCount']>0],
+                  'neither':[r for r in rows if r['levelTextCount']==0 and r['yearTextCount']==0]}
+          open('/tmp/shared-answer-audit/scan-summary.json','w').write(json.dumps(result,indent=2))
+          print('=== ACTUAL PDF SUMMARY ===')
+          print(json.dumps({'total':result['total'],'byPair':result['byPair'],'needsCorrection':len(result['needsCorrection']),'containsNeither':len(result['neither'])},indent=2))
+          print('=== NON-SPAN/SPLIT WARNINGS ===')
+          print(json.dumps([r for r in rows if r['levelTextCount']>r['levelSpanCount']],indent=2))
+          print('=== NO YEAR OR LEVEL CODE SAMPLE ===')
+          print(json.dumps(result['neither'][:20],indent=2))
+          PY
+
+      - name: Upload read-only scan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-shared-maths-answerpack-audit
+          path: |
+            /tmp/shared-answer-audit/candidates.json
+            /tmp/shared-answer-audit/results.tsv
+            /tmp/shared-answer-audit/scan-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm no mutation
+        run: echo 'Shared Maths Answer Pack audit complete. No R2/KV/D1/Worker write or deploy command was executed.'
