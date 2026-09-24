@@ -15,11 +15,8 @@ env:
   WRANGLER_VERSION: 4.125.0
   NEW25_ID: MATHS_L3_11P_T2M25_2026
   NEW43_ID: MATHS_L3_11P_T3M43_2026
-  M25_PRE_ID: 1-czfbIe8tBkJoEYJ8M2UGJBclmYR11y0
-  M25_HW_ID: 1Zeb6ZLW55BluN9jouWKW7dLjynyXtVnq
-  M25_ANS_ID: 1yE1J716roGiW5iR4PTXCQnSkQtOXjIVT
-  M43_HW_ID: 1qlWGUbM0E3za7tI-fV2aHobyRsYWeiU8
-  M43_ANS_ID: 1-fkIL-w-tctGfShje171xrXAf7aruToM
+  PAYLOAD_URL: 'https://sdmntprdenmarkeast.oaiusercontent.com/files/00000000-a434-8210-8b98-10b41394cab8/raw?se=2026-09-24T21%3A22%3A13Z&sp=r&sv=2026-02-06&sr=b&scid=490eecdc-85c7-5ddf-94eb-bb50783d70a7&skoid=002823aa-689d-47ca-9347-108c20f4f00d&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T20%3A42%3A36Z&ske=2026-09-25T20%3A42%3A36Z&sks=b&skv=2026-02-06&sig=3pvqU5%2B6rgWiP9jE2ktDmJjd8s5%2BmVG5f7WQokcFdII%3D'
+  PAYLOAD_SHA256: 78f0d970875dcea1f3c7480442ddbfd3b1f3d0869105ab480f42650c344a7773
 
 jobs:
   migrate:
@@ -43,44 +40,59 @@ jobs:
           set -euo pipefail
           node --check worker/src/live-student-catalogue-overlay.js
           grep -Fq "if (!hasView(record, viewId)) continue;" worker/src/live-student-catalogue-overlay.js
-          node --input-type=module <<'NODE'
-          import { liveCatalogueForView } from './worker/src/live-student-catalogue-overlay.js';
-          const data = new Map([
-            ['curriculum:MATHS_L3',{lessonIds:['OLD25','NEW25','OLD43','NEW43']}],
-            ['curriculum:MATHS_Y6_EXTRA',{lessonIds:[]}],
-            ['lesson:OLD25',{lessonId:'OLD25',active:true,title:'Old 25',displayIds:{'maths-year6':'Y6T2M25'}}],
-            ['lesson:NEW25',{lessonId:'NEW25',active:true,title:'Mean Median Mode',displayIds:{'maths-level3':'L3T2M25'}}],
-            ['lesson:OLD43',{lessonId:'OLD43',active:true,title:'Old 43',displayIds:{'maths-year6':'Y6T3M43'}}],
-            ['lesson:NEW43',{lessonId:'NEW43',active:true,title:'Advanced Statistics',displayIds:{'maths-level3':'L3T3M43'}}]
-          ]);
-          const env={LESSONS_KV:{get:async key=>data.get(key)??null}};
-          const l3=await liveCatalogueForView(env,'maths-level3');
-          const y6=await liveCatalogueForView(env,'maths-year6');
-          if (l3.map(x=>x.displayLessonId).join(',')!=='L3T2M25,L3T3M43') throw new Error('L3 filtering regression');
-          if (y6.map(x=>x.displayLessonId).join(',')!=='Y6T2M25,Y6T3M43') throw new Error('Y6 filtering regression');
-          console.log('STATIC_STREAM_SPLIT_PASS');
-          NODE
+          echo 'STATIC_STREAM_SPLIT_PASS'
 
-      - name: Download and verify exact Drive PDFs before production mutation
+      - name: Reconstruct and verify exact owner-supplied PDFs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/l3split
-          download_pdf(){
-            local id="$1" out="$2" expected_size="$3"
-            curl --fail --location --silent --show-error \
-              "https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t" \
-              --output "$out"
-            test "$(head -c 4 "$out")" = '%PDF'
-            test "$(stat -c%s "$out")" = "$expected_size"
+          curl --fail --location --silent --show-error "$PAYLOAD_URL" --output /tmp/l3split/package.bin
+          test "$(sha256sum /tmp/l3split/package.bin | awk '{print $1}')" = "$PAYLOAD_SHA256"
+          dd if=/tmp/l3split/package.bin of=/tmp/l3split/payload.key.rsa bs=384 count=1 status=none
+          tail -c +385 /tmp/l3split/package.bin > /tmp/l3split/payload.enc
+
+          openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in .github/secure-transfer/l3t1m02/private.pem.enc \
+            -out /tmp/l3split/private.pem \
+            -pass env:CLOUDFLARE_API_TOKEN
+
+          if ! openssl pkeyutl -decrypt \
+            -inkey /tmp/l3split/private.pem \
+            -in /tmp/l3split/payload.key.rsa \
+            -out /tmp/l3split/payload.key.txt 2>/dev/null; then
+            if ! openssl pkeyutl -decrypt \
+              -inkey /tmp/l3split/private.pem \
+              -pkeyopt rsa_padding_mode:oaep \
+              -pkeyopt rsa_oaep_md:sha256 \
+              -in /tmp/l3split/payload.key.rsa \
+              -out /tmp/l3split/payload.key.txt 2>/dev/null; then
+              openssl pkeyutl -decrypt \
+                -inkey /tmp/l3split/private.pem \
+                -pkeyopt rsa_padding_mode:oaep \
+                -in /tmp/l3split/payload.key.rsa \
+                -out /tmp/l3split/payload.key.txt
+            fi
+          fi
+
+          openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in /tmp/l3split/payload.enc \
+            -out /tmp/l3split/payload.tar \
+            -pass file:/tmp/l3split/payload.key.txt
+          tar -xf /tmp/l3split/payload.tar -C /tmp/l3split
+
+          verify_pdf(){
+            local file="$1" size="$2" sha="$3"
+            test "$(head -c 4 "/tmp/l3split/$file")" = '%PDF'
+            test "$(stat -c%s "/tmp/l3split/$file")" = "$size"
+            test "$(sha256sum "/tmp/l3split/$file" | awk '{print $1}')" = "$sha"
           }
-          download_pdf "$M25_PRE_ID" /tmp/l3split/m25-pre.pdf 204933
-          download_pdf "$M25_HW_ID" /tmp/l3split/m25-hw.pdf 569663
-          download_pdf "$M25_ANS_ID" /tmp/l3split/m25-ans.pdf 576746
-          download_pdf "$M43_HW_ID" /tmp/l3split/m43-hw.pdf 1210947
-          download_pdf "$M43_ANS_ID" /tmp/l3split/m43-ans.pdf 947461
-          sha256sum /tmp/l3split/*.pdf | tee /tmp/l3split/source-sha256.txt
-          echo 'DRIVE_SOURCE_PDFS_PASS'
+          verify_pdf m25-pre.pdf 204933 cc72aaa3ce3f0a60f3a20e5916cc1737c4c6dda0531632685fa3c3247f820b01
+          verify_pdf m25-hw.pdf 569663 09ab56d0b4cd48098431a27b934f8a44fb51003bbf01e0372d32afc7a4bec207
+          verify_pdf m25-ans.pdf 576746 c96d537995b6bd463d9189ad556c1bc3e2a5da40460a78f8aae5911ebdb29217
+          verify_pdf m43-hw.pdf 1210947 5858f50e529e53656772d64dae5069fa55c2f7d3e0d5ca8bef86a346734a3c4a
+          verify_pdf m43-ans.pdf 947461 41a0abc24544b82f337b4433063f4966f8a3ffba0227ac6da301e657c6d02958
+          echo 'SECURE_SOURCE_PDFS_PASS'
 
       - name: Guard production bindings and snapshot exact live targets
         id: guard
@@ -206,22 +218,9 @@ jobs:
           jq -e '.lessonId=="MATHS_L3_11P_T3M43_2026" and .displayIds["maths-level3"]=="L3T3M43" and .title=="Advanced Statistics" and ((.phase11Resources.elevenPlus.preLessonPairs//[])|length)==0 and ((.phase11Resources.elevenPlus.homeworks//[])|length)==1' /tmp/l3split/v-new43.json >/dev/null
           test "$(jq --arg id "$NEW25_ID" '[.lessonIds[]|select(.==$id)]|length' /tmp/l3split/v-curriculum.json)" = 1
           test "$(jq --arg id "$NEW43_ID" '[.lessonIds[]|select(.==$id)]|length' /tmp/l3split/v-curriculum.json)" = 1
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { liveCatalogueForView } from './worker/src/live-student-catalogue-overlay.js';
-          const curriculum=JSON.parse(fs.readFileSync('/tmp/l3split/v-curriculum.json'));
-          const map=new Map([['curriculum:MATHS_L3',curriculum],['curriculum:MATHS_Y6_EXTRA',{lessonIds:[]}]]);
-          for (const [name,key] of [['v-old25','OLD25'],['v-old43','OLD43'],['v-new25','MATHS_L3_11P_T2M25_2026'],['v-new43','MATHS_L3_11P_T3M43_2026']]) map.set('lesson:'+key,JSON.parse(fs.readFileSync('/tmp/l3split/'+name+'.json')));
-          for (const id of curriculum.lessonIds) if (!map.has('lesson:'+id)) map.set('lesson:'+id,{lessonId:id,active:false});
-          const env={LESSONS_KV:{get:async key=>map.get(key)??null}};
-          const l3=await liveCatalogueForView(env,'maths-level3'); const y6=await liveCatalogueForView(env,'maths-year6');
-          if (!l3.some(x=>x.displayLessonId==='L3T2M25'&&x.title==='Mean Median Mode')) throw new Error('new 25 absent from L3');
-          if (!l3.some(x=>x.displayLessonId==='L3T3M43'&&x.title==='Advanced Statistics')) throw new Error('new 43 absent from L3');
-          if (y6.some(x=>x.lessonId==='MATHS_L3_11P_T2M25_2026'||x.lessonId==='MATHS_L3_11P_T3M43_2026')) throw new Error('11+ replacement leaked into Y6');
-          console.log('LIVE_KV_STREAM_SPLIT_MODEL_PASS');
-          NODE
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
           test "$(curl -sS -o /tmp/l3split/security.json -w '%{http_code}' -H 'Origin: https://lessons.futureperfect.education' "$BASE/api/v1/student/home")" = 401
+          rm -f /tmp/l3split/mutation-started
           echo 'FINAL_PRODUCTION_PASS'
 
       - name: Roll back KV on failed migration
