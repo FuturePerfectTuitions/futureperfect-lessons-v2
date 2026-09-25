@@ -8,8 +8,8 @@
   "fullSiteWorkflow": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
   "precedence": "This override supersedes conflicting or incomplete statements about ordinary Student Login Manager batch selection/provisioning only. All non-conflicting Portal V2, Replace Resource and shared-Worker composition authority remains binding.",
   "change": {
-    "name": "Create or deliberately reactivate a batch from existing batch settings",
-    "repositoryBaseline": "87160599a2be138df8be4285daa157c28a959708",
+    "name": "Create a new batch from existing batch settings",
+    "repositoryBaseline": "23180aa6770deddb069c432e20aa8ebca7dba9c4",
     "adminSurface": "Student Login Manager",
     "uiScript": "assets/admin-create-batch.js",
     "workerImplementation": "worker/src/admin-batch-manager-v2.js routed by worker/src/index-admin-tools.js; ordinary student provisioning remains in worker/src/admin-student-manager.js",
@@ -17,25 +17,28 @@
   },
   "requiredBehaviour": {
     "createApi": "POST /api/v1/admin/students/batches/create",
-    "reactivateApi": "POST /api/v1/admin/students/batches/reactivate",
     "authentication": "existing signed Admin session",
     "inputs": ["batchKey", "copyFromBatchKey", "activeFrom"],
     "batchKeyRule": "Canonicalise to uppercase and validate before mutation.",
     "templateRule": "The selected existing batch is the settings template; the requested batch remains a distinct batch key and the template must be active on activeFrom.",
     "copiedDefinition": ["academic_year", "subject", "school_year", "stream", "maths_level", "active_to"],
     "createTimestampRule": "New batch rows must populate created_at and updated_at as required by the batch_definitions schema.",
-    "activeFromRule": "Use the requested activeFrom date for the requested batch rather than silently inheriting the template start date.",
-    "postCreateUi": "Refresh active batches, select the created batch when available, and preserve the ordinary Create Student Login flow.",
-    "duplicateRecoveryRule": "If create returns BATCH_ALREADY_EXISTS, the response must include the existing batch definition and whether its structural class definition matches the chosen template. The Admin UI first refreshes and selects it if active. If it remains inactive but the structural definition matches the chosen template, expose a deliberate Reactivate action rather than silently mutating it.",
-    "reactivationRule": "Reactivation is an explicit Admin action. It may update only active_from, active_to and updated_at. It must require the existing batch year/subject/school_year/stream/maths_level to match the selected template exactly, copy the template active_to, use the requested activeFrom, read back the row, and prove it is active on the requested date before returning success.",
-    "reactivationMismatchRule": "If the existing key represents a different class definition from the selected template, fail closed with BATCH_REACTIVATE_TEMPLATE_MISMATCH and do not modify it.",
-    "studentBoundary": "Neither create nor reactivate creates a student. Student provisioning remains a separate deliberate Create Student Login action with its existing prepared-read-model gates.",
+    "activeFromRule": "Use the requested activeFrom date for the new batch rather than inheriting the template start date.",
+    "duplicateRule": "If the batch key already exists, do not mutate it. Refresh the active list: if it is active, select it; otherwise show a short message that the code is already in use and require a different code.",
+    "constraintClassificationRule": "Only a true UNIQUE/primary-key collision on batch_definitions.batch_key is BATCH_ALREADY_EXISTS. Other SQL constraint failures must remain BATCH_CREATE_FAILED.",
+    "postCreateUi": "After successful creation, refresh active batches and select the new batch automatically when available, then continue with the ordinary Create Student Login flow.",
+    "studentBoundary": "Creating a batch never creates the student. Student provisioning remains a separate Create Student Login action with its existing prepared-read-model gates.",
     "dropdownPresentation": "In Copy settings from, render at least one visible space between the batch code and its human-readable type/description."
   },
+  "incident20260925": {
+    "symptom": "Creating Y411OE2 displayed BATCH_ALREADY_EXISTS even though the batch did not appear in the active list.",
+    "rootCause": "The first create implementation omitted required created_at and updated_at values. D1 raised a NOT NULL constraint error, and the Worker incorrectly classified any error containing the word constraint as BATCH_ALREADY_EXISTS.",
+    "repair": "The active create handler supplies created_at and updated_at and classifies only a real batch_key UNIQUE/primary-key collision as BATCH_ALREADY_EXISTS.",
+    "uxDecision": "Keep the Admin workflow simple: create batch -> batch is selected -> create student. Do not expose a separate reactivation workflow in Student Login Manager."
+  },
   "safetyAndPreservation": [
-    "Do not overwrite or repurpose an existing batch with different structural class settings.",
-    "Do not reactivate an inactive batch implicitly merely because its key collides with a requested new batch.",
-    "Do not create or modify a student merely by creating or reactivating a batch definition.",
+    "Do not overwrite, reactivate or repurpose an existing batch definition from Student Login Manager.",
+    "Do not create or modify a student merely by creating a batch definition.",
     "Do not claim a requested batch or student exists until the authenticated mutation and readback complete.",
     "Do not alter normal-student multi-device session semantics.",
     "Do not alter Trial one-successful-login semantics.",
@@ -43,22 +46,21 @@
     "Shared Worker production deployment must retain the composed quiz bridge -> Admin Tools chain and all existing preservation gates."
   ],
   "completionBoundary": {
-    "engineeringChange": "The repository supports safe create plus explicit reactivation of a same-definition inactive batch, with create timestamps corrected and reactivation routed through Admin Tools.",
-    "productionMutation": "A new or reactivated batch is usable only after authenticated mutation, readback and appearance in the refreshed active-batch list.",
+    "engineeringChange": "The repository supports simple batch creation with required timestamps, precise duplicate classification and automatic refresh/selection.",
+    "productionMutation": "A new batch is usable only after authenticated mutation, readback and appearance in the refreshed active-batch list.",
     "studentProvisioning": "A student login is not provisioned until the separate create-student transaction and prepared access publication/readback gates succeed."
   },
   "verificationMatrix": [
     "Syntax-check assets/admin-create-batch.js, worker/src/admin-batch-manager-v2.js, worker/src/index-admin-tools.js and tests/admin-student-manager-verification.mjs.",
     "Run tests/admin-student-manager-verification.mjs.",
-    "Verify unauthenticated create/reactivate remain rejected.",
+    "Verify unauthenticated batch creation remains rejected.",
     "Verify new create populates required created_at and updated_at timestamps.",
-    "Verify duplicate create returns existing definition metadata without mutating it.",
-    "Verify an active duplicate is recovered by refresh + automatic selection.",
-    "Verify an inactive same-definition duplicate exposes a deliberate Reactivate action.",
-    "Verify reactivation changes only active dates/updated_at and requires exact structural-definition match.",
-    "Verify a mismatching historical batch fails closed and is unchanged.",
+    "Verify a generic NOT NULL/CHECK constraint is not classified as BATCH_ALREADY_EXISTS.",
+    "Verify a real batch_key UNIQUE collision is classified as BATCH_ALREADY_EXISTS.",
+    "Verify an active duplicate is recovered by refresh + automatic selection without mutation.",
+    "Verify Student Login Manager exposes no reactivation action or reactivate endpoint call.",
     "Verify the Admin dropdown retains visible separation between batch code and description.",
     "After any shared Worker production deploy, rerun shared-capability regression gates."
   ],
-  "authorityUpdateRule": "If batch-definition fields, create/reactivate endpoint shape, template-copy semantics, duplicate-key recovery, provisioning coupling or validation rules change, update this override and GCH_CURRENT.json in the same coherent change."
+  "authorityUpdateRule": "If batch-definition fields, create endpoint shape, template-copy semantics, duplicate handling, provisioning coupling or validation rules change, update this override and GCH_CURRENT.json in the same coherent change."
 }

@@ -15,11 +15,9 @@ import {
 } from '../worker/src/admin-student-manager.js';
 import {
   CREATE_PATH,
-  REACTIVATE_PATH,
   validBatchKey as validBatchKeyV2,
   validIsoDate as validIsoDateV2,
-  batchActiveOn as batchActiveOnV2,
-  sameDefinition
+  batchActiveOn as batchActiveOnV2
 } from '../worker/src/admin-batch-manager-v2.js';
 
 const source = fs.readFileSync('worker/src/admin-student-manager.js', 'utf8');
@@ -34,7 +32,6 @@ assert.equal(PATHS.batches, '/api/v1/admin/students/batches');
 assert.equal(PATHS.batchCreate, '/api/v1/admin/students/batches/create');
 assert.equal(PATHS.create, '/api/v1/admin/students/create');
 assert.equal(CREATE_PATH, '/api/v1/admin/students/batches/create');
-assert.equal(REACTIVATE_PATH, '/api/v1/admin/students/batches/reactivate');
 
 assert.equal(validIsoDate('2016-12-13'), true);
 assert.equal(validIsoDate('2016-02-30'), false);
@@ -58,14 +55,6 @@ assert.deepEqual(normaliseBatchKeys(['Y511FM', 'Y511FM', ' Y511FE ']), ['Y511FM'
 assert.equal(batchActiveOn({ active_from:'2026-09-01', active_to:null }, '2026-09-22'), true);
 assert.equal(batchActiveOnV2({ active_from:'2026-10-01', active_to:null }, '2026-09-22'), false);
 assert.equal(batchActiveOnV2({ active_from:'2026-09-01', active_to:'2026-09-20' }, '2026-09-22'), false);
-assert.equal(sameDefinition(
-  { academic_year:'2026-27', subject:'english', school_year:4, stream:'11plus', maths_level:null },
-  { academic_year:'2026-27', subject:'english', school_year:4, stream:'11plus', maths_level:null }
-), true);
-assert.equal(sameDefinition(
-  { academic_year:'2026-27', subject:'english', school_year:4, stream:'normal', maths_level:null },
-  { academic_year:'2026-27', subject:'english', school_year:4, stream:'11plus', maths_level:null }
-), false);
 
 const definitions = [
   { batch_key:'Y511FM', subject:'maths', school_year:5, stream:'11plus', maths_level:2 },
@@ -96,14 +85,13 @@ assert.doesNotMatch(source, /trial_login_consumptions/);
 
 assert.match(batchManagerV2, /INSERT INTO batch_definitions/);
 assert.match(batchManagerV2, /created_at, updated_at/);
+assert.match(batchManagerV2, /VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?\)/);
 assert.match(batchManagerV2, /BATCH_ALREADY_EXISTS/);
-assert.match(batchManagerV2, /existing:serialiseBatch/);
-assert.match(batchManagerV2, /sameDefinition/);
+assert.match(batchManagerV2, /UNIQUE constraint failed:\\s\*batch_definitions\\\.batch_key/);
+assert.doesNotMatch(batchManagerV2, /\/unique\|constraint\/i/);
 assert.match(batchManagerV2, /TEMPLATE_NOT_ACTIVE_ON_DATE/);
-assert.match(batchManagerV2, /BATCH_REACTIVATE_TEMPLATE_MISMATCH/);
-assert.match(batchManagerV2, /UPDATE batch_definitions/);
-assert.match(batchManagerV2, /SET active_from = \?, active_to = \?, updated_at = \?/);
-assert.match(batchManagerV2, /BATCH_REACTIVATE_VERIFY_FAILED/);
+assert.doesNotMatch(batchManagerV2, /BATCH_REACTIVATE/);
+assert.doesNotMatch(batchManagerV2, /UPDATE batch_definitions/);
 
 assert.match(adminTools, /handleAdminBatchManagerV2/);
 assert.match(adminTools, /const batchResponse = await handleAdminBatchManagerV2\(request, env\)/);
@@ -115,11 +103,10 @@ assert.match(browser, /\/api\/v1\/admin\/students\/create/);
 assert.match(batchBrowser, /Create a new batch/);
 assert.match(batchBrowser, /\$\{key\} \$\{detail\}/);
 assert.match(batchBrowser, /\/api\/v1\/admin\/students\/batches\/create/);
-assert.match(batchBrowser, /\/api\/v1\/admin\/students\/batches\/reactivate/);
-assert.match(batchBrowser, /Reactivate existing batch/);
-assert.match(batchBrowser, /sameDefinition/);
-assert.match(batchBrowser, /Current dates:/);
-assert.match(batchBrowser, /no student will be created until you then press Create Student Login/i);
+assert.doesNotMatch(batchBrowser, /\/api\/v1\/admin\/students\/batches\/reactivate/);
+assert.doesNotMatch(batchBrowser, /Reactivate existing batch/);
+assert.match(batchBrowser, /created and selected\. Continue with Create Student Login/);
+assert.match(batchBrowser, /Batch code \$\{batchKey\} is already in use\. Choose a different batch code\./);
 assert.match(batchBrowser, /refreshAndSelectBatch/);
 assert.match(html, /assets\/admin-create-batch\.js/);
 assert.ok(html.indexOf('assets/admin-trials.js') < html.indexOf('assets/admin-create-batch.js'));

@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-25",
-  "authorityVersion": "5.5-admin-batch-reactivation",
+  "authorityVersion": "5.6-admin-simple-batch-create",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including Student Login Manager batch creation, safe duplicate recovery and deliberate reactivation of an inactive same-definition batch, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including a simplified Student Login Manager batch-creation flow with required D1 timestamps and precise duplicate classification, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -31,7 +31,7 @@
     },
     "adminBatchCreationOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
-      "role": "higher authority for Admin batch creation, duplicate recovery and deliberate same-definition inactive-batch reactivation before ordinary student provisioning"
+      "role": "higher authority for simple Admin batch creation, required batch timestamps, precise duplicate classification and refresh/selection before ordinary student provisioning"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
@@ -40,16 +40,16 @@
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Admin batch creation and deliberate inactive-batch reactivation",
+    "name": "Simplified Admin batch creation",
     "date": "2026-09-25",
-    "status": "IMPLEMENTED_PENDING_PRODUCTION_OWNER_RETRY",
+    "status": "IMPLEMENTED_IN_REPOSITORY_PENDING_PRODUCTION_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
-    "implementation": "worker/src/admin-batch-manager-v2.js is routed by worker/src/index-admin-tools.js for batch create/reactivate while ordinary student provisioning remains in worker/src/admin-student-manager.js.",
-    "createHardening": "New batch create now populates required created_at/updated_at fields and requires the selected template to be active on the requested activeFrom date.",
-    "duplicateRecoveryHardening": "BATCH_ALREADY_EXISTS returns existing definition metadata. Active duplicates are selected after refresh; inactive same-definition duplicates expose an explicit Reactivate action; structural mismatches fail closed.",
-    "reactivationSafety": "Reactivation may change only active_from, active_to and updated_at, requires exact academic_year/subject/school_year/stream/maths_level match with the selected template, copies template active_to, verifies readback and proves the batch active on activeFrom before success.",
+    "implementation": "worker/src/admin-batch-manager-v2.js remains routed by worker/src/index-admin-tools.js for batch creation; ordinary student provisioning remains in worker/src/admin-student-manager.js.",
+    "rootCauseFixed": "The original false BATCH_ALREADY_EXISTS result came from omitted created_at/updated_at values combined with an over-broad SQL constraint classifier.",
+    "createHardening": "New batch creation supplies required created_at/updated_at fields, requires the selected template to be active on activeFrom, and maps only a true batch_key UNIQUE/primary-key collision to BATCH_ALREADY_EXISTS.",
+    "uiSimplification": "Student Login Manager exposes only the simple flow: create batch, refresh/select it automatically, then press Create Student Login. The separate Reactivate action was removed from the Admin surface.",
     "uiPresentationHardening": "Copy settings from options retain visible whitespace between batch code and human-readable description.",
-    "importantBoundary": "Creating or reactivating a batch does not create a student. Create Student Login remains a separate deliberate action."
+    "importantBoundary": "Creating a batch does not create a student. Create Student Login remains a separate deliberate action."
   },
   "latestClosedChange": {
     "name": "Replace Resource canonical-to-prepared consistency",
@@ -83,8 +83,8 @@
     "lesson release import and prepared access publication",
     "ordinary student login provisioning",
     "Admin creation of new batch definitions from existing batch settings",
-    "safe recovery of active duplicate batches",
-    "deliberate reactivation of inactive same-definition batches",
+    "required batch-definition timestamp persistence",
+    "precise duplicate-key classification and active-list refresh/selection",
     "Trial Login Manager create/inspect/delete/rearm semantics",
     "Replace Resource transaction and rollback",
     "resource open/capability delivery",
@@ -94,7 +94,7 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating or reactivating a batch is distinct from creating a student login. Duplicate-key recovery must never silently repurpose a mismatching historical batch. Inactive same-definition reactivation requires explicit Admin action, readback and active-date verification before the batch can be selected for student provisioning.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch, and Student Login Manager must not silently overwrite or reactivate an existing batch key.",
   "nextChangeProtocol": [
     "classify surface",
     "prove live owner/version/bindings",

@@ -8,20 +8,12 @@
   const TOKEN_KEY = 'fptAdminImportToken';
   const $ = id => document.getElementById(id);
   let activeFromDirty = false;
-  let pendingRecovery = null;
 
   function showStatus(text, kind='') {
     const el = $('studentBatchCreateStatus');
     if (!el) return;
     el.textContent = text;
     el.className = `status ${kind}`.trim();
-  }
-
-  function setRecoveryButton(visible, label='Reactivate existing batch') {
-    const button = $('reactivateStudentBatchBtn');
-    if (!button) return;
-    button.hidden = !visible;
-    button.textContent = label;
   }
 
   async function api(path, body={}) {
@@ -61,7 +53,6 @@
       <div><label for="newStudentBatchTemplate">Copy settings from</label><select id="newStudentBatchTemplate"><option value="">Loading active batches…</option></select></div>
       <div><label for="newStudentBatchActiveFrom">Active from</label><input id="newStudentBatchActiveFrom" type="date"></div>
       <button id="createStudentBatchBtn" type="button">Create Batch</button>
-      <button id="reactivateStudentBatchBtn" type="button" hidden>Reactivate existing batch</button>
     </div>
     <div id="studentBatchCreateStatus" class="status hidden"></div>`;
   choices.before(panel);
@@ -122,52 +113,12 @@
     return checkbox;
   }
 
-  function currentRequest() {
-    return {
-      batchKey:canonicalBatchKey($('newStudentBatchKey')?.value),
-      copyFromBatchKey:canonicalBatchKey($('newStudentBatchTemplate')?.value),
-      activeFrom:$('newStudentBatchActiveFrom')?.value || ''
-    };
-  }
-
-  async function reactivateBatch() {
-    if (!pendingRecovery) return;
-    const button = $('reactivateStudentBatchBtn');
-    const request = { ...pendingRecovery };
-    button.disabled = true;
-    showStatus(`Reactivating ${request.batchKey} from ${request.activeFrom}…`, 'warn');
-    try {
-      const data = await api('/api/v1/admin/students/batches/reactivate', request);
-      const checkbox = await refreshAndSelectBatch(request.batchKey);
-      if (!checkbox) {
-        showStatus(`${request.batchKey} was reactivated but is still not visible after refresh. Stop here and inspect the batch dates before creating the student.`, 'bad');
-        return;
-      }
-      pendingRecovery = null;
-      setRecoveryButton(false);
-      showStatus(`${data.batch.batchKey} has been reactivated from ${data.batch.activeFrom} and selected for this student. You can now continue with Create Student Login.`, 'good');
-    } catch (error) {
-      let message = `Could not reactivate batch: ${error.message}`;
-      if (error.code === 'BATCH_REACTIVATE_TEMPLATE_MISMATCH') {
-        message = `${request.batchKey} exists but its year/subject/stream settings do not match ${request.copyFromBatchKey}. It has not been changed.`;
-      } else if (error.code === 'TEMPLATE_NOT_ACTIVE_ON_DATE') {
-        message = `${request.copyFromBatchKey} is not active on ${request.activeFrom}, so its dates cannot safely be used.`;
-      } else if (error.code === 'BATCH_NOT_FOUND') {
-        message = `${request.batchKey} no longer exists. Refresh Active Batches and try again.`;
-      }
-      showStatus(message, 'bad');
-    } finally {
-      button.disabled = false;
-    }
-  }
-
   async function createBatch() {
-    const request = currentRequest();
-    const { batchKey, copyFromBatchKey, activeFrom } = request;
+    const batchKey = canonicalBatchKey($('newStudentBatchKey')?.value);
+    const copyFromBatchKey = canonicalBatchKey($('newStudentBatchTemplate')?.value);
+    const activeFrom = $('newStudentBatchActiveFrom')?.value || '';
     const button = $('createStudentBatchBtn');
 
-    pendingRecovery = null;
-    setRecoveryButton(false);
     if (!batchKey) return showStatus('Enter the new batch code.', 'bad');
     if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(batchKey)) return showStatus('Use only letters, numbers, hyphens or underscores in the batch code.', 'bad');
     if (!copyFromBatchKey) return showStatus('Choose an existing batch to copy the settings from.', 'bad');
@@ -176,31 +127,26 @@
     button.disabled = true;
     showStatus(`Creating ${batchKey}…`, 'warn');
     try {
-      const data = await api('/api/v1/admin/students/batches/create', request);
+      const data = await api('/api/v1/admin/students/batches/create', {
+        batchKey,
+        copyFromBatchKey,
+        activeFrom
+      });
       $('newStudentBatchKey').value = batchKey;
       const checkbox = await refreshAndSelectBatch(batchKey);
       if (checkbox) {
-        showStatus(`${data.batch.batchKey} created from ${data.copiedFromBatchKey} and selected for this student.`, 'good');
+        showStatus(`${data.batch.batchKey} created and selected. Continue with Create Student Login.`, 'good');
       } else {
-        showStatus(`${data.batch.batchKey} was created, but it is not visible in the active batch list after refresh. Do not create it again; check its active dates before continuing.`, 'bad');
+        showStatus(`${data.batch.batchKey} was created. Refresh Active Batches and select it.`, 'good');
       }
     } catch (error) {
       if (error.code === 'BATCH_ALREADY_EXISTS') {
-        showStatus(`Checking existing ${batchKey}…`, 'warn');
         const checkbox = await refreshAndSelectBatch(batchKey);
         if (checkbox) {
-          showStatus(`${batchKey} already exists and is active. It has now been selected for this student; continue with Create Student Login.`, 'good');
-          return;
+          showStatus(`${batchKey} already exists and has been selected. Continue with Create Student Login.`, 'good');
+        } else {
+          showStatus(`Batch code ${batchKey} is already in use. Choose a different batch code.`, 'bad');
         }
-        if (error.data?.sameDefinition === false) {
-          showStatus(`${batchKey} exists, but its year/subject/stream settings do not match ${copyFromBatchKey}. It has not been changed. Use a different batch code or inspect the existing definition.`, 'bad');
-          return;
-        }
-        pendingRecovery = request;
-        const existing = error.data?.existing || {};
-        const dates = `Current dates: ${existing.activeFrom || 'no start'} to ${existing.activeTo || 'no end'}.`;
-        setRecoveryButton(true, `Reactivate ${batchKey}`);
-        showStatus(`${batchKey} exists with matching class settings but is not active on ${activeFrom}. ${dates} Click Reactivate ${batchKey} to deliberately reset its active dates from ${copyFromBatchKey}; no student will be created until you then press Create Student Login.`, 'bad');
         return;
       }
 
@@ -209,6 +155,7 @@
       else if (error.code === 'TEMPLATE_NOT_ACTIVE_ON_DATE') message = `${copyFromBatchKey} is not active on ${activeFrom}. Choose an active template/date.`;
       else if (error.code === 'INVALID_BATCH_KEY') message = 'The new batch code is not valid.';
       else if (error.code === 'ACTIVE_FROM_REQUIRED') message = 'Enter a valid Active from date.';
+      else if (error.code === 'BATCH_CREATE_FAILED') message = 'Could not create the batch. Please try again.';
       showStatus(message, 'bad');
     } finally {
       button.disabled = false;
@@ -218,7 +165,7 @@
   const joinDate = $('studentJoinDate');
   const activeFrom = $('newStudentBatchActiveFrom');
   activeFrom.value = joinDate?.value || '';
-  activeFrom.addEventListener('input', () => { activeFromDirty = true; pendingRecovery = null; setRecoveryButton(false); });
+  activeFrom.addEventListener('input', () => { activeFromDirty = true; });
   joinDate?.addEventListener('change', () => {
     if (!activeFromDirty) activeFrom.value = joinDate.value;
   });
@@ -227,16 +174,12 @@
   });
 
   $('newStudentBatchKey')?.addEventListener('input', event => {
-    pendingRecovery = null;
-    setRecoveryButton(false);
     const start = event.target.selectionStart;
     const value = canonicalBatchKey(event.target.value);
     event.target.value = value;
     try { event.target.setSelectionRange(start, start); } catch { /* ignore */ }
   });
-  $('newStudentBatchTemplate')?.addEventListener('change', () => { pendingRecovery = null; setRecoveryButton(false); });
   $('createStudentBatchBtn')?.addEventListener('click', createBatch);
-  $('reactivateStudentBatchBtn')?.addEventListener('click', reactivateBatch);
 
   const observer = new MutationObserver(refreshTemplateOptions);
   observer.observe(choices, { childList:true, subtree:true });

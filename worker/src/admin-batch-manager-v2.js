@@ -1,5 +1,4 @@
 const CREATE_PATH = '/api/v1/admin/students/batches/create';
-const REACTIVATE_PATH = '/api/v1/admin/students/batches/reactivate';
 const SESSION_SCOPE = 'lesson-release-import';
 
 const clean = value => String(value ?? '').trim();
@@ -110,16 +109,6 @@ function serialiseBatch(row) {
   };
 }
 
-function sameDefinition(a, b) {
-  return Boolean(a && b &&
-    clean(a.academic_year) === clean(b.academic_year) &&
-    clean(a.subject) === clean(b.subject) &&
-    Number(a.school_year) === Number(b.school_year) &&
-    clean(a.stream) === clean(b.stream) &&
-    (a.maths_level == null ? null : Number(a.maths_level)) === (b.maths_level == null ? null : Number(b.maths_level))
-  );
-}
-
 async function definition(env, batchKey) {
   return env.DB.prepare(
     `SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to, created_at, updated_at
@@ -129,17 +118,17 @@ async function definition(env, batchKey) {
   ).bind(batchKey).first();
 }
 
-async function validateCommon(request, env) {
+async function handleCreate(request, env) {
   const body = await readJson(request);
   const batchKey = normaliseBatchKey(body?.batchKey);
   const copyFromBatchKey = normaliseBatchKey(body?.copyFromBatchKey);
   const activeFrom = clean(body?.activeFrom);
 
-  if (!validBatchKey(batchKey)) return { response:json({ ok:false, error:'INVALID_BATCH_KEY' }, 400, request, env) };
+  if (!validBatchKey(batchKey)) return json({ ok:false, error:'INVALID_BATCH_KEY' }, 400, request, env);
   if (!validBatchKey(copyFromBatchKey) || copyFromBatchKey === batchKey) {
-    return { response:json({ ok:false, error:'INVALID_BATCH_TEMPLATE' }, 400, request, env) };
+    return json({ ok:false, error:'INVALID_BATCH_TEMPLATE' }, 400, request, env);
   }
-  if (!validIsoDate(activeFrom)) return { response:json({ ok:false, error:'ACTIVE_FROM_REQUIRED' }, 400, request, env) };
+  if (!validIsoDate(activeFrom)) return json({ ok:false, error:'ACTIVE_FROM_REQUIRED' }, 400, request, env);
 
   let existing;
   let template;
@@ -149,30 +138,13 @@ async function validateCommon(request, env) {
       definition(env, copyFromBatchKey)
     ]);
   } catch {
-    return { response:json({ ok:false, error:'BATCH_LOOKUP_FAILED' }, 500, request, env) };
+    return json({ ok:false, error:'BATCH_LOOKUP_FAILED' }, 500, request, env);
   }
 
-  if (!template) return { response:json({ ok:false, error:'TEMPLATE_BATCH_NOT_FOUND', copyFromBatchKey }, 404, request, env) };
+  if (existing) return json({ ok:false, error:'BATCH_ALREADY_EXISTS', batchKey }, 409, request, env);
+  if (!template) return json({ ok:false, error:'TEMPLATE_BATCH_NOT_FOUND', copyFromBatchKey }, 404, request, env);
   if (!batchActiveOn(template, activeFrom)) {
-    return { response:json({ ok:false, error:'TEMPLATE_NOT_ACTIVE_ON_DATE', copyFromBatchKey, activeFrom }, 400, request, env) };
-  }
-  return { body, batchKey, copyFromBatchKey, activeFrom, existing, template };
-}
-
-async function handleCreate(request, env) {
-  const state = await validateCommon(request, env);
-  if (state.response) return state.response;
-  const { batchKey, copyFromBatchKey, activeFrom, existing, template } = state;
-
-  if (existing) {
-    return json({
-      ok:false,
-      error:'BATCH_ALREADY_EXISTS',
-      batchKey,
-      existing:serialiseBatch(existing),
-      sameDefinition:sameDefinition(existing, template),
-      activeOnRequestedDate:batchActiveOn(existing, activeFrom)
-    }, 409, request, env);
+    return json({ ok:false, error:'TEMPLATE_NOT_ACTIVE_ON_DATE', copyFromBatchKey, activeFrom }, 400, request, env);
   }
 
   const now = new Date().toISOString();
@@ -200,62 +172,16 @@ async function handleCreate(request, env) {
     return json({ ok:true, batch:serialiseBatch(created), copiedFromBatchKey:copyFromBatchKey }, 200, request, env);
   } catch (error) {
     const detail = clean(error?.message);
-    if (/unique|constraint/i.test(detail)) {
-      const collided = await definition(env, batchKey).catch(() => null);
-      return json({
-        ok:false,
-        error:'BATCH_ALREADY_EXISTS',
-        batchKey,
-        existing:serialiseBatch(collided),
-        sameDefinition:sameDefinition(collided, template),
-        activeOnRequestedDate:batchActiveOn(collided, activeFrom)
-      }, 409, request, env);
+    if (/UNIQUE constraint failed:\s*batch_definitions\.batch_key/i.test(detail) || /PRIMARY KEY/i.test(detail)) {
+      return json({ ok:false, error:'BATCH_ALREADY_EXISTS', batchKey }, 409, request, env);
     }
     return json({ ok:false, error:'BATCH_CREATE_FAILED', detail }, 500, request, env);
   }
 }
 
-async function handleReactivate(request, env) {
-  const state = await validateCommon(request, env);
-  if (state.response) return state.response;
-  const { batchKey, copyFromBatchKey, activeFrom, existing, template } = state;
-
-  if (!existing) return json({ ok:false, error:'BATCH_NOT_FOUND', batchKey }, 404, request, env);
-  if (!sameDefinition(existing, template)) {
-    return json({
-      ok:false,
-      error:'BATCH_REACTIVATE_TEMPLATE_MISMATCH',
-      batchKey,
-      existing:serialiseBatch(existing),
-      template:serialiseBatch(template)
-    }, 409, request, env);
-  }
-
-  const now = new Date().toISOString();
-  const activeTo = clean(template.active_to) || null;
-  try {
-    await env.DB.prepare(
-      `UPDATE batch_definitions
-       SET active_from = ?, active_to = ?, updated_at = ?
-       WHERE batch_key = ?`
-    ).bind(activeFrom, activeTo, now, clean(existing.batch_key)).run();
-
-    const updated = await definition(env, batchKey);
-    if (!updated || !batchActiveOn(updated, activeFrom)) throw new Error('BATCH_REACTIVATE_VERIFY_FAILED');
-    return json({
-      ok:true,
-      batch:serialiseBatch(updated),
-      copiedDatesFromBatchKey:copyFromBatchKey,
-      reactivated:true
-    }, 200, request, env);
-  } catch (error) {
-    return json({ ok:false, error:'BATCH_REACTIVATE_FAILED', detail:clean(error?.message) }, 500, request, env);
-  }
-}
-
 export async function handleAdminBatchManagerV2(request, env) {
   const url = new URL(request.url);
-  if (url.pathname !== CREATE_PATH && url.pathname !== REACTIVATE_PATH) return null;
+  if (url.pathname !== CREATE_PATH) return null;
 
   const origin = request.headers.get('Origin') || '';
   if (origin && !allowedOrigin(origin, env)) return json({ ok:false, error:'ORIGIN_NOT_ALLOWED' }, 403, request, env);
@@ -264,7 +190,7 @@ export async function handleAdminBatchManagerV2(request, env) {
   if (!env?.DB || !env?.ADMIN_IMPORT_SESSION_SECRET) return json({ ok:false, error:'ADMIN_BATCHES_NOT_CONFIGURED' }, 503, request, env);
   if (!(await adminSessionAuthorised(request, env))) return json({ ok:false, error:'UNAUTHORISED' }, 401, request, env);
 
-  return url.pathname === CREATE_PATH ? handleCreate(request, env) : handleReactivate(request, env);
+  return handleCreate(request, env);
 }
 
-export { CREATE_PATH, REACTIVATE_PATH, validBatchKey, validIsoDate, batchActiveOn, sameDefinition };
+export { CREATE_PATH, validBatchKey, validIsoDate, batchActiveOn };

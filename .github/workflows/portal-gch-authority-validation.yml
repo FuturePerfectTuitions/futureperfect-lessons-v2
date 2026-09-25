@@ -43,7 +43,8 @@ jobs:
               '5.2-quiz-bridge-composition',
               '5.3-replace-resource-preflight',
               '5.4-admin-batch-creation',
-              '5.5-admin-batch-reactivation'
+              '5.5-admin-batch-reactivation',
+              '5.6-admin-simple-batch-create'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -68,11 +69,13 @@ jobs:
           assert current['authorityComposition']['adminBatchCreationOverride']['path'] == expected_batch_path
           assert expected_batch_path in current['readOrder']
           assert batch_override['requiredBehaviour']['createApi'] == 'POST /api/v1/admin/students/batches/create'
-          assert batch_override['requiredBehaviour']['reactivateApi'] == 'POST /api/v1/admin/students/batches/reactivate'
+          assert 'reactivateApi' not in batch_override['requiredBehaviour']
+          assert 'created_at' in batch_override['requiredBehaviour']['createTimestampRule']
+          assert 'updated_at' in batch_override['requiredBehaviour']['createTimestampRule']
+          assert 'UNIQUE' in batch_override['requiredBehaviour']['constraintClassificationRule']
           assert 'dropdownPresentation' in batch_override['requiredBehaviour']
           assert 'visible space' in batch_override['requiredBehaviour']['dropdownPresentation']
-          assert 'exact' in batch_override['requiredBehaviour']['reactivationRule'].lower()
-          assert 'explicit' in batch_override['requiredBehaviour']['reactivationRule'].lower()
+          assert batch_override['incident20260925']['rootCause']
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
