@@ -37,7 +37,8 @@ assert.doesNotMatch(backend, /online_prelesson_entitlements/);
 
 assert.match(adminTools, /handleAdminPortalLoginLookup/);
 assert.match(browser, /Portal Login Details/);
-assert.match(browser, /admin-portal-reset-credentials\.js/);
+assert.match(browser, /import\('\.\/admin-portal-reset-credentials\.js'\)/);
+assert.doesNotMatch(browser, /import\('\.\/assets\/admin-portal-reset-credentials\.js'\)/);
 assert.match(resetBrowser, /\/api\/v1\/admin\/students\/reset-credentials/);
 assert.match(resetBrowser, /portalResetCredentialsBtn/);
 
