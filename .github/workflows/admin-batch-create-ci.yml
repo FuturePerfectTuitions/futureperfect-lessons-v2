@@ -1,6 +1,15 @@
 name: Admin batch creation verification
 
 on:
+  push:
+    branches:
+      - feat/admin-create-batch-2026-09-25
+    paths:
+      - 'admin-import.html'
+      - 'assets/admin-create-batch.js'
+      - 'worker/src/admin-student-manager.js'
+      - 'tests/admin-student-manager-verification.mjs'
+      - '.github/workflows/admin-batch-create-ci.yml'
   pull_request:
     paths:
       - 'admin-import.html'
