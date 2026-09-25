@@ -81,8 +81,12 @@ assert.match(source, /env\.STUDENTS_KV\.delete/);
 assert.doesNotMatch(source, /trial_login_consumptions/);
 
 assert.match(source, /INSERT INTO batch_definitions/);
+assert.match(source, /created_at, updated_at/);
+assert.match(source, /VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?\)/);
 assert.match(source, /copiedFromBatchKey/);
 assert.match(source, /BATCH_ALREADY_EXISTS/);
+assert.match(source, /UNIQUE constraint failed:\\s\*batch_definitions\\\.batch_key/);
+assert.doesNotMatch(source, /\/unique\|constraint\/i/);
 assert.match(source, /TEMPLATE_BATCH_NOT_FOUND/);
 assert.match(source, /BATCH_CREATE_FAILED/);
 
@@ -105,9 +109,8 @@ assert.match(batchBrowser, /\/api\/v1\/admin\/students\/batches\/create/);
 assert.match(batchBrowser, /refreshStudentBatchesBtn/);
 assert.match(batchBrowser, /data-student-batch/);
 assert.match(batchBrowser, /refreshAndSelectBatch/);
-assert.match(batchBrowser, /already exists and is active/);
-assert.match(batchBrowser, /not currently in the active batch list/);
-assert.match(batchBrowser, /Do not create it again/);
+assert.match(batchBrowser, /created and selected\. Continue with Create Student Login/);
+assert.match(batchBrowser, /Batch code \$\{batchKey\} is already in use\. Choose a different batch code\./);
 assert.match(batchBrowser, /\$\{key\} \$\{detail\}/);
 assert.match(html, /assets\/admin-create-batch\.js/);
 assert.ok(html.indexOf('assets/admin-trials.js') < html.indexOf('assets/admin-create-batch.js'));
