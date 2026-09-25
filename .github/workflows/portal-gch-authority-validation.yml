@@ -42,7 +42,8 @@ jobs:
           assert current['authorityVersion'] in {
               '5.2-quiz-bridge-composition',
               '5.3-replace-resource-preflight',
-              '5.4-admin-batch-creation'
+              '5.4-admin-batch-creation',
+              '5.5-admin-batch-create-constraint-fix'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -67,8 +68,12 @@ jobs:
           assert current['authorityComposition']['adminBatchCreationOverride']['path'] == expected_batch_path
           assert expected_batch_path in current['readOrder']
           assert batch_override['requiredBehaviour']['api'] == 'POST /api/v1/admin/students/batches/create'
+          assert 'created_at' in batch_override['requiredBehaviour']['timestampRule']
+          assert 'updated_at' in batch_override['requiredBehaviour']['timestampRule']
+          assert 'UNIQUE' in batch_override['requiredBehaviour']['errorClassificationRule']
           assert 'dropdownPresentation' in batch_override['requiredBehaviour']
           assert 'visible space' in batch_override['requiredBehaviour']['dropdownPresentation']
+          assert batch_override['incident20260925']['rootCause']
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
