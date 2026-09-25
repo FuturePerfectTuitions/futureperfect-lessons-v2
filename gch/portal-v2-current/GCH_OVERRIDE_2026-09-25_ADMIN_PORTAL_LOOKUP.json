@@ -38,11 +38,29 @@
     "adminUi": "assets/admin-create-batch.js adds the Portal Login Details card/section alongside the existing Student Login Manager without replacing the batch-creation UI.",
     "verification": "tests/admin-portal-login-lookup-verification.mjs"
   },
-  "completionBoundary": {
-    "repository": "Source, route wiring, Admin UI, tests and authority must be coherent on main.",
-    "production": "Shared Worker deployment must preserve quiz bridge, Admin, Trial, protected-view, Replace Resource and batch-create capabilities and the lookup route must remain protected without an Admin session.",
-    "browser": "Owner verification is required before changing status to CLOSED_PASS_OWNER_VERIFIED."
+  "productionEvidence": {
+    "mergeCommit": "6c91624ef07f3498f4be141967ca3975edf19fb2",
+    "workflowRun": 36157029595,
+    "result": "PASS",
+    "verified": [
+      "production source syntax",
+      "production wiring",
+      "rollback anchor capture",
+      "Worker deployment preserving bindings and secrets",
+      "composed Worker live markers",
+      "quiz bridge protected route",
+      "Replace Resource consistency and CORS preflight",
+      "Trial runtime",
+      "Admin protected routes",
+      "protected Answer Pack viewer"
+    ],
+    "rollbackInvoked": false
   },
-  "statusDetail": "IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+  "completionBoundary": {
+    "repository": "Source, route wiring, Admin UI, tests and authority are coherent on main.",
+    "production": "Shared Worker deployment passed preservation gates on workflow run 36157029595.",
+    "browser": "Owner verification is still required before changing status to CLOSED_PASS_OWNER_VERIFIED."
+  },
+  "statusDetail": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
   "authorityUpdateRule": "Any change to returned fields, credential exposure, authentication, canonical source or mutation semantics requires updating this override and GCH_CURRENT.json in the same coherent change."
 }
