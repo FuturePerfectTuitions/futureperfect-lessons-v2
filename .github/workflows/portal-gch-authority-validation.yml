@@ -36,6 +36,7 @@ jobs:
           replace_override = json.loads((root / 'GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json').read_text())
           quiz_override = json.loads((root / 'GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json').read_text())
           batch_override = json.loads((root / 'GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json').read_text())
+          lookup_override = json.loads((root / 'GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json').read_text())
           workflow = json.loads((root / 'WEBSITE_WORKFLOW_2026-09-23.json').read_text())
 
           assert current['status'] == 'AUTHORITATIVE_CURRENT'
@@ -44,7 +45,8 @@ jobs:
               '5.3-replace-resource-preflight',
               '5.4-admin-batch-creation',
               '5.5-admin-batch-reactivation',
-              '5.6-admin-simple-batch-create'
+              '5.6-admin-simple-batch-create',
+              '5.7-admin-portal-login-lookup'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -54,6 +56,7 @@ jobs:
               'CLOSED_PASS_OWNER_VERIFIED'
           }
           assert batch_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
+          assert lookup_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
           assert workflow['status'] == 'AUTHORITATIVE_CURRENT_WORKFLOW'
 
           expected_quiz_path = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json'
@@ -76,6 +79,14 @@ jobs:
           assert 'dropdownPresentation' in batch_override['requiredBehaviour']
           assert 'visible space' in batch_override['requiredBehaviour']['dropdownPresentation']
           assert batch_override['incident20260925']['rootCause']
+
+          expected_lookup_path = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json'
+          assert current['authorityComposition']['adminPortalLookupOverride']['path'] == expected_lookup_path
+          assert expected_lookup_path in current['readOrder']
+          assert lookup_override['requiredBehaviour']['lookupApi'] == 'POST /api/v1/admin/students/lookup'
+          assert lookup_override['requiredBehaviour']['readOnly'] is True
+          assert 'credential values' in lookup_override['requiredBehaviour']['secretBoundary']
+          assert 'STUDENTS_KV' in lookup_override['requiredBehaviour']['canonicalSource']
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
