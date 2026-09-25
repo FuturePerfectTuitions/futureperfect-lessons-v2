@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-25",
-  "authorityVersion": "5.6-admin-simple-batch-create",
+  "authorityVersion": "5.7-admin-portal-login-lookup",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow with required D1 timestamps and precise duplicate classification, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow and a read-only Portal Login Details lookup, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -14,6 +14,7 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json"
   ],
   "authorityComposition": {
@@ -33,6 +34,10 @@
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
       "role": "higher authority for simple Admin batch creation, required batch timestamps, precise duplicate classification and refresh/selection before ordinary student provisioning"
     },
+    "adminPortalLookupOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
+      "role": "higher authority for the read-only Portal Login Details lookup, canonical STUDENTS_KV read path and no-secret/no-mutation boundary"
+    },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
       "role": "website-wide execution map; scope-specific overrides supersede conflicting statements within their declared scope"
@@ -40,6 +45,20 @@
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
+    "name": "Read-only Portal Login Details lookup",
+    "date": "2026-09-25",
+    "status": "IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
+    "backend": "worker/src/admin-portal-login-lookup.js",
+    "routeComposition": "worker/src/index-admin-tools.js",
+    "adminUi": "assets/admin-create-batch.js",
+    "lookupApi": "POST /api/v1/admin/students/lookup",
+    "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
+    "returnedFields": ["portalUserId", "firstName", "accountStatus", "loginPasswordStored", "answerPasswordStored"],
+    "readOnlyBoundary": "The lookup performs no KV/D1 mutation, does not reset credentials, does not alter batches/entitlements/sessions/account state and does not return stored password values.",
+    "verification": "tests/admin-portal-login-lookup-verification.mjs"
+  },
+  "previousClosedAdminChange": {
     "name": "Simplified Admin batch creation",
     "date": "2026-09-25",
     "status": "CLOSED_PASS_OWNER_VERIFIED",
@@ -48,14 +67,7 @@
     "productionDeploymentCommit": "a58577b2c564f1bd117a4e1b2b24367929e0de84",
     "productionWorkflowRun": 36140308566,
     "productionWorkflowResult": "PASS",
-    "ownerBrowserVerification": "PASS",
-    "implementation": "worker/src/admin-batch-manager-v2.js remains routed by worker/src/index-admin-tools.js for batch creation; ordinary student provisioning remains in worker/src/admin-student-manager.js.",
-    "rootCauseFixed": "The original false BATCH_ALREADY_EXISTS result came from omitted created_at/updated_at values combined with an over-broad SQL constraint classifier.",
-    "createHardening": "New batch creation supplies required created_at/updated_at fields, requires the selected template to be active on activeFrom, and maps only a true batch_key UNIQUE/primary-key collision to BATCH_ALREADY_EXISTS.",
-    "uiSimplification": "Student Login Manager exposes only the simple flow: create batch, refresh/select it automatically, then press Create Student Login. The separate Reactivate action is not part of the Admin surface.",
-    "uiPresentationHardening": "Copy settings from options retain visible whitespace between batch code and human-readable description.",
-    "ownerVerifiedOutcome": "The owner retried the normal Admin flow in production and confirmed that the batch creation worked.",
-    "importantBoundary": "Creating a batch does not create a student. Create Student Login remains a separate deliberate action."
+    "ownerBrowserVerification": "PASS"
   },
   "latestClosedChange": {
     "name": "Replace Resource canonical-to-prepared consistency",
@@ -91,6 +103,7 @@
     "Admin creation of new batch definitions from existing batch settings",
     "required batch-definition timestamp persistence",
     "precise duplicate-key classification and active-list refresh/selection",
+    "read-only Admin Portal Login Details lookup",
     "Trial Login Manager create/inspect/delete/rearm semantics",
     "Replace Resource transaction and rollback",
     "resource open/capability delivery",
@@ -100,7 +113,7 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch, and Student Login Manager must not silently overwrite or reactivate an existing batch key.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. The Portal Login Details lookup is read-only and must not expose stored password values or mutate student state.",
   "nextChangeProtocol": [
     "classify surface",
     "prove live owner/version/bindings",
