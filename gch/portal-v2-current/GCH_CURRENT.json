@@ -47,7 +47,7 @@
   "latestRepositoryChange": {
     "name": "Read-only Portal Login Details lookup",
     "date": "2026-09-25",
-    "status": "IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "backend": "worker/src/admin-portal-login-lookup.js",
     "routeComposition": "worker/src/index-admin-tools.js",
@@ -56,7 +56,11 @@
     "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
     "returnedFields": ["portalUserId", "firstName", "accountStatus", "loginPasswordStored", "answerPasswordStored"],
     "readOnlyBoundary": "The lookup performs no KV/D1 mutation, does not reset credentials, does not alter batches/entitlements/sessions/account state and does not return stored password values.",
-    "verification": "tests/admin-portal-login-lookup-verification.mjs"
+    "verification": "tests/admin-portal-login-lookup-verification.mjs",
+    "productionDeploymentCommit": "6c91624ef07f3498f4be141967ca3975edf19fb2",
+    "productionWorkflowRun": 36157029595,
+    "productionWorkflowResult": "PASS",
+    "ownerBrowserVerification": "PENDING"
   },
   "previousClosedAdminChange": {
     "name": "Simplified Admin batch creation",
