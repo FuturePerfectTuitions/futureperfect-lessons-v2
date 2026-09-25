@@ -47,7 +47,7 @@
   "latestRepositoryChange": {
     "name": "Portal Login Details Reset & Show New Credentials",
     "date": "2026-09-25",
-    "status": "IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "backend": "worker/src/admin-portal-login-lookup.js",
     "routeComposition": "worker/src/index-admin-tools.js",
@@ -58,7 +58,20 @@
     "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
     "lookupBoundary": "Find remains read-only and does not reveal the existing stored credential values.",
     "resetBoundary": "Reset & Show New Credentials deliberately replaces only p/loginPassword/answerPassword for a normal student and returns the newly generated credentials in that response. Batches, entitlements, sessions and account state are preserved.",
-    "verification": "tests/admin-portal-login-lookup-verification.mjs"
+    "verification": "tests/admin-portal-login-lookup-verification.mjs",
+    "mergeCommit": "d6f781af20df64617521eef8d93342d4d835ffc8",
+    "pullRequest": 231,
+    "dedicatedCiRun": 36170666380,
+    "dedicatedCiResult": "PASS",
+    "gchValidationRun": 36170666441,
+    "gchValidationResult": "PASS",
+    "adminBatchCompatibilityRun": 36170666485,
+    "adminBatchCompatibilityResult": "PASS",
+    "productionDeploymentRun": 36170835758,
+    "productionDeploymentResult": "PASS",
+    "githubPagesRun": 36170834879,
+    "githubPagesResult": "PASS",
+    "ownerBrowserVerification": "PENDING"
   },
   "previousPortalLookupChange": {
     "name": "Read-only Portal Login Details lookup",
