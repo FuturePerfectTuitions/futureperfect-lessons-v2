@@ -16,6 +16,13 @@
     el.className = `status ${kind}`.trim();
   }
 
+  function showLookupStatus(text, kind='') {
+    const el = $('portalLookupStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `status ${kind}`.trim();
+  }
+
   async function api(path, body={}) {
     const token = localStorage.getItem(TOKEN_KEY) || '';
     if (!token) throw Object.assign(new Error('Sign in to Admin first.'), { code:'UNAUTHORISED' });
@@ -184,4 +191,80 @@
   const observer = new MutationObserver(refreshTemplateOptions);
   observer.observe(choices, { childList:true, subtree:true });
   refreshTemplateOptions();
+
+  const home = $('adminToolsHome');
+  const grid = home?.querySelector('.admin-tools-grid');
+  if (grid && !$('portalLookupAdminTool')) {
+    const card = document.createElement('div');
+    card.className = 'admin-tool';
+    card.id = 'portalLookupAdminTool';
+    card.innerHTML = '<h3>Portal Login Details</h3><p>Look up an existing Portal ID without changing the account.</p><button type="button" data-admin-target="portalLookupSection">Open Portal Login Details</button>';
+    grid.appendChild(card);
+  }
+
+  if (!$('portalLookupSection')) {
+    const lookupSection = document.createElement('section');
+    lookupSection.className = 'admin-section';
+    lookupSection.id = 'portalLookupSection';
+    lookupSection.innerHTML = `
+      <h2>Portal Login Details</h2>
+      <p class="muted">Read-only lookup for an existing Portal ID. This does not reset passwords or alter batches, entitlements, sessions or account state.</p>
+      <div class="row">
+        <div><label for="portalLookupId">Portal ID</label><input id="portalLookupId" type="text" autocomplete="off" placeholder="e.g. Eva2409"></div>
+        <button id="portalLookupBtn" type="button">Find</button>
+      </div>
+      <div id="portalLookupStatus" class="status hidden"></div>
+      <div id="portalLookupResult" class="trial-credential-box hidden">
+        <div class="state-title">Portal account found</div>
+        <div class="credential-grid">
+          <div>Username</div><div id="portalLookupUsername" class="credential-value"></div>
+          <div>Name</div><div id="portalLookupName"></div>
+          <div>Account state</div><div id="portalLookupAccountState"></div>
+          <div>Login password</div><div id="portalLookupLoginStored"></div>
+          <div>Answer Pack password</div><div id="portalLookupAnswerStored"></div>
+        </div>
+      </div>`;
+    section.after(lookupSection);
+  }
+
+  function hideLookupResult() {
+    $('portalLookupResult')?.classList.add('hidden');
+  }
+
+  async function lookupPortalId() {
+    const portalUserId = String($('portalLookupId')?.value || '').trim();
+    if (!portalUserId) return showLookupStatus('Enter a Portal ID.', 'bad');
+    if (!/^[A-Za-z][A-Za-z0-9_-]{2,39}$/.test(portalUserId)) {
+      return showLookupStatus('Enter a valid Portal ID.', 'bad');
+    }
+
+    const button = $('portalLookupBtn');
+    button.disabled = true;
+    hideLookupResult();
+    showLookupStatus(`Looking up ${portalUserId}…`, 'warn');
+    try {
+      const data = await api('/api/v1/admin/students/lookup', { portalUserId });
+      $('portalLookupUsername').textContent = data.portalUserId || portalUserId;
+      $('portalLookupName').textContent = data.firstName || '—';
+      $('portalLookupAccountState').textContent = data.accountStatus || 'unknown';
+      $('portalLookupLoginStored').textContent = data.loginPasswordStored ? 'Stored' : 'Not stored';
+      $('portalLookupAnswerStored').textContent = data.answerPasswordStored ? 'Stored' : 'Not stored';
+      $('portalLookupResult').classList.remove('hidden');
+      showLookupStatus('Portal account loaded. No account data was changed.', 'good');
+    } catch (error) {
+      if (error.code === 'STUDENT_NOT_FOUND') showLookupStatus(`No Portal account found for ${portalUserId}.`, 'bad');
+      else if (error.code === 'UNAUTHORISED') showLookupStatus('Sign in to Admin again.', 'bad');
+      else showLookupStatus(`Could not load Portal account: ${error.message}`, 'bad');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  $('portalLookupBtn')?.addEventListener('click', lookupPortalId);
+  $('portalLookupId')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      lookupPortalId();
+    }
+  });
 })();
