@@ -135,19 +135,18 @@
       $('newStudentBatchKey').value = batchKey;
       const checkbox = await refreshAndSelectBatch(batchKey);
       if (checkbox) {
-        showStatus(`${data.batch.batchKey} created from ${data.copiedFromBatchKey} and selected for this student.`, 'good');
+        showStatus(`${data.batch.batchKey} created and selected. Continue with Create Student Login.`, 'good');
       } else {
-        showStatus(`${data.batch.batchKey} was created, but it is not visible in the active batch list after refresh. Do not create it again; check its active dates before continuing.`, 'bad');
+        showStatus(`${data.batch.batchKey} was created. Refresh Active Batches and select it.`, 'good');
       }
     } catch (error) {
       if (error.code === 'BATCH_ALREADY_EXISTS') {
-        showStatus(`Checking existing ${batchKey}…`, 'warn');
         const checkbox = await refreshAndSelectBatch(batchKey);
         if (checkbox) {
-          showStatus(`${batchKey} already exists and is active. It has now been selected for this student; continue with Create Student Login.`, 'good');
+          showStatus(`${batchKey} already exists and has been selected. Continue with Create Student Login.`, 'good');
           return;
         }
-        showStatus(`${batchKey} exists in the database but is not currently in the active batch list. It may be inactive or outside its active dates. No existing batch was changed. Use a different batch code, or inspect/reactivate the existing batch deliberately before assigning it.`, 'bad');
+        showStatus(`Batch code ${batchKey} is already in use. Choose a different batch code.`, 'bad');
         return;
       }
 
@@ -155,6 +154,7 @@
       if (error.code === 'TEMPLATE_BATCH_NOT_FOUND') message = 'The batch being copied no longer exists. Refresh Active Batches and choose another template.';
       else if (error.code === 'INVALID_BATCH_KEY') message = 'The new batch code is not valid.';
       else if (error.code === 'ACTIVE_FROM_REQUIRED') message = 'Enter a valid Active from date.';
+      else if (error.code === 'BATCH_CREATE_FAILED') message = 'Could not create the batch. Please try again.';
       showStatus(message, 'bad');
     } finally {
       button.disabled = false;
