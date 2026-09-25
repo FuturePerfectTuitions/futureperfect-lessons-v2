@@ -6,6 +6,7 @@ import {
 
 const PATHS = Object.freeze({
   batches: '/api/v1/admin/students/batches',
+  batchCreate: '/api/v1/admin/students/batches/create',
   create: '/api/v1/admin/students/create'
 });
 
@@ -126,6 +127,14 @@ function validStudentPortalUserId(value) {
   );
 }
 
+function normaliseBatchKey(value) {
+  return clean(value).toUpperCase();
+}
+
+function validBatchKey(value) {
+  return /^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(normaliseBatchKey(value));
+}
+
 function batchActiveOn(row, date) {
   const from = clean(row?.active_from ?? row?.activeFrom);
   const to = clean(row?.active_to ?? row?.activeTo);
@@ -199,6 +208,19 @@ async function allRows(statement) {
   return Array.isArray(result?.results) ? result.results : [];
 }
 
+function serialiseBatch(row) {
+  return {
+    batchKey:clean(row?.batch_key ?? row?.batchKey),
+    academicYear:clean(row?.academic_year ?? row?.academicYear),
+    subject:clean(row?.subject),
+    schoolYear:Number(row?.school_year ?? row?.schoolYear),
+    stream:clean(row?.stream),
+    mathsLevel:(row?.maths_level ?? row?.mathsLevel) == null ? null : Number(row?.maths_level ?? row?.mathsLevel),
+    activeFrom:clean(row?.active_from ?? row?.activeFrom) || null,
+    activeTo:clean(row?.active_to ?? row?.activeTo) || null
+  };
+}
+
 async function activeBatches(env, date = londonToday()) {
   const rows = await allRows(env.DB.prepare(
     `SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to
@@ -224,17 +246,83 @@ async function handleBatches(request, env) {
   const rows = await activeBatches(env);
   return json({
     ok:true,
-    batches:rows.map(row => ({
-      batchKey:clean(row.batch_key),
-      academicYear:clean(row.academic_year),
-      subject:clean(row.subject),
-      schoolYear:Number(row.school_year),
-      stream:clean(row.stream),
-      mathsLevel:row.maths_level == null ? null : Number(row.maths_level),
-      activeFrom:clean(row.active_from) || null,
-      activeTo:clean(row.active_to) || null
-    }))
+    batches:rows.map(serialiseBatch)
   }, 200, request, env);
+}
+
+async function handleBatchCreate(request, env) {
+  const body = await readJson(request);
+  const batchKey = normaliseBatchKey(body?.batchKey);
+  const copyFromBatchKey = normaliseBatchKey(body?.copyFromBatchKey);
+  const activeFrom = clean(body?.activeFrom);
+
+  if (!validBatchKey(batchKey)) {
+    return json({ ok:false, error:'INVALID_BATCH_KEY' }, 400, request, env);
+  }
+  if (!validBatchKey(copyFromBatchKey) || copyFromBatchKey === batchKey) {
+    return json({ ok:false, error:'INVALID_BATCH_TEMPLATE' }, 400, request, env);
+  }
+  if (!validIsoDate(activeFrom)) {
+    return json({ ok:false, error:'ACTIVE_FROM_REQUIRED' }, 400, request, env);
+  }
+
+  let existing;
+  let template;
+  try {
+    [existing, template] = await Promise.all([
+      env.DB.prepare(
+        `SELECT batch_key FROM batch_definitions WHERE UPPER(batch_key) = ? LIMIT 1`
+      ).bind(batchKey).first(),
+      env.DB.prepare(
+        `SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to
+         FROM batch_definitions
+         WHERE UPPER(batch_key) = ?
+         LIMIT 1`
+      ).bind(copyFromBatchKey).first()
+    ]);
+  } catch {
+    return json({ ok:false, error:'BATCH_LOOKUP_FAILED' }, 500, request, env);
+  }
+
+  if (existing) return json({ ok:false, error:'BATCH_ALREADY_EXISTS', batchKey }, 409, request, env);
+  if (!template) return json({ ok:false, error:'TEMPLATE_BATCH_NOT_FOUND', copyFromBatchKey }, 404, request, env);
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO batch_definitions (
+         batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      batchKey,
+      clean(template.academic_year),
+      clean(template.subject),
+      Number(template.school_year),
+      clean(template.stream),
+      template.maths_level == null ? null : Number(template.maths_level),
+      activeFrom,
+      clean(template.active_to) || null
+    ).run();
+
+    const created = await env.DB.prepare(
+      `SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to
+       FROM batch_definitions
+       WHERE batch_key = ?
+       LIMIT 1`
+    ).bind(batchKey).first();
+    if (!created) throw new Error('BATCH_CREATE_VERIFY_FAILED');
+
+    return json({
+      ok:true,
+      batch:serialiseBatch(created),
+      copiedFromBatchKey:clean(template.batch_key)
+    }, 200, request, env);
+  } catch (error) {
+    const detail = clean(error?.message);
+    if (/unique|constraint/i.test(detail)) {
+      return json({ ok:false, error:'BATCH_ALREADY_EXISTS', batchKey }, 409, request, env);
+    }
+    return json({ ok:false, error:'BATCH_CREATE_FAILED', detail }, 500, request, env);
+  }
 }
 
 async function rollbackProvision(env, portalUserIdNorm) {
@@ -392,6 +480,7 @@ export async function handleAdminStudentManager(request, env) {
   }
 
   if (url.pathname === PATHS.batches) return handleBatches(request, env);
+  if (url.pathname === PATHS.batchCreate) return handleBatchCreate(request, env);
   return handleCreate(request, env);
 }
 
@@ -402,6 +491,8 @@ export {
   londonToday,
   proposedStudentPortalUserId,
   validStudentPortalUserId,
+  normaliseBatchKey,
+  validBatchKey,
   batchActiveOn,
   normaliseBatchKeys,
   deriveSchoolYear,
