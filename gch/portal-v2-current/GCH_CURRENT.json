@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-25",
-  "authorityVersion": "5.4-admin-batch-creation",
+  "authorityVersion": "5.5-admin-batch-reactivation",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the 2026-09-25 Student Login Manager ability to create a new batch from an existing batch definition and safely recover when a just-created active batch is encountered again as a duplicate key, while preserving the 2026-09-23 Replace Resource and shared-Worker quiz-bridge authorities.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including Student Login Manager batch creation, safe duplicate recovery and deliberate reactivation of an inactive same-definition batch, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -23,32 +23,33 @@
     },
     "replaceResourceOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
-      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus the 2026-09-23 CORS-preflight defect, production repair evidence and remaining owner-retry closure gate"
+      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus its CORS-preflight repair state"
     },
     "quizBridgeCompositionOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
-      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition, quiz redeem-route preservation incident/repair and owner-verified closeout state"
+      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition and quiz redeem-route preservation"
     },
     "adminBatchCreationOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
-      "role": "higher authority for creating a new batch definition from an existing active batch inside Student Login Manager before ordinary student provisioning, including safe duplicate-key recovery"
+      "role": "higher authority for Admin batch creation, duplicate recovery and deliberate same-definition inactive-batch reactivation before ordinary student provisioning"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
-      "role": "website-wide end-to-end execution map tying Admin/source writes to canonical state, prepared projections, public API/browser verification, rollback and preservation obligations; scope-specific overrides supersede conflicting statements within their declared scope"
+      "role": "website-wide execution map; scope-specific overrides supersede conflicting statements within their declared scope"
     }
   },
-  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Trace the complete write -> canonical -> prepared -> public API -> browser chain for student-visible changes. Preserve every shared Worker capability. Fail closed when projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever the authority set, workflow topology or closed/open gate status changes.",
+  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Admin facility to create new student batches",
+    "name": "Admin batch creation and deliberate inactive-batch reactivation",
     "date": "2026-09-25",
-    "status": "IMPLEMENTED_IN_REPOSITORY_WITH_DUPLICATE_RECOVERY_HARDENING",
-    "baselineMainCommit": "c043e065b28f458689c9278fa4bf9d4ee6cee1a4",
+    "status": "IMPLEMENTED_PENDING_PRODUCTION_OWNER_RETRY",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
-    "behaviour": "Student Login Manager can create a distinct new batch by copying year/subject/stream definition fields from an existing batch and using an explicit activeFrom date before the normal student-provisioning step.",
-    "uiPresentationHardening": "Copy settings from options must include visible whitespace between the batch code and the human-readable batch type/description.",
-    "duplicateRecoveryHardening": "When the Worker reports BATCH_ALREADY_EXISTS, the Admin UI refreshes the active-batch list and automatically selects the matching batch if it is active. If the key remains absent after refresh, the UI reports that the row exists but is not currently active/visible and does not overwrite or reactivate it automatically.",
-    "importantBoundary": "Repository implementation does not by itself prove that any particular batch or student has been created in production. A duplicate response may indicate that an earlier create already succeeded even when the pre-refresh UI was stale."
+    "implementation": "worker/src/admin-batch-manager-v2.js is routed by worker/src/index-admin-tools.js for batch create/reactivate while ordinary student provisioning remains in worker/src/admin-student-manager.js.",
+    "createHardening": "New batch create now populates required created_at/updated_at fields and requires the selected template to be active on the requested activeFrom date.",
+    "duplicateRecoveryHardening": "BATCH_ALREADY_EXISTS returns existing definition metadata. Active duplicates are selected after refresh; inactive same-definition duplicates expose an explicit Reactivate action; structural mismatches fail closed.",
+    "reactivationSafety": "Reactivation may change only active_from, active_to and updated_at, requires exact academic_year/subject/school_year/stream/maths_level match with the selected template, copies template active_to, verifies readback and proves the batch active on activeFrom before success.",
+    "uiPresentationHardening": "Copy settings from options retain visible whitespace between batch code and human-readable description.",
+    "importantBoundary": "Creating or reactivating a batch does not create a student. Create Student Login remains a separate deliberate action."
   },
   "latestClosedChange": {
     "name": "Replace Resource canonical-to-prepared consistency",
@@ -57,8 +58,7 @@
     "incidentLesson": "Y5E2",
     "productionGuardCommit": "2cf7eaa1a78195bf13086dd81654200f45a3881c",
     "productionWorkflowRun": 35854434444,
-    "ownerBrowserVerification": "PASS",
-    "permanentInvariant": "Admin Replace Resource success is valid only after both the canonical lesson resource and the current student-facing prepared lesson point to the verified replacement object; projection failure must fail closed."
+    "ownerBrowserVerification": "PASS"
   },
   "latestOpenRepair": {
     "name": "Replace Resource CORS preflight passthrough",
@@ -66,39 +66,16 @@
     "status": "PRODUCTION_FIX_PASS_PENDING_OWNER_RETRY_AND_STUDENT_RESOURCE_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
     "incidentLesson": "Y6M1.4",
-    "displayLessonCode": "L3T2M24",
-    "uiFailure": "Replacement failed: Failed to fetch",
-    "diagnosticWorkflowRun": 35887723841,
-    "productionVersionDiagnosed": "a1d50246-d014-486f-aa32-57956c816640",
-    "rootCause": "The Replace Resource consistency wrapper treated OPTIONS preflight as a successful replacement response, then rejected it for missing lessonId/oldR2Key/newR2Key and returned HTTP 500, so the browser never sent the replacement POST.",
-    "stateSafety": "Read-only diagnostics proved canonical and prepared homework pointers remained on the original L3T2M24 object key; the failed browser attempt did not complete a replacement mutation.",
-    "fix": "Consistency processing is gated to POST only. OPTIONS preserves the base handler's HTTP 200/body/CORS semantics and carries a runtime-observable preflight guard marker header.",
-    "productionRepair": {
-      "mergeCommit": "391aa015c2cbeda8649315e72726707f259b6a2a",
-      "workflowRun": 35889526505,
-      "rollbackAnchor": "a1d50246-d014-486f-aa32-57956c816640",
-      "deployedVersion": "f62a9638-b2a5-40c7-ac14-dac2d6312c23",
-      "result": "PASS",
-      "livePreflight": "HTTP 200 with expected CORS and {ok:true}; convergence observed after Cloudflare propagation",
-      "sharedWorkerRegressionGate": "PASS",
-      "rollbackInvoked": false
-    },
-    "closureRequires": [
-      "owner retries L3T2M24 replacement successfully",
-      "student-facing replacement is verified to resolve to the intended replacement before final closeout"
-    ]
+    "displayLessonCode": "L3T2M24"
   },
   "latestClosedRepair": {
     "name": "Shared Worker quiz bridge composition restoration",
     "date": "2026-09-23",
     "status": "CLOSED_PASS_OWNER_VERIFIED",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
-    "rootCause": "The 2026-09-23 Admin deployment used index-admin-tools.js as the top-level Worker entrypoint and therefore replaced the previously active quiz bridge wrapper instead of composing it.",
     "productionDeploymentRun": 35883457258,
-    "hardeningMergeCommit": "60f9fa8df9639f1596539b377d40171edd20555e",
     "ownerBrowserVerification": "PASS",
-    "closeoutCommit": "1dbf2dd99b1f4071b2299b2fa847c12d11fc12ca",
-    "permanentInvariant": "The shared production Worker must retain the composed index-step10-quiz-bridge.js -> index-admin-tools.js chain; legacy Gate C remains verification-only and must not become a second production deploy path."
+    "permanentInvariant": "The shared production Worker must retain the composed index-step10-quiz-bridge.js -> index-admin-tools.js chain."
   },
   "websiteWorkflowCoverage": [
     "student authentication and logout",
@@ -106,9 +83,10 @@
     "lesson release import and prepared access publication",
     "ordinary student login provisioning",
     "Admin creation of new batch definitions from existing batch settings",
-    "safe Admin recovery of an existing active batch after duplicate-key response",
+    "safe recovery of active duplicate batches",
+    "deliberate reactivation of inactive same-definition batches",
     "Trial Login Manager create/inspect/delete/rearm semantics",
-    "Replace Resource end-to-end transaction, CORS preflight and rollback",
+    "Replace Resource transaction and rollback",
     "resource open/capability delivery",
     "protected Answer Pack viewer controls",
     "online 11+ English PreLesson VR projection",
@@ -116,17 +94,16 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Completion requires the applicable prepared projection publication/readback and, for incident closeout, live API/browser verification where available. Creating a batch definition is distinct from creating a student login; neither may be inferred from the other. A duplicate-key response must be reconciled against the refreshed active list before deciding whether the batch is usable, and must not implicitly overwrite an inactive/historical batch. Browser transport negotiation such as CORS OPTIONS is not an application mutation and must remain a successful pass-through prerequisite to the actual Admin POST.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating or reactivating a batch is distinct from creating a student login. Duplicate-key recovery must never silently repurpose a mismatching historical batch. Inactive same-definition reactivation requires explicit Admin action, readback and active-date verification before the batch can be selected for student provisioning.",
   "nextChangeProtocol": [
     "classify surface",
     "prove live owner/version/bindings",
     "identify canonical and prepared authorities",
     "trace read/write workflow",
-    "verify browser preflight/transport for cross-origin Admin mutations",
     "define rollback",
     "mutate only after gates pass",
     "verify canonical readback",
-    "verify prepared parity/readback",
+    "verify prepared parity/readback where applicable",
     "verify public API/browser when applicable",
     "run shared-capability regressions",
     "record evidence and update GCH authority"
