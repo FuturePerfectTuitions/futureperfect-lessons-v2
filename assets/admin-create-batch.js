@@ -268,5 +268,5 @@
     }
   });
 
-  import('./assets/admin-portal-reset-credentials.js').catch(() => {});
+  import('./admin-portal-reset-credentials.js').catch(() => {});
 })();

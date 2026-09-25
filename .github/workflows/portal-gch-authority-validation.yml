@@ -47,7 +47,8 @@ jobs:
               '5.5-admin-batch-reactivation',
               '5.6-admin-simple-batch-create',
               '5.7-admin-portal-login-lookup',
-              '5.8-admin-reset-show-credentials'
+              '5.8-admin-reset-show-credentials',
+              '5.9-admin-reset-ui-asset-path-repair'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -89,7 +90,9 @@ jobs:
           assert lookup_override['requiredBehaviour']['lookupReadOnly'] is True
           assert set(lookup_override['requiredBehaviour']['resetScope']) == {'p', 'loginPassword', 'answerPassword'}
           assert 'STUDENTS_KV' in lookup_override['requiredBehaviour']['canonicalSource']
-          assert 'sessions' in current['latestRepositoryChange']['resetBoundary']
+          assert lookup_override['browserIncident20260925']['rootCause']
+          assert "./admin-portal-reset-credentials.js" in lookup_override['implementation']['resetUiLoader']
+          assert 'assets/assets' in lookup_override['browserIncident20260925']['rootCause']
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
