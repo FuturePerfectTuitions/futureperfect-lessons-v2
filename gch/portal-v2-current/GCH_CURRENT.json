@@ -3,7 +3,7 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-25",
-  "authorityVersion": "5.8-admin-reset-show-credentials",
+  "authorityVersion": "5.9-admin-reset-ui-asset-path-repair",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
   "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow and Portal Login Details with read-only lookup plus deliberate Reset & Show New Credentials, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
@@ -36,7 +36,7 @@
     },
     "adminPortalLookupOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
-      "role": "higher authority for Portal Login Details, including read-only account lookup and the deliberate normal-student Reset & Show New Credentials operation"
+      "role": "higher authority for Portal Login Details, including read-only account lookup, deliberate normal-student Reset & Show New Credentials, and the required frontend module-loader path"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
@@ -45,9 +45,9 @@
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Portal Login Details Reset & Show New Credentials",
+    "name": "Portal Login Details Reset UI asset-path repair",
     "date": "2026-09-25",
-    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
+    "status": "REPAIR_PREPARED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "backend": "worker/src/admin-portal-login-lookup.js",
     "routeComposition": "worker/src/index-admin-tools.js",
@@ -56,9 +56,14 @@
     "lookupApi": "POST /api/v1/admin/students/lookup",
     "resetApi": "POST /api/v1/admin/students/reset-credentials",
     "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
-    "lookupBoundary": "Find remains read-only and does not reveal the existing stored credential values.",
-    "resetBoundary": "Reset & Show New Credentials deliberately replaces only p/loginPassword/answerPassword for a normal student and returns the newly generated credentials in that response. Batches, entitlements, sessions and account state are preserved.",
+    "rootCause": "The reset UI loader was written as ./assets/admin-portal-reset-credentials.js inside assets/admin-create-batch.js, which resolves in-browser to assets/assets/admin-portal-reset-credentials.js and therefore fails to load the button module.",
+    "repair": "Change the relative import to ./admin-portal-reset-credentials.js and add a regression assertion that the nested assets path is absent.",
+    "studentMutationImpact": "None from this browser incident; the reset UI module did not load, so no credential reset occurred.",
     "verification": "tests/admin-portal-login-lookup-verification.mjs",
+    "ownerBrowserVerification": "PENDING_REPAIR_DEPLOY"
+  },
+  "previousResetShowDeployment": {
+    "name": "Portal Login Details Reset & Show New Credentials backend and initial frontend deployment",
     "mergeCommit": "d6f781af20df64617521eef8d93342d4d835ffc8",
     "pullRequest": 231,
     "dedicatedCiRun": 36170666380,
@@ -71,7 +76,7 @@
     "productionDeploymentResult": "PASS",
     "githubPagesRun": 36170834879,
     "githubPagesResult": "PASS",
-    "ownerBrowserVerification": "PENDING"
+    "ownerBrowserVerification": "FAIL_RESET_BUTTON_NOT_VISIBLE_DUE_TO_FRONTEND_LOADER_PATH"
   },
   "previousPortalLookupChange": {
     "name": "Read-only Portal Login Details lookup",
@@ -129,6 +134,7 @@
     "precise duplicate-key classification and active-list refresh/selection",
     "read-only Admin Portal Login Details lookup",
     "deliberate normal-student Login and Answer Pack credential reset/show",
+    "frontend module loading for Reset & Show New Credentials",
     "Trial Login Manager create/inspect/delete/rearm semantics",
     "Replace Resource transaction and rollback",
     "resource open/capability delivery",
@@ -138,7 +144,7 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in their browser-relative context, not only by file existence.",
   "nextChangeProtocol": [
     "classify surface",
     "prove live owner/version/bindings",
