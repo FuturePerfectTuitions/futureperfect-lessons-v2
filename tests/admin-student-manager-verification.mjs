@@ -104,6 +104,11 @@ assert.match(batchBrowser, /copyFromBatchKey/);
 assert.match(batchBrowser, /\/api\/v1\/admin\/students\/batches\/create/);
 assert.match(batchBrowser, /refreshStudentBatchesBtn/);
 assert.match(batchBrowser, /data-student-batch/);
+assert.match(batchBrowser, /refreshAndSelectBatch/);
+assert.match(batchBrowser, /already exists and is active/);
+assert.match(batchBrowser, /not currently in the active batch list/);
+assert.match(batchBrowser, /Do not create it again/);
+assert.match(batchBrowser, /\$\{key\} \$\{detail\}/);
 assert.match(html, /assets\/admin-create-batch\.js/);
 assert.ok(html.indexOf('assets/admin-trials.js') < html.indexOf('assets/admin-create-batch.js'));
 
