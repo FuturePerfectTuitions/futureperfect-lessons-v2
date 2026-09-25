@@ -1,4 +1,7 @@
+import { randomPassword } from './admin-trial-manager.js';
+
 const LOOKUP_PATH = '/api/v1/admin/students/lookup';
+const RESET_CREDENTIALS_PATH = '/api/v1/admin/students/reset-credentials';
 const SESSION_SCOPE = 'lesson-release-import';
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
@@ -78,6 +81,11 @@ function validPortalId(value) {
   return /^[A-Za-z][A-Za-z0-9_-]{2,39}$/.test(id);
 }
 
+function resettablePortalId(value) {
+  const id = clean(value);
+  return validPortalId(id) && !/^trial/i.test(id) && !/^admin/i.test(id);
+}
+
 function credentialPresence(student) {
   return {
     loginPasswordStored:Boolean(clean(student?.loginPassword || student?.p)),
@@ -89,31 +97,83 @@ async function readJson(request) {
   try { return await request.json(); } catch { return null; }
 }
 
-async function lookupStudent(request, env) {
+async function loadStudent(request, env) {
   const body = await readJson(request);
   const suppliedId = clean(body?.portalUserId);
   if (!validPortalId(suppliedId)) {
-    return json({ ok:false, error:'INVALID_PORTAL_USER_ID' }, 400, request, env);
+    return { response:json({ ok:false, error:'INVALID_PORTAL_USER_ID' }, 400, request, env) };
   }
 
-  const student = await env.STUDENTS_KV.get(`user:${norm(suppliedId)}`, { type:'json' });
+  const key = `user:${norm(suppliedId)}`;
+  const student = await env.STUDENTS_KV.get(key, { type:'json' });
   if (!student) {
-    return json({ ok:false, error:'STUDENT_NOT_FOUND' }, 404, request, env);
+    return { response:json({ ok:false, error:'STUDENT_NOT_FOUND' }, 404, request, env) };
   }
+  return { suppliedId, key, student };
+}
 
-  const presence = credentialPresence(student);
+async function lookupStudent(request, env) {
+  const found = await loadStudent(request, env);
+  if (found.response) return found.response;
+
+  const presence = credentialPresence(found.student);
   return json({
     ok:true,
-    portalUserId:clean(student.portalUserId) || suppliedId,
-    firstName:clean(student.firstName || student.name),
-    accountStatus:clean(student.accountStatus || student.status) || 'unknown',
+    portalUserId:clean(found.student.portalUserId) || found.suppliedId,
+    firstName:clean(found.student.firstName || found.student.name),
+    accountStatus:clean(found.student.accountStatus || found.student.status) || 'unknown',
     ...presence
+  }, 200, request, env);
+}
+
+async function resetStudentCredentials(request, env) {
+  const found = await loadStudent(request, env);
+  if (found.response) return found.response;
+  if (!resettablePortalId(found.student.portalUserId || found.suppliedId)) {
+    return json({ ok:false, error:'ACCOUNT_NOT_RESETTABLE_HERE' }, 400, request, env);
+  }
+
+  const loginPassword = randomPassword();
+  const answerPassword = randomPassword(new Set([loginPassword]));
+  const updated = {
+    ...found.student,
+    p:loginPassword,
+    loginPassword,
+    answerPassword
+  };
+
+  try {
+    await env.STUDENTS_KV.put(found.key, JSON.stringify(updated));
+    const readback = await env.STUDENTS_KV.get(found.key, { type:'json' });
+    if (
+      !readback ||
+      clean(readback.p || readback.loginPassword) !== loginPassword ||
+      clean(readback.answerPassword) !== answerPassword
+    ) {
+      throw new Error('CREDENTIAL_RESET_VERIFY_FAILED');
+    }
+  } catch (error) {
+    try { await env.STUDENTS_KV.put(found.key, JSON.stringify(found.student)); } catch { /* best-effort rollback */ }
+    return json({
+      ok:false,
+      error:'CREDENTIAL_RESET_FAILED',
+      detail:clean(error?.message)
+    }, 500, request, env);
+  }
+
+  return json({
+    ok:true,
+    portalUserId:clean(updated.portalUserId) || found.suppliedId,
+    firstName:clean(updated.firstName || updated.name),
+    accountStatus:clean(updated.accountStatus || updated.status) || 'unknown',
+    loginPassword,
+    answerPassword
   }, 200, request, env);
 }
 
 export async function handleAdminPortalLoginLookup(request, env) {
   const url = new URL(request.url);
-  if (url.pathname !== LOOKUP_PATH) return null;
+  if (![LOOKUP_PATH, RESET_CREDENTIALS_PATH].includes(url.pathname)) return null;
 
   const origin = request.headers.get('Origin') || '';
   if (origin && !allowedOrigin(origin, env)) {
@@ -128,7 +188,14 @@ export async function handleAdminPortalLoginLookup(request, env) {
     return json({ ok:false, error:'UNAUTHORISED' }, 401, request, env);
   }
 
-  return lookupStudent(request, env);
+  if (url.pathname === LOOKUP_PATH) return lookupStudent(request, env);
+  return resetStudentCredentials(request, env);
 }
 
-export { LOOKUP_PATH, validPortalId, credentialPresence };
+export {
+  LOOKUP_PATH,
+  RESET_CREDENTIALS_PATH,
+  validPortalId,
+  resettablePortalId,
+  credentialPresence
+};
