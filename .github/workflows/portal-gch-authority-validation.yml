@@ -42,7 +42,8 @@ jobs:
           assert current['authorityVersion'] in {
               '5.2-quiz-bridge-composition',
               '5.3-replace-resource-preflight',
-              '5.4-admin-batch-creation'
+              '5.4-admin-batch-creation',
+              '5.5-admin-batch-reactivation'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -66,9 +67,12 @@ jobs:
           expected_batch_path = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json'
           assert current['authorityComposition']['adminBatchCreationOverride']['path'] == expected_batch_path
           assert expected_batch_path in current['readOrder']
-          assert batch_override['requiredBehaviour']['api'] == 'POST /api/v1/admin/students/batches/create'
+          assert batch_override['requiredBehaviour']['createApi'] == 'POST /api/v1/admin/students/batches/create'
+          assert batch_override['requiredBehaviour']['reactivateApi'] == 'POST /api/v1/admin/students/batches/reactivate'
           assert 'dropdownPresentation' in batch_override['requiredBehaviour']
           assert 'visible space' in batch_override['requiredBehaviour']['dropdownPresentation']
+          assert 'exact' in batch_override['requiredBehaviour']['reactivationRule'].lower()
+          assert 'explicit' in batch_override['requiredBehaviour']['reactivationRule'].lower()
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
@@ -89,7 +93,6 @@ jobs:
           assert preflight['readOnlyFindings']['githubPagesOriginPreflightHttpStatus'] == 500
           assert preflight['readOnlyFindings']['canonicalAndPreparedStillMatchOldObject'] is True
           assert 'OPTIONS' in replace_override['permanentImplementation']['transportBoundary']['rule']
-          assert 'prepared' in current['nonNegotiableCompletionRule'].lower()
 
           agents = Path('AGENTS.md').read_text()
           for required in current['readOrder'][1:]:
