@@ -1,0 +1,30 @@
+{
+  "schema": "fpt.portal.gch.evidence.admin-batch-create-owner-verified.v1",
+  "status": "CLOSED_PASS_OWNER_VERIFIED",
+  "date": "2026-09-25",
+  "scope": "ADMIN_LEGACY.CreateStudentLogin.batchDefinitionCreation",
+  "productionDeployment": {
+    "mergeCommit": "a58577b2c564f1bd117a4e1b2b24367929e0de84",
+    "workflowRun": 36140308566,
+    "workflow": "Admin superuser production deploy",
+    "result": "PASS"
+  },
+  "ownerVerification": {
+    "result": "PASS",
+    "reportedOutcome": "The simplified Admin batch-creation flow worked successfully after the production fix.",
+    "verifiedBehaviour": [
+      "Create Batch no longer reports the false BATCH_ALREADY_EXISTS error caused by the prior constraint-classification bug.",
+      "Student Login Manager remains a simple create-batch then create-student workflow.",
+      "No reactivation workflow is required for the normal Admin path."
+    ]
+  },
+  "rootCause": "The initial batch INSERT omitted required created_at and updated_at values. D1 returned a constraint failure, and the old error handler incorrectly mapped generic constraint failures to BATCH_ALREADY_EXISTS.",
+  "permanentFix": [
+    "Populate required created_at and updated_at values on new batch rows.",
+    "Classify only a true batch_key UNIQUE/primary-key collision as BATCH_ALREADY_EXISTS.",
+    "Keep Student Login Manager create-only: Create Batch -> refresh/select -> Create Student Login.",
+    "Keep visible spacing between the batch code and description in Copy settings from.",
+    "Production deploy workflow now includes and verifies Admin batch-creation code and route protection."
+  ],
+  "closure": "The 2026-09-25 Admin batch-creation incident is closed as PASS with owner browser verification."
+}
