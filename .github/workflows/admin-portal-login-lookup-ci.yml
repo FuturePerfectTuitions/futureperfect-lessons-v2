@@ -1,0 +1,38 @@
+name: Admin Portal login lookup verification
+
+on:
+  push:
+    paths:
+      - 'worker/src/admin-portal-login-lookup.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'assets/admin-create-batch.js'
+      - 'tests/admin-portal-login-lookup-verification.mjs'
+      - '.github/workflows/admin-portal-login-lookup-ci.yml'
+  pull_request:
+    paths:
+      - 'worker/src/admin-portal-login-lookup.js'
+      - 'worker/src/index-admin-tools.js'
+      - 'assets/admin-create-batch.js'
+      - 'tests/admin-portal-login-lookup-verification.mjs'
+      - '.github/workflows/admin-portal-login-lookup-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check worker/src/admin-portal-login-lookup.js
+          node --check worker/src/index-admin-tools.js
+          node --check assets/admin-create-batch.js
+          node --check tests/admin-portal-login-lookup-verification.mjs
+      - name: Verify lookup remains read-only
+        run: node tests/admin-portal-login-lookup-verification.mjs
