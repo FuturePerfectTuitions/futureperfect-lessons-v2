@@ -34,7 +34,19 @@
     "symptom": "Creating Y411OE2 displayed BATCH_ALREADY_EXISTS even though the batch did not appear in the active list.",
     "rootCause": "The first create implementation omitted required created_at and updated_at values. D1 raised a NOT NULL constraint error, and the Worker incorrectly classified any error containing the word constraint as BATCH_ALREADY_EXISTS.",
     "repair": "The active create handler supplies created_at and updated_at and classifies only a real batch_key UNIQUE/primary-key collision as BATCH_ALREADY_EXISTS.",
-    "uxDecision": "Keep the Admin workflow simple: create batch -> batch is selected -> create student. Do not expose a separate reactivation workflow in Student Login Manager."
+    "uxDecision": "Keep the Admin workflow simple: create batch -> batch is selected -> create student. Do not expose a separate reactivation workflow in Student Login Manager.",
+    "productionDeployment": {
+      "commit": "a58577b2c564f1bd117a4e1b2b24367929e0de84",
+      "workflowRun": 36140308566,
+      "result": "PASS"
+    },
+    "ownerBrowserVerification": {
+      "result": "PASS",
+      "date": "2026-09-25",
+      "outcome": "Owner retried the normal Admin batch-creation flow in production and confirmed that it worked.",
+      "evidence": "gch/portal-v2-current/evidence/2026-09-25_ADMIN_BATCH_CREATION_OWNER_VERIFIED.json"
+    },
+    "closure": "CLOSED_PASS_OWNER_VERIFIED"
   },
   "safetyAndPreservation": [
     "Do not overwrite, reactivate or repurpose an existing batch definition from Student Login Manager.",
@@ -48,7 +60,8 @@
   "completionBoundary": {
     "engineeringChange": "The repository supports simple batch creation with required timestamps, precise duplicate classification and automatic refresh/selection.",
     "productionMutation": "A new batch is usable only after authenticated mutation, readback and appearance in the refreshed active-batch list.",
-    "studentProvisioning": "A student login is not provisioned until the separate create-student transaction and prepared access publication/readback gates succeed."
+    "studentProvisioning": "A student login is not provisioned until the separate create-student transaction and prepared access publication/readback gates succeed.",
+    "incidentClosure": "The 2026-09-25 false duplicate incident is closed after successful production deployment and owner browser verification."
   },
   "verificationMatrix": [
     "Syntax-check assets/admin-create-batch.js, worker/src/admin-batch-manager-v2.js, worker/src/index-admin-tools.js and tests/admin-student-manager-verification.mjs.",
