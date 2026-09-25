@@ -1,0 +1,48 @@
+{
+  "schema": "fpt.portal.gch.override.admin-portal-lookup.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
+  "effectiveDate": "2026-09-25",
+  "scope": "ADMIN_LEGACY.PortalLoginDetailsLookup",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "fullSiteWorkflow": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
+  "precedence": "This override is higher authority only for the Admin Portal Login Details lookup. All non-conflicting Portal V2, Admin batch creation, Replace Resource and shared-Worker authority remains binding.",
+  "requiredBehaviour": {
+    "adminSurface": "Portal Login Details",
+    "lookupApi": "POST /api/v1/admin/students/lookup",
+    "authentication": "existing signed Admin session",
+    "input": "portalUserId",
+    "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
+    "readOnly": true,
+    "returnedFields": [
+      "portalUserId",
+      "firstName",
+      "accountStatus",
+      "loginPasswordStored",
+      "answerPasswordStored"
+    ],
+    "secretBoundary": "The lookup confirms whether stored Login and Answer Pack credentials exist but does not return the credential values themselves.",
+    "cacheRule": "Responses use no-store/no-cache semantics.",
+    "notFoundRule": "Unknown Portal IDs return STUDENT_NOT_FOUND without creating or mutating an account."
+  },
+  "nonMutationInvariants": [
+    "Do not reset or replace Login or Answer Pack passwords.",
+    "Do not write, delete or rewrite STUDENTS_KV.",
+    "Do not change student batch assignments.",
+    "Do not change lesson entitlements, prepared access, Trial consumption, sessions or account state.",
+    "Do not use the lookup as a substitute for student provisioning or account repair."
+  ],
+  "implementation": {
+    "backend": "worker/src/admin-portal-login-lookup.js",
+    "routeComposition": "worker/src/index-admin-tools.js",
+    "adminUi": "assets/admin-create-batch.js adds the Portal Login Details card/section alongside the existing Student Login Manager without replacing the batch-creation UI.",
+    "verification": "tests/admin-portal-login-lookup-verification.mjs"
+  },
+  "completionBoundary": {
+    "repository": "Source, route wiring, Admin UI, tests and authority must be coherent on main.",
+    "production": "Shared Worker deployment must preserve quiz bridge, Admin, Trial, protected-view, Replace Resource and batch-create capabilities and the lookup route must remain protected without an Admin session.",
+    "browser": "Owner verification is required before changing status to CLOSED_PASS_OWNER_VERIFIED."
+  },
+  "statusDetail": "IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+  "authorityUpdateRule": "Any change to returned fields, credential exposure, authentication, canonical source or mutation semantics requires updating this override and GCH_CURRENT.json in the same coherent change."
+}
