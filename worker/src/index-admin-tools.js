@@ -6,6 +6,7 @@ import {
 import { handleAdminResourceRequest } from './admin-resource-replace-consistency.js';
 import { handleAdminBatchManagerV2 } from './admin-batch-manager-v2.js';
 
+// Batch create requests are routed here so Admin batch-manager fixes deploy with the shared Worker.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
