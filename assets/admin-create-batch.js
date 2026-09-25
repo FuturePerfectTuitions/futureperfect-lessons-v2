@@ -64,9 +64,14 @@
     const rows = [...choices.querySelectorAll('input[data-student-batch]')]
       .map(input => {
         const label = input.closest('label');
+        const key = String(input.dataset.studentBatch || '').trim();
+        const rawText = String(label?.textContent || key).replace(/\s+/g, ' ').trim();
+        const detail = rawText.toUpperCase().startsWith(key.toUpperCase())
+          ? rawText.slice(key.length).trim()
+          : rawText;
         return {
-          key:String(input.dataset.studentBatch || '').trim(),
-          text:String(label?.textContent || input.dataset.studentBatch || '').replace(/\s+/g, ' ').trim()
+          key,
+          text:detail && detail !== key ? `${key} ${detail}` : key
         };
       })
       .filter(row => row.key)
