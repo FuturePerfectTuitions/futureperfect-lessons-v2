@@ -6,6 +6,7 @@ on:
       - 'worker/src/admin-portal-login-lookup.js'
       - 'worker/src/index-admin-tools.js'
       - 'assets/admin-create-batch.js'
+      - 'assets/admin-portal-reset-credentials.js'
       - 'tests/admin-portal-login-lookup-verification.mjs'
       - '.github/workflows/admin-portal-login-lookup-ci.yml'
   pull_request:
@@ -13,6 +14,7 @@ on:
       - 'worker/src/admin-portal-login-lookup.js'
       - 'worker/src/index-admin-tools.js'
       - 'assets/admin-create-batch.js'
+      - 'assets/admin-portal-reset-credentials.js'
       - 'tests/admin-portal-login-lookup-verification.mjs'
       - '.github/workflows/admin-portal-login-lookup-ci.yml'
 
@@ -33,6 +35,7 @@ jobs:
           node --check worker/src/admin-portal-login-lookup.js
           node --check worker/src/index-admin-tools.js
           node --check assets/admin-create-batch.js
+          node --check assets/admin-portal-reset-credentials.js
           node --check tests/admin-portal-login-lookup-verification.mjs
-      - name: Verify lookup remains read-only
+      - name: Verify lookup and credential-reset boundaries
         run: node tests/admin-portal-login-lookup-verification.mjs

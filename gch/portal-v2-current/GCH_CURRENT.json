@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-25",
-  "authorityVersion": "5.7-admin-portal-login-lookup",
+  "authorityVersion": "5.8-admin-reset-show-credentials",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow and a read-only Portal Login Details lookup, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow and Portal Login Details with read-only lookup plus deliberate Reset & Show New Credentials, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -36,7 +36,7 @@
     },
     "adminPortalLookupOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
-      "role": "higher authority for the read-only Portal Login Details lookup, canonical STUDENTS_KV read path and no-secret/no-mutation boundary"
+      "role": "higher authority for Portal Login Details, including read-only account lookup and the deliberate normal-student Reset & Show New Credentials operation"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
@@ -45,22 +45,29 @@
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Read-only Portal Login Details lookup",
+    "name": "Portal Login Details Reset & Show New Credentials",
     "date": "2026-09-25",
-    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
+    "status": "IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "backend": "worker/src/admin-portal-login-lookup.js",
     "routeComposition": "worker/src/index-admin-tools.js",
-    "adminUi": "assets/admin-create-batch.js",
+    "lookupUi": "assets/admin-create-batch.js",
+    "resetUi": "assets/admin-portal-reset-credentials.js",
     "lookupApi": "POST /api/v1/admin/students/lookup",
+    "resetApi": "POST /api/v1/admin/students/reset-credentials",
     "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
-    "returnedFields": ["portalUserId", "firstName", "accountStatus", "loginPasswordStored", "answerPasswordStored"],
-    "readOnlyBoundary": "The lookup performs no KV/D1 mutation, does not reset credentials, does not alter batches/entitlements/sessions/account state and does not return stored password values.",
-    "verification": "tests/admin-portal-login-lookup-verification.mjs",
+    "lookupBoundary": "Find remains read-only and does not reveal the existing stored credential values.",
+    "resetBoundary": "Reset & Show New Credentials deliberately replaces only p/loginPassword/answerPassword for a normal student and returns the newly generated credentials in that response. Batches, entitlements, sessions and account state are preserved.",
+    "verification": "tests/admin-portal-login-lookup-verification.mjs"
+  },
+  "previousPortalLookupChange": {
+    "name": "Read-only Portal Login Details lookup",
+    "date": "2026-09-25",
+    "status": "PRODUCTION_PASS_OWNER_BROWSER_VERIFIED_FOR_LOOKUP_UI",
     "productionDeploymentCommit": "6c91624ef07f3498f4be141967ca3975edf19fb2",
     "productionWorkflowRun": 36157029595,
     "productionWorkflowResult": "PASS",
-    "ownerBrowserVerification": "PENDING"
+    "ownerBrowserVerification": "PASS_LOOKUP_UI_VISIBLE_AND_FUNCTIONAL"
   },
   "previousClosedAdminChange": {
     "name": "Simplified Admin batch creation",
@@ -108,6 +115,7 @@
     "required batch-definition timestamp persistence",
     "precise duplicate-key classification and active-list refresh/selection",
     "read-only Admin Portal Login Details lookup",
+    "deliberate normal-student Login and Answer Pack credential reset/show",
     "Trial Login Manager create/inspect/delete/rearm semantics",
     "Replace Resource transaction and rollback",
     "resource open/capability delivery",
@@ -117,7 +125,7 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. The Portal Login Details lookup is read-only and must not expose stored password values or mutate student state.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state.",
   "nextChangeProtocol": [
     "classify surface",
     "prove live owner/version/bindings",

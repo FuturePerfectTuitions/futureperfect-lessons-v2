@@ -267,4 +267,6 @@
       lookupPortalId();
     }
   });
+
+  import('./assets/admin-portal-reset-credentials.js').catch(() => {});
 })();

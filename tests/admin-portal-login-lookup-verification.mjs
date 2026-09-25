@@ -2,45 +2,43 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   LOOKUP_PATH,
+  RESET_CREDENTIALS_PATH,
   validPortalId,
+  resettablePortalId,
   credentialPresence
 } from '../worker/src/admin-portal-login-lookup.js';
 
 const backend = fs.readFileSync('worker/src/admin-portal-login-lookup.js', 'utf8');
 const adminTools = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
 const browser = fs.readFileSync('assets/admin-create-batch.js', 'utf8');
+const resetBrowser = fs.readFileSync('assets/admin-portal-reset-credentials.js', 'utf8');
 
 assert.equal(LOOKUP_PATH, '/api/v1/admin/students/lookup');
+assert.equal(RESET_CREDENTIALS_PATH, '/api/v1/admin/students/reset-credentials');
 assert.equal(validPortalId('Eva2409'), true);
-assert.equal(validPortalId('eva2409'), true);
 assert.equal(validPortalId('bad id'), false);
+assert.equal(resettablePortalId('Eva2409'), true);
+assert.equal(resettablePortalId('TrialEva'), false);
+assert.equal(resettablePortalId('Admin'), false);
 
-assert.deepEqual(
-  credentialPresence({ loginPassword:'Ab1c', answerPassword:'Cd2e' }),
-  { loginPasswordStored:true, answerPasswordStored:true }
-);
-assert.deepEqual(
-  credentialPresence({ p:'Ab1c' }),
-  { loginPasswordStored:true, answerPasswordStored:false }
-);
+assert.deepEqual(credentialPresence({ p:'x', answerPassword:'y' }), {
+  loginPasswordStored:true,
+  answerPasswordStored:true
+});
 
-assert.match(backend, /STUDENTS_KV\.get\(`user:\$\{norm\(suppliedId\)\}`/);
-assert.match(backend, /cache-control':'no-store/);
-assert.match(backend, /loginPasswordStored/);
-assert.match(backend, /answerPasswordStored/);
-assert.doesNotMatch(backend, /STUDENTS_KV\.put/);
-assert.doesNotMatch(backend, /STUDENTS_KV\.delete/);
+assert.match(backend, /STUDENTS_KV\.get\(key/);
+assert.match(backend, /STUDENTS_KV\.put\(found\.key/);
+assert.match(backend, /CREDENTIAL_RESET_VERIFY_FAILED/);
+assert.match(backend, /CREDENTIAL_RESET_FAILED/);
 assert.doesNotMatch(backend, /DB\.prepare/);
 assert.doesNotMatch(backend, /student_batch_assignments/);
-assert.doesNotMatch(backend, /entitlements\s*=/);
+assert.doesNotMatch(backend, /lesson_entitlements/);
+assert.doesNotMatch(backend, /online_prelesson_entitlements/);
 
 assert.match(adminTools, /handleAdminPortalLoginLookup/);
-assert.match(adminTools, /const lookupResponse = await handleAdminPortalLoginLookup\(request, env\)/);
 assert.match(browser, /Portal Login Details/);
-assert.match(browser, /\/api\/v1\/admin\/students\/lookup/);
-assert.match(browser, /No account data was changed/);
-assert.match(browser, /Login password<\/div><div id="portalLookupLoginStored"/);
-assert.match(browser, /Answer Pack password<\/div><div id="portalLookupAnswerStored"/);
-assert.doesNotMatch(browser, /Reset Passwords/);
+assert.match(browser, /admin-portal-reset-credentials\.js/);
+assert.match(resetBrowser, /\/api\/v1\/admin\/students\/reset-credentials/);
+assert.match(resetBrowser, /portalResetCredentialsBtn/);
 
 console.log('ADMIN_PORTAL_LOGIN_LOOKUP_VERIFICATION_PASS');

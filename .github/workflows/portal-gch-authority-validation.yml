@@ -46,7 +46,8 @@ jobs:
               '5.4-admin-batch-creation',
               '5.5-admin-batch-reactivation',
               '5.6-admin-simple-batch-create',
-              '5.7-admin-portal-login-lookup'
+              '5.7-admin-portal-login-lookup',
+              '5.8-admin-reset-show-credentials'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -84,9 +85,11 @@ jobs:
           assert current['authorityComposition']['adminPortalLookupOverride']['path'] == expected_lookup_path
           assert expected_lookup_path in current['readOrder']
           assert lookup_override['requiredBehaviour']['lookupApi'] == 'POST /api/v1/admin/students/lookup'
-          assert lookup_override['requiredBehaviour']['readOnly'] is True
-          assert 'credential values' in lookup_override['requiredBehaviour']['secretBoundary']
+          assert lookup_override['requiredBehaviour']['resetApi'] == 'POST /api/v1/admin/students/reset-credentials'
+          assert lookup_override['requiredBehaviour']['lookupReadOnly'] is True
+          assert set(lookup_override['requiredBehaviour']['resetScope']) == {'p', 'loginPassword', 'answerPassword'}
           assert 'STUDENTS_KV' in lookup_override['requiredBehaviour']['canonicalSource']
+          assert 'sessions' in current['latestRepositoryChange']['resetBoundary']
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel

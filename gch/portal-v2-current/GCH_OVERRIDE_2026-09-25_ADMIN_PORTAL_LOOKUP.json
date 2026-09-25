@@ -1,66 +1,68 @@
 {
-  "schema": "fpt.portal.gch.override.admin-portal-lookup.v1",
+  "schema": "fpt.portal.gch.override.admin-portal-lookup.v2",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
   "effectiveDate": "2026-09-25",
-  "scope": "ADMIN_LEGACY.PortalLoginDetailsLookup",
+  "scope": "ADMIN_LEGACY.PortalLoginDetailsLookupAndCredentialReset",
   "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
   "fullSiteWorkflow": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
-  "precedence": "This override is higher authority only for the Admin Portal Login Details lookup. All non-conflicting Portal V2, Admin batch creation, Replace Resource and shared-Worker authority remains binding.",
+  "precedence": "This override is higher authority only for the Admin Portal Login Details lookup and deliberate credential-reset action. All non-conflicting Portal V2, Admin batch creation, Replace Resource and shared-Worker authority remains binding.",
   "requiredBehaviour": {
     "adminSurface": "Portal Login Details",
     "lookupApi": "POST /api/v1/admin/students/lookup",
+    "resetApi": "POST /api/v1/admin/students/reset-credentials",
     "authentication": "existing signed Admin session",
     "input": "portalUserId",
     "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
-    "readOnly": true,
-    "returnedFields": [
+    "lookupReadOnly": true,
+    "lookupReturnedFields": [
       "portalUserId",
       "firstName",
       "accountStatus",
       "loginPasswordStored",
       "answerPasswordStored"
     ],
-    "secretBoundary": "The lookup confirms whether stored Login and Answer Pack credentials exist but does not return the credential values themselves.",
+    "lookupSecretBoundary": "The read-only lookup confirms whether stored Login and Answer Pack credentials exist but does not return their existing values.",
+    "resetBehaviour": "After the operator explicitly chooses Reset & Show New Credentials, generate a new four-character Login password and a different four-character Answer Pack password using the existing Portal password generator, replace only p/loginPassword/answerPassword in the existing student record, verify the write, and return the newly generated values in that response so the Admin console can display them.",
+    "resetScope": [
+      "p",
+      "loginPassword",
+      "answerPassword"
+    ],
+    "resetExclusions": [
+      "Trial IDs",
+      "Admin IDs"
+    ],
     "cacheRule": "Responses use no-store/no-cache semantics.",
-    "notFoundRule": "Unknown Portal IDs return STUDENT_NOT_FOUND without creating or mutating an account."
+    "notFoundRule": "Unknown Portal IDs return STUDENT_NOT_FOUND without creating an account."
   },
-  "nonMutationInvariants": [
-    "Do not reset or replace Login or Answer Pack passwords.",
-    "Do not write, delete or rewrite STUDENTS_KV.",
-    "Do not change student batch assignments.",
-    "Do not change lesson entitlements, prepared access, Trial consumption, sessions or account state.",
-    "Do not use the lookup as a substitute for student provisioning or account repair."
+  "preservationInvariants": [
+    "Lookup does not write, delete or rewrite STUDENTS_KV.",
+    "Credential reset does not change student batch assignments.",
+    "Credential reset does not change lesson entitlements, prepared access, Trial consumption, sessions or account state.",
+    "Credential reset does not change portalUserId, name, school year, VR eligibility or other student profile fields.",
+    "Credential reset must preserve the existing student record by spreading the current record and replacing only the credential fields.",
+    "If verification of the credential write fails, attempt to restore the original student record and return CREDENTIAL_RESET_FAILED.",
+    "Trial and Admin IDs must use their dedicated account controls rather than this normal-student reset path."
   ],
   "implementation": {
     "backend": "worker/src/admin-portal-login-lookup.js",
     "routeComposition": "worker/src/index-admin-tools.js",
-    "adminUi": "assets/admin-create-batch.js adds the Portal Login Details card/section alongside the existing Student Login Manager without replacing the batch-creation UI.",
+    "lookupUi": "assets/admin-create-batch.js",
+    "resetUi": "assets/admin-portal-reset-credentials.js",
     "verification": "tests/admin-portal-login-lookup-verification.mjs"
   },
-  "productionEvidence": {
+  "previousProductionEvidence": {
     "mergeCommit": "6c91624ef07f3498f4be141967ca3975edf19fb2",
     "workflowRun": 36157029595,
     "result": "PASS",
-    "verified": [
-      "production source syntax",
-      "production wiring",
-      "rollback anchor capture",
-      "Worker deployment preserving bindings and secrets",
-      "composed Worker live markers",
-      "quiz bridge protected route",
-      "Replace Resource consistency and CORS preflight",
-      "Trial runtime",
-      "Admin protected routes",
-      "protected Answer Pack viewer"
-    ],
-    "rollbackInvoked": false
+    "scope": "read-only lookup implementation before credential-reset extension"
   },
   "completionBoundary": {
-    "repository": "Source, route wiring, Admin UI, tests and authority are coherent on main.",
-    "production": "Shared Worker deployment passed preservation gates on workflow run 36157029595.",
-    "browser": "Owner verification is still required before changing status to CLOSED_PASS_OWNER_VERIFIED."
+    "repository": "Lookup, deliberate reset route, Admin UI, tests and authority must be coherent on main.",
+    "production": "Shared Worker deployment must preserve quiz bridge, Admin, Trial, protected-view, Replace Resource and batch-create capabilities; both lookup and reset routes must remain protected without an Admin session.",
+    "browser": "Owner verification is required after production deployment before changing status to CLOSED_PASS_OWNER_VERIFIED."
   },
-  "statusDetail": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
-  "authorityUpdateRule": "Any change to returned fields, credential exposure, authentication, canonical source or mutation semantics requires updating this override and GCH_CURRENT.json in the same coherent change."
+  "statusDetail": "RESET_AND_SHOW_IMPLEMENTED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+  "authorityUpdateRule": "Any change to lookup fields, credential reset scope, credential exposure, authentication, canonical source or mutation semantics requires updating this override and GCH_CURRENT.json in the same coherent change."
 }
