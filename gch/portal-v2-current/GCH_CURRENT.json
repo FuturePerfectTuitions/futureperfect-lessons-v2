@@ -6,7 +6,7 @@
   "authorityVersion": "5.6-admin-simple-batch-create",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including a simplified Student Login Manager batch-creation flow with required D1 timestamps and precise duplicate classification, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow with required D1 timestamps and precise duplicate classification, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -42,13 +42,19 @@
   "latestRepositoryChange": {
     "name": "Simplified Admin batch creation",
     "date": "2026-09-25",
-    "status": "IMPLEMENTED_IN_REPOSITORY_PENDING_PRODUCTION_VERIFICATION",
+    "status": "CLOSED_PASS_OWNER_VERIFIED",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
+    "evidence": "gch/portal-v2-current/evidence/2026-09-25_ADMIN_BATCH_CREATION_OWNER_VERIFIED.json",
+    "productionDeploymentCommit": "a58577b2c564f1bd117a4e1b2b24367929e0de84",
+    "productionWorkflowRun": 36140308566,
+    "productionWorkflowResult": "PASS",
+    "ownerBrowserVerification": "PASS",
     "implementation": "worker/src/admin-batch-manager-v2.js remains routed by worker/src/index-admin-tools.js for batch creation; ordinary student provisioning remains in worker/src/admin-student-manager.js.",
     "rootCauseFixed": "The original false BATCH_ALREADY_EXISTS result came from omitted created_at/updated_at values combined with an over-broad SQL constraint classifier.",
     "createHardening": "New batch creation supplies required created_at/updated_at fields, requires the selected template to be active on activeFrom, and maps only a true batch_key UNIQUE/primary-key collision to BATCH_ALREADY_EXISTS.",
-    "uiSimplification": "Student Login Manager exposes only the simple flow: create batch, refresh/select it automatically, then press Create Student Login. The separate Reactivate action was removed from the Admin surface.",
+    "uiSimplification": "Student Login Manager exposes only the simple flow: create batch, refresh/select it automatically, then press Create Student Login. The separate Reactivate action is not part of the Admin surface.",
     "uiPresentationHardening": "Copy settings from options retain visible whitespace between batch code and human-readable description.",
+    "ownerVerifiedOutcome": "The owner retried the normal Admin flow in production and confirmed that the batch creation worked.",
     "importantBoundary": "Creating a batch does not create a student. Create Student Login remains a separate deliberate action."
   },
   "latestClosedChange": {
