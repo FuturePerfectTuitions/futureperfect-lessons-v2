@@ -287,11 +287,13 @@ async function handleBatchCreate(request, env) {
   if (existing) return json({ ok:false, error:'BATCH_ALREADY_EXISTS', batchKey }, 409, request, env);
   if (!template) return json({ ok:false, error:'TEMPLATE_BATCH_NOT_FOUND', copyFromBatchKey }, 404, request, env);
 
+  const now = new Date().toISOString();
   try {
     await env.DB.prepare(
       `INSERT INTO batch_definitions (
-         batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         batch_key, academic_year, subject, school_year, stream, maths_level,
+         active_from, active_to, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       batchKey,
       clean(template.academic_year),
@@ -300,7 +302,9 @@ async function handleBatchCreate(request, env) {
       clean(template.stream),
       template.maths_level == null ? null : Number(template.maths_level),
       activeFrom,
-      clean(template.active_to) || null
+      clean(template.active_to) || null,
+      now,
+      now
     ).run();
 
     const created = await env.DB.prepare(
@@ -318,7 +322,7 @@ async function handleBatchCreate(request, env) {
     }, 200, request, env);
   } catch (error) {
     const detail = clean(error?.message);
-    if (/unique|constraint/i.test(detail)) {
+    if (/UNIQUE constraint failed:\s*batch_definitions\.batch_key/i.test(detail) || /PRIMARY KEY/i.test(detail)) {
       return json({ ok:false, error:'BATCH_ALREADY_EXISTS', batchKey }, 409, request, env);
     }
     return json({ ok:false, error:'BATCH_CREATE_FAILED', detail }, 500, request, env);
