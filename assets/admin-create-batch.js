@@ -91,7 +91,7 @@
     if (rows.some(row => row.key === current)) select.value = current;
   }
 
-  async function waitForBatchCheckbox(batchKey, timeoutMs=4000) {
+  async function waitForBatchCheckbox(batchKey, timeoutMs=8000) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const input = [...choices.querySelectorAll('input[data-student-batch]')]
@@ -100,6 +100,17 @@
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     return null;
+  }
+
+  async function refreshAndSelectBatch(batchKey) {
+    document.getElementById('refreshStudentBatchesBtn')?.click();
+    const checkbox = await waitForBatchCheckbox(batchKey);
+    if (!checkbox) return null;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles:true }));
+    checkbox.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    refreshTemplateOptions();
+    return checkbox;
   }
 
   async function createBatch() {
@@ -122,20 +133,26 @@
         activeFrom
       });
       $('newStudentBatchKey').value = batchKey;
-      document.getElementById('refreshStudentBatchesBtn')?.click();
-      const checkbox = await waitForBatchCheckbox(batchKey);
+      const checkbox = await refreshAndSelectBatch(batchKey);
       if (checkbox) {
-        checkbox.checked = true;
-        checkbox.scrollIntoView({ behavior:'smooth', block:'nearest' });
-        refreshTemplateOptions();
         showStatus(`${data.batch.batchKey} created from ${data.copiedFromBatchKey} and selected for this student.`, 'good');
       } else {
-        showStatus(`${data.batch.batchKey} was created. Refresh Active Batches to select it.`, 'good');
+        showStatus(`${data.batch.batchKey} was created, but it is not visible in the active batch list after refresh. Do not create it again; check its active dates before continuing.`, 'bad');
       }
     } catch (error) {
+      if (error.code === 'BATCH_ALREADY_EXISTS') {
+        showStatus(`Checking existing ${batchKey}…`, 'warn');
+        const checkbox = await refreshAndSelectBatch(batchKey);
+        if (checkbox) {
+          showStatus(`${batchKey} already exists and is active. It has now been selected for this student; continue with Create Student Login.`, 'good');
+          return;
+        }
+        showStatus(`${batchKey} exists in the database but is not currently in the active batch list. It may be inactive or outside its active dates. No existing batch was changed. Use a different batch code, or inspect/reactivate the existing batch deliberately before assigning it.`, 'bad');
+        return;
+      }
+
       let message = `Could not create batch: ${error.message}`;
-      if (error.code === 'BATCH_ALREADY_EXISTS') message = `${batchKey} already exists. Refresh Active Batches and select it below.`;
-      else if (error.code === 'TEMPLATE_BATCH_NOT_FOUND') message = 'The batch being copied no longer exists. Refresh Active Batches and choose another template.';
+      if (error.code === 'TEMPLATE_BATCH_NOT_FOUND') message = 'The batch being copied no longer exists. Refresh Active Batches and choose another template.';
       else if (error.code === 'INVALID_BATCH_KEY') message = 'The new batch code is not valid.';
       else if (error.code === 'ACTIVE_FROM_REQUIRED') message = 'Enter a valid Active from date.';
       showStatus(message, 'bad');
