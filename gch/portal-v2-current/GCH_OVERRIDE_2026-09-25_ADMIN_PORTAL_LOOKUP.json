@@ -15,13 +15,7 @@
     "input": "portalUserId",
     "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
     "lookupReadOnly": true,
-    "lookupReturnedFields": [
-      "portalUserId",
-      "firstName",
-      "accountStatus",
-      "loginPasswordStored",
-      "answerPasswordStored"
-    ],
+    "lookupReturnedFields": ["portalUserId", "firstName", "accountStatus", "loginPasswordStored", "answerPasswordStored"],
     "lookupSecretBoundary": "The read-only lookup confirms whether stored Login and Answer Pack credentials exist but does not return their existing values.",
     "resetBehaviour": "After the operator explicitly chooses Reset & Show New Credentials, generate a new four-character Login password and a different four-character Answer Pack password using the existing Portal password generator, replace only p/loginPassword/answerPassword in the existing student record, verify the write, and return the newly generated values in that response so the Admin console can display them.",
     "resetScope": ["p", "loginPassword", "answerPassword"],
@@ -43,6 +37,7 @@
     "routeComposition": "worker/src/index-admin-tools.js",
     "lookupUi": "assets/admin-create-batch.js",
     "resetUi": "assets/admin-portal-reset-credentials.js",
+    "resetUiLoader": "assets/admin-create-batch.js must import ./admin-portal-reset-credentials.js because module resolution is relative to the assets/ directory.",
     "verification": "tests/admin-portal-login-lookup-verification.mjs"
   },
   "previousProductionEvidence": {
@@ -65,13 +60,19 @@
     "sharedWorkerRollbackInvoked": false,
     "githubPagesRun": 36170834879,
     "githubPagesResult": "PASS",
-    "note": "The guarded shared-Worker deploy passed its existing composition, quiz bridge, Replace Resource, Trial, Admin-route and protected-view preservation gates. Owner browser verification of the new reset operation remains pending."
+    "note": "Backend and Pages deployment passed, but owner browser verification exposed a frontend loader-path defect before any credential reset was attempted."
+  },
+  "browserIncident20260925": {
+    "ownerEvidence": "After Ctrl+F5, Portal Login Details remained read-only and no Reset & Show New Credentials button appeared.",
+    "rootCause": "assets/admin-create-batch.js used import('./assets/admin-portal-reset-credentials.js'). Because the importing module itself is already under assets/, the browser resolved that to assets/assets/admin-portal-reset-credentials.js, so the reset UI module did not load.",
+    "repair": "Use import('./admin-portal-reset-credentials.js') and verify the incorrect nested assets path is absent.",
+    "mutationImpact": "None. The reset UI never loaded, so this incident did not itself reset or change Eva2409 or any other student credentials."
   },
   "completionBoundary": {
-    "repository": "PASS — lookup, deliberate reset route, Admin UI, tests and authority are coherent on main.",
-    "production": "PASS — shared Worker deployment and GitHub Pages deployment completed successfully while existing preservation gates passed.",
-    "browser": "Owner verification of Reset & Show New Credentials is still required before changing status to CLOSED_PASS_OWNER_VERIFIED."
+    "repository": "Repair prepared: correct relative module path plus regression assertion.",
+    "production": "Pending merge/deploy of the frontend loader-path repair.",
+    "browser": "Owner verification of the Reset & Show New Credentials button and operation is still required before changing status to CLOSED_PASS_OWNER_VERIFIED."
   },
-  "statusDetail": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
-  "authorityUpdateRule": "Any change to lookup fields, credential reset scope, credential exposure, authentication, canonical source or mutation semantics requires updating this override and GCH_CURRENT.json in the same coherent change."
+  "statusDetail": "FRONTEND_ASSET_PATH_REPAIR_PREPARED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
+  "authorityUpdateRule": "Any change to lookup fields, credential reset scope, credential exposure, authentication, canonical source, frontend loader path or mutation semantics requires updating this override and GCH_CURRENT.json in the same coherent change."
 }
