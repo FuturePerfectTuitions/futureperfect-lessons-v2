@@ -1,4 +1,4 @@
-name: Year 6 full display-code read-only audit
+name: Year 6 guarded display-code correction
 
 on:
   push:
@@ -12,16 +12,28 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  correct:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
     steps:
       - uses: actions/checkout@v6
-      - name: Audit all live Year 6 display IDs
+
+      - name: Prove current live frontend presentation path
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            'https://lessons.futureperfect.education/assets/phase7.js?v=20260912-y6-sats-section-1' \
+            --output /tmp/live-phase7.js
+          grep -Fq '/api/v1/student/views/' /tmp/live-phase7.js
+          grep -Fq 'displayLessonId' /tmp/live-phase7.js
+          echo 'Live student frontend is serving the lesson-list implementation that consumes displayLessonId.'
+
+      - name: Guardedly correct Year 6 display aliases
         shell: bash
         run: |
           set -euo pipefail
@@ -31,37 +43,157 @@ jobs:
             --output /tmp/settings.json
           export LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/settings.json)"
           test -n "$LESSONS_KV_ID"
+
           python3 - <<'PY'
-          import json, os, urllib.request, urllib.parse, concurrent.futures, re
-          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']; ns=os.environ['LESSONS_KV_ID']
-          base=f'https://api.cloudflare.com/client/v4/accounts/{account}/storage/kv/namespaces/{ns}/values/'
+          import copy, json, os, re, urllib.parse, urllib.request
+
+          account = os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token = os.environ['CLOUDFLARE_API_TOKEN']
+          namespace = os.environ['LESSONS_KV_ID']
+          base = f'https://api.cloudflare.com/client/v4/accounts/{account}/storage/kv/namespaces/{namespace}/values/'
+
+          expected = {
+              'Y6M17': ('Y6T2M17', 'Y6T2M22'),
+              'Y6M18': ('Y6T2M18', 'Y6T2M23'),
+              'Y6M19': ('Y6T2M19', 'Y6T2M24'),
+              'Y6M01': ('Y6T2M20', 'Y6T2M25'),
+              'Y6M1': ('Y6T2M21', 'Y6T2M26'),
+              'Y6M1.2': ('Y6T2M22', 'Y6T2M27'),
+              'Y6M1.3': ('Y6T2M23', 'Y6T2M28'),
+              'Y6M1.4': ('Y6T2M24', 'Y6T2M29'),
+              'Y6M25': ('Y6T2M25', 'Y6T2M30'),
+              'Y6M34': ('Y6T2M26', 'Y6T2M31'),
+              'Y6M35': ('Y6T2M27', 'Y6T2M32'),
+              'Y6M36': ('Y6T2M28', 'Y6T2M33'),
+              'Y6M37': ('Y6T2M29', 'Y6T2M34'),
+              'Y6M38': ('Y6T2M30', 'Y6T2M35'),
+              'Y6M3': ('Y6T3M31', 'Y6T3M36'),
+              'Y6M7': ('Y6T3M32', 'Y6T3M37'),
+              'Y6M29': ('Y6T3M33', 'Y6T3M38'),
+              'Y6M30': ('Y6T3M34', 'Y6T3M39'),
+              'Y6M31': ('Y6T3M35', 'Y6T3M40'),
+              'Y6M32': ('Y6T3M36', 'Y6T3M41'),
+              'Y6M39': ('Y6T3M37', 'Y6T3M42'),
+              'Y6M40': ('Y6T3M38', 'Y6T3M43'),
+              'Y6M41': ('Y6T3M39', 'Y6T3M44'),
+              'Y6M42': ('Y6T3M40', 'Y6T3M45'),
+              'Y6M43': ('Y6T3M41', 'Y6T3M46'),
+              'Y6M44': ('Y6T3M42', 'Y6T3M47'),
+              'Y6M45': ('Y6T3M43', 'Y6T3M48'),
+          }
+
+          headers = {'Authorization': f'Bearer {token}'}
+          def url_for(key):
+              return base + urllib.parse.quote(key, safe='')
+
           def get(key):
-              req=urllib.request.Request(base+urllib.parse.quote(key,safe=''), headers={'Authorization':f'Bearer {token}'})
-              with urllib.request.urlopen(req, timeout=30) as r: return json.loads(r.read())
-          curricula={c:get('curriculum:'+c) for c in ('MATHS_L3','MATHS_Y6_EXTRA')}
-          ids=[]
-          for c in ('MATHS_L3','MATHS_Y6_EXTRA'):
-              raw=curricula[c]; items=raw.get('lessonIds') or raw.get('lessons') or raw.get('items') or raw
-              for x in items:
-                  lid=x if isinstance(x,str) else x.get('lessonId')
-                  if lid and lid not in ids: ids.append(lid)
-          with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
-              vals=dict(zip(ids, ex.map(lambda i:get('lesson:'+i), ids)))
-          rows=[]
-          for i,lid in enumerate(ids,1):
-              v=vals[lid]; did=(v.get('displayIds') or {}).get('maths-year6')
-              rows.append((i,lid,v.get('title'),did,(v.get('displayIds') or {}).get('maths-level3')))
-          print('ORDER\tCANONICAL\tTITLE\tYEAR6_DISPLAY\tL3_DISPLAY')
-          for r in rows: print('\t'.join('' if x is None else str(x) for x in r))
-          nums={}
-          for _,lid,title,did,_ in rows:
-              m=re.fullmatch(r'Y6T([123])M(\d+)', did or '')
-              if m: nums.setdefault(int(m.group(2)),[]).append((did,lid,title))
-          print('=== REUSED M NUMBERS ACROSS TERMS ===')
-          for n,arr in sorted(nums.items()):
-              terms={x[0].split('M')[0] for x in arr}
-              if len(terms)>1:
-                  for x in arr: print(n,*x,sep='\t')
+              req = urllib.request.Request(url_for(key), headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.loads(response.read().decode('utf-8'))
+
+          def put(key, value):
+              data = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+              req = urllib.request.Request(
+                  url_for(key), data=data, method='PUT',
+                  headers={**headers, 'Content-Type': 'application/json'}
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  response.read()
+
+          originals = {}
+          changed = []
+          try:
+              # Fail closed if production drifted since the read-only audit.
+              for lesson_id, (old_code, _new_code) in expected.items():
+                  record = get('lesson:' + lesson_id)
+                  current = (record.get('displayIds') or {}).get('maths-year6')
+                  if current != old_code:
+                      raise RuntimeError(f'PRECONDITION_FAILED {lesson_id}: expected {old_code}, found {current!r}')
+                  originals[lesson_id] = copy.deepcopy(record)
+
+              # Apply exactly one field change per canonical lesson record.
+              for lesson_id, (_old_code, new_code) in expected.items():
+                  record = copy.deepcopy(originals[lesson_id])
+                  record.setdefault('displayIds', {})['maths-year6'] = new_code
+                  put('lesson:' + lesson_id, record)
+                  changed.append(lesson_id)
+
+                  readback = get('lesson:' + lesson_id)
+                  if (readback.get('displayIds') or {}).get('maths-year6') != new_code:
+                      raise RuntimeError(f'READBACK_FAILED {lesson_id}')
+                  before_other = copy.deepcopy(originals[lesson_id].get('displayIds') or {})
+                  after_other = copy.deepcopy(readback.get('displayIds') or {})
+                  before_other.pop('maths-year6', None)
+                  after_other.pop('maths-year6', None)
+                  if before_other != after_other:
+                      raise RuntimeError(f'UNRELATED_DISPLAY_ALIAS_CHANGED {lesson_id}')
+                  for field in ('lessonId', 'title', 'active'):
+                      if readback.get(field) != originals[lesson_id].get(field):
+                          raise RuntimeError(f'UNRELATED_FIELD_CHANGED {lesson_id}.{field}')
+
+              # Verify the complete live Year 6 normal-Maths display sequence.
+              ids = []
+              for curriculum_code in ('MATHS_L3', 'MATHS_Y6_EXTRA'):
+                  raw = get('curriculum:' + curriculum_code)
+                  items = raw.get('lessonIds') or raw.get('lessons') or raw.get('items') or raw
+                  for item in items:
+                      lesson_id = item if isinstance(item, str) else item.get('lessonId')
+                      if lesson_id and lesson_id not in ids:
+                          ids.append(lesson_id)
+
+              rows = []
+              for lesson_id in ids:
+                  record = get('lesson:' + lesson_id)
+                  code = (record.get('displayIds') or {}).get('maths-year6')
+                  match = re.fullmatch(r'Y6T([123])M(\d+)', code or '')
+                  if match:
+                      rows.append((int(match.group(2)), int(match.group(1)), lesson_id, code))
+
+              numbers = [row[0] for row in rows]
+              if sorted(numbers) != list(range(1, 49)):
+                  raise RuntimeError(f'FINAL_SEQUENCE_FAILED numbers={sorted(numbers)}')
+              if len(set(numbers)) != 48:
+                  raise RuntimeError('FINAL_DUPLICATE_M_NUMBER')
+
+              # Term boundary checks and untouched special aliases.
+              boundaries = {
+                  'Y6M16': 'Y6T1M16', 'Y6M46': 'Y6T1M17', 'Y6M50': 'Y6T1M21',
+                  'Y6M17': 'Y6T2M22', 'Y6M38': 'Y6T2M35',
+                  'Y6M3': 'Y6T3M36', 'Y6M45': 'Y6T3M48',
+                  'Y6M51': 'Y6MS1', 'Y6M69': 'Y6MS19'
+              }
+              for lesson_id, wanted in boundaries.items():
+                  record = get('lesson:' + lesson_id)
+                  actual = (record.get('displayIds') or {}).get('maths-year6')
+                  if actual != wanted:
+                      raise RuntimeError(f'BOUNDARY_FAILED {lesson_id}: {actual!r} != {wanted!r}')
+
+              print('YEAR6_DISPLAY_CODE_CORRECTION_PASS')
+              print('changed_records=27')
+              print('normal_year6_sequence=Y6M01..M48_unique')
+              print('sats_aliases=unchanged')
+              print('level3_aliases=unchanged')
+
+          except Exception as exc:
+              print(f'ERROR: {exc}')
+              rollback_errors = []
+              for lesson_id in reversed(changed):
+                  try:
+                      put('lesson:' + lesson_id, originals[lesson_id])
+                      restored = get('lesson:' + lesson_id)
+                      if restored != originals[lesson_id]:
+                          rollback_errors.append(lesson_id + ':readback-mismatch')
+                  except Exception as rollback_exc:
+                      rollback_errors.append(lesson_id + ':' + str(rollback_exc))
+              if rollback_errors:
+                  print('ROLLBACK_ERRORS=' + json.dumps(rollback_errors))
+              else:
+                  print('ROLLBACK_PASS')
+              raise
           PY
-      - name: Confirm read-only boundary
-        run: echo "Full Year 6 audit complete; no production write/deploy command executed."
+
+      - name: Confirm mutation boundary
+        run: |
+          echo 'Guarded correction complete.'
+          echo 'Only LESSONS_KV lesson:<canonical-id> displayIds[maths-year6] was changed for the 27 audited records.'
+          echo 'No curriculum membership, canonical lesson ID, Level 3 alias, SATs alias, D1, R2 or Worker deployment was changed.'
