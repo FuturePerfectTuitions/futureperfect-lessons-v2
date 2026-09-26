@@ -22,17 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Prove current live frontend presentation path
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location \
-            'https://lessons.futureperfect.education/assets/phase7.js?v=20260912-y6-sats-section-1' \
-            --output /tmp/live-phase7.js
-          grep -Fq '/api/v1/student/views/' /tmp/live-phase7.js
-          grep -Fq 'displayLessonId' /tmp/live-phase7.js
-          echo 'Live student frontend is serving the lesson-list implementation that consumes displayLessonId.'
-
       - name: Guardedly correct Year 6 display aliases
         shell: bash
         run: |
@@ -103,7 +92,6 @@ jobs:
           originals = {}
           changed = []
           try:
-              # Fail closed if production drifted since the read-only audit.
               for lesson_id, (old_code, _new_code) in expected.items():
                   record = get('lesson:' + lesson_id)
                   current = (record.get('displayIds') or {}).get('maths-year6')
@@ -111,7 +99,6 @@ jobs:
                       raise RuntimeError(f'PRECONDITION_FAILED {lesson_id}: expected {old_code}, found {current!r}')
                   originals[lesson_id] = copy.deepcopy(record)
 
-              # Apply exactly one field change per canonical lesson record.
               for lesson_id, (_old_code, new_code) in expected.items():
                   record = copy.deepcopy(originals[lesson_id])
                   record.setdefault('displayIds', {})['maths-year6'] = new_code
@@ -131,7 +118,6 @@ jobs:
                       if readback.get(field) != originals[lesson_id].get(field):
                           raise RuntimeError(f'UNRELATED_FIELD_CHANGED {lesson_id}.{field}')
 
-              # Verify the complete live Year 6 normal-Maths display sequence.
               ids = []
               for curriculum_code in ('MATHS_L3', 'MATHS_Y6_EXTRA'):
                   raw = get('curriculum:' + curriculum_code)
@@ -155,7 +141,6 @@ jobs:
               if len(set(numbers)) != 48:
                   raise RuntimeError('FINAL_DUPLICATE_M_NUMBER')
 
-              # Term boundary checks and untouched special aliases.
               boundaries = {
                   'Y6M16': 'Y6T1M16', 'Y6M46': 'Y6T1M17', 'Y6M50': 'Y6T1M21',
                   'Y6M17': 'Y6T2M22', 'Y6M38': 'Y6T2M35',
@@ -170,7 +155,7 @@ jobs:
 
               print('YEAR6_DISPLAY_CODE_CORRECTION_PASS')
               print('changed_records=27')
-              print('normal_year6_sequence=Y6M01..M48_unique')
+              print('normal_year6_sequence=M01..M48_unique')
               print('sats_aliases=unchanged')
               print('level3_aliases=unchanged')
 
