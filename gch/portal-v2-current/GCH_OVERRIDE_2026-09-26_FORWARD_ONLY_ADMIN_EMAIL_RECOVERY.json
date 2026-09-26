@@ -1,0 +1,66 @@
+{
+  "schema": "fpt.portal.gch.override.forward-only-admin-email-recovery.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
+  "effectiveDate": "2026-09-26",
+  "scope": "PORTAL_V2.ProductionRecoveryAndManualParentEmail",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "precedence": "This override is higher authority for production recovery method, shared Worker deployment safety, manual parent-email routing/idempotency and its Admin UI counters. All non-conflicting Portal V2 authority remains binding.",
+  "ownerDirective": {
+    "recoveryPolicy": "FORWARD_ONLY_ONLY",
+    "prohibited": [
+      "git revert as a recovery mechanism",
+      "restoring an older Worker version",
+      "wrangler rollback after failed verification",
+      "deploying an older entrypoint to recover one feature",
+      "undoing later valid Admin, Trial, Quiz, resource, batch, navigation or portal changes while fixing another defect"
+    ],
+    "requiredMethod": "Start from current main and current production composition, identify the defective layer, preserve all later valid capabilities, apply a forward-only fix, and fail closed if preservation cannot be proved."
+  },
+  "sharedWorkerInvariant": {
+    "worker": "fpt-portal-v2-worker",
+    "canonicalEntrypoint": "worker/src/index-step10-quiz-bridge.js",
+    "compositionRequirement": "The shared Worker deployment must retain the complete current composition chain and bindings, including quiz bridge, Admin tools, lesson-release import, Trial runtime, Replace Resource, read-model publication and parent email capability.",
+    "deploymentScript": "ops/deploy_current_worker_preserve.sh",
+    "parentEmailTestRoutingProductionRule": "PARENT_EMAIL_TEST_TO must be blank in production live-parent mode."
+  },
+  "parentEmailIncident": {
+    "date": "2026-09-26",
+    "cause": "A production test-recipient binding routed manual parent emails to the owner while the successful test delivery still consumed the normal parent-delivery idempotency record.",
+    "recoveryCommit": "eabe318aac1abd7356838a82329b1c589f7de10a",
+    "routingCommit": "c596d19e0764bb6ef1af8d97ee72bc843192f2c4",
+    "workflowRun": 36246321399,
+    "workflowResult": "PASS",
+    "rearmedMisroutedDeliveryRecords": 2,
+    "ownerObservedRecovery": "PASS: the Admin Console reported 2 parent emails sent after the two incident delivery records were re-armed.",
+    "liveRule": "A delivery sent to a test recipient must never be recorded as delivery to the intended parent. Production must not silently substitute a test recipient for the parent."
+  },
+  "manualEmailUi": {
+    "automaticImportRule": "CSV import changes Portal access only; parent emails remain a separate deliberate manual action.",
+    "manualButton": "Send Parent Emails",
+    "counterDefect": "After a successful manual send, the green status banner reflected the manual result but summary pills retained the earlier automatic-import summary, producing a stale emailsSent:0 display.",
+    "fixCommits": [
+      "3c1f125f4013dfb2f6610a27c0c4697f343c67bb",
+      "46846566482203c6d0299329d334bc03e9e1d349"
+    ],
+    "requiredUiRule": "After manual send, refresh summary counters from the manual-send response without triggering any second send."
+  },
+  "preservationInvariants": [
+    "Never roll back production to fix an Admin Console defect.",
+    "Never use an automatic rollback step in a production workflow.",
+    "Preserve current later-valid changes when correcting an earlier layer.",
+    "Automatic CSV import must not send parent emails.",
+    "Manual send must remain idempotent for actual parent deliveries.",
+    "Test routing must not consume live-parent duplicate protection.",
+    "Do not resend a parent email solely to repair stale UI counters."
+  ],
+  "verificationRequirements": [
+    "Prove current shared Worker entrypoint and required bindings before deployment.",
+    "Run shared-capability preservation tests before mutation.",
+    "Deploy current main forward-only only.",
+    "Verify PARENT_EMAIL_TEST_TO is blank for production live-parent routing.",
+    "Verify quiz bridge, Replace Resource, lesson-release import and Trial runtime markers remain present after deployment.",
+    "Verify any incident-specific idempotency repair targets only the known incident window/records.",
+    "Record resulting production workflow run and update GCH authority."
+  ]
+}
