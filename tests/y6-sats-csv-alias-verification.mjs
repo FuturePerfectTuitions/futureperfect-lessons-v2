@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { normaliseY6SatsPortalAlias } from '../worker/src/admin-y6-sats-csv-alias.js';
 
+// Production regression: FuturePerfectLive emits Y6SM1..Y6SM19.
 const row = {
   Student:'Devansh2806',
   Lesson:'Y6SM1 SATs Preparation Measurement',
