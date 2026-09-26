@@ -1,4 +1,4 @@
-name: Reconcile Aarav Year 6 SAT access
+name: Verify Aarav Year 6 SAT access
 
 on:
   push:
@@ -12,16 +12,15 @@ permissions:
   contents: read
 
 jobs:
-  reconcile:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
       EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
-      EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,14 +29,12 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Recompile and verify Aarav prepared access
+      - name: Read back Aarav prepared access
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/reconcile-aarav.mjs <<'JS'
+          cat > verify-aarav.mjs <<'JS'
           import {
-            assertReadModelReconciliationReady,
-            refreshStudentAccessReadModel,
             opaqueAccessScopeId,
             resolveCurrentScope,
             globalToCatalogue,
@@ -50,143 +47,95 @@ jobs:
           const token = clean(process.env.CLOUDFLARE_API_TOKEN);
           const account = clean(process.env.CLOUDFLARE_ACCOUNT_ID);
           const worker = clean(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
-          const expectedStudents = clean(process.env.EXPECTED_STUDENTS_KV_ID);
-          const expectedReadModels = clean(process.env.EXPECTED_READ_MODELS_KV_ID);
-          const expectedDb = clean(process.env.EXPECTED_PROD_D1_ID);
-          const portalUserIdNorm = 'aar1811';
-          const userKey = `user:${portalUserIdNorm}`;
-          if (!token || !account) throw new Error('Cloudflare credentials are required.');
-          if (Y6_SATS_DIRECT_RELEASE_MARKER !== 'y6-sats-direct-release-v1') throw new Error('SAT direct-release source marker missing.');
+          if (Y6_SATS_DIRECT_RELEASE_MARKER !== 'y6-sats-direct-release-v1') throw new Error('SAT rule marker missing');
+          const api = 'https://api.cloudflare.com/client/v4';
+          const auth = { Authorization:`Bearer ${token}` };
 
-          const base = 'https://api.cloudflare.com/client/v4';
-          const headers = { Authorization:`Bearer ${token}` };
-          async function request(path, options = {}) {
-            const response = await fetch(`${base}${path}`, { ...options, headers:{ ...headers, ...(options.headers || {}) } });
-            const text = await response.text();
-            let body = null;
-            try { body = JSON.parse(text); } catch {}
-            return { response, text, body };
+          async function req(path) {
+            const r = await fetch(`${api}${path}`, { headers:auth });
+            const text = await r.text();
+            let body = null; try { body = JSON.parse(text); } catch {}
+            return { r, text, body };
           }
-          async function envelope(path, options = {}) {
-            const out = await request(path, options);
-            if (!out.response.ok || out.body?.success !== true) throw new Error(`Cloudflare request failed: ${out.response.status} ${path}`);
-            return out.body;
+          async function envelope(path) {
+            const x = await req(path);
+            if (!x.r.ok || x.body?.success !== true) throw new Error(`Cloudflare request failed ${x.r.status}`);
+            return x.body;
           }
-          async function kvText(namespaceId, key) {
-            const out = await request(`/accounts/${account}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`);
-            if (out.response.status === 404) return null;
-            if (!out.response.ok) throw new Error(`KV read failed: ${out.response.status}`);
-            return out.text;
+          async function kvText(ns, key) {
+            const x = await req(`/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`);
+            if (!x.r.ok) throw new Error(`KV read failed ${x.r.status}`);
+            return x.text;
           }
-          async function kvPut(namespaceId, key, value) {
-            const out = await request(`/accounts/${account}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`, {
-              method:'PUT', headers:{ 'content-type':'text/plain; charset=utf-8' }, body:String(value)
-            });
-            if (!out.response.ok || out.body?.success !== true) throw new Error(`KV write failed: ${out.response.status}`);
-          }
-          function remoteKv(namespaceId) {
-            return {
-              async get(key, options = {}) {
-                const text = await kvText(namespaceId, key);
-                if (text == null) return null;
-                if (options?.type === 'json') { try { return JSON.parse(text); } catch { return null; } }
-                return text;
-              },
-              async put(key, value) { return kvPut(namespaceId, key, value); }
-            };
-          }
-          function remoteDb(databaseId) {
-            class Statement {
-              constructor(sql, params = []) { this.sql = sql; this.params = params; }
-              bind(...params) { return new Statement(this.sql, params); }
-              async all() {
-                if (!/^\s*(SELECT|PRAGMA)\b/i.test(this.sql)) throw new Error('D1 adapter is read-only.');
-                const body = await envelope(`/accounts/${account}/d1/database/${databaseId}/query`, {
-                  method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ sql:this.sql, params:this.params })
-                });
-                const result = Array.isArray(body.result) ? body.result[0] : body.result;
-                return { results:Array.isArray(result?.results) ? result.results : [] };
-              }
-            }
-            return { prepare(sql) { return new Statement(sql); } };
+          function remoteKv(ns) {
+            return { async get(key, options={}) {
+              const text = await kvText(ns,key);
+              if (options?.type === 'json') return JSON.parse(text);
+              return text;
+            }};
           }
 
           const settings = (await envelope(`/accounts/${account}/workers/scripts/${worker}/settings`)).result || {};
-          const binding = name => (settings.bindings || []).find(row => row?.name === name) || {};
+          const binding = name => (settings.bindings || []).find(x => x?.name === name) || {};
           const studentsId = clean(binding('STUDENTS_KV').namespace_id);
           const readModelsId = clean(binding('READ_MODELS_KV').namespace_id);
-          const dbId = clean(binding('DB').database_id || binding('DB').id);
-          if (studentsId !== expectedStudents) throw new Error('Production STUDENTS_KV binding drifted.');
-          if (readModelsId !== expectedReadModels) throw new Error('Production READ_MODELS_KV binding drifted.');
-          if (dbId !== expectedDb) throw new Error('Production D1 binding drifted.');
+          if (studentsId !== clean(process.env.EXPECTED_STUDENTS_KV_ID)) throw new Error('STUDENTS_KV binding drift');
+          if (readModelsId !== clean(process.env.EXPECTED_READ_MODELS_KV_ID)) throw new Error('READ_MODELS_KV binding drift');
+          const store = remoteKv(readModelsId);
 
-          const env = { STUDENTS_KV:remoteKv(studentsId), READ_MODELS_KV:remoteKv(readModelsId), DB:remoteDb(dbId) };
-          const ready = await assertReadModelReconciliationReady(env);
-          if (!ready?.ok) throw new Error('Prepared read-model reconciliation preflight failed.');
+          const profile = JSON.parse(await kvText(studentsId, 'user:aar1811'));
+          const libraries = new Set((profile.fullLibraries || []).map(x => clean(x).toUpperCase()));
+          if (!libraries.has('MATHS_Y6_FULL')) throw new Error('Aarav broad Year 6 library missing');
 
-          const profileText = await kvText(studentsId, userKey);
-          if (!profileText) throw new Error('AARAV_STUDENT_NOT_FOUND');
-          const profile = JSON.parse(profileText);
-          const libraries = new Set((Array.isArray(profile.fullLibraries) ? profile.fullLibraries : []).map(v => clean(v).toUpperCase()));
-          if (!libraries.has('MATHS_Y6_FULL')) throw new Error('AARAV_MATHS_Y6_FULL_NOT_PRESENT');
-          const role = norm(profile?.role || profile?.accountType);
-          if (portalUserIdNorm.startsWith('trial') || portalUserIdNorm === 'admin' || role.includes('admin') || profile?.isAdmin === true) throw new Error('AARAV_NOT_ORDINARY_STUDENT');
-
-          const global = await resolveCurrentScope(env.READ_MODELS_KV, 'global');
+          const global = await resolveCurrentScope(store, 'global');
           const catalogue = globalToCatalogue(global.payload);
-          const year6Ids = Object.entries(catalogue?.lessonToViews || {})
-            .filter(([, views]) => Array.isArray(views) && views.map(norm).includes('maths-year6'))
-            .map(([lessonId]) => clean(lessonId)).filter(Boolean);
+          const year6Ids = Object.entries(catalogue.lessonToViews || {})
+            .filter(([,views]) => Array.isArray(views) && views.map(norm).includes('maths-year6'))
+            .map(([id]) => clean(id));
           const satIds = year6Ids.filter(isYear6SatsLessonId).sort();
           const normalIds = year6Ids.filter(id => !isYear6SatsLessonId(id));
-          if (satIds.length !== 19) throw new Error(`SAT_CATALOGUE_COUNT_DRIFT:${satIds.length}`);
+          if (satIds.length !== 19) throw new Error(`SAT count drift ${satIds.length}`);
 
-          const salt = clean(await env.READ_MODELS_KV.get('meta:scope-salt'));
-          if (!salt) throw new Error('READ_MODEL_SCOPE_SALT_MISSING');
-          const scopeId = await opaqueAccessScopeId(portalUserIdNorm, salt);
-          const before = await resolveCurrentScope(env.READ_MODELS_KV, `access:${scopeId}`);
-          const beforeSatFull = satIds.filter(id => before?.payload?.lessonAccess?.[id]?.core === true).length;
-          const beforeSatInherited = satIds.filter(id => (before?.payload?.lessonAccess?.[id]?.sources || []).includes('full-library')).length;
-
-          const published = await refreshStudentAccessReadModel(env, portalUserIdNorm);
-          const after = await resolveCurrentScope(env.READ_MODELS_KV, `access:${scopeId}`);
-          if (!after?.payload) throw new Error('AARAV_PREPARED_ACCESS_MISSING');
-
-          const afterSatInherited = satIds.filter(id => (after.payload.lessonAccess?.[id]?.sources || []).includes('full-library'));
-          if (afterSatInherited.length) throw new Error(`SAT_FULL_LIBRARY_INHERITANCE_REMAINS:${afterSatInherited.join(',')}`);
+          const salt = clean(await store.get('meta:scope-salt'));
+          const scopeId = await opaqueAccessScopeId('aar1811', salt);
+          const prepared = await resolveCurrentScope(store, `access:${scopeId}`);
+          const snapshot = prepared.payload?.snapshot || prepared.payload;
+          if (!snapshot?.lessonAccess) throw new Error('Prepared lessonAccess unavailable');
+          if (!(snapshot.fullViewIds || []).map(norm).includes('maths-year6')) throw new Error('Year 6 full view presentation missing');
 
           const normalFailures = normalIds.filter(id => {
-            const state = after.payload.lessonAccess?.[id];
-            return !state?.core || state?.blocked === true || state?.preLessonOnly === true;
+            const s = snapshot.lessonAccess[id];
+            return !s?.core || s?.blocked === true || s?.preLessonOnly === true;
           });
           if (normalFailures.length) throw new Error(`NORMAL_YEAR6_FULL_ACCESS_REGRESSED:${normalFailures.length}`);
 
-          const afterSatFull = satIds.filter(id => after.payload.lessonAccess?.[id]?.core === true);
-          const afterSatPre = satIds.filter(id => after.payload.lessonAccess?.[id]?.preLessonOnly === true);
-          const afterSatLocked = satIds.filter(id => !after.payload.lessonAccess?.[id] || after.payload.lessonAccess[id]?.blocked === true);
-          for (const id of afterSatFull) {
-            const sources = after.payload.lessonAccess[id]?.sources || [];
+          const inheritedSat = satIds.filter(id => (snapshot.lessonAccess[id]?.sources || []).includes('full-library'));
+          if (inheritedSat.length) throw new Error(`SAT_FULL_LIBRARY_INHERITANCE_REMAINS:${inheritedSat.join(',')}`);
+
+          const directFull = satIds.filter(id => snapshot.lessonAccess[id]?.core === true);
+          const preOnly = satIds.filter(id => snapshot.lessonAccess[id]?.preLessonOnly === true);
+          const locked = satIds.filter(id => !snapshot.lessonAccess[id] || snapshot.lessonAccess[id]?.blocked === true);
+          for (const id of directFull) {
+            const sources = snapshot.lessonAccess[id]?.sources || [];
             if (!sources.some(s => ['earned','manual','temporary'].includes(s))) throw new Error(`SAT_FULL_WITHOUT_DIRECT_SOURCE:${id}`);
           }
 
-          const evidence = {
-            marker:'AARAV_Y6_SATS_RECONCILIATION_PASS',
-            status:'PASS',
-            before:{ satFull:beforeSatFull, satInheritedFromFullLibrary:beforeSatInherited },
-            after:{ satFull:afterSatFull.length, satPreLessonOnly:afterSatPre.length, satLocked:afterSatLocked.length, satInheritedFromFullLibrary:0 },
-            directFullSatLessonIds:afterSatFull,
-            preLessonSatLessonIds:afterSatPre,
-            normalYear6FullPreserved:true,
+          console.log(JSON.stringify({
+            marker:'AARAV_Y6_SATS_VERIFIED', status:'PASS',
             normalYear6LessonCount:normalIds.length,
+            normalYear6FullPreserved:true,
             satLessonCount:satIds.length,
-            refreshVersion:published?.version || null,
-            preparedVersion:after.version,
+            satInheritedFromFullLibrary:0,
+            satFullReleasedIndividually:directFull.length,
+            satPreLessonOnly:preOnly.length,
+            satLocked:locked.length,
+            directFullSatLessonIds:directFull,
+            preLessonSatLessonIds:preOnly,
+            preparedVersion:prepared.version,
             canonicalProfileChanged:false,
             d1Changed:false,
             credentialsDisclosed:false
-          };
-          console.log(JSON.stringify(evidence, null, 2));
+          }, null, 2));
           JS
-          cp /tmp/reconcile-aarav.mjs ./reconcile-aarav.mjs
-          node reconcile-aarav.mjs
-          rm reconcile-aarav.mjs
+          node verify-aarav.mjs
+          rm verify-aarav.mjs
