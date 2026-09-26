@@ -1,4 +1,4 @@
-name: Year 6 guarded display-code correction
+name: Year 6 SAT direct-release guarded change
 
 on:
   push:
@@ -9,176 +9,238 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  correct:
+  patch-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: fpt-portal-v2-worker
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
 
-      - name: Guardedly correct Year 6 display aliases
+      - name: Apply fail-closed source and authority patch
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/settings.json
-          export LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/settings.json)"
-          test -n "$LESSONS_KV_ID"
-
           python3 - <<'PY'
-          import copy, json, os, re, urllib.parse, urllib.request
+          from pathlib import Path
+          import json
 
-          account = os.environ['CLOUDFLARE_ACCOUNT_ID']
-          token = os.environ['CLOUDFLARE_API_TOKEN']
-          namespace = os.environ['LESSONS_KV_ID']
-          base = f'https://api.cloudflare.com/client/v4/accounts/{account}/storage/kv/namespaces/{namespace}/values/'
+          src = Path('worker/src/access-read-model-sync.js')
+          text = src.read_text()
+          marker_anchor = "const norm = value => clean(value).toLowerCase();\n"
+          if text.count(marker_anchor) != 1:
+              raise SystemExit('SOURCE_ANCHOR_DRIFT: norm anchor')
+          if 'y6-sats-direct-release-v1' in text:
+              raise SystemExit('SOURCE_ALREADY_PATCHED')
+          helper = """
 
-          expected = {
-              'Y6M17': ('Y6T2M17', 'Y6T2M22'),
-              'Y6M18': ('Y6T2M18', 'Y6T2M23'),
-              'Y6M19': ('Y6T2M19', 'Y6T2M24'),
-              'Y6M01': ('Y6T2M20', 'Y6T2M25'),
-              'Y6M1': ('Y6T2M21', 'Y6T2M26'),
-              'Y6M1.2': ('Y6T2M22', 'Y6T2M27'),
-              'Y6M1.3': ('Y6T2M23', 'Y6T2M28'),
-              'Y6M1.4': ('Y6T2M24', 'Y6T2M29'),
-              'Y6M25': ('Y6T2M25', 'Y6T2M30'),
-              'Y6M34': ('Y6T2M26', 'Y6T2M31'),
-              'Y6M35': ('Y6T2M27', 'Y6T2M32'),
-              'Y6M36': ('Y6T2M28', 'Y6T2M33'),
-              'Y6M37': ('Y6T2M29', 'Y6T2M34'),
-              'Y6M38': ('Y6T2M30', 'Y6T2M35'),
-              'Y6M3': ('Y6T3M31', 'Y6T3M36'),
-              'Y6M7': ('Y6T3M32', 'Y6T3M37'),
-              'Y6M29': ('Y6T3M33', 'Y6T3M38'),
-              'Y6M30': ('Y6T3M34', 'Y6T3M39'),
-              'Y6M31': ('Y6T3M35', 'Y6T3M40'),
-              'Y6M32': ('Y6T3M36', 'Y6T3M41'),
-              'Y6M39': ('Y6T3M37', 'Y6T3M42'),
-              'Y6M40': ('Y6T3M38', 'Y6T3M43'),
-              'Y6M41': ('Y6T3M39', 'Y6T3M44'),
-              'Y6M42': ('Y6T3M40', 'Y6T3M45'),
-              'Y6M43': ('Y6T3M41', 'Y6T3M46'),
-              'Y6M44': ('Y6T3M42', 'Y6T3M47'),
-              'Y6M45': ('Y6T3M43', 'Y6T3M48'),
+          const Y6_SATS_DIRECT_RELEASE_MARKER = 'y6-sats-direct-release-v1';
+
+          function isYear6SatsLessonId(value) {
+            if (!Y6_SATS_DIRECT_RELEASE_MARKER) return false;
+            const match = clean(value).match(/^Y6M(\\d+)$/i);
+            if (!match) return false;
+            const lessonNumber = Number(match[1]);
+            return lessonNumber >= 51 && lessonNumber <= 69;
           }
+          """.rstrip() + "\n"
+          text = text.replace(marker_anchor, marker_anchor + helper, 1)
 
-          headers = {'Authorization': f'Bearer {token}'}
-          def url_for(key):
-              return base + urllib.parse.quote(key, safe='')
+          old = "    const fullLibrary = views.some(viewId => full.has(viewId));\n"
+          new = "    const fullLibrary = !isYear6SatsLessonId(lessonId) && views.some(viewId => full.has(viewId));\n"
+          if text.count(old) != 1:
+              raise SystemExit(f'SOURCE_ANCHOR_DRIFT: fullLibrary count={text.count(old)}')
+          text = text.replace(old, new, 1)
 
-          def get(key):
-              req = urllib.request.Request(url_for(key), headers=headers)
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  return json.loads(response.read().decode('utf-8'))
+          export_anchor = "  VIEW_DEFINITIONS,\n  SCOPE_SALT_KEY,\n"
+          export_new = "  VIEW_DEFINITIONS,\n  SCOPE_SALT_KEY,\n  Y6_SATS_DIRECT_RELEASE_MARKER,\n  isYear6SatsLessonId,\n"
+          if text.count(export_anchor) != 1:
+              raise SystemExit('SOURCE_ANCHOR_DRIFT: export anchor')
+          text = text.replace(export_anchor, export_new, 1)
+          src.write_text(text)
 
-          def put(key, value):
-              data = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-              req = urllib.request.Request(
-                  url_for(key), data=data, method='PUT',
-                  headers={**headers, 'Content-Type': 'application/json'}
-              )
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  response.read()
+          test = Path('tests/y6-sats-direct-release-verification.mjs')
+          test.write_text(r'''import assert from 'node:assert/strict';
+          import {
+            Y6_SATS_DIRECT_RELEASE_MARKER,
+            isYear6SatsLessonId,
+            compileAccessSnapshot
+          } from '../worker/src/access-read-model-sync.js';
 
-          originals = {}
-          changed = []
-          try:
-              for lesson_id, (old_code, _new_code) in expected.items():
-                  record = get('lesson:' + lesson_id)
-                  current = (record.get('displayIds') or {}).get('maths-year6')
-                  if current != old_code:
-                      raise RuntimeError(f'PRECONDITION_FAILED {lesson_id}: expected {old_code}, found {current!r}')
-                  originals[lesson_id] = copy.deepcopy(record)
+          assert.equal(Y6_SATS_DIRECT_RELEASE_MARKER, 'y6-sats-direct-release-v1');
+          assert.equal(isYear6SatsLessonId('Y6M50'), false);
+          for (let n = 51; n <= 69; n += 1) assert.equal(isYear6SatsLessonId(`Y6M${n}`), true);
+          assert.equal(isYear6SatsLessonId('Y6M70'), false);
 
-              for lesson_id, (_old_code, new_code) in expected.items():
-                  record = copy.deepcopy(originals[lesson_id])
-                  record.setdefault('displayIds', {})['maths-year6'] = new_code
-                  put('lesson:' + lesson_id, record)
-                  changed.append(lesson_id)
-
-                  readback = get('lesson:' + lesson_id)
-                  if (readback.get('displayIds') or {}).get('maths-year6') != new_code:
-                      raise RuntimeError(f'READBACK_FAILED {lesson_id}')
-                  before_other = copy.deepcopy(originals[lesson_id].get('displayIds') or {})
-                  after_other = copy.deepcopy(readback.get('displayIds') or {})
-                  before_other.pop('maths-year6', None)
-                  after_other.pop('maths-year6', None)
-                  if before_other != after_other:
-                      raise RuntimeError(f'UNRELATED_DISPLAY_ALIAS_CHANGED {lesson_id}')
-                  for field in ('lessonId', 'title', 'active'):
-                      if readback.get(field) != originals[lesson_id].get(field):
-                          raise RuntimeError(f'UNRELATED_FIELD_CHANGED {lesson_id}.{field}')
-
-              ids = []
-              for curriculum_code in ('MATHS_L3', 'MATHS_Y6_EXTRA'):
-                  raw = get('curriculum:' + curriculum_code)
-                  items = raw.get('lessonIds') or raw.get('lessons') or raw.get('items') or raw
-                  for item in items:
-                      lesson_id = item if isinstance(item, str) else item.get('lessonId')
-                      if lesson_id and lesson_id not in ids:
-                          ids.append(lesson_id)
-
-              rows = []
-              for lesson_id in ids:
-                  record = get('lesson:' + lesson_id)
-                  code = (record.get('displayIds') or {}).get('maths-year6')
-                  match = re.fullmatch(r'Y6T([123])M(\d+)', code or '')
-                  if match:
-                      rows.append((int(match.group(2)), int(match.group(1)), lesson_id, code))
-
-              numbers = [row[0] for row in rows]
-              if sorted(numbers) != list(range(1, 49)):
-                  raise RuntimeError(f'FINAL_SEQUENCE_FAILED numbers={sorted(numbers)}')
-              if len(set(numbers)) != 48:
-                  raise RuntimeError('FINAL_DUPLICATE_M_NUMBER')
-
-              boundaries = {
-                  'Y6M16': 'Y6T1M16', 'Y6M46': 'Y6T1M17', 'Y6M50': 'Y6T1M21',
-                  'Y6M17': 'Y6T2M22', 'Y6M38': 'Y6T2M35',
-                  'Y6M3': 'Y6T3M36', 'Y6M45': 'Y6T3M48',
-                  'Y6M51': 'Y6MS1', 'Y6M69': 'Y6MS19'
+          const catalogue = {
+            schemaVersion: 1,
+            kind: 'prepared-catalogue',
+            views: {
+              'maths-year6': {
+                lessonCount: 4,
+                lessons: [
+                  { lessonId: 'Y6M50' },
+                  { lessonId: 'Y6M51' },
+                  { lessonId: 'Y6M52' },
+                  { lessonId: 'Y6M69' }
+                ]
               }
-              for lesson_id, wanted in boundaries.items():
-                  record = get('lesson:' + lesson_id)
-                  actual = (record.get('displayIds') or {}).get('maths-year6')
-                  if actual != wanted:
-                      raise RuntimeError(f'BOUNDARY_FAILED {lesson_id}: {actual!r} != {wanted!r}')
+            },
+            lessonToViews: {
+              Y6M50: ['maths-year6'],
+              Y6M51: ['maths-year6'],
+              Y6M52: ['maths-year6'],
+              Y6M69: ['maths-year6']
+            }
+          };
 
-              print('YEAR6_DISPLAY_CODE_CORRECTION_PASS')
-              print('changed_records=27')
-              print('normal_year6_sequence=M01..M48_unique')
-              print('sats_aliases=unchanged')
-              print('level3_aliases=unchanged')
+          const base = {
+            asOfDate: '2026-09-26',
+            user: { firstName: 'Fixture', fullLibraries: ['MATHS_Y6_FULL'] },
+            batchAssignments: [],
+            entitlements: [],
+            onlinePreLessonEntitlements: []
+          };
 
-          except Exception as exc:
-              print(f'ERROR: {exc}')
-              rollback_errors = []
-              for lesson_id in reversed(changed):
-                  try:
-                      put('lesson:' + lesson_id, originals[lesson_id])
-                      restored = get('lesson:' + lesson_id)
-                      if restored != originals[lesson_id]:
-                          rollback_errors.append(lesson_id + ':readback-mismatch')
-                  except Exception as rollback_exc:
-                      rollback_errors.append(lesson_id + ':' + str(rollback_exc))
-              if rollback_errors:
-                  print('ROLLBACK_ERRORS=' + json.dumps(rollback_errors))
-              else:
-                  print('ROLLBACK_PASS')
-              raise
+          const inherited = compileAccessSnapshot(base, catalogue, { asOfDate: base.asOfDate });
+          assert.equal(inherited.lessonAccess.Y6M50?.core, true, 'ordinary Year 6 lesson must retain full-library access');
+          assert.equal(inherited.lessonAccess.Y6M51, undefined, 'SAT lesson must not inherit Year 6 full-library access');
+          assert.equal(inherited.lessonAccess.Y6M69, undefined, 'last SAT lesson must not inherit Year 6 full-library access');
+
+          const released = compileAccessSnapshot({
+            ...base,
+            entitlements: [{ lesson_id: 'Y6M51', core_access: 1 }]
+          }, catalogue, { asOfDate: base.asOfDate });
+          assert.equal(released.lessonAccess.Y6M51?.core, true, 'individually released SAT lesson must open FULL');
+          assert.equal(released.lessonAccess.Y6M51?.sources.includes('earned'), true);
+
+          const prelesson = compileAccessSnapshot({
+            ...base,
+            onlinePreLessonEntitlements: [{ lesson_id: 'Y6M52', vr_access: 0 }]
+          }, catalogue, { asOfDate: base.asOfDate });
+          assert.equal(prelesson.lessonAccess.Y6M52?.core, false);
+          assert.equal(prelesson.lessonAccess.Y6M52?.preLessonOnly, true, 'SAT lesson must support normal PreLesson-only release');
+
+          console.log('Y6_SATS_DIRECT_RELEASE_VERIFICATION_PASS');
+          ''')
+
+          deploy = Path('.github/workflows/admin-superuser-production-deploy.yml')
+          d = deploy.read_text()
+          trigger_anchor = "      - 'worker/src/admin-lesson-release-import.js'\n"
+          trigger_add = trigger_anchor + "      - 'worker/src/access-read-model-sync.js'\n      - 'tests/y6-sats-direct-release-verification.mjs'\n"
+          if d.count(trigger_anchor) != 1:
+              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: trigger anchor')
+          d = d.replace(trigger_anchor, trigger_add, 1)
+          syntax_anchor = "          node --check worker/src/admin-lesson-release-import.js\n"
+          if d.count(syntax_anchor) != 1:
+              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: syntax anchor')
+          d = d.replace(syntax_anchor, syntax_anchor + "          node --check worker/src/access-read-model-sync.js\n", 1)
+          test_anchor = "          node tests/admin-lesson-release-import-verification.mjs\n"
+          if d.count(test_anchor) != 1:
+              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: test anchor')
+          d = d.replace(test_anchor, test_anchor + "          node tests/admin-lesson-release-y6-sats-verification.mjs\n          node tests/y6-sats-direct-release-verification.mjs\n", 1)
+          live_anchor = "          grep -aFq 'BATCH_CREATE_FAILED' /tmp/admin-live-worker.bin\n"
+          if d.count(live_anchor) != 1:
+              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: live marker anchor')
+          d = d.replace(live_anchor, live_anchor + "          grep -aFq 'y6-sats-direct-release-v1' /tmp/admin-live-worker.bin\n", 1)
+          deploy.write_text(d)
+
+          override_path = Path('gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json')
+          override = {
+            'schema':'fpt.portal.gch.override.y6-sats-direct-release.v1',
+            'documentType':'CURRENT_SCOPE_OVERRIDE',
+            'status':'AUTHORITATIVE_CURRENT_OVERRIDE',
+            'effectiveDate':'2026-09-26',
+            'scope':'PUBLIC_STUDENT_V2.Year6SatsReleaseSemantics',
+            'baseAuthority':'gch/portal-v2-current/GCH_STATE.json',
+            'precedence':'This override is higher authority only for Year 6 SAT lesson access/release semantics. All non-conflicting Portal V2 authority remains binding.',
+            'ownerRequirement':{
+              'canonicalSatLessonIds':'Y6M51..Y6M69',
+              'displaySatLessonIds':'Y6MS1..Y6MS19',
+              'rule':'Year 6 SAT lessons must not inherit broad MATHS_Y6_FULL / Year 6 full-view core access. They are released lesson-by-lesson through the normal Lesson Release Import workflow.',
+              'releaseStates':['LOCKED until a canonical release exists','PRELESSON_ONLY when the normal online PreLesson rule applies','FULL when the normal completed/continuing lesson release grants core access'],
+              'ordinaryYear6Boundary':'Normal Year 6 lessons retain existing full-library and direct-release semantics.',
+              'existingExplicitReleaseBoundary':'Any SAT lesson that already has a canonical direct entitlement remains released; this change removes only broad inherited full-library access.'
+            },
+            'implementation':{
+              'source':'worker/src/access-read-model-sync.js',
+              'marker':'y6-sats-direct-release-v1',
+              'mechanism':'Exclude canonical Y6M51..Y6M69 from full-library inheritance inside lessonAccessMap while preserving direct earned, manual, temporary and PreLesson pathways.',
+              'importerEvidence':'tests/admin-lesson-release-y6-sats-verification.mjs',
+              'accessRegression':'tests/y6-sats-direct-release-verification.mjs'
+            },
+            'preservationInvariants':[
+              'Do not alter normal Year 6 lesson access.',
+              'Do not alter SAT canonical IDs, display IDs, curriculum membership or resources.',
+              'Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR or quiz bridge behaviour.',
+              'Student-visible completion still requires prepared access reconciliation/readback.'
+            ],
+            'existingPreparedSnapshotRule':'Students whose prepared access snapshot predates this change must be reconciled through the standard access publisher before the old inherited SAT FULL state disappears.',
+            'verificationMatrix':[
+              'MATHS_Y6_FULL still opens an ordinary Year 6 lesson.',
+              'MATHS_Y6_FULL alone does not open Y6M51..Y6M69.',
+              'A direct canonical SAT entitlement opens that SAT lesson FULL.',
+              'A normal SAT PreLesson entitlement opens only that SAT lesson PRELESSON_ONLY.',
+              'Existing Y6MS importer mapping and state tests pass.',
+              'Shared production Worker retains all preservation markers and exposes y6-sats-direct-release-v1.'
+            ]
+          }
+          override_path.write_text(json.dumps(override, indent=2) + '\n')
+
+          current_path = Path('gch/portal-v2-current/GCH_CURRENT.json')
+          current = json.loads(current_path.read_text())
+          new_path = str(override_path)
+          if new_path not in current.get('readOrder', []):
+              current['readOrder'].append(new_path)
+          current.setdefault('authorityComposition', {})['y6SatsDirectReleaseOverride'] = {
+              'path': new_path,
+              'role':'higher authority for Year 6 SAT lesson-by-lesson access and release semantics'
+          }
+          current['latestRepositoryChange'] = {
+              'name':'Year 6 SAT lesson-by-lesson release semantics',
+              'date':'2026-09-26',
+              'status':'SOURCE_AND_GUARDS_PREPARED_FOR_PRODUCTION',
+              'authority':new_path,
+              'source':'worker/src/access-read-model-sync.js',
+              'marker':'y6-sats-direct-release-v1',
+              'verification':'tests/y6-sats-direct-release-verification.mjs plus tests/admin-lesson-release-y6-sats-verification.mjs',
+              'ownerBrowserVerification':'PENDING_DEPLOY_AND_RECONCILIATION'
+          }
+          current_path.write_text(json.dumps(current, indent=2) + '\n')
+
+          agents = Path('AGENTS.md')
+          a = agents.read_text()
+          line = '8. `gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json`\n'
+          if line not in a:
+              anchor = '7. `gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json`\n'
+              if a.count(anchor) != 1:
+                  raise SystemExit('AGENTS_DRIFT: authority list anchor')
+              a = a.replace(anchor, anchor + line, 1)
+          agents.write_text(a)
           PY
 
-      - name: Confirm mutation boundary
+      - name: Run targeted regression gates
         run: |
-          echo 'Guarded correction complete.'
-          echo 'Only LESSONS_KV lesson:<canonical-id> displayIds[maths-year6] was changed for the 27 audited records.'
-          echo 'No curriculum membership, canonical lesson ID, Level 3 alias, SATs alias, D1, R2 or Worker deployment was changed.'
+          set -euo pipefail
+          node --check worker/src/access-read-model-sync.js
+          node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/y6-sats-direct-release-verification.mjs
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+          grep -Fq 'y6-sats-direct-release-v1' worker/src/access-read-model-sync.js
+
+      - name: Commit verified change to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add worker/src/access-read-model-sync.js tests/y6-sats-direct-release-verification.mjs .github/workflows/admin-superuser-production-deploy.yml gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json gch/portal-v2-current/GCH_CURRENT.json AGENTS.md
+          git diff --cached --check
+          git commit -m 'Release Year 6 SAT lessons individually'
+          git push origin HEAD:main
+          echo "MAIN_COMMIT=$(git rev-parse HEAD)"
