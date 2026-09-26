@@ -1,0 +1,148 @@
+name: Year 6 production display-ID migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/year6-production-display-id-migration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Re-prove exact Year 6 boundary before production write
+        run: node tests/year6-live-structure-regression.mjs
+
+      - name: Resolve production LESSONS_KV namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/settings.json
+          NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
+          test -n "$NS" && test "$NS" != null
+          echo "LESSONS_KV_NAMESPACE=$NS" >> "$GITHUB_ENV"
+          echo "Resolved production LESSONS_KV namespace: $NS"
+
+      - name: Guarded migration of Year 6 display IDs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import { expectedYear6DisplayId } from './ops/year6-display-id-policy.mjs';
+
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_NAMESPACE;
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values`;
+          const headers = { Authorization: `Bearer ${token}` };
+          const affected = [
+            ...Array.from({length:14},(_,i)=>`M3.L${i+22}`),
+            ...Array.from({length:13},(_,i)=>`Y6.EXTRA.L${i+1}`)
+          ];
+          const backup = {};
+          const changed = [];
+
+          async function getRecord(id) {
+            const r = await fetch(`${base}/${encodeURIComponent(`lesson:${id}`)}`, { headers });
+            if (!r.ok) throw new Error(`GET ${id} failed: ${r.status} ${await r.text()}`);
+            return await r.json();
+          }
+          async function putRecord(id, record) {
+            const r = await fetch(`${base}/${encodeURIComponent(`lesson:${id}`)}`, {
+              method:'PUT', headers:{...headers,'Content-Type':'application/json'}, body:JSON.stringify(record)
+            });
+            if (!r.ok) throw new Error(`PUT ${id} failed: ${r.status} ${await r.text()}`);
+          }
+          function withoutYear6Display(record) {
+            const x = structuredClone(record);
+            if (x.displayIds && typeof x.displayIds === 'object') delete x.displayIds['maths-year6'];
+            return x;
+          }
+
+          for (const id of affected) {
+            const before = await getRecord(id);
+            backup[id] = before;
+            assert(before.displayIds && typeof before.displayIds === 'object', `${id} missing displayIds`);
+            const target = expectedYear6DisplayId(id);
+            assert(target, `${id} has no expected Year 6 target`);
+            const current = String(before.displayIds['maths-year6'] || '').trim();
+            const oldExpected = id.startsWith('M3.L')
+              ? `Y6T2M${Number(id.split('L')[1])}`
+              : `Y6T3M${35 + Number(id.split('L')[1])}`;
+            assert(
+              current === oldExpected || current === target,
+              `${id}: refusing unexpected live display ID ${current}; expected ${oldExpected} or idempotent ${target}`
+            );
+            if (current === target) continue;
+            const after = structuredClone(before);
+            after.displayIds['maths-year6'] = target;
+            assert.deepEqual(
+              withoutYear6Display(after), withoutYear6Display(before),
+              `${id}: proposed change touches fields outside displayIds['maths-year6']`
+            );
+            await putRecord(id, after);
+            const reread = await getRecord(id);
+            assert.equal(reread.displayIds['maths-year6'], target, `${id}: write did not persist target`);
+            assert.deepEqual(
+              withoutYear6Display(reread), withoutYear6Display(before),
+              `${id}: live record changed outside displayIds['maths-year6']`
+            );
+            changed.push({ id, from: current, to: target });
+          }
+          fs.writeFileSync('/tmp/year6-before.json', JSON.stringify(backup,null,2));
+          fs.writeFileSync('/tmp/year6-changes.json', JSON.stringify(changed,null,2));
+          console.log(`YEAR6_DISPLAY_ID_MIGRATION_CHANGED=${changed.length}`);
+          console.log(JSON.stringify(changed,null,2));
+          NODE
+
+      - name: Verify production KV sequence and SATS isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { YEAR6_STANDARD_LESSON_IDS, expectedYear6StandardDisplaySequence } from './ops/year6-display-id-policy.mjs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, ns=process.env.LESSONS_KV_NAMESPACE;
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values`;
+          const headers={Authorization:`Bearer ${token}`};
+          async function get(id){const r=await fetch(`${base}/${encodeURIComponent(`lesson:${id}`)}`,{headers}); if(!r.ok) throw new Error(`${id}: ${r.status}`); return r.json();}
+          const actual=[];
+          for(const id of YEAR6_STANDARD_LESSON_IDS){const x=await get(id); actual.push(x.displayIds?.['maths-year6']);}
+          const expected=expectedYear6StandardDisplaySequence();
+          assert.deepEqual(actual, expected, 'Production KV standard Year 6 sequence does not match canonical term-local numbering');
+          const i=actual.indexOf('Y6T1M21');
+          assert.equal(actual[i+1], 'Y6T2M1', 'Production KV boundary must be Y6T1M21 -> Y6T2M1');
+          assert.equal(actual[35], 'Y6T3M1', 'Production KV Term 3 must restart at Y6T3M1');
+          console.log(`PRODUCTION_KV_BOUNDARY=${actual[i]} -> ${actual[i+1]}`);
+          console.log(`PRODUCTION_KV_TERM3_START=${actual[35]}`);
+          console.log(`PRODUCTION_KV_STANDARD_COUNT=${actual.length}`);
+          NODE
+
+      - name: Preserve migration evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: year6-display-id-migration-evidence
+          path: |
+            /tmp/year6-before.json
+            /tmp/year6-changes.json
+          retention-days: 30
