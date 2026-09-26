@@ -47,7 +47,10 @@ if [ -n "$CURRENT_READ_MODELS" ] && [ "$CURRENT_READ_MODELS" != "$READ_MODELS_KV
   exit 1
 fi
 READ_MODELS="$READ_MODELS_KV_ID"
-PARENT_EMAIL_TEST_TO="$(plain PARENT_EMAIL_TEST_TO)"
+# Production parent transactional email is live-only. Never carry a test recipient
+# forward from an older deployment: doing so misroutes real parent mail and can also
+# consume duplicate-send protection for a delivery the parent never received.
+PARENT_EMAIL_TEST_TO=""
 for value in "$STUDENTS" "$LESSONS" "$DBID" "$R2" "$READ_MODELS"; do test -n "$value"; done
 
 # The live rebuilt Student Worker derives opaque student scopes from the same salt
@@ -87,11 +90,12 @@ grep -Fq "main = \"$WORKER_ENTRYPOINT\"" worker/wrangler.runtime-preserve.toml
 grep -Fq '[[send_email]]' worker/wrangler.runtime-preserve.toml
 grep -Fq 'name = "EMAIL"' worker/wrangler.runtime-preserve.toml
 grep -Fq 'binding = "READ_MODELS_KV"' worker/wrangler.runtime-preserve.toml
+grep -Fq 'PARENT_EMAIL_TEST_TO = ""' worker/wrangler.runtime-preserve.toml
 npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.runtime-preserve.toml --keep-vars --message "${DEPLOY_MESSAGE:-Portal V2 production update}"
 curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/fpt-worker-settings-after.json
 jq -c '[.result.bindings[]|select((.type//"")|test("secret";"i"))|.name]|sort' /tmp/fpt-worker-settings-after.json >/tmp/fpt-secrets-after.json
 cmp -s /tmp/fpt-secrets-before.json /tmp/fpt-secrets-after.json
 jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/fpt-worker-settings-after.json >/dev/null
 jq -e --arg expected "$READ_MODELS" '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace" and .namespace_id==$expected)' /tmp/fpt-worker-settings-after.json >/dev/null
-jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/fpt-worker-settings-after.json >/dev/null
-echo 'PRODUCTION_BINDINGS_PRESERVED_WITH_EMAIL_AND_READ_MODELS'
+jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/fpt-worker-settings-after.json >/dev/null
+echo 'PRODUCTION_BINDINGS_PRESERVED_PARENT_EMAIL_LIVE_ONLY'
