@@ -22,7 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create disposable authenticated production session
-        id: setup
         shell: bash
         run: |
           set -euo pipefail
@@ -33,6 +32,10 @@ jobs:
           DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB") | (.id // .database_id)' /tmp/settings.json)"
           test -n "$STUDENTS_NS" && test "$STUDENTS_NS" != null
           test -n "$DB_ID" && test "$DB_ID" != null
+
+          # Remove the lone stale disposable KV identity from the prior failed setup.
+          STALE_KEY="$(python -c 'import urllib.parse; print(urllib.parse.quote("user:y6httpverify36243821525",safe=""))')"
+          curl --fail --silent --show-error -X DELETE "$API/storage/kv/namespaces/$STUDENTS_NS/values/$STALE_KEY" -H "$AUTH" >/dev/null || true
 
           USER_ID="y6httpverify${GITHUB_RUN_ID}"
           SESSION_TOKEN="$(openssl rand -hex 32)"
@@ -48,25 +51,21 @@ jobs:
           printf '%s' "$STUDENTS_NS" >/tmp/students-ns
           printf '%s' "$DB_ID" >/tmp/db-id
 
-          USER_KEY="user:${USER_ID}"
-          ENCODED="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$USER_KEY")"
+          ENCODED="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "user:$USER_ID")"
           jq -n --arg id "$USER_ID" '{portalUserId:$id,firstName:"Year6 HTTP Verification",p:"Aa1b",status:"active",expires:"2099-12-31",schoolYear:6,batches:[],fullLibraries:["MATHS_Y6_FULL"]}' >/tmp/test-user.json
-          curl --fail --silent --show-error -X PUT \
-            "$API/storage/kv/namespaces/$STUDENTS_NS/values/$ENCODED" \
-            -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/test-user.json >/dev/null
+          curl --fail --silent --show-error -X PUT "$API/storage/kv/namespaces/$STUDENTS_NS/values/$ENCODED" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/test-user.json >/dev/null
 
           d1() {
             local sql="$1" params="$2"
             jq -n --arg sql "$sql" --argjson params "$params" '{sql:$sql,params:$params}' >/tmp/d1.json
-            curl --fail --silent --show-error -X POST "$API/d1/database/$DB_ID/query" \
-              -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/d1.json >/tmp/d1-out.json
+            curl --fail --silent --show-error -X POST "$API/d1/database/$DB_ID/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/d1.json >/tmp/d1-out.json
             jq -e '.success == true and (.result[0].success == true)' /tmp/d1-out.json >/dev/null
           }
-          d1 'INSERT INTO student_sessions (token_hash,portal_user_id_norm,created_at,last_activity_at,idle_expires_at,revoked_at) VALUES (?,?,?,?,?,NULL)' \
-            "$(jq -nc --arg a "$SESSION_HASH" --arg b "$USER_ID" --arg c "$NOW" --arg d "$NOW" --arg e "$EXP" '[\$a,\$b,\$c,\$d,\$e]')"
-          d1 'INSERT INTO student_session_windows (token_hash,portal_user_id_norm,window_token_hash,created_at) VALUES (?,?,?,?)' \
-            "$(jq -nc --arg a "$SESSION_HASH" --arg b "$USER_ID" --arg c "$WINDOW_HASH" --arg d "$NOW" '[\$a,\$b,\$c,\$d]')"
-          echo "Disposable production session created for HTTP verification (identity value suppressed from logs)."
+          P1="$(jq -nc --arg a "$SESSION_HASH" --arg b "$USER_ID" --arg c "$NOW" --arg d "$NOW" --arg e "$EXP" '[$a,$b,$c,$d,$e]')"
+          P2="$(jq -nc --arg a "$SESSION_HASH" --arg b "$USER_ID" --arg c "$WINDOW_HASH" --arg d "$NOW" '[$a,$b,$c,$d]')"
+          d1 'INSERT INTO student_sessions (token_hash,portal_user_id_norm,created_at,last_activity_at,idle_expires_at,revoked_at) VALUES (?,?,?,?,?,NULL)' "$P1"
+          d1 'INSERT INTO student_session_windows (token_hash,portal_user_id_norm,window_token_hash,created_at) VALUES (?,?,?,?)' "$P2"
+          echo 'Disposable production session created for authenticated HTTP verification.'
 
       - name: Call exact authenticated live Year 6 endpoint and assert order
         shell: bash
@@ -74,15 +73,10 @@ jobs:
           set -euo pipefail
           SESSION_TOKEN="$(cat /tmp/session-token)"
           WINDOW_TOKEN="$(cat /tmp/window-token)"
-          STATUS="$(curl --silent --show-error -o /tmp/live-response.json -w '%{http_code}' \
-            "$LIVE_ORIGIN/api/v1/student/views/maths-year6/lessons" \
-            -H "Cookie: fpt_v2_session=$SESSION_TOKEN" \
-            -H "X-FPT-Window-Token: $WINDOW_TOKEN" \
-            -H 'Accept: application/json')"
+          STATUS="$(curl --silent --show-error -o /tmp/live-response.json -w '%{http_code}' "$LIVE_ORIGIN/api/v1/student/views/maths-year6/lessons" -H "Cookie: fpt_v2_session=$SESSION_TOKEN" -H "X-FPT-Window-Token: $WINDOW_TOKEN" -H 'Accept: application/json')"
           echo "LIVE_HTTP_STATUS=$STATUS"
           test "$STATUS" = 200
           jq -e '.ok == true and (.lessons|type=="array")' /tmp/live-response.json >/dev/null
-
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
@@ -95,7 +89,6 @@ jobs:
           const expected=expectedYear6StandardDisplaySequence();
           assert.deepEqual(ids,expected,'Authenticated live HTTP Year 6 standard order differs from canonical 21/14/13 sequence');
           const i=ids.indexOf('Y6T1M21');
-          assert.notEqual(i,-1);
           assert.equal(ids[i+1],'Y6T2M1','Authenticated live HTTP boundary must be Y6T1M21 -> Y6T2M1');
           assert.equal(ids[35],'Y6T3M1','Authenticated live HTTP Term 3 must start Y6T3M1');
           const sats=rows.filter(r=>/^Y6MS\d+$/i.test(String(r.displayLessonId||''))).map(r=>r.displayLessonId);
@@ -112,7 +105,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           test -f /tmp/test-user-id || exit 0
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
@@ -121,20 +114,16 @@ jobs:
           DB_ID="$(cat /tmp/db-id)"
           SESSION_TOKEN="$(cat /tmp/session-token)"
           SESSION_HASH="$(printf '%s' "$SESSION_TOKEN" | sha256sum | awk '{print $1}')"
-
           d1_cleanup() {
-            local sql="$1" params="$2"
+            local sql="$1"
+            local params
+            params="$(jq -nc --arg x "$SESSION_HASH" '[$x]')"
             jq -n --arg sql "$sql" --argjson params "$params" '{sql:$sql,params:$params}' >/tmp/d1-clean.json
-            curl --fail --silent --show-error -X POST "$API/d1/database/$DB_ID/query" \
-              -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/d1-clean.json >/tmp/d1-clean-out.json
-            jq -e '.success == true and (.result[0].success == true)' /tmp/d1-clean-out.json >/dev/null
+            curl --fail --silent --show-error -X POST "$API/d1/database/$DB_ID/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/d1-clean.json >/tmp/d1-clean-out.json && jq -e '.success == true and (.result[0].success == true)' /tmp/d1-clean-out.json >/dev/null
           }
-          PARAM_HASH="$(jq -nc --arg x "$SESSION_HASH" '[\$x]')"
-          d1_cleanup 'DELETE FROM student_session_windows WHERE token_hash = ?' "$PARAM_HASH" || true
-          d1_cleanup 'DELETE FROM student_session_profiles WHERE token_hash = ?' "$PARAM_HASH" || true
-          d1_cleanup 'DELETE FROM student_sessions WHERE token_hash = ?' "$PARAM_HASH" || true
-
+          d1_cleanup 'DELETE FROM student_session_windows WHERE token_hash = ?' || true
+          d1_cleanup 'DELETE FROM student_session_profiles WHERE token_hash = ?' || true
+          d1_cleanup 'DELETE FROM student_sessions WHERE token_hash = ?' || true
           ENCODED="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "user:$USER_ID")"
-          curl --fail --silent --show-error -X DELETE \
-            "$API/storage/kv/namespaces/$STUDENTS_NS/values/$ENCODED" -H "$AUTH" >/dev/null || true
+          curl --fail --silent --show-error -X DELETE "$API/storage/kv/namespaces/$STUDENTS_NS/values/$ENCODED" -H "$AUTH" >/dev/null || true
           echo 'Disposable HTTP-verification identity and session cleaned up.'
