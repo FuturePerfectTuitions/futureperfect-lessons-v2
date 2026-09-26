@@ -30,20 +30,14 @@ jobs:
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
-          NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id // .namespace_id' /tmp/settings.json)"
-          if [ -z "$NS" ] || [ "$NS" = null ]; then
-            NS="49619b1a24b244bc8aaa6223fcd24e80"
-          fi
+          NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
+          if [ -z "$NS" ] || [ "$NS" = null ]; then NS="49619b1a24b244bc8aaa6223fcd24e80"; fi
           echo "LESSONS_KV_NAMESPACE=$NS"
 
           getkv() {
             local key="$1" out="$2"
             local encoded
-            encoded="$(python - "$key" <<'PY'
-import sys, urllib.parse
-print(urllib.parse.quote(sys.argv[1], safe=''))
-PY
-)"
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
             curl --fail --silent --show-error "$API/storage/kv/namespaces/$NS/values/$encoded" -H "$AUTH" -o "$out"
           }
 
@@ -55,71 +49,66 @@ PY
           jq -c . /tmp/extra.json
 
           python - <<'PY' >/tmp/ids.txt
-import json
-
-def ids(path):
-    x=json.load(open(path))
-    if isinstance(x,list): a=x
-    elif isinstance(x,dict): a=x.get('lessonIds') or x.get('lessons') or x.get('items') or []
-    else: a=[]
-    out=[]
-    for v in a:
-        if isinstance(v,str): out.append(v.strip())
-        elif isinstance(v,dict) and v.get('lessonId'): out.append(str(v['lessonId']).strip())
-    return [x for x in out if x]
-
-seen=set()
-for p in ['/tmp/l3.json','/tmp/extra.json']:
-    for x in ids(p):
-        if x not in seen:
-            seen.add(x); print(x)
-PY
+          import json
+          def ids(path):
+              x=json.load(open(path))
+              if isinstance(x,list): a=x
+              elif isinstance(x,dict): a=x.get('lessonIds') or x.get('lessons') or x.get('items') or []
+              else: a=[]
+              out=[]
+              for v in a:
+                  if isinstance(v,str): out.append(v.strip())
+                  elif isinstance(v,dict) and v.get('lessonId'): out.append(str(v['lessonId']).strip())
+              return [x for x in out if x]
+          seen=set()
+          for p in ['/tmp/l3.json','/tmp/extra.json']:
+              for x in ids(p):
+                  if x not in seen:
+                      seen.add(x); print(x)
+          PY
 
           : >/tmp/year6.tsv
           while IFS= read -r id; do
             getkv "lesson:$id" /tmp/lesson.json
-            python - "$id" <<'PY' >>/tmp/year6.tsv
-import json,sys
-id=sys.argv[1]
-r=json.load(open('/tmp/lesson.json'))
-d={}
-for src in [r.get('displayIds'),r.get('displayLessonIds'),(r.get('presentation') or {}).get('displayIds')]:
-    if isinstance(src,dict):
-        d=src; break
-shown=''
-for k,v in d.items():
-    if str(k).strip().lower()=='maths-year6': shown=str(v).strip(); break
-if shown:
-    print('\t'.join([id,shown,str(r.get('title') or '').replace('\t',' ')]))
-PY
+            ID="$id" python - <<'PY' >>/tmp/year6.tsv
+          import json,os
+          id=os.environ['ID']
+          r=json.load(open('/tmp/lesson.json'))
+          d={}
+          for src in [r.get('displayIds'),r.get('displayLessonIds'),(r.get('presentation') or {}).get('displayIds')]:
+              if isinstance(src,dict): d=src; break
+          shown=''
+          for k,v in d.items():
+              if str(k).strip().lower()=='maths-year6': shown=str(v).strip(); break
+          if shown: print('\t'.join([id,shown,str(r.get('title') or '').replace('\t',' ')]))
+          PY
           done </tmp/ids.txt
 
           echo '--- LIVE YEAR6 MERGED SOURCE ORDER (canonical, display, title) ---'
           cat /tmp/year6.tsv
           echo '--- BOUNDARY / DUPLICATE ANALYSIS ---'
           python - <<'PY'
-import re
-rows=[]
-for line in open('/tmp/year6.tsv'):
-    c,d,t=(line.rstrip('\n').split('\t',2)+['',''])[:3]
-    rows.append((c,d,t))
-
-def key(r):
-    d=r[1].upper()
-    m=re.fullmatch(r'Y(\d+)T(\d+)M(\d+)',d)
-    if m: return (0,int(m.group(1)),int(m.group(2)),int(m.group(3)),d)
-    m=re.fullmatch(r'Y(\d+)MS(\d+)',d)
-    if m: return (1,int(m.group(1)),0,int(m.group(2)),d)
-    return (2,0,0,0,d)
-
-from collections import Counter
-cnt=Counter(d for _,d,_ in rows)
-print('row_count=',len(rows))
-print('duplicates=',[(d,n) for d,n in cnt.items() if n>1])
-for i,r in enumerate(rows):
-    if r[1]=='Y6T1M21': print('source_after_Y6T1M21=',rows[i+1:i+4])
-sorted_rows=sorted(rows,key=key)
-for i,r in enumerate(sorted_rows):
-    if r[1]=='Y6T1M21': print('sorted_after_Y6T1M21=',sorted_rows[i+1:i+4])
-print('sorted_display_ids=',[d for _,d,_ in sorted_rows])
-PY
+          import re
+          from collections import Counter
+          rows=[]
+          for line in open('/tmp/year6.tsv'):
+              parts=line.rstrip('\n').split('\t',2)
+              while len(parts)<3: parts.append('')
+              rows.append(tuple(parts[:3]))
+          def key(r):
+              d=r[1].upper()
+              m=re.fullmatch(r'Y(\d+)T(\d+)M(\d+)',d)
+              if m: return (0,int(m.group(1)),int(m.group(2)),int(m.group(3)),d)
+              m=re.fullmatch(r'Y(\d+)MS(\d+)',d)
+              if m: return (1,int(m.group(1)),0,int(m.group(2)),d)
+              return (2,0,0,0,d)
+          cnt=Counter(d for _,d,_ in rows)
+          print('row_count=',len(rows))
+          print('duplicates=',[(d,n) for d,n in cnt.items() if n>1])
+          for i,r in enumerate(rows):
+              if r[1]=='Y6T1M21': print('source_after_Y6T1M21=',rows[i+1:i+4])
+          sorted_rows=sorted(rows,key=key)
+          for i,r in enumerate(sorted_rows):
+              if r[1]=='Y6T1M21': print('sorted_after_Y6T1M21=',sorted_rows[i+1:i+4])
+          print('sorted_display_ids=',[d for _,d,_ in sorted_rows])
+          PY
