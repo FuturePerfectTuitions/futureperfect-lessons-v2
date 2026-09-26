@@ -1,4 +1,4 @@
-name: Year 6 display-code read-only audit
+name: Maths display-code read-only audit
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Read focused live Year 6 display mappings
+      - name: Read focused live display mappings
         shell: bash
         run: |
           set -euo pipefail
@@ -31,21 +31,26 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/worker-settings.json
-
           LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name == "LESSONS_KV") | .namespace_id' /tmp/worker-settings.json)"
           test -n "$LESSONS_KV_ID"
 
-          for code in MATHS_L3 MATHS_Y6_EXTRA; do
-            npx --yes wrangler@latest kv key get "curriculum:${code}" --namespace-id "$LESSONS_KV_ID" --remote > "/tmp/${code}.json"
-            echo "=== curriculum:${code} ==="
-            jq -c '{curriculumCode, lessonIds:(.lessonIds // .lessons // .items // .)}' "/tmp/${code}.json"
+          echo "=== Year 4 samples ==="
+          for lesson_id in Y4M2 Y4M17 Y4M18 Y4M24 Y4M1 Y4M37 Y4M38 Y4M39 Y4M25; do
+            npx --yes wrangler@latest kv key get "lesson:${lesson_id}" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/lesson.json
+            jq -c --arg fallback "$lesson_id" '{lessonId:(.lessonId // $fallback), title, displayIds}' /tmp/lesson.json
           done
 
-          echo "=== focused live lesson records ==="
+          echo "=== Year 5 samples ==="
+          for lesson_id in Y5M1 Y5M6 Y5M22 Y5M28 Y5M9 Y5M18 Y5M19 Y5M20 Y5M21 Y5M7 Y5M30; do
+            npx --yes wrangler@latest kv key get "lesson:${lesson_id}" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/lesson.json
+            jq -c --arg fallback "$lesson_id" '{lessonId:(.lessonId // $fallback), title, displayIds}' /tmp/lesson.json
+          done
+
+          echo "=== Year 6 suspect samples ==="
           for lesson_id in Y6M16 Y6M17 Y6M18 Y6M34 Y6M35 Y6M36 Y6M37 Y6M38 Y6M46 Y6M47 Y6M48 Y6M49 Y6M50 Y6M51; do
             npx --yes wrangler@latest kv key get "lesson:${lesson_id}" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/lesson.json
-            jq -c --arg fallback "$lesson_id" '{lessonId:(.lessonId // $fallback), title, active, displayIds, displayLessonIds, presentationDisplayIds:(.presentation.displayIds // null)}' /tmp/lesson.json
+            jq -c --arg fallback "$lesson_id" '{lessonId:(.lessonId // $fallback), title, displayIds}' /tmp/lesson.json
           done
 
       - name: Confirm read-only boundary
-        run: echo "Focused Year 6 display-code audit complete. No KV, D1, R2 or Worker write/deploy command was executed."
+        run: echo "Display-code audit complete. No KV, D1, R2 or Worker write/deploy command was executed."
