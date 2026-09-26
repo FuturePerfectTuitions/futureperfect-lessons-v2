@@ -1,0 +1,25 @@
+name: Year 6 real-structure regression
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/year6-display-id-policy.mjs'
+      - 'tests/year6-live-structure-regression.mjs'
+      - '.github/workflows/year6-live-structure-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify real Year 6 canonical structure and exact boundary
+        run: node tests/year6-live-structure-regression.mjs
