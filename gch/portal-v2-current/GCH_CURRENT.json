@@ -2,11 +2,11 @@
   "schema": "fpt.portal.gch.current-manifest.v1",
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
-  "effectiveDate": "2026-09-25",
-  "authorityVersion": "5.9-admin-reset-ui-asset-path-repair",
+  "effectiveDate": "2026-09-26",
+  "authorityVersion": "6.0-forward-only-admin-email-y6sm-live",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system, including the owner-verified simplified Student Login Manager batch-creation flow and Portal Login Details with read-only lookup plus deliberate Reset & Show New Credentials, while preserving Replace Resource and shared-Worker quiz-bridge authorities.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, manual parent-email delivery, and the permanent forward-only production-recovery rule.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -16,7 +16,8 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
-    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json"
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json"
   ],
   "authorityComposition": {
     "base": {
@@ -25,19 +26,19 @@
     },
     "replaceResourceOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_REPLACE_RESOURCE.json",
-      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus its CORS-preflight repair state"
+      "role": "higher authority for Replace Resource canonical-to-prepared consistency plus CORS-preflight repair state"
     },
     "quizBridgeCompositionOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
-      "role": "higher authority for the shared fpt-portal-v2-worker top-level composition and quiz redeem-route preservation"
+      "role": "higher authority for shared fpt-portal-v2-worker top-level composition and quiz redeem-route preservation"
     },
     "adminBatchCreationOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
-      "role": "higher authority for simple Admin batch creation, required batch timestamps, precise duplicate classification and refresh/selection before ordinary student provisioning"
+      "role": "higher authority for simple Admin batch creation, timestamps, duplicate classification and selection before ordinary student provisioning"
     },
     "adminPortalLookupOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
-      "role": "higher authority for Portal Login Details, including read-only account lookup, deliberate normal-student Reset & Show New Credentials, and the required frontend module-loader path"
+      "role": "higher authority for Portal Login Details, read-only lookup, deliberate normal-student Reset & Show New Credentials, and frontend loader path"
     },
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
@@ -45,19 +46,73 @@
     },
     "y6SatsDirectReleaseOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
-      "role": "higher authority for Year 6 SAT lesson-by-lesson access and release semantics"
+      "role": "higher authority for Year 6 SAT lesson-by-lesson access and authoritative Y6SM1..Y6SM19 CSV/display mapping to canonical Y6M51..Y6M69"
+    },
+    "forwardOnlyAdminEmailRecoveryOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
+      "role": "higher authority for no-rollback production recovery, shared Worker preservation, live parent-email routing/idempotency and manual-send UI counters"
     }
   },
-  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
+  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Year 6 SAT lesson-by-lesson release semantics",
+    "name": "Year 6 SAT Y6SM CSV/display alias resolution with forward-only production deployment",
     "date": "2026-09-26",
-    "status": "SOURCE_AND_REGRESSION_GATES_READY_FOR_PRODUCTION_DEPLOY",
+    "status": "PRODUCTION_PASS",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
-    "source": "worker/src/access-read-model-sync.js",
-    "marker": "y6-sats-direct-release-v1",
-    "verification": "tests/y6-sats-direct-release-verification.mjs plus tests/admin-lesson-release-y6-sats-verification.mjs",
-    "ownerBrowserVerification": "PENDING_DEPLOY_AND_RECONCILIATION"
+    "authoritativeDisplayCodes": "Y6SM1..Y6SM19",
+    "canonicalLessonIds": "Y6M51..Y6M69",
+    "legacyCompatibilityAlias": "Y6MS1..Y6MS19",
+    "functionalHead": "f67070ba0b38a70848a885fead587c96b50fa043",
+    "productionWorkflowRun": 36256460288,
+    "productionWorkflowResult": "PASS",
+    "ownerBrowserVerification": "PENDING_REPROCESS_OF_DEVANSH_Y6SM1_ROW"
+  },
+  "latestProductionIncidentRecovery": {
+    "name": "Parent-email test-routing/idempotency recovery",
+    "date": "2026-09-26",
+    "status": "CLOSED_PASS",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
+    "recoveryCommit": "eabe318aac1abd7356838a82329b1c589f7de10a",
+    "productionWorkflowRun": 36246321399,
+    "productionWorkflowResult": "PASS",
+    "rearmedIncidentRecords": 2,
+    "ownerBrowserVerification": "PASS_2_PARENT_EMAILS_SENT",
+    "permanentRule": "PARENT_EMAIL_TEST_TO must be blank in production live-parent mode and a test delivery must never consume live-parent idempotency."
+  },
+  "latestAdminUiRepair": {
+    "name": "Manual parent-email send counters refresh",
+    "date": "2026-09-26",
+    "status": "SOURCE_COMMITTED_PAGES_DEPLOY_TRIGGERED",
+    "commits": [
+      "3c1f125f4013dfb2f6610a27c0c4697f343c67bb",
+      "46846566482203c6d0299329d334bc03e9e1d349"
+    ],
+    "rule": "The post-send summary pills must reflect the manual-send response; repairing display state must never trigger a second email send."
+  },
+  "permanentProductionRecoveryRule": {
+    "mode": "FORWARD_ONLY",
+    "prohibited": [
+      "git revert for production recovery",
+      "restoring an older Worker version",
+      "wrangler rollback",
+      "automatic rollback-on-verification-failure",
+      "older-entrypoint deployment that discards later changes"
+    ],
+    "required": "Fix the defective layer on top of current main/current production while preserving every later valid capability."
+  },
+  "sharedWorkerInvariant": {
+    "worker": "fpt-portal-v2-worker",
+    "canonicalEntrypoint": "worker/src/index-step10-quiz-bridge.js",
+    "deploymentScript": "ops/deploy_current_worker_preserve.sh",
+    "requiredCapabilities": [
+      "quiz bridge redeem route",
+      "Admin tools",
+      "lesson-release import",
+      "prepared access/read-model reconciliation",
+      "Trial runtime",
+      "Replace Resource consistency",
+      "parent email capability"
+    ]
   },
   "previousResetShowDeployment": {
     "name": "Portal Login Details Reset & Show New Credentials backend and initial frontend deployment",
@@ -125,6 +180,7 @@
     "student authentication and logout",
     "student home/subjects/views/lesson navigation",
     "lesson release import and prepared access publication",
+    "Year 6 SAT direct release and Y6SM CSV/display resolution",
     "ordinary student login provisioning",
     "Admin creation of new batch definitions from existing batch settings",
     "required batch-definition timestamp persistence",
@@ -133,21 +189,23 @@
     "deliberate normal-student Login and Answer Pack credential reset/show",
     "frontend module loading for Reset & Show New Credentials",
     "Trial Login Manager create/inspect/delete/rearm semantics",
-    "Replace Resource transaction and rollback",
+    "Replace Resource transaction and forward recovery",
     "resource open/capability delivery",
     "protected Answer Pack viewer controls",
     "online 11+ English PreLesson VR projection",
-    "manual parent email boundary",
+    "manual parent email boundary, delivery idempotency and live routing",
+    "manual parent-email post-send counter refresh",
     "quiz bridge/path-scoped compatibility preservation",
-    "shared Worker deployment preservation and regression verification"
+    "shared Worker deployment preservation and regression verification",
+    "forward-only production recovery"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in their browser-relative context, not only by file existence.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Production recovery must never roll back later valid changes.",
   "nextChangeProtocol": [
     "classify surface",
-    "prove live owner/version/bindings",
+    "prove current main and live owner/version/bindings",
     "identify canonical and prepared authorities",
     "trace read/write workflow",
-    "define rollback",
+    "define forward-only recovery and preservation gates",
     "mutate only after gates pass",
     "verify canonical readback",
     "verify prepared parity/readback where applicable",
