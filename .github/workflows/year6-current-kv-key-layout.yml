@@ -1,0 +1,41 @@
+name: Year 6 current KV key layout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/year6-current-kv-key-layout.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - name: Inspect live LESSONS_KV keys and Year 6 curricula
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
+          echo "NAMESPACE=$NS"
+          echo '--- keys matching M3.L22 ---'
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/$NS/keys?limit=1000" -H "$AUTH" -o /tmp/keys.json
+          jq -r '.result[].name' /tmp/keys.json | grep -E 'M3\.L22|M3\.L2|Y6\.EXTRA\.L1|curriculum:MATHS_(L3|Y6_EXTRA)' || true
+          echo '--- first 50 lesson-like keys ---'
+          jq -r '.result[].name' /tmp/keys.json | grep -E '^(lesson:)?(M3\.|Y6\.)' | head -50 || true
+          echo '--- curricula ---'
+          for key in 'curriculum:MATHS_L3' 'curriculum:MATHS_Y6_EXTRA'; do
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            echo "$key"
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/$NS/values/$encoded" -H "$AUTH" | jq -c .
+          done
