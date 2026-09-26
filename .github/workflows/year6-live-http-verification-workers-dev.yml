@@ -1,4 +1,5 @@
 name: Year 6 authenticated live HTTP verification - production Worker
+# Post-recovery rerun: verify the canonical composed Worker currently serving the live portal.
 
 on:
   push:
