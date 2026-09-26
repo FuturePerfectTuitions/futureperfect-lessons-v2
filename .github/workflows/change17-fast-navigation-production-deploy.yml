@@ -27,10 +27,10 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      WORKER_ENTRYPOINT: src/index-phase20-change17-parent-email.js
+      WORKER_ENTRYPOINT: src/index-phase23-protected-view-stability.js
       WRANGLER_VERSION: 4.125.0
       PARENT_EMAIL_TEST_TO: sejal.mail@gmail.com
-      DEPLOY_MESSAGE: Portal V2 fast navigation integrated with parent email
+      DEPLOY_MESSAGE: Portal V2 Year 6 sequential catalogue ordering
 
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +56,7 @@ jobs:
           node tests/year6-sequential-catalogue-order-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
-          grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
+          grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
           grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
           echo 'CHANGE17_FAST_NAV_INTEGRATION_PASS'
 
