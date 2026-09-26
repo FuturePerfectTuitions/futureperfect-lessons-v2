@@ -45,104 +45,88 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import assert from 'node:assert/strict';
-          import { expectedYear6DisplayId } from './ops/year6-display-id-policy.mjs';
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          mkdir -p /tmp/year6-before
+          : >/tmp/year6-changes.tsv
 
-          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const ns = process.env.LESSONS_KV_NAMESPACE;
-          const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values`;
-          const headers = { Authorization: `Bearer ${token}` };
-          const affected = [
-            ...Array.from({length:14},(_,i)=>`M3.L${i+22}`),
-            ...Array.from({length:13},(_,i)=>`Y6.EXTRA.L${i+1}`)
-          ];
-          const backup = {};
-          const changed = [];
+          kvurl() {
+            local key="$1" encoded
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            printf '%s/storage/kv/namespaces/%s/values/%s' "$API" "$LESSONS_KV_NAMESPACE" "$encoded"
+          }
+          migrate_one() {
+            local id="$1" target="$2" old_expected="$3"
+            local url current
+            url="$(kvurl "lesson:$id")"
+            curl --fail --silent --show-error "$url" -H "$AUTH" -o "/tmp/year6-before/$id.json"
+            jq -e '.displayIds and (.displayIds|type=="object")' "/tmp/year6-before/$id.json" >/dev/null
+            current="$(jq -r '.displayIds["maths-year6"] // ""' "/tmp/year6-before/$id.json")"
+            if [ "$current" != "$old_expected" ] && [ "$current" != "$target" ]; then
+              echo "REFUSING $id: unexpected live display ID '$current' (expected '$old_expected' or idempotent '$target')" >&2
+              exit 1
+            fi
+            if [ "$current" = "$target" ]; then
+              printf '%s\t%s\t%s\n' "$id" "$current" "$target" >>/tmp/year6-changes.tsv
+              return
+            fi
+            jq --arg target "$target" '.displayIds["maths-year6"]=$target' "/tmp/year6-before/$id.json" > /tmp/year6-after.json
+            jq 'del(.displayIds["maths-year6"])' "/tmp/year6-before/$id.json" > /tmp/before-without.json
+            jq 'del(.displayIds["maths-year6"])' /tmp/year6-after.json > /tmp/after-without.json
+            diff -u /tmp/before-without.json /tmp/after-without.json
+            curl --fail --silent --show-error -X PUT "$url" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/year6-after.json >/dev/null
+            curl --fail --silent --show-error "$url" -H "$AUTH" -o /tmp/year6-reread.json
+            test "$(jq -r '.displayIds["maths-year6"] // ""' /tmp/year6-reread.json)" = "$target"
+            jq 'del(.displayIds["maths-year6"])' /tmp/year6-reread.json > /tmp/reread-without.json
+            diff -u /tmp/before-without.json /tmp/reread-without.json
+            printf '%s\t%s\t%s\n' "$id" "$current" "$target" >>/tmp/year6-changes.tsv
+          }
 
-          async function getRecord(id) {
-            const r = await fetch(`${base}/${encodeURIComponent(`lesson:${id}`)}`, { headers });
-            if (!r.ok) throw new Error(`GET ${id} failed: ${r.status} ${await r.text()}`);
-            return await r.json();
-          }
-          async function putRecord(id, record) {
-            const r = await fetch(`${base}/${encodeURIComponent(`lesson:${id}`)}`, {
-              method:'PUT', headers:{...headers,'Content-Type':'application/json'}, body:JSON.stringify(record)
-            });
-            if (!r.ok) throw new Error(`PUT ${id} failed: ${r.status} ${await r.text()}`);
-          }
-          function withoutYear6Display(record) {
-            const x = structuredClone(record);
-            if (x.displayIds && typeof x.displayIds === 'object') delete x.displayIds['maths-year6'];
-            return x;
-          }
+          for n in $(seq 22 35); do migrate_one "M3.L$n" "Y6T2M$((n-21))" "Y6T2M$n"; done
+          for n in $(seq 1 13); do migrate_one "Y6.EXTRA.L$n" "Y6T3M$n" "Y6T3M$((35+n))"; done
 
-          for (const id of affected) {
-            const before = await getRecord(id);
-            backup[id] = before;
-            assert(before.displayIds && typeof before.displayIds === 'object', `${id} missing displayIds`);
-            const target = expectedYear6DisplayId(id);
-            assert(target, `${id} has no expected Year 6 target`);
-            const current = String(before.displayIds['maths-year6'] || '').trim();
-            const oldExpected = id.startsWith('M3.L')
-              ? `Y6T2M${Number(id.split('L')[1])}`
-              : `Y6T3M${35 + Number(id.split('L')[1])}`;
-            assert(
-              current === oldExpected || current === target,
-              `${id}: refusing unexpected live display ID ${current}; expected ${oldExpected} or idempotent ${target}`
-            );
-            if (current === target) continue;
-            const after = structuredClone(before);
-            after.displayIds['maths-year6'] = target;
-            assert.deepEqual(
-              withoutYear6Display(after), withoutYear6Display(before),
-              `${id}: proposed change touches fields outside displayIds['maths-year6']`
-            );
-            await putRecord(id, after);
-            const reread = await getRecord(id);
-            assert.equal(reread.displayIds['maths-year6'], target, `${id}: write did not persist target`);
-            assert.deepEqual(
-              withoutYear6Display(reread), withoutYear6Display(before),
-              `${id}: live record changed outside displayIds['maths-year6']`
-            );
-            changed.push({ id, from: current, to: target });
-          }
-          fs.writeFileSync('/tmp/year6-before.json', JSON.stringify(backup,null,2));
-          fs.writeFileSync('/tmp/year6-changes.json', JSON.stringify(changed,null,2));
-          console.log(`YEAR6_DISPLAY_ID_MIGRATION_CHANGED=${changed.length}`);
-          console.log(JSON.stringify(changed,null,2));
-          NODE
+          tar -czf /tmp/year6-before.tgz -C /tmp/year6-before .
+          echo "YEAR6_DISPLAY_ID_MIGRATION_RECORDS=$(wc -l </tmp/year6-changes.tsv)"
+          cat /tmp/year6-changes.tsv
 
-      - name: Verify production KV sequence and SATS isolation
+      - name: Verify production KV sequence
         shell: bash
         run: |
           set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          : >/tmp/year6-live-sequence.txt
+          get_display() {
+            local id="$1" encoded
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "lesson:$id")"
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS_KV_NAMESPACE/values/$encoded" -H "$AUTH" | jq -r '.displayIds["maths-year6"] // ""'
+          }
+          for n in $(seq 1 35); do get_display "M3.L$n" >>/tmp/year6-live-sequence.txt; done
+          for n in $(seq 1 13); do get_display "Y6.EXTRA.L$n" >>/tmp/year6-live-sequence.txt; done
+
           node --input-type=module <<'NODE'
+          import fs from 'node:fs';
           import assert from 'node:assert/strict';
-          import { YEAR6_STANDARD_LESSON_IDS, expectedYear6StandardDisplaySequence } from './ops/year6-display-id-policy.mjs';
-          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN, ns=process.env.LESSONS_KV_NAMESPACE;
-          const base=`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values`;
-          const headers={Authorization:`Bearer ${token}`};
-          async function get(id){const r=await fetch(`${base}/${encodeURIComponent(`lesson:${id}`)}`,{headers}); if(!r.ok) throw new Error(`${id}: ${r.status}`); return r.json();}
-          const actual=[];
-          for(const id of YEAR6_STANDARD_LESSON_IDS){const x=await get(id); actual.push(x.displayIds?.['maths-year6']);}
+          import { expectedYear6StandardDisplaySequence } from './ops/year6-display-id-policy.mjs';
+          const actual=fs.readFileSync('/tmp/year6-live-sequence.txt','utf8').trim().split(/\r?\n/);
           const expected=expectedYear6StandardDisplaySequence();
-          assert.deepEqual(actual, expected, 'Production KV standard Year 6 sequence does not match canonical term-local numbering');
+          assert.deepEqual(actual, expected, 'Production KV sequence must match the canonical 48-lesson Year 6 sequence');
           const i=actual.indexOf('Y6T1M21');
-          assert.equal(actual[i+1], 'Y6T2M1', 'Production KV boundary must be Y6T1M21 -> Y6T2M1');
-          assert.equal(actual[35], 'Y6T3M1', 'Production KV Term 3 must restart at Y6T3M1');
+          assert.equal(actual[i+1], 'Y6T2M1');
+          assert.equal(actual[35], 'Y6T3M1');
           console.log(`PRODUCTION_KV_BOUNDARY=${actual[i]} -> ${actual[i+1]}`);
           console.log(`PRODUCTION_KV_TERM3_START=${actual[35]}`);
           console.log(`PRODUCTION_KV_STANDARD_COUNT=${actual.length}`);
           NODE
 
       - name: Preserve migration evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: year6-display-id-migration-evidence
           path: |
-            /tmp/year6-before.json
-            /tmp/year6-changes.json
+            /tmp/year6-before.tgz
+            /tmp/year6-changes.tsv
+            /tmp/year6-live-sequence.txt
+          if-no-files-found: ignore
           retention-days: 30
