@@ -54,6 +54,51 @@ function studentTitle(record, shownId) {
   return title || shownId || canonical;
 }
 
+function sequentialDisplayKey(value) {
+  const code = clean(value).toUpperCase();
+  let match = code.match(/^Y(\d+)T(\d+)M(\d+)$/);
+  if (match) {
+    return {
+      recognised:true,
+      year:Number(match[1]),
+      section:0,
+      term:Number(match[2]),
+      lesson:Number(match[3]),
+      code
+    };
+  }
+
+  match = code.match(/^Y(\d+)MS(\d+)$/);
+  if (match) {
+    return {
+      recognised:true,
+      year:Number(match[1]),
+      section:1,
+      term:0,
+      lesson:Number(match[2]),
+      code
+    };
+  }
+
+  return { recognised:false, code };
+}
+
+function compareSequentialDisplayLessons(left, right) {
+  const a = sequentialDisplayKey(left?.displayLessonId ?? left);
+  const b = sequentialDisplayKey(right?.displayLessonId ?? right);
+
+  if (a.recognised && b.recognised) {
+    return (
+      a.year - b.year ||
+      a.section - b.section ||
+      a.term - b.term ||
+      a.lesson - b.lesson
+    );
+  }
+  if (a.recognised !== b.recognised) return a.recognised ? -1 : 1;
+  return a.code.localeCompare(b.code, undefined, { numeric:true, sensitivity:'base' });
+}
+
 function fullLibraryForView(viewId) {
   const id = norm(viewId);
   let match = id.match(/^maths-level([1-3])$/);
@@ -120,6 +165,11 @@ async function liveCatalogueForView(env, viewId) {
       record
     });
   }
+
+  // Year 6 is assembled from more than one live curriculum. Those source arrays
+  // are valid for membership but not for presentation order, so sort the final
+  // student-facing rows by the display code: T1 -> T2 -> T3, then SAT MS1..MS19.
+  if (norm(viewId) === 'maths-year6') rows.sort(compareSequentialDisplayLessons);
   return rows;
 }
 
@@ -373,6 +423,7 @@ export {
   lessonIdsFromCurriculum,
   displayLessonId,
   studentTitle,
+  compareSequentialDisplayLessons,
   fullLibraryForView,
   entitlementMatchesView,
   liveCatalogueForView,
