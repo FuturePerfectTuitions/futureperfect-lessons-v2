@@ -27,91 +27,99 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
-      WORKER_ENTRYPOINT: src/index-phase23-protected-view-stability.js
+      WORKER_ENTRYPOINT: src/index-step10-quiz-bridge.js
       WRANGLER_VERSION: 4.125.0
-      PARENT_EMAIL_TEST_TO: sejal.mail@gmail.com
-      DEPLOY_MESSAGE: Portal V2 Year 6 sequential catalogue ordering
+      DEPLOY_MESSAGE: Restore canonical composed Worker after Year 6 navigation deploy
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Verify integrated fast navigation and canonical bundle
+      - name: Verify Year 6 navigation and canonical composition
         shell: bash
         run: |
           set -euo pipefail
           rm -rf /tmp/change17-navigation-package
           node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/change17-navigation-package >/tmp/change17-navigation.log
           jq -e '.navigationManifestLessons == 369 and .navigationManifestCurricula == 11' /tmp/change17-navigation-package/phase11-apply-summary.json >/dev/null
-          node --check worker/src/index-phase20-change17.js
-          node --check worker/src/index-phase20-change17-parent-email.js
           node tests/subject-preview-enrolment-boundary-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y411-admin-import-baseline-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/live-student-catalogue-overlay-verification.mjs
           node tests/year6-sequential-catalogue-order-verification.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
-          grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
-          grep -Fq 'PARENT_EMAIL_TEST_TO' ops/deploy_change17_parent_email_preserve.sh
-          echo 'CHANGE17_FAST_NAV_INTEGRATION_PASS'
+          grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "./admin-resource-replace-consistency.js" worker/src/index-admin-tools.js
+          echo 'CHANGE17_CANONICAL_COMPOSITION_PASS'
 
-      - name: Require production bindings and secrets
+      - name: Capture production rollback anchor
+        id: rollback
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test "$PARENT_EMAIL_TEST_TO" = 'sejal.mail@gmail.com'
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/change17-settings-before.json
-          jq -e '.success == true' /tmp/change17-settings-before.json >/dev/null
-          for binding in STUDENTS_KV LESSONS_KV MATERIALS_R2 DB; do
-            jq -e --arg n "$binding" '.result.bindings[] | select(.name==$n)' /tmp/change17-settings-before.json >/dev/null
-          done
-          for required in ADMIN_IMPORT_PASSWORD ADMIN_IMPORT_SESSION_SECRET EXCEL_SYNC_TOKEN; do
-            jq -e --arg n "$required" '[.result.bindings[] | select((.type // "") | test("secret"; "i")) | .name] | index($n) != null' /tmp/change17-settings-before.json >/dev/null
-          done
-          echo 'CHANGE17_FAST_NAV_BINDINGS_PASS'
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json >/tmp/change17-before.json
+          OLD="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/change17-before.json | head -n1)"
+          test -n "$OLD"
+          echo "old_version=$OLD" >> "$GITHUB_OUTPUT"
+          echo "CHANGE17_ROLLBACK_ANCHOR=$OLD"
 
-      - name: Deploy integrated Worker preserving parent email bindings
+      - name: Deploy canonical composed Worker preserving all bindings
         shell: bash
         run: |
           set -euo pipefail
-          bash ops/deploy_change17_parent_email_preserve.sh
+          bash ops/deploy_current_worker_preserve.sh
 
-      - name: Verify live fast navigation and parent email outer layer
+      - name: Verify canonical shared Worker and lesson-release capability
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/change17-settings-after.json
-          jq -e '.success == true' /tmp/change17-settings-after.json >/dev/null
-          jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/change17-settings-after.json >/dev/null
-          jq -e --arg expected "$PARENT_EMAIL_TEST_TO" '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text==$expected)' /tmp/change17-settings-after.json >/dev/null
-          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/change17-worker-after.bin
-          grep -aFq '/api/v1/student/navigation' /tmp/change17-worker-after.bin
-          grep -aFq 'fast-v1' /tmp/change17-worker-after.bin
-          grep -aFq 'live-kv-v1' /tmp/change17-worker-after.bin
-          echo 'CHANGE17_LIVE_FAST_NAVIGATION_PASS'
-
-      - name: Verify live security boundary
-        shell: bash
-        run: |
-          set -euo pipefail
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
-          ORIGIN='https://lessons.futureperfect.education'
-          code="$(curl --silent --show-error --output /tmp/change17-navigation.json --write-out '%{http_code}' \
-            --header "Origin: $ORIGIN" "$BASE/api/v1/student/navigation")"
-          test "$code" = '401'
-          echo 'CHANGE17_LIVE_SECURITY_PASS'
+          ORIGIN='https://futureperfecttuitions.github.io'
+
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings-after.json
+          jq -e '.success == true' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace")' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/settings-after.json >/dev/null
+
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" -H "$AUTH" -o /tmp/live-worker.bin
+          grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/live-worker.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/live-worker.bin
+          grep -aFq '/api/v1/admin/lesson-releases/confirm' /tmp/live-worker.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/live-worker.bin
+
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --request OPTIONS \
+              --header "Origin: $ORIGIN" \
+              --header 'Access-Control-Request-Method: POST' \
+              --header 'Access-Control-Request-Headers: content-type, authorization' \
+              --dump-header /tmp/release-preflight-headers.txt \
+              --output /tmp/release-preflight-body.json \
+              --write-out '%{http_code}' \
+              "$BASE/api/v1/admin/lesson-releases/confirm")"
+            echo "Lesson release preflight attempt $attempt returned HTTP $code"
+            if test "$code" = '200' \
+              && grep -iFq "access-control-allow-origin: $ORIGIN" /tmp/release-preflight-headers.txt \
+              && grep -iEq '^access-control-allow-methods:.*POST' /tmp/release-preflight-headers.txt; then
+              echo 'LESSON_RELEASE_PREFLIGHT_LIVE_PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Lesson Release Import preflight did not converge.' >&2
+          cat /tmp/release-preflight-headers.txt >&2 || true
+          cat /tmp/release-preflight-body.json >&2 || true
+          exit 1
+
+      - name: Roll back if production verification failed
+        if: failure() && steps.rollback.outputs.old_version != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" rollback "${{ steps.rollback.outputs.old_version }}" --name "$WORKER_NAME" --message 'Automatic rollback after failed canonical Change17 recovery verification'
