@@ -4,6 +4,7 @@ import {
   decoratePreview,
   sendEmailsAfterConfirm
 } from './admin-lesson-release-import-email.js';
+import { normaliseY6SatsPortalAlias } from './admin-y6-sats-csv-alias.js';
 
 const PREVIEW_PATH = '/api/v1/admin/lesson-releases/preview';
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';
@@ -40,8 +41,11 @@ export async function handleAdminLessonReleaseImport(request, env) {
   const body = await readJson(request);
   if (!Array.isArray(body?.rows)) return handleReconciledImport(request, env);
 
+  // Keep the CSV's real Y6SM display code for preview and parent-email copy,
+  // but translate it to the legacy internal Y6MS alias only for Portal lesson resolution.
   const normalizedRows = body.rows.map(normaliseCsvInputRow);
-  const normalizedRequest = requestWithJson(request, { ...body, rows:normalizedRows });
+  const portalRows = normalizedRows.map(normaliseY6SatsPortalAlias);
+  const normalizedRequest = requestWithJson(request, { ...body, rows:portalRows });
   const baseResponse = await handleReconciledImport(normalizedRequest, env);
   const baseBody = await baseResponse.clone().json().catch(() => null);
   if (!baseBody) return baseResponse;
