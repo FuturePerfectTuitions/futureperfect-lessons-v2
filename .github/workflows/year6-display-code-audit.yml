@@ -45,13 +45,13 @@ jobs:
             jq '{curriculumCode, lessonIds:(.lessonIds // .lessons // .items // .)}' "/tmp/${code}.json"
           done
 
-          jq -r '[.lessonIds // .lessons // .items // .][] | if type=="string" then . else .lessonId end' /tmp/MATHS_L3.json /tmp/MATHS_Y6_EXTRA.json \
+          jq -r '(.lessonIds // .lessons // .items // .)[] | if type=="string" then . else .lessonId end' /tmp/MATHS_L3.json /tmp/MATHS_Y6_EXTRA.json \
             | sed '/^null$/d;/^$/d' | awk '!seen[$0]++' > /tmp/y6-lesson-ids.txt
 
           echo "=== live Year 6 lesson records: canonical -> displayed IDs ==="
           while IFS= read -r lesson_id; do
             npx --yes wrangler@latest kv key get "lesson:${lesson_id}" --namespace-id "$LESSONS_KV_ID" --remote > /tmp/lesson.json
-            jq -c '{lessonId:(.lessonId // "'"$lesson_id"'"), title, active, displayIds, displayLessonIds, presentationDisplayIds:(.presentation.displayIds // null)}' /tmp/lesson.json
+            jq -c --arg fallback "$lesson_id" '{lessonId:(.lessonId // $fallback), title, active, displayIds, displayLessonIds, presentationDisplayIds:(.presentation.displayIds // null)}' /tmp/lesson.json
           done < /tmp/y6-lesson-ids.txt
 
           echo "=== duplicate display IDs within maths-year6 ==="
