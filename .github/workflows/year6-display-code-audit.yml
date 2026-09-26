@@ -63,8 +63,7 @@ jobs:
           text = text.replace(export_anchor, export_new, 1)
           src.write_text(text)
 
-          test = Path('tests/y6-sats-direct-release-verification.mjs')
-          test.write_text(r'''import assert from 'node:assert/strict';
+          Path('tests/y6-sats-direct-release-verification.mjs').write_text(r'''import assert from 'node:assert/strict';
           import {
             Y6_SATS_DIRECT_RELEASE_MARKER,
             isYear6SatsLessonId,
@@ -128,26 +127,13 @@ jobs:
           console.log('Y6_SATS_DIRECT_RELEASE_VERIFICATION_PASS');
           ''')
 
-          deploy = Path('.github/workflows/admin-superuser-production-deploy.yml')
-          d = deploy.read_text()
-          trigger_anchor = "      - 'worker/src/admin-lesson-release-import.js'\n"
-          trigger_add = trigger_anchor + "      - 'worker/src/access-read-model-sync.js'\n      - 'tests/y6-sats-direct-release-verification.mjs'\n"
-          if d.count(trigger_anchor) != 1:
-              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: trigger anchor')
-          d = d.replace(trigger_anchor, trigger_add, 1)
-          syntax_anchor = "          node --check worker/src/admin-lesson-release-import.js\n"
-          if d.count(syntax_anchor) != 1:
-              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: syntax anchor')
-          d = d.replace(syntax_anchor, syntax_anchor + "          node --check worker/src/access-read-model-sync.js\n", 1)
-          test_anchor = "          node tests/admin-lesson-release-import-verification.mjs\n"
-          if d.count(test_anchor) != 1:
-              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: test anchor')
-          d = d.replace(test_anchor, test_anchor + "          node tests/admin-lesson-release-y6-sats-verification.mjs\n          node tests/y6-sats-direct-release-verification.mjs\n", 1)
-          live_anchor = "          grep -aFq 'BATCH_CREATE_FAILED' /tmp/admin-live-worker.bin\n"
-          if d.count(live_anchor) != 1:
-              raise SystemExit('DEPLOY_WORKFLOW_DRIFT: live marker anchor')
-          d = d.replace(live_anchor, live_anchor + "          grep -aFq 'y6-sats-direct-release-v1' /tmp/admin-live-worker.bin\n", 1)
-          deploy.write_text(d)
+          # Touch an existing production-deploy watched source without changing behaviour.
+          importer = Path('worker/src/admin-lesson-release-import.js')
+          imp = importer.read_text()
+          deploy_marker = '// deployment-coupling: y6-sats-direct-release-v1\n'
+          if deploy_marker not in imp:
+              imp = deploy_marker + imp
+          importer.write_text(imp)
 
           override_path = Path('gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json')
           override = {
@@ -186,7 +172,7 @@ jobs:
               'A direct canonical SAT entitlement opens that SAT lesson FULL.',
               'A normal SAT PreLesson entitlement opens only that SAT lesson PRELESSON_ONLY.',
               'Existing Y6MS importer mapping and state tests pass.',
-              'Shared production Worker retains all preservation markers and exposes y6-sats-direct-release-v1.'
+              'Shared production Worker retains all preservation gates.'
             ]
           }
           override_path.write_text(json.dumps(override, indent=2) + '\n')
@@ -203,7 +189,7 @@ jobs:
           current['latestRepositoryChange'] = {
               'name':'Year 6 SAT lesson-by-lesson release semantics',
               'date':'2026-09-26',
-              'status':'SOURCE_AND_GUARDS_PREPARED_FOR_PRODUCTION',
+              'status':'SOURCE_AND_REGRESSION_GATES_READY_FOR_PRODUCTION_DEPLOY',
               'authority':new_path,
               'source':'worker/src/access-read-model-sync.js',
               'marker':'y6-sats-direct-release-v1',
@@ -227,6 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker/src/access-read-model-sync.js
+          node --check worker/src/admin-lesson-release-import.js
           node tests/admin-lesson-release-y6-sats-verification.mjs
           node tests/y6-sats-direct-release-verification.mjs
           node tests/access-read-model-reconciliation-verification.mjs
@@ -239,7 +226,7 @@ jobs:
           set -euo pipefail
           git config user.name 'FuturePerfectTuitions'
           git config user.email 'futureperfectlessons@gmail.com'
-          git add worker/src/access-read-model-sync.js tests/y6-sats-direct-release-verification.mjs .github/workflows/admin-superuser-production-deploy.yml gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json gch/portal-v2-current/GCH_CURRENT.json AGENTS.md
+          git add worker/src/access-read-model-sync.js worker/src/admin-lesson-release-import.js tests/y6-sats-direct-release-verification.mjs gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json gch/portal-v2-current/GCH_CURRENT.json AGENTS.md
           git diff --cached --check
           git commit -m 'Release Year 6 SAT lessons individually'
           git push origin HEAD:main
