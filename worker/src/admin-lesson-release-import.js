@@ -1,3 +1,4 @@
+// deployment-coupling: y6-sats-direct-release-v1
 const LOGIN_PATH = '/api/v1/admin/lesson-releases/login';
 const PREVIEW_PATH = '/api/v1/admin/lesson-releases/preview';
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';

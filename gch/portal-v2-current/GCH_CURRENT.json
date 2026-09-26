@@ -15,7 +15,8 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_BATCH_CREATION.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
-    "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json"
+    "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json"
   ],
   "authorityComposition": {
     "base": {
@@ -41,26 +42,22 @@
     "fullSiteWorkflow": {
       "path": "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
       "role": "website-wide execution map; scope-specific overrides supersede conflicting statements within their declared scope"
+    },
+    "y6SatsDirectReleaseOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
+      "role": "higher authority for Year 6 SAT lesson-by-lesson access and release semantics"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove live route/deployment/data-store ownership. Preserve every shared Worker capability. Fail closed when state, projection parity, live ownership or rollback safety cannot be proved. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Portal Login Details Reset UI asset-path repair",
-    "date": "2026-09-25",
-    "status": "REPAIR_PREPARED_PENDING_PRODUCTION_AND_OWNER_VERIFICATION",
-    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
-    "backend": "worker/src/admin-portal-login-lookup.js",
-    "routeComposition": "worker/src/index-admin-tools.js",
-    "lookupUi": "assets/admin-create-batch.js",
-    "resetUi": "assets/admin-portal-reset-credentials.js",
-    "lookupApi": "POST /api/v1/admin/students/lookup",
-    "resetApi": "POST /api/v1/admin/students/reset-credentials",
-    "canonicalSource": "STUDENTS_KV user:<normalised Portal ID>",
-    "rootCause": "The reset UI loader was written as ./assets/admin-portal-reset-credentials.js inside assets/admin-create-batch.js, which resolves in-browser to assets/assets/admin-portal-reset-credentials.js and therefore fails to load the button module.",
-    "repair": "Change the relative import to ./admin-portal-reset-credentials.js and add a regression assertion that the nested assets path is absent.",
-    "studentMutationImpact": "None from this browser incident; the reset UI module did not load, so no credential reset occurred.",
-    "verification": "tests/admin-portal-login-lookup-verification.mjs",
-    "ownerBrowserVerification": "PENDING_REPAIR_DEPLOY"
+    "name": "Year 6 SAT lesson-by-lesson release semantics",
+    "date": "2026-09-26",
+    "status": "SOURCE_AND_REGRESSION_GATES_READY_FOR_PRODUCTION_DEPLOY",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
+    "source": "worker/src/access-read-model-sync.js",
+    "marker": "y6-sats-direct-release-v1",
+    "verification": "tests/y6-sats-direct-release-verification.mjs plus tests/admin-lesson-release-y6-sats-verification.mjs",
+    "ownerBrowserVerification": "PENDING_DEPLOY_AND_RECONCILIATION"
   },
   "previousResetShowDeployment": {
     "name": "Portal Login Details Reset & Show New Credentials backend and initial frontend deployment",

@@ -16,6 +16,17 @@ const SCOPE_SALT_KEY = 'meta:scope-salt';
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
+
+const Y6_SATS_DIRECT_RELEASE_MARKER = 'y6-sats-direct-release-v1';
+
+function isYear6SatsLessonId(value) {
+  if (!Y6_SATS_DIRECT_RELEASE_MARKER) return false;
+  const match = clean(value).match(/^Y6M(\d+)$/i);
+  if (!match) return false;
+  const lessonNumber = Number(match[1]);
+  return lessonNumber >= 51 && lessonNumber <= 69;
+}
+
 const VIEW_DEFINITIONS = Object.freeze({
   'maths-year2': Object.freeze({ viewId:'maths-year2', subject:'maths', label:'Year 2', rank:20, schoolYear:2, stream:'normal', fullLibraryIds:Object.freeze(['MATHS_Y2_FULL']) }),
   'maths-year3': Object.freeze({ viewId:'maths-year3', subject:'maths', label:'Year 3', rank:30, schoolYear:3, stream:'normal', fullLibraryIds:Object.freeze(['MATHS_Y3_FULL']) }),
@@ -469,7 +480,7 @@ function lessonAccessMap({ catalogue, fullViews, entitlementIds, vrEntitlementId
   const access = {};
   for (const lessonId of [...allLessonIds].sort()) {
     const views = catalogue?.lessonToViews?.[lessonId] || [];
-    const fullLibrary = views.some(viewId => full.has(viewId));
+    const fullLibrary = !isYear6SatsLessonId(lessonId) && views.some(viewId => full.has(viewId));
     const temp = temporary.get(lessonId);
     const core = fullLibrary || earned.has(lessonId) || manualCore.has(lessonId) || Boolean(temp?.core);
     const vr = earnedVr.has(lessonId) || preVr.has(lessonId) || manualVr.has(lessonId) || Boolean(temp?.vr);
@@ -902,6 +913,8 @@ async function refreshStudentAccessReadModel(env, portalUserIdNorm, options = {}
 export {
   VIEW_DEFINITIONS,
   SCOPE_SALT_KEY,
+  Y6_SATS_DIRECT_RELEASE_MARKER,
+  isYear6SatsLessonId,
   legacyBatchViewId,
   inferViewIdFromLessonAndBatch,
   prepareAccessInputForParity,
