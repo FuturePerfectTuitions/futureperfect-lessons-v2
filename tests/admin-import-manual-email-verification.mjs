@@ -32,6 +32,9 @@ assert.match(production, /admin-lesson-release-import-manual-email-reconciled\.j
 assert.match(manualJs, /sendEmails:true/);
 assert.match(manualJs, /Send Parent Emails/);
 assert.match(manualJs, /Parent emails are being sent now/);
+assert.match(manualJs, /function renderSummary\(summary\)/);
+assert.match(manualJs, /renderSummary\(data\.summary\)/);
+assert.match(manualJs, /state\.importSummary = data\.summary \|\| state\.importSummary/);
 assert.doesNotMatch(manualJs, /\.click\(\).*sendEmailsBtn/);
 
-console.log('Automatic Portal import with reconciled access + manual parent-email send control: PASS');
+console.log('Automatic Portal import with reconciled access + manual parent-email send control + post-send counter refresh: PASS');
