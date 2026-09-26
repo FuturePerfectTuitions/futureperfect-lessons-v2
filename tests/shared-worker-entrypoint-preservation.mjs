@@ -1,3 +1,4 @@
+// deploy-trigger: y6-sats-direct-release-v1
 import fs from 'node:fs';
 
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
