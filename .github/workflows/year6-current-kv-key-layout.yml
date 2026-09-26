@@ -13,13 +13,13 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
     steps:
-      - name: Inspect live LESSONS_KV keys and Year 6 curricula
+      - name: Inspect actual live Year 6 curricula and records
         shell: bash
         run: |
           set -euo pipefail
@@ -28,14 +28,27 @@ jobs:
           curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
           NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
           echo "NAMESPACE=$NS"
-          echo '--- keys matching M3.L22 ---'
-          curl --fail --silent --show-error "$API/storage/kv/namespaces/$NS/keys?limit=1000" -H "$AUTH" -o /tmp/keys.json
-          jq -r '.result[].name' /tmp/keys.json | grep -E 'M3\.L22|M3\.L2|Y6\.EXTRA\.L1|curriculum:MATHS_(L3|Y6_EXTRA)' || true
-          echo '--- first 50 lesson-like keys ---'
-          jq -r '.result[].name' /tmp/keys.json | grep -E '^(lesson:)?(M3\.|Y6\.)' | head -50 || true
-          echo '--- curricula ---'
-          for key in 'curriculum:MATHS_L3' 'curriculum:MATHS_Y6_EXTRA'; do
+          getkv() {
+            local key="$1" encoded
             encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
-            echo "$key"
-            curl --fail --silent --show-error "$API/storage/kv/namespaces/$NS/values/$encoded" -H "$AUTH" | jq -c .
-          done
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/$NS/values/$encoded" -H "$AUTH"
+          }
+          getkv 'curriculum:MATHS_L3' >/tmp/l3.json
+          getkv 'curriculum:MATHS_Y6_EXTRA' >/tmp/extra.json
+          echo '--- curricula ---'
+          jq -c . /tmp/l3.json
+          jq -c . /tmp/extra.json
+          jq -r '.lessonIds[]' /tmp/l3.json /tmp/extra.json | awk '!seen[$0]++' >/tmp/ids.txt
+          : >/tmp/records.tsv
+          while IFS= read -r id; do
+            getkv "lesson:$id" >/tmp/lesson.json
+            ID="$id" jq -r --arg id "$id" '[ $id, (.displayIds["maths-year6"] // .displayLessonIds["maths-year6"] // .presentation.displayIds["maths-year6"] // ""), (.title // "") ] | @tsv' /tmp/lesson.json >>/tmp/records.tsv
+          done </tmp/ids.txt
+          echo '--- actual live merged order: canonical / display / title ---'
+          cat /tmp/records.tsv
+          echo '--- display IDs only ---'
+          cut -f2 /tmp/records.tsv
+          echo '--- boundary around Y6T1M21 ---'
+          awk -F '\t' 'p>0 {print; p--; next} $2=="Y6T1M21" {print; p=5}' /tmp/records.tsv
+          echo '--- duplicates ---'
+          cut -f2 /tmp/records.tsv | grep -v '^$' | sort | uniq -cd || true
