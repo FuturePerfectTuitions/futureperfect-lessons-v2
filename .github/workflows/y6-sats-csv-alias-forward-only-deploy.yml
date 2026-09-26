@@ -1,0 +1,72 @@
+name: Y6 SATs CSV alias forward-only deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/y6-sats-csv-alias-forward-only-deploy.yml'
+      - 'worker/src/admin-y6-sats-csv-alias.js'
+      - 'worker/src/admin-lesson-release-import-email-reconciled.js'
+      - 'worker/src/admin-lesson-release-import-manual-email-reconciled.js'
+      - 'tests/y6-sats-csv-alias-verification.mjs'
+      - 'ops/deploy_current_worker_preserve.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Forward-only Y6SM SATs CSV alias fix
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify alias and current composed Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/admin-y6-sats-csv-alias.js
+          node --check worker/src/admin-lesson-release-import-email-reconciled.js
+          node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
+          node tests/y6-sats-csv-alias-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/y6-sats-direct-release-verification.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+          grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
+          echo 'Y6_SATS_ALIAS_PREFLIGHT_PASS'
+
+      - name: Deploy current main forward-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+
+      - name: Verify live composition and live parent routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/y6-sats-settings.json
+          jq -e '.success == true' /tmp/y6-sats-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/y6-sats-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace")' /tmp/y6-sats-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/y6-sats-settings.json >/dev/null
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" -H "$AUTH" -o /tmp/y6-sats-worker.bin
+          grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/y6-sats-worker.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/y6-sats-worker.bin
+          grep -aFq '/api/v1/admin/lesson-releases/confirm' /tmp/y6-sats-worker.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/y6-sats-worker.bin
+          grep -aFq 'Y6SM' /tmp/y6-sats-worker.bin
+          echo 'Y6_SATS_ALIAS_FORWARD_ONLY_DEPLOY_PASS'
