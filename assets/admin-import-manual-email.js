@@ -75,6 +75,18 @@
     el.className = `status ${kind}`.trim();
   }
 
+  function renderSummary(summary) {
+    const el = document.getElementById('summary');
+    if (!el) return;
+    el.innerHTML = '';
+    for (const [key, value] of Object.entries(summary || {})) {
+      const span = document.createElement('span');
+      span.className = 'pill';
+      span.textContent = `${key}: ${value}`;
+      el.appendChild(span);
+    }
+  }
+
   function eligibleCount() {
     return Number(
       state.importSummary?.emailEligible ??
@@ -132,6 +144,9 @@
       });
       const data = await response.json().catch(() => ({ ok:false, error:'INVALID_RESPONSE' }));
       if (!response.ok || data.ok === false) throw Object.assign(new Error(data.error || `HTTP ${response.status}`), { data });
+
+      state.importSummary = data.summary || state.importSummary;
+      renderSummary(data.summary);
 
       const sent = Number(data.summary?.emailsSent || 0);
       const already = Number(data.summary?.emailsAlreadySent || 0);
