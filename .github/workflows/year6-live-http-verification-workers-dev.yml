@@ -1,0 +1,109 @@
+name: Year 6 authenticated live HTTP verification - production Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/year6-live-http-verification-workers-dev.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      LIVE_ORIGIN: https://fpt-portal-v2-worker.futureperfectlessons.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create disposable authenticated production session
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
+          STUDENTS_NS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV") | .namespace_id' /tmp/settings.json)"
+          DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB") | (.id // .database_id)' /tmp/settings.json)"
+          test -n "$STUDENTS_NS" && test "$STUDENTS_NS" != null
+          test -n "$DB_ID" && test "$DB_ID" != null
+          USER_ID="y6httpverify${GITHUB_RUN_ID}"
+          SESSION_TOKEN="$(openssl rand -hex 32)"
+          WINDOW_TOKEN="$(openssl rand -hex 24)"
+          SESSION_HASH="$(printf '%s' "$SESSION_TOKEN" | sha256sum | awk '{print $1}')"
+          WINDOW_HASH="$(printf '%s' "$WINDOW_TOKEN" | sha256sum | awk '{print $1}')"
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          EXP="$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%S.000Z)"
+          printf '%s' "$USER_ID" >/tmp/test-user-id
+          printf '%s' "$SESSION_TOKEN" >/tmp/session-token
+          printf '%s' "$WINDOW_TOKEN" >/tmp/window-token
+          printf '%s' "$STUDENTS_NS" >/tmp/students-ns
+          printf '%s' "$DB_ID" >/tmp/db-id
+          ENCODED="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "user:$USER_ID")"
+          jq -n --arg id "$USER_ID" '{portalUserId:$id,firstName:"Year6 HTTP Verification",p:"Aa1b",status:"active",expires:"2099-12-31",schoolYear:6,batches:[],fullLibraries:["MATHS_Y6_FULL"]}' >/tmp/test-user.json
+          curl --fail --silent --show-error -X PUT "$API/storage/kv/namespaces/$STUDENTS_NS/values/$ENCODED" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/test-user.json >/dev/null
+          d1() {
+            local sql="$1" params="$2"
+            jq -n --arg sql "$sql" --argjson params "$params" '{sql:$sql,params:$params}' >/tmp/d1.json
+            curl --fail --silent --show-error -X POST "$API/d1/database/$DB_ID/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/d1.json >/tmp/d1-out.json
+            jq -e '.success == true and (.result[0].success == true)' /tmp/d1-out.json >/dev/null
+          }
+          P1="$(jq -nc --arg a "$SESSION_HASH" --arg b "$USER_ID" --arg c "$NOW" --arg d "$NOW" --arg e "$EXP" '[$a,$b,$c,$d,$e]')"
+          P2="$(jq -nc --arg a "$SESSION_HASH" --arg b "$USER_ID" --arg c "$WINDOW_HASH" --arg d "$NOW" '[$a,$b,$c,$d]')"
+          d1 'INSERT INTO student_sessions (token_hash,portal_user_id_norm,created_at,last_activity_at,idle_expires_at,revoked_at) VALUES (?,?,?,?,?,NULL)' "$P1"
+          d1 'INSERT INTO student_session_windows (token_hash,portal_user_id_norm,window_token_hash,created_at) VALUES (?,?,?,?)' "$P2"
+
+      - name: Assert exact authenticated live HTTP Year 6 order
+        shell: bash
+        run: |
+          set -euo pipefail
+          SESSION_TOKEN="$(cat /tmp/session-token)"
+          WINDOW_TOKEN="$(cat /tmp/window-token)"
+          STATUS="$(curl --silent --show-error -o /tmp/live-response.json -w '%{http_code}' "$LIVE_ORIGIN/api/v1/student/views/maths-year6/lessons" -H 'Origin: https://lessons.futureperfect.education' -H "Cookie: fpt_v2_session=$SESSION_TOKEN" -H "X-FPT-Window-Token: $WINDOW_TOKEN" -H 'Accept: application/json')"
+          echo "LIVE_HTTP_STATUS=$STATUS"
+          test "$STATUS" = 200
+          jq -e '.ok == true and (.lessons|type=="array")' /tmp/live-response.json >/dev/null
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import { expectedYear6StandardDisplaySequence } from './ops/year6-display-id-policy.mjs';
+          const rows=JSON.parse(fs.readFileSync('/tmp/live-response.json','utf8')).lessons;
+          const normalize=s=>String(s||'').replace(/^(Y6T\d+M)0+(\d+)$/,'$1$2');
+          const ids=rows.filter(r=>/^Y6T\d+M\d+$/i.test(String(r.displayLessonId||''))).map(r=>normalize(r.displayLessonId));
+          assert.deepEqual(ids,expectedYear6StandardDisplaySequence());
+          const i=ids.indexOf('Y6T1M21');
+          assert.equal(ids[i+1],'Y6T2M1');
+          assert.equal(ids[35],'Y6T3M1');
+          const sats=rows.filter(r=>/^Y6MS\d+$/i.test(String(r.displayLessonId||''))).map(r=>r.displayLessonId);
+          assert.deepEqual(sats,Array.from({length:19},(_,i)=>`Y6MS${i+1}`));
+          console.log(`AUTHENTICATED_LIVE_HTTP_STANDARD_COUNT=${ids.length}`);
+          console.log(`AUTHENTICATED_LIVE_HTTP_BOUNDARY=${ids[i]} -> ${ids[i+1]}`);
+          console.log(`AUTHENTICATED_LIVE_HTTP_TERM3_START=${ids[35]}`);
+          console.log(`AUTHENTICATED_LIVE_HTTP_SATS=${sats[0]} -> ${sats.at(-1)} (${sats.length})`);
+          NODE
+
+      - name: Clean disposable identity and session
+        if: always()
+        shell: bash
+        run: |
+          set -u
+          test -f /tmp/test-user-id || exit 0
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          USER_ID="$(cat /tmp/test-user-id)"
+          STUDENTS_NS="$(cat /tmp/students-ns)"
+          DB_ID="$(cat /tmp/db-id)"
+          SESSION_HASH="$(printf '%s' "$(cat /tmp/session-token)" | sha256sum | awk '{print $1}')"
+          params="$(jq -nc --arg x "$SESSION_HASH" '[$x]')"
+          for sql in 'DELETE FROM student_session_windows WHERE token_hash = ?' 'DELETE FROM student_session_profiles WHERE token_hash = ?' 'DELETE FROM student_sessions WHERE token_hash = ?'; do
+            jq -n --arg sql "$sql" --argjson params "$params" '{sql:$sql,params:$params}' >/tmp/d1-clean.json
+            curl --fail --silent --show-error -X POST "$API/d1/database/$DB_ID/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/d1-clean.json >/dev/null || true
+          done
+          ENCODED="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "user:$USER_ID")"
+          curl --fail --silent --show-error -X DELETE "$API/storage/kv/namespaces/$STUDENTS_NS/values/$ENCODED" -H "$AUTH" >/dev/null || true
+          echo 'Disposable HTTP-verification identity and session cleaned up.'
