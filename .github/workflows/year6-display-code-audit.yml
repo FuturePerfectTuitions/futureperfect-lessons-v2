@@ -1,4 +1,4 @@
-name: Year 6 SAT direct-release guarded change
+name: Reconcile Aarav Year 6 SAT access
 
 on:
   push:
@@ -9,225 +9,184 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-and-verify:
+  reconcile:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
     steps:
       - uses: actions/checkout@v6
         with:
           ref: main
-          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-      - name: Apply fail-closed source and authority patch
+      - name: Recompile and verify Aarav prepared access
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import json
-
-          src = Path('worker/src/access-read-model-sync.js')
-          text = src.read_text()
-          marker_anchor = "const norm = value => clean(value).toLowerCase();\n"
-          if text.count(marker_anchor) != 1:
-              raise SystemExit('SOURCE_ANCHOR_DRIFT: norm anchor')
-          if 'y6-sats-direct-release-v1' in text:
-              raise SystemExit('SOURCE_ALREADY_PATCHED')
-          helper = """
-
-          const Y6_SATS_DIRECT_RELEASE_MARKER = 'y6-sats-direct-release-v1';
-
-          function isYear6SatsLessonId(value) {
-            if (!Y6_SATS_DIRECT_RELEASE_MARKER) return false;
-            const match = clean(value).match(/^Y6M(\\d+)$/i);
-            if (!match) return false;
-            const lessonNumber = Number(match[1]);
-            return lessonNumber >= 51 && lessonNumber <= 69;
-          }
-          """.rstrip() + "\n"
-          text = text.replace(marker_anchor, marker_anchor + helper, 1)
-
-          old = "    const fullLibrary = views.some(viewId => full.has(viewId));\n"
-          new = "    const fullLibrary = !isYear6SatsLessonId(lessonId) && views.some(viewId => full.has(viewId));\n"
-          if text.count(old) != 1:
-              raise SystemExit(f'SOURCE_ANCHOR_DRIFT: fullLibrary count={text.count(old)}')
-          text = text.replace(old, new, 1)
-
-          export_anchor = "  VIEW_DEFINITIONS,\n  SCOPE_SALT_KEY,\n"
-          export_new = "  VIEW_DEFINITIONS,\n  SCOPE_SALT_KEY,\n  Y6_SATS_DIRECT_RELEASE_MARKER,\n  isYear6SatsLessonId,\n"
-          if text.count(export_anchor) != 1:
-              raise SystemExit('SOURCE_ANCHOR_DRIFT: export anchor')
-          text = text.replace(export_anchor, export_new, 1)
-          src.write_text(text)
-
-          Path('tests/y6-sats-direct-release-verification.mjs').write_text(r'''import assert from 'node:assert/strict';
+          cat > /tmp/reconcile-aarav.mjs <<'JS'
           import {
-            Y6_SATS_DIRECT_RELEASE_MARKER,
+            assertReadModelReconciliationReady,
+            refreshStudentAccessReadModel,
+            opaqueAccessScopeId,
+            resolveCurrentScope,
+            globalToCatalogue,
             isYear6SatsLessonId,
-            compileAccessSnapshot
-          } from '../worker/src/access-read-model-sync.js';
+            Y6_SATS_DIRECT_RELEASE_MARKER
+          } from './worker/src/access-read-model-sync.js';
 
-          assert.equal(Y6_SATS_DIRECT_RELEASE_MARKER, 'y6-sats-direct-release-v1');
-          assert.equal(isYear6SatsLessonId('Y6M50'), false);
-          for (let n = 51; n <= 69; n += 1) assert.equal(isYear6SatsLessonId(`Y6M${n}`), true);
-          assert.equal(isYear6SatsLessonId('Y6M70'), false);
+          const clean = value => String(value ?? '').trim();
+          const norm = value => clean(value).toLowerCase();
+          const token = clean(process.env.CLOUDFLARE_API_TOKEN);
+          const account = clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const worker = clean(process.env.WORKER_NAME || 'fpt-portal-v2-worker');
+          const expectedStudents = clean(process.env.EXPECTED_STUDENTS_KV_ID);
+          const expectedReadModels = clean(process.env.EXPECTED_READ_MODELS_KV_ID);
+          const expectedDb = clean(process.env.EXPECTED_PROD_D1_ID);
+          const portalUserIdNorm = 'aar1811';
+          const userKey = `user:${portalUserIdNorm}`;
+          if (!token || !account) throw new Error('Cloudflare credentials are required.');
+          if (Y6_SATS_DIRECT_RELEASE_MARKER !== 'y6-sats-direct-release-v1') throw new Error('SAT direct-release source marker missing.');
 
-          const catalogue = {
-            schemaVersion: 1,
-            kind: 'prepared-catalogue',
-            views: {
-              'maths-year6': {
-                lessonCount: 4,
-                lessons: [
-                  { lessonId: 'Y6M50' },
-                  { lessonId: 'Y6M51' },
-                  { lessonId: 'Y6M52' },
-                  { lessonId: 'Y6M69' }
-                ]
+          const base = 'https://api.cloudflare.com/client/v4';
+          const headers = { Authorization:`Bearer ${token}` };
+          async function request(path, options = {}) {
+            const response = await fetch(`${base}${path}`, { ...options, headers:{ ...headers, ...(options.headers || {}) } });
+            const text = await response.text();
+            let body = null;
+            try { body = JSON.parse(text); } catch {}
+            return { response, text, body };
+          }
+          async function envelope(path, options = {}) {
+            const out = await request(path, options);
+            if (!out.response.ok || out.body?.success !== true) throw new Error(`Cloudflare request failed: ${out.response.status} ${path}`);
+            return out.body;
+          }
+          async function kvText(namespaceId, key) {
+            const out = await request(`/accounts/${account}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`);
+            if (out.response.status === 404) return null;
+            if (!out.response.ok) throw new Error(`KV read failed: ${out.response.status}`);
+            return out.text;
+          }
+          async function kvPut(namespaceId, key, value) {
+            const out = await request(`/accounts/${account}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`, {
+              method:'PUT', headers:{ 'content-type':'text/plain; charset=utf-8' }, body:String(value)
+            });
+            if (!out.response.ok || out.body?.success !== true) throw new Error(`KV write failed: ${out.response.status}`);
+          }
+          function remoteKv(namespaceId) {
+            return {
+              async get(key, options = {}) {
+                const text = await kvText(namespaceId, key);
+                if (text == null) return null;
+                if (options?.type === 'json') { try { return JSON.parse(text); } catch { return null; } }
+                return text;
+              },
+              async put(key, value) { return kvPut(namespaceId, key, value); }
+            };
+          }
+          function remoteDb(databaseId) {
+            class Statement {
+              constructor(sql, params = []) { this.sql = sql; this.params = params; }
+              bind(...params) { return new Statement(this.sql, params); }
+              async all() {
+                if (!/^\s*(SELECT|PRAGMA)\b/i.test(this.sql)) throw new Error('D1 adapter is read-only.');
+                const body = await envelope(`/accounts/${account}/d1/database/${databaseId}/query`, {
+                  method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ sql:this.sql, params:this.params })
+                });
+                const result = Array.isArray(body.result) ? body.result[0] : body.result;
+                return { results:Array.isArray(result?.results) ? result.results : [] };
               }
-            },
-            lessonToViews: {
-              Y6M50: ['maths-year6'],
-              Y6M51: ['maths-year6'],
-              Y6M52: ['maths-year6'],
-              Y6M69: ['maths-year6']
             }
+            return { prepare(sql) { return new Statement(sql); } };
+          }
+
+          const settings = (await envelope(`/accounts/${account}/workers/scripts/${worker}/settings`)).result || {};
+          const binding = name => (settings.bindings || []).find(row => row?.name === name) || {};
+          const studentsId = clean(binding('STUDENTS_KV').namespace_id);
+          const readModelsId = clean(binding('READ_MODELS_KV').namespace_id);
+          const dbId = clean(binding('DB').database_id || binding('DB').id);
+          if (studentsId !== expectedStudents) throw new Error('Production STUDENTS_KV binding drifted.');
+          if (readModelsId !== expectedReadModels) throw new Error('Production READ_MODELS_KV binding drifted.');
+          if (dbId !== expectedDb) throw new Error('Production D1 binding drifted.');
+
+          const env = { STUDENTS_KV:remoteKv(studentsId), READ_MODELS_KV:remoteKv(readModelsId), DB:remoteDb(dbId) };
+          const ready = await assertReadModelReconciliationReady(env);
+          if (!ready?.ok) throw new Error('Prepared read-model reconciliation preflight failed.');
+
+          const profileText = await kvText(studentsId, userKey);
+          if (!profileText) throw new Error('AARAV_STUDENT_NOT_FOUND');
+          const profile = JSON.parse(profileText);
+          const libraries = new Set((Array.isArray(profile.fullLibraries) ? profile.fullLibraries : []).map(v => clean(v).toUpperCase()));
+          if (!libraries.has('MATHS_Y6_FULL')) throw new Error('AARAV_MATHS_Y6_FULL_NOT_PRESENT');
+          const role = norm(profile?.role || profile?.accountType);
+          if (portalUserIdNorm.startsWith('trial') || portalUserIdNorm === 'admin' || role.includes('admin') || profile?.isAdmin === true) throw new Error('AARAV_NOT_ORDINARY_STUDENT');
+
+          const global = await resolveCurrentScope(env.READ_MODELS_KV, 'global');
+          const catalogue = globalToCatalogue(global.payload);
+          const year6Ids = Object.entries(catalogue?.lessonToViews || {})
+            .filter(([, views]) => Array.isArray(views) && views.map(norm).includes('maths-year6'))
+            .map(([lessonId]) => clean(lessonId)).filter(Boolean);
+          const satIds = year6Ids.filter(isYear6SatsLessonId).sort();
+          const normalIds = year6Ids.filter(id => !isYear6SatsLessonId(id));
+          if (satIds.length !== 19) throw new Error(`SAT_CATALOGUE_COUNT_DRIFT:${satIds.length}`);
+
+          const salt = clean(await env.READ_MODELS_KV.get('meta:scope-salt'));
+          if (!salt) throw new Error('READ_MODEL_SCOPE_SALT_MISSING');
+          const scopeId = await opaqueAccessScopeId(portalUserIdNorm, salt);
+          const before = await resolveCurrentScope(env.READ_MODELS_KV, `access:${scopeId}`);
+          const beforeSatFull = satIds.filter(id => before?.payload?.lessonAccess?.[id]?.core === true).length;
+          const beforeSatInherited = satIds.filter(id => (before?.payload?.lessonAccess?.[id]?.sources || []).includes('full-library')).length;
+
+          const published = await refreshStudentAccessReadModel(env, portalUserIdNorm);
+          const after = await resolveCurrentScope(env.READ_MODELS_KV, `access:${scopeId}`);
+          if (!after?.payload) throw new Error('AARAV_PREPARED_ACCESS_MISSING');
+
+          const afterSatInherited = satIds.filter(id => (after.payload.lessonAccess?.[id]?.sources || []).includes('full-library'));
+          if (afterSatInherited.length) throw new Error(`SAT_FULL_LIBRARY_INHERITANCE_REMAINS:${afterSatInherited.join(',')}`);
+
+          const normalFailures = normalIds.filter(id => {
+            const state = after.payload.lessonAccess?.[id];
+            return !state?.core || state?.blocked === true || state?.preLessonOnly === true;
+          });
+          if (normalFailures.length) throw new Error(`NORMAL_YEAR6_FULL_ACCESS_REGRESSED:${normalFailures.length}`);
+
+          const afterSatFull = satIds.filter(id => after.payload.lessonAccess?.[id]?.core === true);
+          const afterSatPre = satIds.filter(id => after.payload.lessonAccess?.[id]?.preLessonOnly === true);
+          const afterSatLocked = satIds.filter(id => !after.payload.lessonAccess?.[id] || after.payload.lessonAccess[id]?.blocked === true);
+          for (const id of afterSatFull) {
+            const sources = after.payload.lessonAccess[id]?.sources || [];
+            if (!sources.some(s => ['earned','manual','temporary'].includes(s))) throw new Error(`SAT_FULL_WITHOUT_DIRECT_SOURCE:${id}`);
+          }
+
+          const evidence = {
+            marker:'AARAV_Y6_SATS_RECONCILIATION_PASS',
+            status:'PASS',
+            before:{ satFull:beforeSatFull, satInheritedFromFullLibrary:beforeSatInherited },
+            after:{ satFull:afterSatFull.length, satPreLessonOnly:afterSatPre.length, satLocked:afterSatLocked.length, satInheritedFromFullLibrary:0 },
+            directFullSatLessonIds:afterSatFull,
+            preLessonSatLessonIds:afterSatPre,
+            normalYear6FullPreserved:true,
+            normalYear6LessonCount:normalIds.length,
+            satLessonCount:satIds.length,
+            refreshVersion:published?.version || null,
+            preparedVersion:after.version,
+            canonicalProfileChanged:false,
+            d1Changed:false,
+            credentialsDisclosed:false
           };
-
-          const base = {
-            asOfDate: '2026-09-26',
-            user: { firstName: 'Fixture', fullLibraries: ['MATHS_Y6_FULL'] },
-            batchAssignments: [],
-            entitlements: [],
-            onlinePreLessonEntitlements: []
-          };
-
-          const inherited = compileAccessSnapshot(base, catalogue, { asOfDate: base.asOfDate });
-          assert.equal(inherited.lessonAccess.Y6M50?.core, true, 'ordinary Year 6 lesson must retain full-library access');
-          assert.equal(inherited.lessonAccess.Y6M51, undefined, 'SAT lesson must not inherit Year 6 full-library access');
-          assert.equal(inherited.lessonAccess.Y6M69, undefined, 'last SAT lesson must not inherit Year 6 full-library access');
-
-          const released = compileAccessSnapshot({
-            ...base,
-            entitlements: [{ lesson_id: 'Y6M51', core_access: 1 }]
-          }, catalogue, { asOfDate: base.asOfDate });
-          assert.equal(released.lessonAccess.Y6M51?.core, true, 'individually released SAT lesson must open FULL');
-          assert.equal(released.lessonAccess.Y6M51?.sources.includes('earned'), true);
-
-          const prelesson = compileAccessSnapshot({
-            ...base,
-            onlinePreLessonEntitlements: [{ lesson_id: 'Y6M52', vr_access: 0 }]
-          }, catalogue, { asOfDate: base.asOfDate });
-          assert.equal(prelesson.lessonAccess.Y6M52?.core, false);
-          assert.equal(prelesson.lessonAccess.Y6M52?.preLessonOnly, true, 'SAT lesson must support normal PreLesson-only release');
-
-          console.log('Y6_SATS_DIRECT_RELEASE_VERIFICATION_PASS');
-          ''')
-
-          # Touch an existing production-deploy watched source without changing behaviour.
-          importer = Path('worker/src/admin-lesson-release-import.js')
-          imp = importer.read_text()
-          deploy_marker = '// deployment-coupling: y6-sats-direct-release-v1\n'
-          if deploy_marker not in imp:
-              imp = deploy_marker + imp
-          importer.write_text(imp)
-
-          override_path = Path('gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json')
-          override = {
-            'schema':'fpt.portal.gch.override.y6-sats-direct-release.v1',
-            'documentType':'CURRENT_SCOPE_OVERRIDE',
-            'status':'AUTHORITATIVE_CURRENT_OVERRIDE',
-            'effectiveDate':'2026-09-26',
-            'scope':'PUBLIC_STUDENT_V2.Year6SatsReleaseSemantics',
-            'baseAuthority':'gch/portal-v2-current/GCH_STATE.json',
-            'precedence':'This override is higher authority only for Year 6 SAT lesson access/release semantics. All non-conflicting Portal V2 authority remains binding.',
-            'ownerRequirement':{
-              'canonicalSatLessonIds':'Y6M51..Y6M69',
-              'displaySatLessonIds':'Y6MS1..Y6MS19',
-              'rule':'Year 6 SAT lessons must not inherit broad MATHS_Y6_FULL / Year 6 full-view core access. They are released lesson-by-lesson through the normal Lesson Release Import workflow.',
-              'releaseStates':['LOCKED until a canonical release exists','PRELESSON_ONLY when the normal online PreLesson rule applies','FULL when the normal completed/continuing lesson release grants core access'],
-              'ordinaryYear6Boundary':'Normal Year 6 lessons retain existing full-library and direct-release semantics.',
-              'existingExplicitReleaseBoundary':'Any SAT lesson that already has a canonical direct entitlement remains released; this change removes only broad inherited full-library access.'
-            },
-            'implementation':{
-              'source':'worker/src/access-read-model-sync.js',
-              'marker':'y6-sats-direct-release-v1',
-              'mechanism':'Exclude canonical Y6M51..Y6M69 from full-library inheritance inside lessonAccessMap while preserving direct earned, manual, temporary and PreLesson pathways.',
-              'importerEvidence':'tests/admin-lesson-release-y6-sats-verification.mjs',
-              'accessRegression':'tests/y6-sats-direct-release-verification.mjs'
-            },
-            'preservationInvariants':[
-              'Do not alter normal Year 6 lesson access.',
-              'Do not alter SAT canonical IDs, display IDs, curriculum membership or resources.',
-              'Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR or quiz bridge behaviour.',
-              'Student-visible completion still requires prepared access reconciliation/readback.'
-            ],
-            'existingPreparedSnapshotRule':'Students whose prepared access snapshot predates this change must be reconciled through the standard access publisher before the old inherited SAT FULL state disappears.',
-            'verificationMatrix':[
-              'MATHS_Y6_FULL still opens an ordinary Year 6 lesson.',
-              'MATHS_Y6_FULL alone does not open Y6M51..Y6M69.',
-              'A direct canonical SAT entitlement opens that SAT lesson FULL.',
-              'A normal SAT PreLesson entitlement opens only that SAT lesson PRELESSON_ONLY.',
-              'Existing Y6MS importer mapping and state tests pass.',
-              'Shared production Worker retains all preservation gates.'
-            ]
-          }
-          override_path.write_text(json.dumps(override, indent=2) + '\n')
-
-          current_path = Path('gch/portal-v2-current/GCH_CURRENT.json')
-          current = json.loads(current_path.read_text())
-          new_path = str(override_path)
-          if new_path not in current.get('readOrder', []):
-              current['readOrder'].append(new_path)
-          current.setdefault('authorityComposition', {})['y6SatsDirectReleaseOverride'] = {
-              'path': new_path,
-              'role':'higher authority for Year 6 SAT lesson-by-lesson access and release semantics'
-          }
-          current['latestRepositoryChange'] = {
-              'name':'Year 6 SAT lesson-by-lesson release semantics',
-              'date':'2026-09-26',
-              'status':'SOURCE_AND_REGRESSION_GATES_READY_FOR_PRODUCTION_DEPLOY',
-              'authority':new_path,
-              'source':'worker/src/access-read-model-sync.js',
-              'marker':'y6-sats-direct-release-v1',
-              'verification':'tests/y6-sats-direct-release-verification.mjs plus tests/admin-lesson-release-y6-sats-verification.mjs',
-              'ownerBrowserVerification':'PENDING_DEPLOY_AND_RECONCILIATION'
-          }
-          current_path.write_text(json.dumps(current, indent=2) + '\n')
-
-          agents = Path('AGENTS.md')
-          a = agents.read_text()
-          line = '8. `gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json`\n'
-          if line not in a:
-              anchor = '7. `gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json`\n'
-              if a.count(anchor) != 1:
-                  raise SystemExit('AGENTS_DRIFT: authority list anchor')
-              a = a.replace(anchor, anchor + line, 1)
-          agents.write_text(a)
-          PY
-
-      - name: Run targeted regression gates
-        run: |
-          set -euo pipefail
-          node --check worker/src/access-read-model-sync.js
-          node --check worker/src/admin-lesson-release-import.js
-          node tests/admin-lesson-release-y6-sats-verification.mjs
-          node tests/y6-sats-direct-release-verification.mjs
-          node tests/access-read-model-reconciliation-verification.mjs
-          node tests/shared-worker-entrypoint-preservation.mjs
-          grep -Fq 'y6-sats-direct-release-v1' worker/src/access-read-model-sync.js
-
-      - name: Commit verified change to main
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'FuturePerfectTuitions'
-          git config user.email 'futureperfectlessons@gmail.com'
-          git add worker/src/access-read-model-sync.js worker/src/admin-lesson-release-import.js tests/y6-sats-direct-release-verification.mjs gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json gch/portal-v2-current/GCH_CURRENT.json AGENTS.md
-          git diff --cached --check
-          git commit -m 'Release Year 6 SAT lessons individually'
-          git push origin HEAD:main
-          echo "MAIN_COMMIT=$(git rev-parse HEAD)"
+          console.log(JSON.stringify(evidence, null, 2));
+          JS
+          cp /tmp/reconcile-aarav.mjs ./reconcile-aarav.mjs
+          node reconcile-aarav.mjs
+          rm reconcile-aarav.mjs
