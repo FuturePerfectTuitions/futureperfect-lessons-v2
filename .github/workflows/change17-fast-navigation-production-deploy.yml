@@ -7,10 +7,13 @@ on:
       - '.github/workflows/change17-fast-navigation-production-deploy.yml'
       - 'worker/src/index-phase20-change17.js'
       - 'worker/src/index-phase20-change17-parent-email.js'
+      - 'worker/src/live-student-catalogue-overlay.js'
       - 'worker/wrangler.toml'
       - 'ops/deploy_change17_parent_email_preserve.sh'
       - 'scripts/phase11-apply-package.mjs'
       - 'scripts/phase11-navigation-manifest.mjs'
+      - 'tests/live-student-catalogue-overlay-verification.mjs'
+      - 'tests/year6-sequential-catalogue-order-verification.mjs'
 
 permissions:
   contents: read
@@ -50,6 +53,7 @@ jobs:
           node tests/y411-admin-import-baseline-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/live-student-catalogue-overlay-verification.mjs
+          node tests/year6-sequential-catalogue-order-verification.mjs
           node --experimental-default-type=module tests/phase11-navigation-cache-static-verification.mjs
           grep -Fq "import fastNavigationWorker from './index-phase20-change17.js';" worker/src/index-phase20-change17-parent-email.js
           grep -Fq 'main = "src/index-phase20-change17-parent-email.js"' worker/wrangler.toml
