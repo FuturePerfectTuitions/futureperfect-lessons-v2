@@ -1,0 +1,138 @@
+name: Parent email live recovery 2026-09-26
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/parent-email-live-recovery-2026-09-26.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      WRANGLER_VERSION: 4.125.0
+      DEPLOY_MESSAGE: Forward-only parent email live-routing recovery 2026-09-26
+      INCIDENT_START_UTC: '2026-09-26T13:15:00Z'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify current composed Worker before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/parent-email.js
+          node --check worker/src/admin-lesson-release-import-email.js
+          node --check worker/src/admin-lesson-release-import-manual-email.js
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/parent-email-test-routing-verification.mjs
+          node tests/subject-preview-enrolment-boundary-verification.mjs
+          node tests/maths-11plus-level-navigation-verification.mjs
+          node tests/y411-admin-import-baseline-verification.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+          echo 'FORWARD_ONLY_PREFLIGHT_PASS'
+
+      - name: Capture active test-routing incident boundary
+        id: incident
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/email-recovery-settings-before.json
+          jq -e '.success == true' /tmp/email-recovery-settings-before.json >/dev/null
+          TEST_TO="$(jq -r '[.result.bindings[]|select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text")|.text][0] // ""' /tmp/email-recovery-settings-before.json)"
+          test -n "$TEST_TO"
+          STUDENTS_KV_ID="$(jq -r '[.result.bindings[]|select(.name=="STUDENTS_KV" and .type=="kv_namespace")|.namespace_id][0] // ""' /tmp/email-recovery-settings-before.json)"
+          test -n "$STUDENTS_KV_ID"
+          INCIDENT_END_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "students_kv_id=$STUDENTS_KV_ID" >> "$GITHUB_OUTPUT"
+          echo "incident_end_utc=$INCIDENT_END_UTC" >> "$GITHUB_OUTPUT"
+          echo "Active test routing detected; incident end captured at $INCIDENT_END_UTC."
+
+      - name: Deploy current main forward-only with live parent routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+
+      - name: Verify live-only routing and composed Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/email-recovery-settings-after.json
+          jq -e '.success == true' /tmp/email-recovery-settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/email-recovery-settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="EMAIL")' /tmp/email-recovery-settings-after.json >/dev/null
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" -H "$AUTH" -o /tmp/email-recovery-worker.bin
+          grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/email-recovery-worker.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/email-recovery-worker.bin
+          grep -aFq '/api/v1/admin/lesson-releases/confirm' /tmp/email-recovery-worker.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/email-recovery-worker.bin
+          grep -aFq 'Completed Lesson:' /tmp/email-recovery-worker.bin
+          echo 'LIVE_ONLY_COMPOSED_WORKER_PASS'
+
+      - name: Rearm only deliveries recorded during the test-routing incident
+        shell: bash
+        env:
+          STUDENTS_KV_ID: ${{ steps.incident.outputs.students_kv_id }}
+          INCIDENT_END_UTC: ${{ steps.incident.outputs.incident_end_utc }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          PREFIX='admin-email-delivery:v1:'
+          CURSOR=''
+          DELETED=0
+          while :; do
+            URL="$API/storage/kv/namespaces/${STUDENTS_KV_ID}/keys?limit=1000&prefix=admin-email-delivery%3Av1%3A"
+            if [ -n "$CURSOR" ]; then
+              ENCODED_CURSOR="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$CURSOR")"
+              URL="$URL&cursor=$ENCODED_CURSOR"
+            fi
+            curl --fail --silent --show-error "$URL" -H "$AUTH" -o /tmp/email-recovery-keys.json
+            jq -e '.success == true' /tmp/email-recovery-keys.json >/dev/null
+            mapfile -t KEYS < <(jq -r '.result[].name' /tmp/email-recovery-keys.json)
+            for KEY in "${KEYS[@]}"; do
+              ENCODED_KEY="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$KEY")"
+              curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${ENCODED_KEY}" -H "$AUTH" -o /tmp/email-recovery-value.json
+              SENT_AT="$(jq -r '.sentAt // ""' /tmp/email-recovery-value.json 2>/dev/null || true)"
+              STATUS="$(jq -r '.status // ""' /tmp/email-recovery-value.json 2>/dev/null || true)"
+              if [ "$STATUS" = 'SENT' ] && [[ "$SENT_AT" > "$INCIDENT_START_UTC" || "$SENT_AT" = "$INCIDENT_START_UTC" ]] && [[ "$SENT_AT" < "$INCIDENT_END_UTC" || "$SENT_AT" = "$INCIDENT_END_UTC" ]]; then
+                curl --fail --silent --show-error --request DELETE "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${ENCODED_KEY}" -H "$AUTH" -o /tmp/email-recovery-delete.json
+                jq -e '.success == true' /tmp/email-recovery-delete.json >/dev/null
+                DELETED=$((DELETED+1))
+              fi
+            done
+            CURSOR="$(jq -r '.result_info.cursor // ""' /tmp/email-recovery-keys.json)"
+            [ -z "$CURSOR" ] && break
+          done
+          echo "REARMED_TEST_ROUTED_DELIVERIES=$DELETED"
+          test "$DELETED" -ge 1
+
+      - name: Final safety verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/email-recovery-final.json
+          jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/email-recovery-final.json >/dev/null
+          echo 'PARENT_EMAIL_FORWARD_ONLY_RECOVERY_PASS'
