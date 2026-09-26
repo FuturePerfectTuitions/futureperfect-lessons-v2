@@ -13,7 +13,7 @@ permissions:
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -24,24 +24,43 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Re-prove exact Year 6 boundary before production write
+      - name: Re-prove actual live Year 6 structure before production write
         run: node tests/year6-live-structure-regression.mjs
 
       - name: Resolve production LESSONS_KV namespace
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/settings.json
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/settings.json
           NS="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV") | .namespace_id' /tmp/settings.json)"
           test -n "$NS" && test "$NS" != null
           echo "LESSONS_KV_NAMESPACE=$NS" >> "$GITHUB_ENV"
           echo "Resolved production LESSONS_KV namespace: $NS"
 
-      - name: Guarded migration of Year 6 display IDs only
+      - name: Freeze current live curricula and migration plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          getkv() {
+            local key="$1" encoded
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS_KV_NAMESPACE/values/$encoded" -H "$AUTH"
+          }
+          getkv 'curriculum:MATHS_L3' >/tmp/curriculum-l3-before.json
+          getkv 'curriculum:MATHS_Y6_EXTRA' >/tmp/curriculum-extra-before.json
+          node --input-type=module <<'NODE' >/tmp/year6-migrations.tsv
+          import { YEAR6_DISPLAY_ID_MIGRATIONS } from './ops/year6-display-id-policy.mjs';
+          for (const x of YEAR6_DISPLAY_ID_MIGRATIONS) console.log(`${x.id}\t${x.from}\t${x.to}`);
+          NODE
+          test "$(wc -l </tmp/year6-migrations.tsv)" -eq 27
+          echo 'Migration plan:'
+          cat /tmp/year6-migrations.tsv
+
+      - name: Guarded migration of only 27 Year 6 display IDs
         shell: bash
         run: |
           set -euo pipefail
@@ -55,68 +74,119 @@ jobs:
             encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
             printf '%s/storage/kv/namespaces/%s/values/%s' "$API" "$LESSONS_KV_NAMESPACE" "$encoded"
           }
-          migrate_one() {
-            local id="$1" target="$2" old_expected="$3"
-            local url current
+
+          while IFS=$'\t' read -r id old_expected target; do
             url="$(kvurl "lesson:$id")"
-            curl --fail --silent --show-error "$url" -H "$AUTH" -o "/tmp/year6-before/$id.json"
-            jq -e '.displayIds and (.displayIds|type=="object")' "/tmp/year6-before/$id.json" >/dev/null
-            current="$(jq -r '.displayIds["maths-year6"] // ""' "/tmp/year6-before/$id.json")"
+            before="/tmp/year6-before/${id}.json"
+            curl --fail --silent --show-error "$url" -H "$AUTH" -o "$before"
+            jq -e '.displayIds and (.displayIds|type=="object")' "$before" >/dev/null
+            current="$(jq -r '.displayIds["maths-year6"] // ""' "$before")"
             if [ "$current" != "$old_expected" ] && [ "$current" != "$target" ]; then
-              echo "REFUSING $id: unexpected live display ID '$current' (expected '$old_expected' or idempotent '$target')" >&2
+              echo "REFUSING $id: unexpected live display ID '$current'; expected '$old_expected' or idempotent '$target'" >&2
               exit 1
             fi
             if [ "$current" = "$target" ]; then
-              printf '%s\t%s\t%s\n' "$id" "$current" "$target" >>/tmp/year6-changes.tsv
-              return
+              printf '%s\t%s\t%s\tIDEMPOTENT\n' "$id" "$current" "$target" >>/tmp/year6-changes.tsv
+              continue
             fi
-            jq --arg target "$target" '.displayIds["maths-year6"]=$target' "/tmp/year6-before/$id.json" > /tmp/year6-after.json
-            jq 'del(.displayIds["maths-year6"])' "/tmp/year6-before/$id.json" > /tmp/before-without.json
-            jq 'del(.displayIds["maths-year6"])' /tmp/year6-after.json > /tmp/after-without.json
+
+            jq --arg target "$target" '.displayIds["maths-year6"]=$target' "$before" >/tmp/year6-after.json
+            jq -S 'del(.displayIds["maths-year6"])' "$before" >/tmp/before-without.json
+            jq -S 'del(.displayIds["maths-year6"])' /tmp/year6-after.json >/tmp/after-without.json
             diff -u /tmp/before-without.json /tmp/after-without.json
+
             curl --fail --silent --show-error -X PUT "$url" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/year6-after.json >/dev/null
             curl --fail --silent --show-error "$url" -H "$AUTH" -o /tmp/year6-reread.json
             test "$(jq -r '.displayIds["maths-year6"] // ""' /tmp/year6-reread.json)" = "$target"
-            jq 'del(.displayIds["maths-year6"])' /tmp/year6-reread.json > /tmp/reread-without.json
+            jq -S 'del(.displayIds["maths-year6"])' /tmp/year6-reread.json >/tmp/reread-without.json
             diff -u /tmp/before-without.json /tmp/reread-without.json
-            printf '%s\t%s\t%s\n' "$id" "$current" "$target" >>/tmp/year6-changes.tsv
-          }
+            printf '%s\t%s\t%s\tCHANGED\n' "$id" "$current" "$target" >>/tmp/year6-changes.tsv
+          done </tmp/year6-migrations.tsv
 
-          for n in $(seq 22 35); do migrate_one "M3.L$n" "Y6T2M$((n-21))" "Y6T2M$n"; done
-          for n in $(seq 1 13); do migrate_one "Y6.EXTRA.L$n" "Y6T3M$n" "Y6T3M$((35+n))"; done
-
+          test "$(wc -l </tmp/year6-changes.tsv)" -eq 27
           tar -czf /tmp/year6-before.tgz -C /tmp/year6-before .
-          echo "YEAR6_DISPLAY_ID_MIGRATION_RECORDS=$(wc -l </tmp/year6-changes.tsv)"
+          echo 'Applied/verified migration rows:'
           cat /tmp/year6-changes.tsv
 
-      - name: Verify production KV sequence
+      - name: Verify live source records, curricula preservation and final overlay order
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          : >/tmp/year6-live-sequence.txt
-          get_display() {
-            local id="$1" encoded
-            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "lesson:$id")"
-            curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS_KV_NAMESPACE/values/$encoded" -H "$AUTH" | jq -r '.displayIds["maths-year6"] // ""'
+          mkdir -p /tmp/year6-live
+          getkv() {
+            local key="$1" out="$2" encoded
+            encoded="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            curl --fail --silent --show-error "$API/storage/kv/namespaces/$LESSONS_KV_NAMESPACE/values/$encoded" -H "$AUTH" -o "$out"
           }
-          for n in $(seq 1 35); do get_display "M3.L$n" >>/tmp/year6-live-sequence.txt; done
-          for n in $(seq 1 13); do get_display "Y6.EXTRA.L$n" >>/tmp/year6-live-sequence.txt; done
 
-          node --input-type=module <<'NODE'
+          getkv 'curriculum:MATHS_L3' /tmp/year6-live/curriculum-l3.json
+          getkv 'curriculum:MATHS_Y6_EXTRA' /tmp/year6-live/curriculum-extra.json
+          diff -u /tmp/curriculum-l3-before.json /tmp/year6-live/curriculum-l3.json
+          diff -u /tmp/curriculum-extra-before.json /tmp/year6-live/curriculum-extra.json
+
+          node --input-type=module <<'NODE' >/tmp/year6-standard-ids.txt
+          import { YEAR6_STANDARD_LESSON_IDS } from './ops/year6-display-id-policy.mjs';
+          for (const id of YEAR6_STANDARD_LESSON_IDS) console.log(id);
+          NODE
+          jq -r '.lessonIds[]' /tmp/year6-live/curriculum-l3.json /tmp/year6-live/curriculum-extra.json | awk '!seen[$0]++' >/tmp/year6-all-curriculum-ids.txt
+          while IFS= read -r id; do
+            safe="$(printf '%s' "$id" | sed 's/[^A-Za-z0-9._-]/_/g')"
+            getkv "lesson:$id" "/tmp/year6-live/lesson-${safe}.json"
+          done </tmp/year6-all-curriculum-ids.txt
+
+          LIVE_DIR=/tmp/year6-live node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
-          import { expectedYear6StandardDisplaySequence } from './ops/year6-display-id-policy.mjs';
-          const actual=fs.readFileSync('/tmp/year6-live-sequence.txt','utf8').trim().split(/\r?\n/);
-          const expected=expectedYear6StandardDisplaySequence();
-          assert.deepEqual(actual, expected, 'Production KV sequence must match the canonical 48-lesson Year 6 sequence');
-          const i=actual.indexOf('Y6T1M21');
-          assert.equal(actual[i+1], 'Y6T2M1');
-          assert.equal(actual[35], 'Y6T3M1');
-          console.log(`PRODUCTION_KV_BOUNDARY=${actual[i]} -> ${actual[i+1]}`);
-          console.log(`PRODUCTION_KV_TERM3_START=${actual[35]}`);
-          console.log(`PRODUCTION_KV_STANDARD_COUNT=${actual.length}`);
+          import { liveCatalogueForView } from './worker/src/live-student-catalogue-overlay.js';
+          import { YEAR6_STANDARD_LESSON_IDS, expectedYear6StandardDisplaySequence } from './ops/year6-display-id-policy.mjs';
+
+          const dir=process.env.LIVE_DIR;
+          const l3=JSON.parse(fs.readFileSync(`${dir}/curriculum-l3.json`,'utf8'));
+          const extra=JSON.parse(fs.readFileSync(`${dir}/curriculum-extra.json`,'utf8'));
+          const records=new Map([
+            ['curriculum:MATHS_L3',l3],
+            ['curriculum:MATHS_Y6_EXTRA',extra]
+          ]);
+          for (const id of [...new Set([...l3.lessonIds,...extra.lessonIds])]) {
+            const safe=id.replace(/[^A-Za-z0-9._-]/g,'_');
+            records.set(`lesson:${id}`,JSON.parse(fs.readFileSync(`${dir}/lesson-${safe}.json`,'utf8')));
+          }
+          const env={LESSONS_KV:{async get(key,options){const v=records.get(String(key))??null; if(options?.type==='json') return v==null?null:structuredClone(v); return v==null?null:JSON.stringify(v);}}};
+
+          const normalize=s=>String(s||'').replace(/^(Y6T\d+M)0+(\d+)$/,'$1$2');
+          const actualSource=[];
+          for (const id of YEAR6_STANDARD_LESSON_IDS) {
+            const r=records.get(`lesson:${id}`);
+            actualSource.push(normalize(r?.displayIds?.['maths-year6']));
+          }
+          assert.deepEqual(actualSource, expectedYear6StandardDisplaySequence(), 'Live KV source records do not match 21/14/13 term-local numbering');
+
+          for (let n=51;n<=69;n++) {
+            const r=records.get(`lesson:Y6M${n}`);
+            assert.equal(r?.displayIds?.['maths-year6'],`Y6MS${n-50}`,`SATS Y6M${n} changed unexpectedly`);
+          }
+          for (const id of ['MATHS_L3_11P_T2M25_2026','MATHS_L3_11P_T3M43_2026']) {
+            assert.equal(records.get(`lesson:${id}`)?.displayIds?.['maths-year6'] ?? null,null,`${id} unexpectedly gained a Year 6 display ID`);
+          }
+
+          const rows=await liveCatalogueForView(env,'maths-year6');
+          const standardRows=rows.filter(r=>/^Y6T\d+M\d+$/i.test(String(r.displayLessonId||'')));
+          const normalized=standardRows.map(r=>normalize(r.displayLessonId));
+          assert.deepEqual(normalized, expectedYear6StandardDisplaySequence(), 'Final live-data overlay catalogue is not sequential by displayed lesson code');
+          const i=normalized.indexOf('Y6T1M21');
+          assert.equal(normalized[i+1],'Y6T2M1','Exact live-data overlay boundary must be Y6T1M21 -> Y6T2M1');
+          const sats=rows.filter(r=>/^Y6MS\d+$/i.test(String(r.displayLessonId||''))).map(r=>r.displayLessonId);
+          assert.equal(sats.length,19,'All 19 SATS lessons must remain present');
+          assert.equal(sats[0],'Y6MS1');
+          assert.equal(sats.at(-1),'Y6MS19');
+
+          fs.writeFileSync('/tmp/year6-live-final-order.txt',rows.map(r=>`${r.displayLessonId}\t${r.lessonId}\t${r.title}`).join('\n')+'\n');
+          console.log(`LIVE_KV_STANDARD_COUNT=${normalized.length}`);
+          console.log(`LIVE_OVERLAY_BOUNDARY=${standardRows[i].displayLessonId} -> ${standardRows[i+1].displayLessonId}`);
+          console.log(`LIVE_OVERLAY_TERM3_START=${standardRows[35].displayLessonId}`);
+          console.log(`LIVE_SATS_COUNT=${sats.length}; LIVE_SATS_RANGE=${sats[0]} -> ${sats.at(-1)}`);
           NODE
 
       - name: Preserve migration evidence
@@ -125,8 +195,11 @@ jobs:
         with:
           name: year6-display-id-migration-evidence
           path: |
+            /tmp/curriculum-l3-before.json
+            /tmp/curriculum-extra-before.json
+            /tmp/year6-migrations.tsv
             /tmp/year6-before.tgz
             /tmp/year6-changes.tsv
-            /tmp/year6-live-sequence.txt
+            /tmp/year6-live-final-order.txt
           if-no-files-found: ignore
           retention-days: 30
