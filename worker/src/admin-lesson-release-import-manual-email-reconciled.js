@@ -1,6 +1,7 @@
 import { handleAdminLessonReleaseImport as handleReconciledBase } from './admin-lesson-release-import-reconciled.js';
 import { handleAdminLessonReleaseImport as handleEmailImport } from './admin-lesson-release-import-email-reconciled.js';
 import { normaliseCsvInputRow, emailItemFromRow } from './admin-lesson-release-import-email.js';
+import { normaliseY6SatsPortalAlias } from './admin-y6-sats-csv-alias.js';
 
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';
 
@@ -47,8 +48,11 @@ export async function handleAdminLessonReleaseImport(request, env) {
   // automatic import continues to defer email delivery exactly as before.
   if (body.sendEmails === true) return handleEmailImport(request, env);
 
+  // Preserve Y6SM in parent-facing data, but use the legacy Y6MS alias internally
+  // so the existing canonical SAT mapping resolves Y6SM1..Y6SM19 to Y6M51..Y6M69.
   const normalizedRows = body.rows.map(normaliseCsvInputRow);
-  const normalizedRequest = requestWithJson(request, { ...body, rows:normalizedRows });
+  const portalRows = normalizedRows.map(normaliseY6SatsPortalAlias);
+  const normalizedRequest = requestWithJson(request, { ...body, rows:portalRows });
   const baseResponse = await handleReconciledBase(normalizedRequest, env);
   const baseBody = await baseResponse.clone().json().catch(() => null);
   if (!baseBody) return baseResponse;
