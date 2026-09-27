@@ -14,17 +14,17 @@ permissions:
 
 jobs:
   audit:
-    name: Trace exact prepared access snapshots and producer
+    name: Trace source inputs behind duplicate current Maths views
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      AS_OF_DATE: '2026-09-26'
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
 
       - name: Confirm read credentials
         shell: bash
@@ -33,102 +33,121 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Read only access-model keys and identify Devansh/Kiaan snapshots
+      - name: Inspect only source access inputs for Devansh and Kiaan
         shell: bash
         run: |
           set -euo pipefail
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${READ_MODELS_KV_ID}"
-          PREFIX='rm:v1:scope:access_3A'
-          : > /tmp/access-keys.txt
-          cursor=''
-          page=0
-          while :; do
-            page=$((page+1))
-            args=(--get "$API/keys" -H "$AUTH" --data-urlencode 'limit=1000' --data-urlencode "prefix=$PREFIX")
-            if [ -n "$cursor" ]; then args+=(--data-urlencode "cursor=$cursor"); fi
-            curl --fail --silent --show-error "${args[@]}" -o /tmp/access-page.json
-            jq -e '.success == true' /tmp/access-page.json >/dev/null
-            jq -r '.result[].name' /tmp/access-page.json >> /tmp/access-keys.txt
-            cursor="$(jq -r '.result_info.cursor // empty' /tmp/access-page.json)"
-            [ -z "$cursor" ] && break
-            [ "$page" -lt 10 ] || { echo 'ACCESS_KEY_PAGINATION_SAFETY_STOP'; exit 2; }
-          done
-          sort -u /tmp/access-keys.txt -o /tmp/access-keys.txt
-          echo "ACCESS_MODEL_KEY_COUNT=$(wc -l < /tmp/access-keys.txt | tr -d ' ')"
-          grep ':current$' /tmp/access-keys.txt > /tmp/access-pointers.txt || true
-          echo "ACCESS_POINTER_COUNT=$(wc -l < /tmp/access-pointers.txt | tr -d ' ')"
+          node <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const studentsNs=process.env.STUDENTS_KV_ID;
+          const db=process.env.DB_ID;
+          const asOf=process.env.AS_OF_DATE;
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`};
+          const clean=v=>String(v??'').trim();
+          const norm=v=>clean(v).toLowerCase();
 
-          : > /tmp/matches.ndjson
-          while IFS= read -r pointerKey; do
-            [ -n "$pointerKey" ] || continue
-            encodedPointer="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$pointerKey")"
-            curl --fail --silent --show-error "$API/values/$encodedPointer" -H "$AUTH" -o /tmp/pointer.json
-            version="$(jq -r '.current.version // empty' /tmp/pointer.json)"
-            [ -n "$version" ] || continue
-            scopeEncoded="${pointerKey#rm:v1:scope:}"
-            scopeEncoded="${scopeEncoded%:current}"
-            versionEncoded="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="-_.!~*\x27()" ).replace("%","_"))' "$version")"
-            envelopeKey="rm:v1:scope:${scopeEncoded}:version:${versionEncoded}"
-            encodedEnvelope="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$envelopeKey")"
-            if ! curl --fail --silent --show-error "$API/values/$encodedEnvelope" -H "$AUTH" -o /tmp/envelope.json; then
-              continue
-            fi
-            firstName="$(jq -r '.payload.snapshot.account.firstName // empty' /tmp/envelope.json)"
-            case "${firstName,,}" in
-              devansh|kiaan)
-                jq -c --arg pointerKey "$pointerKey" '{
-                  firstName:.payload.snapshot.account.firstName,
-                  pointerKey:$pointerKey,
-                  envelope:{schemaVersion,kind,scope,version,generatedAt,sha256},
-                  snapshot:{
-                    asOfDate:.payload.snapshot.asOfDate,
-                    account:.payload.snapshot.account,
-                    fullViewIds:.payload.snapshot.fullViewIds,
-                    views:[(.payload.snapshot.views // [])[] | {viewId,subject,label,current,group,lockedPreview,catalogueAvailable,visibleLessonCount,openLessonCount,lockedLessonCount}],
-                    lessonAccessCount:(.payload.snapshot.lessonAccess // {} | length)
-                  }
-                }' /tmp/envelope.json >> /tmp/matches.ndjson
-                ;;
-            esac
-          done < /tmp/access-pointers.txt
+          async function envelope(path,init={}){
+            const r=await fetch(`${base}${path}`,{...init,headers:{...headers,...(init.headers||{})}});
+            const body=await r.json().catch(()=>null);
+            if(!r.ok||body?.success!==true) throw new Error(`CF_READ_FAILED ${r.status} ${path}`);
+            return body;
+          }
+          async function kvKeys(prefix){
+            const out=[]; let cursor='';
+            do{
+              const q=new URLSearchParams({limit:'1000',prefix}); if(cursor)q.set('cursor',cursor);
+              const b=await envelope(`/accounts/${account}/storage/kv/namespaces/${studentsNs}/keys?${q}`);
+              out.push(...(b.result||[]).map(x=>x.name)); cursor=clean(b.result_info?.cursor);
+            }while(cursor);
+            return out;
+          }
+          async function kvGet(key){
+            const r=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${studentsNs}/values/${encodeURIComponent(key)}`,{headers});
+            if(r.status===404)return null; if(!r.ok)throw new Error(`KV ${r.status}`); return r.json();
+          }
+          async function d1(sql,params=[]){
+            if(!/^\s*(SELECT|PRAGMA)\b/i.test(sql)) throw new Error('READ_ONLY_SQL_ONLY');
+            const b=await envelope(`/accounts/${account}/d1/database/${db}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql,params})});
+            const first=Array.isArray(b.result)?b.result[0]:b.result; return first?.results||[];
+          }
+          function active(row){
+            const from=clean(row.effective_from),to=clean(row.effective_to),af=clean(row.active_from),at=clean(row.active_to);
+            return (!from||from<=asOf)&&(!to||asOf<to)&&(!af||af<=asOf)&&(!at||asOf<at);
+          }
+          function viewForDef(r){
+            const subject=norm(r.subject),stream=norm(r.stream),year=Number(r.school_year),level=Number(r.maths_level||0);
+            if(subject==='maths'){
+              if(stream==='11plus'||level>=1){const l=level||year-3; return l>=1&&l<=3?`maths-level${l}`:'';}
+              return year>=2&&year<=6?`maths-year${year}`:'';
+            }
+            if(subject==='english'){
+              if(stream==='11plus'&&(year===4||year===5))return `english-year${year}-11plus`;
+              return year>=2&&year<=6?`english-year${year}`:'';
+            }
+            return '';
+          }
+          function legacyBatchViewId(value){
+            const key=clean(value).toUpperCase(); let m=key.match(/^Y([2-6])M(?:O)?$/); if(m)return `maths-year${m[1]}`;
+            m=key.match(/^Y([2-6])E(?:O)?$/); if(m)return `english-year${m[1]}`;
+            m=key.match(/^Y([4-6])(?:11|M11|11M).*$/); if(m)return `maths-level${Number(m[1])-3}`;
+            m=key.match(/^Y([45])(?:E11|11E).*$/); return m?`english-year${m[1]}-11plus`:'';
+          }
 
-          echo '=== EXACT CURRENT PREPARED SNAPSHOTS: DEVANSH/KIAAN ==='
-          if [ -s /tmp/matches.ndjson ]; then
-            jq . /tmp/matches.ndjson
-          else
-            echo 'TARGET_SNAPSHOTS_NOT_FOUND'
-            exit 3
-          fi
+          const allDefs=await d1('SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions');
+          const defMap=new Map(allDefs.map(r=>[clean(r.batch_key),r]));
+          const keys=await kvKeys('user:');
+          const targets=[];
+          for(const key of keys){
+            const user=await kvGet(key); const first=norm(user?.firstName||user?.name);
+            if(first==='devansh'||first==='kiaan') targets.push({label:first==='devansh'?'DEVANSH':'KIAAN',key,user,id:norm(key.replace(/^user:/,''))});
+          }
+          if(targets.length!==2) throw new Error(`TARGET_COUNT_${targets.length}`);
 
-      - name: Locate access-snapshot producer and publisher across rebuild branches
+          for(const t of targets){
+            const assignments=await d1(`SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.batch_key`,[t.id]);
+            const ent=await d1(`SELECT lesson_id,core_access,vr_access,source,source_batch_code,source_lesson_date,first_granted_at,last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY source_lesson_date,lesson_id`,[t.id]);
+            const pre=await d1(`SELECT lesson_id,batch_key,lesson_date,first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_date,lesson_id`,[t.id]);
+
+            const profileBatches=(Array.isArray(t.user?.batches)?t.user.batches:[]).map(b=>({batch:clean(b),legacyView:legacyBatchViewId(b)}));
+            const fullLibraries=Array.isArray(t.user?.fullLibraries)?t.user.fullLibraries:[];
+            const historicalViews=Array.isArray(t.user?.historicalViews)?t.user.historicalViews:[];
+            const assignmentRows=assignments.map(r=>({batch:clean(r.batch_key),view:viewForDef(r),effectiveFrom:r.effective_from||null,effectiveTo:r.effective_to||null,batchActiveFrom:r.active_from||null,batchActiveTo:r.active_to||null,isCurrent:active(r)}));
+            const currentAssignments=assignmentRows.filter(r=>r.isCurrent);
+
+            const entByPresentation={};
+            for(const r of ent){
+              const batch=clean(r.source_batch_code),def=defMap.get(batch),view=def?viewForDef(def):legacyBatchViewId(batch)||'(unresolved)';
+              const k=view||'(none)'; const s=entByPresentation[k]||(entByPresentation[k]={rows:0,currentAcademicYearRows:0,openCoreRows:0,sourceBatches:new Set(),examples:[]});
+              s.rows++; if(clean(r.source_lesson_date)>='2026-09-01')s.currentAcademicYearRows++; if(Number(r.core_access||0)!==0)s.openCoreRows++; if(batch)s.sourceBatches.add(batch);
+              if(s.examples.length<5)s.examples.push({lessonId:r.lesson_id,sourceLessonDate:r.source_lesson_date||null,source:r.source||null,batch});
+            }
+            for(const s of Object.values(entByPresentation))s.sourceBatches=[...s.sourceBatches].sort();
+            const preByPresentation={};
+            for(const r of pre){const batch=clean(r.batch_key),def=defMap.get(batch),view=def?viewForDef(def):legacyBatchViewId(batch)||'(unresolved)'; const k=view||'(none)'; const s=preByPresentation[k]||(preByPresentation[k]={rows:0,currentAcademicYearRows:0,sourceBatches:new Set(),examples:[]}); s.rows++; if(clean(r.lesson_date)>='2026-09-01')s.currentAcademicYearRows++; if(batch)s.sourceBatches.add(batch); if(s.examples.length<5)s.examples.push({lessonId:r.lesson_id,lessonDate:r.lesson_date||null,batch});}
+            for(const s of Object.values(preByPresentation))s.sourceBatches=[...s.sourceBatches].sort();
+
+            console.log(`=== ${t.label} SOURCE INPUT ===`);
+            console.log(JSON.stringify({
+              profile:{batches:profileBatches,fullLibraries,historicalViews,upsellViews:Array.isArray(t.user?.upsellViews)?t.user.upsellViews:null,manualCoreLessonCount:Array.isArray(t.user?.manualAccess?.coreLessons)?t.user.manualAccess.coreLessons.length:0},
+              assignments:assignmentRows,
+              currentAssignmentViews:[...new Set(currentAssignments.map(r=>r.view))].sort(),
+              entitlementPresentation:entByPresentation,
+              preLessonPresentation:preByPresentation
+            },null,2));
+          }
+          NODE
+
+      - name: Print exact parity-normalizer mechanisms that can synthesize current cards
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags origin '+refs/heads/rebuild/*:refs/remotes/origin/rebuild/*'
-          mapfile -t refs < <(git for-each-ref --format='%(refname)' 'refs/remotes/origin/rebuild/*')
-          echo "REBUILD_REF_COUNT=${#refs[@]}"
-
-          echo '=== EXACT PRODUCER SOURCE MATCHES ==='
-          for ref in "${refs[@]}"; do
-            for needle in 'function compileAccessSnapshot' 'compileAccessSnapshot(' 'prepared-access-read-model' 'READ_MODELS_KV.put' 'publishPrepared' 'rm:v1:scope:'; do
-              git grep -n -F "$needle" "$ref" -- 'rebuild/**' 'scripts/**' '.github/workflows/**' 2>/dev/null | sed "s#^#$ref | #" || true
-            done
-          done | sort -u > /tmp/producer-matches.txt
-          cat /tmp/producer-matches.txt | head -n 1500
-
-          echo '=== ACCESS SNAPSHOT SOURCE HASHES BY REBUILD REF ==='
-          for ref in "${refs[@]}"; do
-            if git cat-file -e "$ref:rebuild/shared/read-models/access-snapshot.mjs" 2>/dev/null; then
-              printf '%s ' "$ref"
-              git show "$ref:rebuild/shared/read-models/access-snapshot.mjs" | sha256sum | awk '{print $1}'
-            fi
-          done | sort -k2,2 -k1,1
-
-          echo '=== CURRENT/HISTORICAL PUBLISH WORKFLOW PATHS ==='
-          for ref in "${refs[@]}"; do
-            git ls-tree -r --name-only "$ref" | grep -E '(^|/)(.*compile.*publish.*|.*read.*model.*publish.*|.*backfill.*access.*|.*snapshot.*)\.(mjs|js|yml|yaml)$' | sed "s#^#$ref | #" || true
-          done | sort -u | head -n 1000
+          git fetch --no-tags origin 'rebuild/post-cp13-entitlement-fix-2026-09-15:refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15'
+          echo '=== prepareAccessInputForParity source ==='
+          git show 'refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15:rebuild/adminops/src/lib/backfill-parity-audit.mjs' | sed -n '1,150p'
+          echo '=== compileAccessSnapshot current flag source ==='
+          git show 'refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15:rebuild/shared/read-models/access-snapshot.mjs' | sed -n '235,310p'
 
       - name: Audit complete
-        run: echo 'EXACT_PREPARED_ACCESS_ROOT_TRACE_COMPLETE'
+        run: echo 'DUPLICATE_CURRENT_VIEW_SOURCE_INPUT_TRACE_COMPLETE'
