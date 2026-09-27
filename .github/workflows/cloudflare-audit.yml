@@ -14,14 +14,14 @@ permissions:
 
 jobs:
   audit:
-    name: Audit live lessons domain routing
+    name: Trace live browser and student Worker code path
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      ZONE_NAME: futureperfect.education
-      HOST_NAME: lessons.futureperfect.education
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
     steps:
       - uses: actions/checkout@v6
 
@@ -33,69 +33,83 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo 'Cloudflare read credentials present.'
 
-      - name: Resolve zone and DNS record
+      - name: Read live Worker settings and bindings
         shell: bash
         run: |
           set -euo pipefail
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl --fail --silent --show-error --get \
-            'https://api.cloudflare.com/client/v4/zones' \
-            -H "$AUTH" --data-urlencode "name=${ZONE_NAME}" -o /tmp/zones.json
-          jq '{success,errors,result:[.result[]|{id,name,status}]}' /tmp/zones.json
-          ZONE_ID="$(jq -r '.result[0].id // empty' /tmp/zones.json)"
-          test -n "$ZONE_ID"
-          echo "ZONE_ID=$ZONE_ID" >> "$GITHUB_ENV"
-          curl --fail --silent --show-error --get \
-            "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
-            -H "$AUTH" --data-urlencode "name=${HOST_NAME}" -o /tmp/dns.json
-          echo '=== DNS RECORD ==='
-          jq '{success,errors,result:[.result[]|{id,type,name,content,proxied,proxiable,ttl,comment,tags}]}' /tmp/dns.json
+          for W in "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            echo "=== SETTINGS $W ==="
+            curl --fail --silent --show-error \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${W}/settings" \
+              -H "$AUTH" -o "/tmp/${W}.settings.json"
+            jq '{success,errors,result:{compatibility_date:.result.compatibility_date,compatibility_flags:.result.compatibility_flags,bindings:[(.result.bindings // [])[]|{name,type,service,environment,namespace_id,bucket_name,database_name,database_id}]}}' "/tmp/${W}.settings.json"
+          done
 
-      - name: Read Worker routes and custom domains
-        shell: bash
-        run: |
-          set -u
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          echo '=== ZONE WORKER ROUTES ==='
-          curl --silent --show-error \
-            "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes" \
-            -H "$AUTH" -o /tmp/routes.json || true
-          jq '{success,errors,result:[(.result // [])[]|{id,pattern,script,environment}]}' /tmp/routes.json 2>/dev/null || cat /tmp/routes.json
-
-          echo '=== ACCOUNT WORKER CUSTOM DOMAINS ==='
-          curl --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/domains" \
-            -H "$AUTH" -o /tmp/domains.json || true
-          jq '{success,errors,result:[(.result // [])[]|{id,hostname,service,environment,zone_id,zone_name}]}' /tmp/domains.json 2>/dev/null || cat /tmp/domains.json
-
-      - name: Read Pages projects and domains
-        shell: bash
-        run: |
-          set -u
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects" \
-            -H "$AUTH" -o /tmp/pages.json || true
-          echo '=== PAGES PROJECTS ==='
-          jq '{success,errors,result:[(.result // [])[]|{name,subdomain,production_branch,created_on,source,domains,canonical_deployment:{id:.canonical_deployment.id,url:.canonical_deployment.url,environment:.canonical_deployment.environment,created_on:.canonical_deployment.created_on,latest_stage:.canonical_deployment.latest_stage}}]}' /tmp/pages.json 2>/dev/null || cat /tmp/pages.json
-
-      - name: Read Worker script names
-        shell: bash
-        run: |
-          set -u
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts" \
-            -H "$AUTH" -o /tmp/scripts.json || true
-          echo '=== WORKER SCRIPTS ==='
-          jq '{success,errors,result:[(.result // [])[]|{id,etag,modified_on,created_on,usage_model,handlers}]}' /tmp/scripts.json 2>/dev/null || cat /tmp/scripts.json
-
-      - name: Verify public live asset and record headers
+      - name: Download live Worker packages read-only
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== LIVE ROOT HEADERS ==='
-          curl --fail --silent --show-error --location -D - "https://${HOST_NAME}/" -o /tmp/live.html
-          echo '=== LIVE ASSET REFERENCES ==='
-          grep -Eo '<script[^>]+src="[^"]+"[^>]*>|<link[^>]+href="[^"]+"[^>]*>' /tmp/live.html || true
-          echo 'CLOUDFLARE_LIVE_DOMAIN_PROVENANCE_AUDIT_COMPLETE'
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          for W in "$BROWSER_WORKER" "$STUDENT_WORKER"; do
+            curl --fail --silent --show-error --dump-header "/tmp/${W}.headers" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${W}" \
+              -H "$AUTH" -o "/tmp/${W}.package"
+          done
+
+      - name: Inspect package modules and exact API/home code path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib, os, re
+
+          workers=['fpt-portal-v2-rebuild-browser-prod','fpt-portal-v2-rebuild-student-prod']
+          needles=[
+            '/api/v2/student/home','/api/v2/student/views/','/api/v2/student/lessons/',
+            'student/home','viewId','views','lockedLessonCount','openLessonCount',
+            'Year 4','Year 5','Year 6','L1','L2','L3','maths-year4','maths-year5','maths-year6','maths-level1','maths-level2','maths-level3'
+          ]
+
+          for worker in workers:
+            print(f'=== PACKAGE {worker} ===')
+            raw=open(f'/tmp/{worker}.package','rb').read()
+            headers=open(f'/tmp/{worker}.headers','rb').read().decode('latin-1','replace')
+            m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+            ct=m.group(1).strip() if m else ''
+            print('content-type:',ct)
+            print('package-sha256:',hashlib.sha256(raw).hexdigest())
+            parts=[]
+            if ct.lower().startswith('multipart/'):
+              msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ct}\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+raw)
+              for p in msg.iter_parts():
+                name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or '(unnamed)'
+                payload=p.get_payload(decode=True) or b''
+                parts.append((name,payload))
+            else:
+              parts=[('single-script',raw)]
+            print('modules:')
+            for name,payload in parts:
+              print(f' - {name}: bytes={len(payload)} sha256={hashlib.sha256(payload).hexdigest()}')
+
+            for name,payload in parts:
+              try: text=payload.decode('utf-8')
+              except UnicodeDecodeError: continue
+              hits=[n for n in needles if n in text]
+              if not hits: continue
+              print(f'--- TEXT MODULE {name} markers={hits} ---')
+              for needle in ['/api/v2/student/home','student/home','maths-year4','maths-level1','maths-year6','maths-level3','Year 4','Year 6']:
+                start=0; shown=0
+                while shown<4:
+                  i=text.find(needle,start)
+                  if i<0: break
+                  excerpt=text[max(0,i-450):min(len(text),i+900)].replace('\n',' ')
+                  excerpt=re.sub(r'\s+',' ',excerpt)
+                  print(f'CONTEXT[{needle}]: {excerpt}')
+                  start=i+len(needle); shown+=1
+          PY
+
+      - name: Audit complete
+        run: echo 'LIVE_BROWSER_STUDENT_CODE_PATH_AUDIT_COMPLETE'
