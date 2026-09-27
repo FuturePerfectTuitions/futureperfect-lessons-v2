@@ -11,7 +11,7 @@ permissions:
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,7 +22,11 @@ jobs:
           set -euo pipefail
           node --check worker/src/index-maths-equivalent-navigation-final.js
           node --check worker/src/index-phase20-change15.js
-      - name: Maths navigation regressions
+          node --check worker/src/access-read-model-sync-v2.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
+      - name: Maths navigation and release reconciliation regressions
         run: |
           set -euo pipefail
           node tests/live-entitlement-view-classification-verification.mjs
@@ -32,9 +36,15 @@ jobs:
           node tests/admin-lesson-release-import-verification.mjs
           node tests/y6-sats-direct-release-verification.mjs
           node tests/shared-worker-entrypoint-preservation.mjs
-      - name: Confirm no deployment in validation workflow
+      - name: Wrangler production-composition bundle dry run
         run: |
           set -euo pipefail
-          ! grep -F 'wrangler deploy' .github/workflows/y6-l3-sats-live-response-validation.yml
+          rm -rf /tmp/y6-worker-bundle
+          npx --yes wrangler@4.125.0 deploy --dry-run --config worker/wrangler.toml --outdir /tmp/y6-worker-bundle
+          test -n "$(find /tmp/y6-worker-bundle -type f -maxdepth 2 -print -quit)"
+      - name: Confirm validation has no production mutation
+        run: |
+          set -euo pipefail
+          grep -Fq 'wrangler@4.125.0 deploy --dry-run' .github/workflows/y6-l3-sats-live-response-validation.yml
           ! grep -F 'ops/deploy_current_worker_preserve.sh' .github/workflows/y6-l3-sats-live-response-validation.yml
           echo Y6_L3_SATS_LIVE_RESPONSE_VALIDATION_PASS
