@@ -4,6 +4,7 @@ import {
   norm,
   counterpartViewId,
   fullLibraryViewIds,
+  isSatsLessonId,
   sortedViewIds,
   viewIdForBatch
 } from './view-registry.mjs';
@@ -100,7 +101,7 @@ function blockedLessonIds(user) {
 
 function configuredPreviewViewIds(user, currentRows) {
   if (Array.isArray(user?.upsellViews)) {
-    return sortedViewIds(user.upsellViews);
+    return sortedViewIds(user.upsellViews).filter(viewId => !VIEW_DEFINITIONS[viewId]?.presentationOnly);
   }
   const actual = new Set(currentRows.map(viewIdForBatch).filter(Boolean));
   const previews = [];
@@ -108,7 +109,7 @@ function configuredPreviewViewIds(user, currentRows) {
     const counterpart = counterpartViewId(row);
     if (counterpart && !actual.has(counterpart)) previews.push(counterpart);
   }
-  return sortedViewIds(previews);
+  return sortedViewIds(previews).filter(viewId => !VIEW_DEFINITIONS[viewId]?.presentationOnly);
 }
 
 function batchDefinitionLookup(definitions = []) {
@@ -121,27 +122,32 @@ function batchDefinitionLookup(definitions = []) {
 }
 
 function viewIdFromAccessRow(row, catalogue, batchDefinitions) {
-  const direct = norm(row?.viewId ?? row?.view_id);
-  if (VIEW_DEFINITIONS[direct]) return direct;
   const sourceBatch = clean(row?.source_batch_code ?? row?.sourceBatchCode ?? row?.batch_key ?? row?.batchKey);
   if (sourceBatch && batchDefinitions.has(sourceBatch)) {
-    const resolved = viewIdForBatch(batchDefinitions.get(sourceBatch));
-    if (resolved) return resolved;
+    return viewIdForBatch(batchDefinitions.get(sourceBatch));
   }
+  const direct = norm(row?.viewId ?? row?.view_id);
+  if (VIEW_DEFINITIONS[direct] && !VIEW_DEFINITIONS[direct]?.presentationOnly) return direct;
   const lessonId = clean(row?.lesson_id ?? row?.lessonId);
-  const candidates = catalogue?.lessonToViews?.[lessonId] || [];
+  const candidates = (catalogue?.lessonToViews?.[lessonId] || [])
+    .filter(viewId => !VIEW_DEFINITIONS[viewId]?.presentationOnly);
   return candidates.length === 1 ? candidates[0] : '';
 }
 
 function accessDerivedViewIds(input, catalogue) {
   const definitions = batchDefinitionLookup(input?.batchDefinitions);
   const views = new Set();
-  for (const row of [
-    ...(Array.isArray(input?.entitlements) ? input.entitlements : []),
-    ...(Array.isArray(input?.onlinePreLessonEntitlements) ? input.onlinePreLessonEntitlements : [])
-  ]) {
+  for (const row of Array.isArray(input?.entitlements) ? input.entitlements : []) {
     const viewId = viewIdFromAccessRow(row, catalogue, definitions);
     if (viewId) views.add(viewId);
+    const lessonId = clean(row?.lesson_id ?? row?.lessonId);
+    const hasCore = Number(row?.core_access ?? row?.coreAccess ?? 1) !== 0;
+    if (hasCore && isSatsLessonId(lessonId)) views.add('maths-sats');
+  }
+  for (const row of Array.isArray(input?.onlinePreLessonEntitlements) ? input.onlinePreLessonEntitlements : []) {
+    const viewId = viewIdFromAccessRow(row, catalogue, definitions);
+    if (viewId) views.add(viewId);
+    if (isSatsLessonId(row?.lesson_id ?? row?.lessonId)) views.add('maths-sats');
   }
 
   // Manual core access is deliberately presentation-only and historically
@@ -272,7 +278,10 @@ function compileAccessSnapshot(input, catalogue, options = {}) {
     blockedIds
   });
 
-  const currentSet = new Set(currentViews);
+  const currentSet = new Set([
+    ...currentViews,
+    ...accessDerivedViews.filter(viewId => VIEW_DEFINITIONS[viewId]?.presentationOnly)
+  ]);
   const actualSet = new Set(visibleActualViews);
   const previewSet = new Set(previewViews.filter(viewId => !actualSet.has(viewId)));
   const ordered = sortedViewIds([...actualSet, ...previewSet]);
@@ -293,6 +302,7 @@ function compileAccessSnapshot(input, catalogue, options = {}) {
       visibleLessonCount: catalogueCount,
       openLessonCount: open,
       lockedLessonCount: Math.max(0, catalogueCount - open),
+      ...(definition.presentationOnly ? { presentationOnly: true } : {}),
       ...(preview ? { source: Array.isArray(user.upsellViews) ? 'configuredUpsell' : 'crossSubjectPreview' } : {})
     };
   });
