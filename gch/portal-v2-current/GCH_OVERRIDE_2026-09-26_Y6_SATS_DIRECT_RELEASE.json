@@ -38,6 +38,7 @@
     "serverNavigationSource": "worker/src/index-phase20-change15.js",
     "serverNavigationFunctionalCommit": "32ce803d847469c8bb5915e50fc6111506f9242a",
     "serverNavigationVerificationCommit": "881665f4cbd1a1a16d51979bbf6da5690a0b9be7",
+    "productionDeploymentCommit": "8f7e5effaadaaa465a4249bb17c7d444bcb688ec",
     "syntheticPresentationViews": {
       "maths-year6-lessons": "delegates authorization to canonical maths-year6 and filters out Y6 SAT lessons",
       "maths-sats": "delegates authorization to canonical maths-year6 and filters to Y6 SAT lessons"
@@ -47,10 +48,11 @@
     "frontendFallbackCompatibilityCommit": "261f8975b07f3f5eb739a3fb8e5601ce9289fa33",
     "previousFrontendPagesRun": 36308967999,
     "previousFrontendPagesResult": "PASS_BUT_BROWSER_STILL_SHOWED_DUPLICATES_BECAUSE_SERVER_HOME_REMAINED_DUPLICATED",
-    "productionWorkflowRun": null,
-    "productionWorkflowResult": "PENDING_FORWARD_ONLY_DEPLOY",
-    "productionDeploymentVerified": false,
-    "ownerBrowserVerification": "PENDING_SERVER_AUTHORITATIVE_DEPLOY_AND_RETEST"
+    "productionWorkflowRun": 36310766438,
+    "productionWorkflowResult": "PASS",
+    "productionDeploymentVerified": true,
+    "productionPreservationVerification": "PASS: current composed Worker preflight, forward-only deploy, live bindings, parent-email live routing, quiz bridge, Replace Resource, lesson-release import, Trial runtime, Y6SM alias and new maths-year6-lessons/maths-sats markers all verified by workflow",
+    "ownerBrowserVerification": "PENDING_DEVANSH_AND_KIAAN_RETEST"
   },
   "verificationMatrix": [
     "Y6SM1 resolves to canonical Y6M51.",
@@ -76,6 +78,6 @@
     "Do not expose Y6MSn as the owner-facing code; Y6SMn is authoritative for CSV/display use.",
     "Do not use Year 4, Year 5 or Year 6 duplicate cards when their L1, L2 or L3 equivalent is already present.",
     "Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR, resource replacement, parent-email routing or quiz bridge behaviour.",
-    "Do not declare this repair closed until the current composed Worker is deployed, preservation gates pass, and owner browser evidence confirms representative live students."
+    "Do not declare this repair closed until owner browser evidence confirms representative live students after the successful production deployment."
   ]
 }
