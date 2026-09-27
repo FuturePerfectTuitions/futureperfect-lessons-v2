@@ -1,0 +1,84 @@
+name: Y6 L3 SATS guarded production publication
+
+on:
+  push:
+    branches:
+      - fix/y6-l3-sats-prepared-model-2026-09-27
+
+permissions:
+  contents: read
+
+concurrency:
+  group: y6-l3-sats-production-publication
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      AS_OF_DATE: '2026-09-27'
+      APPLY: '0'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Syntax and focused programme-neutral tests
+        run: |
+          set -euo pipefail
+          node --check scripts/publish-y6-l3-sats-prepared-model.mjs
+          node --check rebuild/adminops/src/lib/access-compiler-v2.mjs
+          node tests/y6-l3-sats-prepared-model-regression.mjs
+          node tests/y6-l3-sats-programme-neutral-access-v2.mjs
+      - name: Compile candidate catalogue from current production lesson source
+        run: |
+          set -euo pipefail
+          node scripts/rebuild-checkpoint2-prepare-catalogue.mjs \
+            rebuild/student/src/prepared-catalogue.generated.js \
+            /tmp/y6-l3-sats-publish-catalogue.json
+          test "$(jq -r '.views' /tmp/y6-l3-sats-publish-catalogue.json)" = "16"
+          test "$(jq -r '.viewLessonCounts["maths-sats"]' /tmp/y6-l3-sats-publish-catalogue.json)" = "19"
+      - name: Production publication dry run
+        run: node scripts/publish-y6-l3-sats-prepared-model.mjs
+      - name: Prove preflight is read only
+        run: |
+          set -euo pipefail
+          test "$APPLY" = "0"
+          echo Y6_L3_SATS_PRODUCTION_PREFLIGHT_READONLY_PASS
+
+  apply:
+    needs: preflight
+    if: contains(github.event.head_commit.message, '[apply-y6-programme]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      AS_OF_DATE: '2026-09-27'
+      APPLY: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Recompile catalogue immediately before production publication
+        run: |
+          set -euo pipefail
+          node scripts/rebuild-checkpoint2-prepare-catalogue.mjs \
+            rebuild/student/src/prepared-catalogue.generated.js \
+            /tmp/y6-l3-sats-apply-catalogue.json
+          test "$(jq -r '.views' /tmp/y6-l3-sats-apply-catalogue.json)" = "16"
+          test "$(jq -r '.viewLessonCounts["maths-sats"]' /tmp/y6-l3-sats-apply-catalogue.json)" = "19"
+      - name: Atomic forward-only production publication
+        run: node scripts/publish-y6-l3-sats-prepared-model.mjs
