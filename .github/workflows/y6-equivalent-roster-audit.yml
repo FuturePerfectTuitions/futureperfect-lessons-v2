@@ -107,3 +107,43 @@ jobs:
           )
           npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-access-audit.json
           echo 'Y6_L3_ACCESS_SOURCE_AUDIT_PASS'
+
+      - name: Audit L3 Year 6 entitlement lesson distribution without exposing student IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL=$(cat <<'SQL'
+          WITH current_l3 AS (
+            SELECT DISTINCT a.portal_user_id_norm
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key = a.batch_key
+            WHERE
+              (a.effective_from IS NULL OR a.effective_from='' OR a.effective_from <= date('now')) AND
+              (a.effective_to IS NULL OR a.effective_to='' OR date('now') < a.effective_to) AND
+              (b.active_from IS NULL OR b.active_from='' OR b.active_from <= date('now')) AND
+              (b.active_to IS NULL OR b.active_to='' OR date('now') < b.active_to) AND
+              lower(b.subject)='maths' AND lower(b.stream)='11plus' AND CAST(b.maths_level AS INTEGER)=3
+          ),
+          access_rows AS (
+            SELECT e.portal_user_id_norm, e.lesson_id, 'FULL' AS mode
+            FROM lesson_entitlements e
+            JOIN current_l3 l ON l.portal_user_id_norm=e.portal_user_id_norm
+            WHERE e.core_access=1 AND e.lesson_id GLOB 'Y6M*'
+            UNION ALL
+            SELECT e.portal_user_id_norm, e.lesson_id, 'PRELESSON' AS mode
+            FROM online_prelesson_entitlements e
+            JOIN current_l3 l ON l.portal_user_id_norm=e.portal_user_id_norm
+            WHERE e.lesson_id GLOB 'Y6M*'
+          )
+          SELECT
+            lesson_id,
+            mode,
+            COUNT(*) AS entitlement_rows,
+            COUNT(DISTINCT portal_user_id_norm) AS students
+          FROM access_rows
+          GROUP BY lesson_id, mode
+          ORDER BY CAST(substr(lesson_id,4) AS INTEGER), mode;
+          SQL
+          )
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-l3-lesson-distribution.json
+          echo 'Y6_L3_LESSON_DISTRIBUTION_AUDIT_PASS'
