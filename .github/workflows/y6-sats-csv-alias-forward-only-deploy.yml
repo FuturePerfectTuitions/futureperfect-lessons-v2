@@ -32,7 +32,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Forward-only batch-defined Maths equivalent navigation and conditional L3 SATS fix
+      DEPLOY_MESSAGE: Forward-only live-label Maths equivalent navigation fix
 
     steps:
       - uses: actions/checkout@v4
@@ -89,7 +89,7 @@ jobs:
           grep -aFq 'Y6SM' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-year6-lessons' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-sats' /tmp/y6-sats-worker.bin
-          grep -aFq 'maths-equivalent-navigation-final-v3' /tmp/y6-sats-worker.bin
-          grep -aFq 'suppressUnreleasedL3Sats' /tmp/y6-sats-worker.bin
+          grep -aFq 'maths-equivalent-navigation-final-v4' /tmp/y6-sats-worker.bin
+          grep -aFq 'mathsPresentationRole' /tmp/y6-sats-worker.bin
           grep -aFq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' /tmp/y6-sats-worker.bin
           echo 'MATHS_EQUIVALENT_NAV_FINAL_FORWARD_ONLY_DEPLOY_PASS'
