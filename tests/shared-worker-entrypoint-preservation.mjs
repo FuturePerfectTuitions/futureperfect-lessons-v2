@@ -34,7 +34,9 @@ must(liveCatalogueOverlay, 'LEFT JOIN batch_definitions b ON b.batch_key = e.sou
 must(liveCatalogueOverlay, 'LEFT JOIN batch_definitions b ON b.batch_key = e.batch_key', 'prelesson entitlement batch-definition join');
 must(reconciledImport, "from './access-read-model-sync-v2.js';", 'lesson-release read-model reconciliation v2 composition');
 must(readModelSyncV2, 'd1-authoritative-sats-presentation-v2', 'authoritative read-model reconciliation marker');
-must(readModelSyncV2, "from '../../rebuild/adminops/src/lib/compiler.mjs';", 'reconciliation reuses authoritative rebuild compiler');
+must(readModelSyncV2, 'compileLegacyAccessScope', 'reconciliation preserves existing compiler features');
+must(readModelSyncV2, 'normaliseAuthoritativeInput', 'D1 programme authority normalization');
+must(readModelSyncV2, 'decorateAuthoritativeSnapshot', 'SATS presentation isolation');
 must(admin, "./admin-resource-replace-consistency.js", 'Admin Replace Resource consistency composition');
 must(replaceConsistency, "replace-resource-consistency-v1", 'Admin Replace Resource consistency marker');
 must(deploy, 'CONFIG_ENTRYPOINT=', 'deployment derives canonical entrypoint from wrangler');
