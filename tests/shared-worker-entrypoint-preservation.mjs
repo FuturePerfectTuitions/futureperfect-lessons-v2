@@ -1,9 +1,10 @@
-// deploy-trigger: y6-sats-direct-release-v1
+// deploy-trigger: maths-equivalent-navigation-final-v1
 import fs from 'node:fs';
 
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 const bridge = fs.readFileSync('worker/src/index-step10-quiz-bridge.js', 'utf8');
 const admin = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
+const finalMathsNavigation = fs.readFileSync('worker/src/index-maths-equivalent-navigation-final.js', 'utf8');
 const replaceConsistency = fs.readFileSync('worker/src/admin-resource-replace-consistency.js', 'utf8');
 const deploy = fs.readFileSync('ops/deploy_current_worker_preserve.sh', 'utf8');
 
@@ -17,6 +18,10 @@ must(bridge, "'/api/v1/quiz-bridge/redeem'", 'quiz redeem route');
 must(bridge, "'/api/v1/student/quiz/eligibility'", 'legacy quiz eligibility route');
 must(bridge, "'/api/v1/student/quiz/launch'", 'legacy quiz launch route');
 must(bridge, "const RELEASE_SOURCE='portal-live-maths11plus-release-v2'", 'L2/L3 release context marker');
+must(admin, "import currentWorker from './index-maths-equivalent-navigation-final.js';", 'final Maths navigation composition');
+must(finalMathsNavigation, "import currentWorker from './index-phase24-trial-vr.js';", 'final Maths navigation preserves current student chain');
+must(finalMathsNavigation, 'maths-equivalent-navigation-final-v1', 'final Maths navigation live marker');
+must(finalMathsNavigation, "url.pathname === '/api/v1/student/home'", 'final Maths home interception');
 must(admin, "./admin-resource-replace-consistency.js", 'Admin Replace Resource consistency composition');
 must(replaceConsistency, "replace-resource-consistency-v1", 'Admin Replace Resource consistency marker');
 must(deploy, 'CONFIG_ENTRYPOINT=', 'deployment derives canonical entrypoint from wrangler');
