@@ -26,6 +26,7 @@ jobs:
           node --check rebuild/shared/read-models/access-snapshot.mjs
           node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
           node --check tests/y6-l3-sats-prepared-model-regression.mjs
+          node --check scripts/audit-y6-l3-sats-candidate-live.mjs
       - name: Focused Year 6 L3 SATS regression
         run: node tests/y6-l3-sats-prepared-model-regression.mjs
       - name: Checkpoint 2 prepared read-model regression
@@ -39,3 +40,32 @@ jobs:
           node tests/rebuild-checkpoint5-auth-capability-core.mjs
           node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
           node tests/rebuild-checkpoint3-atomic-publishing.mjs
+
+  live-readonly:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      AS_OF_DATE: '2026-09-27'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Compile candidate catalogue from live LESSONS_KV read-only
+        run: |
+          set -euo pipefail
+          node scripts/rebuild-checkpoint2-prepare-catalogue.mjs \
+            rebuild/student/src/prepared-catalogue.generated.js \
+            /tmp/y6-l3-sats-catalogue-evidence.json
+          test "$(jq -r '.views' /tmp/y6-l3-sats-catalogue-evidence.json)" = "16"
+          test "$(jq -r '.viewLessonCounts["maths-sats"]' /tmp/y6-l3-sats-catalogue-evidence.json)" -gt 0
+      - name: Compile all current Year 6 equivalent students read-only
+        run: node scripts/audit-y6-l3-sats-candidate-live.mjs
+      - name: Confirm repository remained unchanged
+        run: git diff --exit-code -- . ':!rebuild/student/src/prepared-catalogue.generated.js'
