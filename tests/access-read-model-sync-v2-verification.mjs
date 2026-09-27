@@ -131,7 +131,8 @@ function currentMaths(payload) {
 }
 
 // With a current D1 programme plus both Full Libraries, D1 remains current and
-// the opposite equivalent Full Library is preserved under Previous.
+// the opposite equivalent Full Library is preserved under Previous. The current
+// L3 view is fully open because MATHS_L3_FULL is an explicit access grant.
 {
   const input = {
     asOfDate,
@@ -142,7 +143,7 @@ function currentMaths(payload) {
     onlinePreLessonEntitlements:[]
   };
   const payload = compileAuthoritativeAccessScope(input, catalogue, 'fixture-current-plus-full', asOfDate);
-  assert.deepEqual(currentMaths(payload), ['maths-level3:L3:1']);
+  assert.deepEqual(currentMaths(payload), ['maths-level3:L3:2']);
   const y6 = payload.snapshot.views.find(view => view.viewId === 'maths-year6');
   assert.equal(Boolean(y6), true);
   assert.equal(y6.current, false);
