@@ -57,7 +57,7 @@ jobs:
           npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-roster-audit.json
           echo 'Y6_EQUIVALENT_ROSTER_AUDIT_PASS'
 
-      - name: Audit L3 students with direct SAT entitlement without exposing student IDs
+      - name: Audit L3 Year 6 access sources without exposing student IDs
         shell: bash
         run: |
           set -euo pipefail
@@ -73,18 +73,37 @@ jobs:
               (b.active_to IS NULL OR b.active_to='' OR date('now') < b.active_to) AND
               lower(b.subject)='maths' AND lower(b.stream)='11plus' AND CAST(b.maths_level AS INTEGER)=3
           ),
-          sat_access AS (
+          full_y6 AS (
             SELECT DISTINCT portal_user_id_norm
             FROM lesson_entitlements
             WHERE core_access=1 AND lesson_id GLOB 'Y6M*'
+          ),
+          pre_y6 AS (
+            SELECT DISTINCT portal_user_id_norm
+            FROM online_prelesson_entitlements
+            WHERE lesson_id GLOB 'Y6M*'
+          ),
+          any_y6 AS (
+            SELECT portal_user_id_norm FROM full_y6
+            UNION
+            SELECT portal_user_id_norm FROM pre_y6
+          ),
+          sat_access AS (
+            SELECT portal_user_id_norm
+            FROM lesson_entitlements
+            WHERE core_access=1 AND lesson_id GLOB 'Y6M*'
+              AND CAST(substr(lesson_id,4) AS INTEGER) BETWEEN 51 AND 69
+            UNION
+            SELECT portal_user_id_norm
+            FROM online_prelesson_entitlements
+            WHERE lesson_id GLOB 'Y6M*'
               AND CAST(substr(lesson_id,4) AS INTEGER) BETWEEN 51 AND 69
           )
           SELECT
             (SELECT COUNT(*) FROM current_l3) AS current_l3_students,
-            COUNT(*) AS l3_students_with_direct_sat_access
-          FROM current_l3 l
-          JOIN sat_access s ON s.portal_user_id_norm = l.portal_user_id_norm;
+            (SELECT COUNT(*) FROM current_l3 l JOIN any_y6 y ON y.portal_user_id_norm=l.portal_user_id_norm) AS l3_students_with_any_y6_entitlement,
+            (SELECT COUNT(*) FROM current_l3 l JOIN sat_access s ON s.portal_user_id_norm=l.portal_user_id_norm) AS l3_students_with_sat_access;
           SQL
           )
-          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-sat-audit.json
-          echo 'Y6_L3_SAT_ENTITLEMENT_AUDIT_PASS'
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-access-audit.json
+          echo 'Y6_L3_ACCESS_SOURCE_AUDIT_PASS'
