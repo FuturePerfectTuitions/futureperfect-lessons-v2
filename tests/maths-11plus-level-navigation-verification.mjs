@@ -19,6 +19,9 @@ assert.equal(year6Split.lessons.length, 50);
 assert.equal(year6Split.sats.length, 19);
 assert.equal(year6Split.sats.filter(row => row.locked === false).length, 1);
 
+// Preserve the valid lower-year equivalent-card normalisation. Final Year 6/L3
+// programme identity and SATS presentation are now owned by the native prepared
+// model and verified in final-maths-equivalent-navigation-verification.mjs.
 const kiaan = {
   ok:true,
   student:{ portalUserId:'kiaan' },
@@ -28,24 +31,22 @@ const kiaan = {
       { viewId:'maths-year4', label:'Year 4', visibleLessonCount:35, openLessonCount:35, lockedLessonCount:0, current:true, group:'current' },
       { viewId:'maths-level1', label:'L1', visibleLessonCount:35, openLessonCount:35, lockedLessonCount:0, current:true, group:'current' },
       { viewId:'maths-year5', label:'Year 5', visibleLessonCount:38, openLessonCount:38, lockedLessonCount:0, current:true, group:'current' },
-      { viewId:'maths-level2', label:'L2', visibleLessonCount:38, openLessonCount:38, lockedLessonCount:0, current:true, group:'current' },
-      { viewId:'maths-level3', label:'L3', visibleLessonCount:43, openLessonCount:5, lockedLessonCount:38, current:true, group:'current' }
+      { viewId:'maths-level2', label:'L2', visibleLessonCount:38, openLessonCount:38, lockedLessonCount:0, current:true, group:'current' }
     ]
   }]
 };
-normaliseMathsEquivalentHome(kiaan, year6Split);
+normaliseMathsEquivalentHome(kiaan);
 assert.deepEqual(
   kiaan.subjects[0].views.map(view => view.viewId),
-  ['maths-level1','maths-level2','maths-level3']
+  ['maths-level1','maths-level2']
 );
 assert.deepEqual(
   kiaan.subjects[0].views.map(view => view.label),
-  ['L1','L2','L3']
+  ['L1','L2']
 );
 
-// Regression for the live defect: presentation aliases must collapse even if
-// a prepared/live layer uses different internal view IDs. Preserve the actual
-// L-level IDs because those are the valid navigation targets for that response.
+// Presentation aliases must still collapse even when prepared/live layers use
+// different internal IDs but the stable labels identify the same lower level.
 const liveAliasIds = {
   ok:true,
   student:{ portalUserId:'alias-student' },
@@ -55,62 +56,15 @@ const liveAliasIds = {
       { viewId:'live-y4-alias', label:'Year 4', visibleLessonCount:35, openLessonCount:35, current:true, group:'current' },
       { viewId:'live-l1-alias', label:'L1', visibleLessonCount:35, openLessonCount:35, current:true, group:'current' },
       { viewId:'live-y5-alias', label:'Year 5', visibleLessonCount:38, openLessonCount:38, current:true, group:'current' },
-      { viewId:'live-l2-alias', label:'L2', visibleLessonCount:38, openLessonCount:38, current:true, group:'current' },
-      { viewId:'live-l3-alias', label:'L3', visibleLessonCount:43, openLessonCount:5, current:true, group:'current' }
+      { viewId:'live-l2-alias', label:'L2', visibleLessonCount:38, openLessonCount:38, current:true, group:'current' }
     ]
   }]
 };
-normaliseMathsEquivalentHome(liveAliasIds, year6Split);
+normaliseMathsEquivalentHome(liveAliasIds);
 assert.deepEqual(
   liveAliasIds.subjects[0].views.map(view => [view.viewId, view.label]),
-  [['live-l1-alias','L1'],['live-l2-alias','L2'],['live-l3-alias','L3']]
+  [['live-l1-alias','L1'],['live-l2-alias','L2']]
 );
-
-const devansh = {
-  ok:true,
-  student:{ portalUserId:'dev2608' },
-  subjects:[{
-    subject:'maths',
-    views:[
-      { viewId:'live-year6-alias', label:'Year 6', visibleLessonCount:67, openLessonCount:1, lockedLessonCount:66, current:true, group:'current' },
-      { viewId:'live-l3-alias', label:'L3', visibleLessonCount:43, openLessonCount:0, lockedLessonCount:43, current:true, group:'current' }
-    ]
-  }]
-};
-normaliseMathsEquivalentHome(devansh, year6Split);
-assert.deepEqual(
-  devansh.subjects[0].views.map(view => view.viewId),
-  ['live-l3-alias','maths-sats']
-);
-assert.deepEqual(
-  devansh.subjects[0].views.map(view => view.label),
-  ['L3','SATS']
-);
-assert.equal(devansh.subjects[0].views[1].visibleLessonCount, 19);
-assert.equal(devansh.subjects[0].views[1].openLessonCount, 1);
-assert.equal(devansh.subjects[0].views[1].lockedLessonCount, 18);
-
-const ordinaryYear6 = {
-  ok:true,
-  student:{ portalUserId:'ordinary0606' },
-  subjects:[{
-    subject:'maths',
-    views:[
-      { viewId:'live-year6-only', label:'Year 6', visibleLessonCount:69, openLessonCount:1, lockedLessonCount:68, current:true, group:'current' }
-    ]
-  }]
-};
-normaliseMathsEquivalentHome(ordinaryYear6, year6Split);
-assert.deepEqual(
-  ordinaryYear6.subjects[0].views.map(view => view.viewId),
-  ['maths-year6-lessons','maths-sats']
-);
-assert.deepEqual(
-  ordinaryYear6.subjects[0].views.map(view => view.label),
-  ['Lessons','SATS']
-);
-assert.equal(ordinaryYear6.subjects[0].views[0].visibleLessonCount, 50);
-assert.equal(ordinaryYear6.subjects[0].views[1].visibleLessonCount, 19);
 
 const normalYear4 = {
   ok:true,
