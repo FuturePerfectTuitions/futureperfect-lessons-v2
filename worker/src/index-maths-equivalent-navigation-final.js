@@ -5,7 +5,7 @@ import {
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v2';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v3';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
@@ -120,12 +120,28 @@ function refreshHomeViewSummary(body, viewId, rows) {
   return true;
 }
 
+function hasReleasedSats(year6Split) {
+  return Array.isArray(year6Split?.sats) && year6Split.sats.some(row => row?.locked === false);
+}
+
+function suppressUnreleasedL3Sats(body, hadL3BeforeNormalisation, year6Split) {
+  if (!hadL3BeforeNormalisation || hasReleasedSats(year6Split)) return false;
+  const maths = Array.isArray(body?.subjects)
+    ? body.subjects.find(subject => norm(subject?.subject) === 'maths')
+    : null;
+  if (!maths || !Array.isArray(maths.views)) return false;
+  const before = maths.views.length;
+  maths.views = maths.views.filter(view => norm(view?.viewId) !== YEAR6_SATS_VIEW);
+  return maths.views.length !== before;
+}
+
 async function finalHome(request, env, ctx) {
   const response = await currentWorker.fetch(request, env, ctx);
   if (!response.ok) return response;
   const body = await response.clone().json().catch(() => null);
   if (!body?.ok) return response;
 
+  const hadL3BeforeNormalisation = homeHasView(body, L3_VIEW);
   let year6Split = null;
   if (homeHasYear6Equivalent(body)) {
     const loaded = await canonicalYear6List(request, env, ctx);
@@ -135,12 +151,19 @@ async function finalHome(request, env, ctx) {
   // The prepared home snapshot can be older than the current entitlement/source
   // classification. Before collapsing Year 6/L3, refresh L3 counts from the live
   // list response repaired by the batch-definition-aware catalogue overlay.
-  if (homeHasView(body, L3_VIEW)) {
+  if (hadL3BeforeNormalisation) {
     const l3 = await loadViewList(request, env, ctx, L3_VIEW);
     refreshHomeViewSummary(body, L3_VIEW, l3.rows);
   }
 
   normaliseMathsEquivalentHome(body, year6Split);
+
+  // L3 students do not get a permanent SATS card merely because L3 and Year 6
+  // share canonical content. SATS appears for L3 only when at least one SATS
+  // lesson is genuinely released/prelesson-available to that student. Ordinary
+  // Year 6 students continue to receive the explicit Lessons + SATS split.
+  suppressUnreleasedL3Sats(body, hadL3BeforeNormalisation, year6Split);
+
   return responseLike(response, body);
 }
 
@@ -177,6 +200,8 @@ export {
   countSummary,
   homeHasYear6Equivalent,
   refreshHomeViewSummary,
+  hasReleasedSats,
+  suppressUnreleasedL3Sats,
   finalHome,
   finalSyntheticList
 };
