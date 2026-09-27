@@ -71,7 +71,7 @@ function authoritativeBatchViewId(value, definitions) {
   return legacyBatchViewId(key);
 }
 
-function stripTeachingSource(row) {
+function stripTeachingSource(row, forcedViewId = '') {
   const next = { ...(row || {}) };
   delete next.source_batch_code;
   delete next.sourceBatchCode;
@@ -79,6 +79,7 @@ function stripTeachingSource(row) {
   delete next.batchKey;
   delete next.viewId;
   delete next.view_id;
+  if (clean(forcedViewId)) next.viewId = clean(forcedViewId);
   return next;
 }
 
@@ -122,12 +123,20 @@ function normaliseAuthoritativeInput(input, asOfDate) {
 
   const sanitiseAccessRow = row => {
     const lid = lessonId(row);
-    if (isYear6SatsLessonId(lid)) return stripTeachingSource(row);
+    if (isYear6SatsLessonId(lid)) {
+      // SATS is presentation-only. When a teaching programme exists, bind the
+      // underlying access row to that current programme solely to stop the
+      // legacy compiler from inferring a second teaching assignment. With no
+      // teaching programme, the maths-sats sentinel cannot create one.
+      return stripTeachingSource(row, currentProgramme || 'maths-sats');
+    }
     if (!currentProgramme) return { ...(row || {}) };
     const batch = clean(row?.source_batch_code ?? row?.sourceBatchCode ?? row?.batch_key ?? row?.batchKey);
     const sourceView = authoritativeBatchViewId(batch, definitions);
     if ((sourceView === 'maths-year6' || sourceView === 'maths-level3') && sourceView !== currentProgramme) {
-      return stripTeachingSource(row);
+      // Transfers retain lesson access, but an old equivalent-curriculum source
+      // batch must not become a second current programme card.
+      return stripTeachingSource(row, currentProgramme);
     }
     return { ...(row || {}) };
   };
