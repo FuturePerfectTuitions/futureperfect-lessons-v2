@@ -109,6 +109,23 @@ function currentMaths(payload) {
   assert.equal(payload.snapshot.lessonAccess.Y6M52.preLessonOnly, true);
 }
 
+// A stale known profile batch for the opposite equivalent curriculum cannot
+// compete with the current D1 programme.
+{
+  const { payload } = compile({
+    currentBatch:'Y511FM',
+    profileBatches:['Y511FM','Y611FM']
+  });
+  assert.deepEqual(currentMaths(payload), ['maths-level3:L3:0']);
+}
+{
+  const { payload } = compile({
+    currentBatch:'Y611FM',
+    profileBatches:['Y611FM','Y511FM']
+  });
+  assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
+}
+
 // Known D1 profile batch with a temporarily absent assignment is interpreted by
 // its D1 definition, never by regex. This preserves the old parity/backfill role.
 {
