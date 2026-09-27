@@ -42,6 +42,21 @@ function currentEquivalentProgramme(input, asOfDate) {
 function normaliseProgrammeNeutralAccess(input, asOfDate) {
   const definitions = definitionMap(input?.batchDefinitions);
   const currentProgramme = currentEquivalentProgramme(input, asOfDate);
+  const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
+
+  // Once D1 has a current Year6/L3-equivalent assignment, it is the teaching
+  // programme authority. A stale KV profile batch that D1 itself defines as the
+  // other equivalent curriculum must not be allowed to synthesize a second
+  // current programme in the parity normalizer. Undefined legacy batches remain
+  // untouched as compatibility fallback, and non-equivalent profile batches are
+  // preserved.
+  const profileBatches = (Array.isArray(sourceUser.batches) ? sourceUser.batches : []).filter(value => {
+    if (!currentProgramme) return true;
+    const key = upper(value);
+    if (!key || !definitions.has(key)) return true;
+    const viewId = authoritativeBatchViewId(key, definitions);
+    return viewId !== 'maths-year6' && viewId !== 'maths-level3';
+  });
 
   const sanitise = row => {
     const id = lessonId(row);
@@ -59,6 +74,7 @@ function normaliseProgrammeNeutralAccess(input, asOfDate) {
 
   return {
     ...(input || {}),
+    user:{ ...sourceUser, batches:profileBatches },
     entitlements:(Array.isArray(input?.entitlements) ? input.entitlements : []).map(sanitise),
     onlinePreLessonEntitlements:(Array.isArray(input?.onlinePreLessonEntitlements) ? input.onlinePreLessonEntitlements : []).map(sanitise)
   };
