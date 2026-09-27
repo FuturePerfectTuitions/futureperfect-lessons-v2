@@ -72,9 +72,6 @@ const year6WithStaleL3Profile = compile({
 });
 assert.deepEqual(currentMaths(year6WithStaleL3Profile), ['maths-year6:Lessons:0']);
 
-// Once D1 contains equivalent assignment history, stale profile batches cannot
-// resurrect either curriculum as current after the assignment has ended. The
-// legitimate D1 historical view is retained.
 const historicalInput = {
   asOfDate,
   user:{ name:'Fixture', batches:['Y511FM','Y611FM'], upsellViews:[] },
@@ -88,5 +85,20 @@ assert.deepEqual(currentMaths(historicalPayload), []);
 const historicalL3 = historicalPayload.snapshot.views.find(v => v.viewId === 'maths-level3');
 assert.equal(Boolean(historicalL3), true);
 assert.equal(historicalL3.current, false);
+
+// Explicit dual Full Library grants are a legitimate access exception and must
+// not be deleted simply because they expose both equivalent catalogues. SATS is
+// still not granted by either Full Library alias.
+const dualFullLibraryInput = {
+  asOfDate,
+  user:{ name:'Fixture', batches:[], upsellViews:[], fullLibraries:['MATHS_Y6_FULL','MATHS_L3_FULL'] },
+  batchDefinitions:definitions,
+  batchAssignments:[],
+  entitlements:[],
+  onlinePreLessonEntitlements:[]
+};
+const dualFullLibraryPayload = compileAccessScopeV2(dualFullLibraryInput, catalogue, { scopeId:'fixture-full-library', asOfDate });
+assert.deepEqual(currentMaths(dualFullLibraryPayload), ['maths-level3:L3:1','maths-year6:Lessons:1']);
+assert.equal(dualFullLibraryPayload.snapshot.views.some(v => v.viewId === 'maths-sats'), false);
 
 console.log('Y6_L3_SATS_PROGRAMME_NEUTRAL_ACCESS_V2_PASS');
