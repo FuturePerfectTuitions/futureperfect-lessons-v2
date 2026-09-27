@@ -36,11 +36,34 @@ const kiaan = {
 normaliseMathsEquivalentHome(kiaan, year6Split);
 assert.deepEqual(
   kiaan.subjects[0].views.map(view => view.viewId),
-  ['maths-level1','maths-level2','maths-level3','maths-sats']
+  ['maths-level1','maths-level2','maths-level3']
 );
 assert.deepEqual(
   kiaan.subjects[0].views.map(view => view.label),
-  ['L1','L2','L3','SATS']
+  ['L1','L2','L3']
+);
+
+// Regression for the live defect: presentation aliases must collapse even if
+// a prepared/live layer uses different internal view IDs. Preserve the actual
+// L-level IDs because those are the valid navigation targets for that response.
+const liveAliasIds = {
+  ok:true,
+  student:{ portalUserId:'alias-student' },
+  subjects:[{
+    subject:'maths',
+    views:[
+      { viewId:'live-y4-alias', label:'Year 4', visibleLessonCount:35, openLessonCount:35, current:true, group:'current' },
+      { viewId:'live-l1-alias', label:'L1', visibleLessonCount:35, openLessonCount:35, current:true, group:'current' },
+      { viewId:'live-y5-alias', label:'Year 5', visibleLessonCount:38, openLessonCount:38, current:true, group:'current' },
+      { viewId:'live-l2-alias', label:'L2', visibleLessonCount:38, openLessonCount:38, current:true, group:'current' },
+      { viewId:'live-l3-alias', label:'L3', visibleLessonCount:43, openLessonCount:5, current:true, group:'current' }
+    ]
+  }]
+};
+normaliseMathsEquivalentHome(liveAliasIds, year6Split);
+assert.deepEqual(
+  liveAliasIds.subjects[0].views.map(view => [view.viewId, view.label]),
+  [['live-l1-alias','L1'],['live-l2-alias','L2'],['live-l3-alias','L3']]
 );
 
 const devansh = {
@@ -49,15 +72,15 @@ const devansh = {
   subjects:[{
     subject:'maths',
     views:[
-      { viewId:'maths-year6', label:'Year 6', visibleLessonCount:69, openLessonCount:1, lockedLessonCount:68, current:true, group:'current' },
-      { viewId:'maths-level3', label:'L3', visibleLessonCount:43, openLessonCount:0, lockedLessonCount:43, current:true, group:'current' }
+      { viewId:'live-year6-alias', label:'Year 6', visibleLessonCount:67, openLessonCount:1, lockedLessonCount:66, current:true, group:'current' },
+      { viewId:'live-l3-alias', label:'L3', visibleLessonCount:43, openLessonCount:0, lockedLessonCount:43, current:true, group:'current' }
     ]
   }]
 };
 normaliseMathsEquivalentHome(devansh, year6Split);
 assert.deepEqual(
   devansh.subjects[0].views.map(view => view.viewId),
-  ['maths-level3','maths-sats']
+  ['live-l3-alias','maths-sats']
 );
 assert.deepEqual(
   devansh.subjects[0].views.map(view => view.label),
@@ -73,7 +96,7 @@ const ordinaryYear6 = {
   subjects:[{
     subject:'maths',
     views:[
-      { viewId:'maths-year6', label:'Year 6', visibleLessonCount:69, openLessonCount:1, lockedLessonCount:68, current:true, group:'current' }
+      { viewId:'live-year6-only', label:'Year 6', visibleLessonCount:69, openLessonCount:1, lockedLessonCount:68, current:true, group:'current' }
     ]
   }]
 };
