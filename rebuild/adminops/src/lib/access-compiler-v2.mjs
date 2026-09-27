@@ -51,11 +51,6 @@ function normaliseProgrammeNeutralAccess(input, asOfDate) {
   const hasEquivalentD1History = equivalentAssignmentViews(input).length > 0;
   const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
 
-  // D1 assignment state is authoritative for Year6/L3 whenever any D1 history
-  // exists. That includes students whose equivalent assignment is now historical:
-  // a stale KV profile batch must not resurrect Year6 or L3 as current. If no D1
-  // equivalent assignment exists at all, profile batches remain compatibility
-  // fallback and are interpreted through D1 batch_definitions where available.
   const profileBatches = (Array.isArray(sourceUser.batches) ? sourceUser.batches : []).filter(value => {
     if (!hasEquivalentD1History) return true;
     const key = upper(value);
@@ -66,9 +61,7 @@ function normaliseProgrammeNeutralAccess(input, asOfDate) {
 
   const sanitise = row => {
     const id = lessonId(row);
-    if (isSatsLessonId(id)) {
-      return stripTeachingSource(row, currentProgramme || 'maths-sats');
-    }
+    if (isSatsLessonId(id)) return stripTeachingSource(row, currentProgramme || 'maths-sats');
     if (!currentProgramme) return { ...(row || {}) };
     const batch = clean(row?.source_batch_code ?? row?.sourceBatchCode ?? row?.batch_key ?? row?.batchKey);
     const sourceView = authoritativeBatchViewId(batch, definitions);
@@ -86,6 +79,32 @@ function normaliseProgrammeNeutralAccess(input, asOfDate) {
   };
 }
 
+function collisionDiagnostic(input, normalized, payload, asOfDate) {
+  const definitions = definitionMap(input?.batchDefinitions);
+  const equivalent = value => {
+    const id = authoritativeBatchViewId(value, definitions);
+    return id === 'maths-year6' || id === 'maths-level3' ? id : '';
+  };
+  const rowViews = rows => [...new Set((Array.isArray(rows) ? rows : []).map(row => {
+    const direct = clean(row?.viewId ?? row?.view_id);
+    if (direct === 'maths-year6' || direct === 'maths-level3') return direct;
+    return equivalent(row?.source_batch_code ?? row?.sourceBatchCode ?? row?.batch_key ?? row?.batchKey);
+  }).filter(Boolean))].sort();
+  return {
+    outputCurrent:(payload?.snapshot?.views || []).filter(view => view?.current && !view?.lockedPreview)
+      .map(view => view?.viewId).filter(id => id === 'maths-year6' || id === 'maths-level3').sort(),
+    d1Current:[...new Set((input?.batchAssignments || []).filter(row => assignmentCurrent(row, asOfDate)).map(viewIdForBatch)
+      .filter(id => id === 'maths-year6' || id === 'maths-level3'))].sort(),
+    d1History:[...new Set(equivalentAssignmentViews(input))].sort(),
+    profileOriginal:[...new Set((input?.user?.batches || []).map(equivalent).filter(Boolean))].sort(),
+    profileNormalized:[...new Set((normalized?.user?.batches || []).map(equivalent).filter(Boolean))].sort(),
+    entitlementViews:rowViews(normalized?.entitlements),
+    preLessonViews:rowViews(normalized?.onlinePreLessonEntitlements),
+    fullLibraries:[...new Set((input?.user?.fullLibraries || []).map(value => upper(value))
+      .filter(value => value === 'MATHS_Y6_FULL' || value === 'MATHS_L3_FULL'))].sort()
+  };
+}
+
 function compileAccessScopeV2(input, catalogue, options = {}) {
   const asOfDate = clean(options.asOfDate || input?.asOfDate);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) throw new Error('A deterministic YYYY-MM-DD asOfDate is required.');
@@ -93,7 +112,9 @@ function compileAccessScopeV2(input, catalogue, options = {}) {
   const payload = compileBaseAccessScope(normalized, catalogue, { ...options, asOfDate });
   const current = (payload?.snapshot?.views || []).filter(view => view?.current && !view?.lockedPreview &&
     (view?.viewId === 'maths-year6' || view?.viewId === 'maths-level3'));
-  if (current.length > 1) throw new Error('COMPILED_YEAR6_L3_PROGRAMME_COLLISION');
+  if (current.length > 1) {
+    throw new Error(`COMPILED_YEAR6_L3_PROGRAMME_COLLISION:${JSON.stringify(collisionDiagnostic(input, normalized, payload, asOfDate))}`);
+  }
   return payload;
 }
 
@@ -102,5 +123,6 @@ export {
   equivalentAssignmentViews,
   currentEquivalentProgramme,
   normaliseProgrammeNeutralAccess,
+  collisionDiagnostic,
   compileAccessScopeV2
 };
