@@ -30,6 +30,12 @@ function stripTeachingSource(row, forcedViewId = '') {
   return next;
 }
 
+function equivalentAssignmentViews(input) {
+  return (Array.isArray(input?.batchAssignments) ? input.batchAssignments : [])
+    .map(viewIdForBatch)
+    .filter(id => id === 'maths-year6' || id === 'maths-level3');
+}
+
 function currentEquivalentProgramme(input, asOfDate) {
   const ids = [...new Set((Array.isArray(input?.batchAssignments) ? input.batchAssignments : [])
     .filter(row => assignmentCurrent(row, asOfDate))
@@ -42,16 +48,16 @@ function currentEquivalentProgramme(input, asOfDate) {
 function normaliseProgrammeNeutralAccess(input, asOfDate) {
   const definitions = definitionMap(input?.batchDefinitions);
   const currentProgramme = currentEquivalentProgramme(input, asOfDate);
+  const hasEquivalentD1History = equivalentAssignmentViews(input).length > 0;
   const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
 
-  // Once D1 has a current Year6/L3-equivalent assignment, it is the teaching
-  // programme authority. A stale KV profile batch that D1 itself defines as the
-  // other equivalent curriculum must not be allowed to synthesize a second
-  // current programme in the parity normalizer. Undefined legacy batches remain
-  // untouched as compatibility fallback, and non-equivalent profile batches are
-  // preserved.
+  // D1 assignment state is authoritative for Year6/L3 whenever any D1 history
+  // exists. That includes students whose equivalent assignment is now historical:
+  // a stale KV profile batch must not resurrect Year6 or L3 as current. If no D1
+  // equivalent assignment exists at all, profile batches remain compatibility
+  // fallback and are interpreted through D1 batch_definitions where available.
   const profileBatches = (Array.isArray(sourceUser.batches) ? sourceUser.batches : []).filter(value => {
-    if (!currentProgramme) return true;
+    if (!hasEquivalentD1History) return true;
     const key = upper(value);
     if (!key || !definitions.has(key)) return true;
     const viewId = authoritativeBatchViewId(key, definitions);
@@ -93,6 +99,7 @@ function compileAccessScopeV2(input, catalogue, options = {}) {
 
 export {
   ACCESS_COMPILER_V2_MARKER,
+  equivalentAssignmentViews,
   currentEquivalentProgramme,
   normaliseProgrammeNeutralAccess,
   compileAccessScopeV2
