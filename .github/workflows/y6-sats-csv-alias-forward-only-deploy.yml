@@ -14,14 +14,10 @@ on:
       - 'worker/src/admin-y6-sats-csv-alias.js'
       - 'worker/src/admin-lesson-release-import-email-reconciled.js'
       - 'worker/src/admin-lesson-release-import-manual-email-reconciled.js'
-      - 'rebuild/adminops/src/lib/compiler.mjs'
-      - 'rebuild/adminops/src/lib/backfill-parity-audit.mjs'
-      - 'rebuild/shared/read-models/access-snapshot.mjs'
-      - 'rebuild/shared/read-models/catalogue.mjs'
-      - 'rebuild/shared/read-models/view-registry.mjs'
       - 'tests/live-entitlement-view-classification-verification.mjs'
       - 'tests/maths-11plus-level-navigation-verification.mjs'
       - 'tests/final-maths-equivalent-navigation-verification.mjs'
+      - 'tests/access-read-model-sync-v2-verification.mjs'
       - 'tests/shared-worker-entrypoint-preservation.mjs'
       - 'tests/y6-sats-csv-alias-verification.mjs'
       - 'ops/deploy_current_worker_preserve.sh'
@@ -60,11 +56,10 @@ jobs:
           node --check worker/src/admin-y6-sats-csv-alias.js
           node --check worker/src/admin-lesson-release-import-email-reconciled.js
           node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
-          node --check rebuild/adminops/src/lib/compiler.mjs
-          node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
           node tests/live-entitlement-view-classification-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/final-maths-equivalent-navigation-verification.mjs
+          node tests/access-read-model-sync-v2-verification.mjs
           node tests/y6-sats-csv-alias-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/y6-sats-direct-release-verification.mjs
