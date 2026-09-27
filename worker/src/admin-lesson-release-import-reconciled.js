@@ -2,7 +2,7 @@ import { handleAdminLessonReleaseImport as handleBaseImport } from './admin-less
 import {
   assertReadModelReconciliationReady,
   refreshStudentAccessReadModel
-} from './access-read-model-sync.js';
+} from './access-read-model-sync-v2.js';
 
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';
 const clean = value => String(value ?? '').trim();
