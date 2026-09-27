@@ -15,14 +15,14 @@ import {
 
 const catalogueInput = {
   sourceType: 'synthetic-checkpoint2-fixture',
-  sourceRevision: 'fixture-v1',
+  sourceRevision: 'fixture-v2-sats',
   curricula: {
     MATHS_Y2: { lessonIds: ['Y2A'] },
     MATHS_Y3: { lessonIds: ['Y3A'] },
     MATHS_L1: { lessonIds: ['L1A', 'L1B'] },
     MATHS_L2: { lessonIds: ['L2A', 'L2B'] },
     MATHS_L3: { lessonIds: ['L3A'] },
-    MATHS_Y6_EXTRA: { lessonIds: ['Y6X1'] },
+    MATHS_Y6_EXTRA: { lessonIds: ['Y6X1', 'Y6M51'] },
     ENGLISH_Y2: { lessonIds: ['E2A'] },
     ENGLISH_Y3: { lessonIds: ['E3A'] },
     ENGLISH_Y4: { lessonIds: ['E4A'] },
@@ -43,7 +43,8 @@ const catalogueInput = {
     L2A: { lessonId: 'L2A', title: 'L2A Fractions', order: 1, active: true },
     L2B: { lessonId: 'L2B', title: 'L2B Decimals', order: 2, active: true },
     L3A: { lessonId: 'L3A', title: 'L3A Ratio', order: 1, active: true },
-    Y6X1: { lessonId: 'Y6X1', title: 'Y6X1 SATs Preparation', order: 50, active: true },
+    Y6X1: { lessonId: 'Y6X1', title: 'Y6X1 Extension', order: 50, active: true },
+    Y6M51: { lessonId: 'Y6M51', title: 'Y6M51 SATs Preparation Measurement', order: 51, active: true },
     E2A: { lessonId: 'E2A', title: 'E2A Grammar', order: 1, active: true },
     E3A: { lessonId: 'E3A', title: 'E3A Grammar', order: 1, active: true },
     E4A: { lessonId: 'E4A', title: 'E4A Comprehension', order: 1, active: true },
@@ -55,10 +56,16 @@ const catalogueInput = {
 
 const catalogue = compileCatalogueReadModel(catalogueInput);
 assert.equal(catalogue.kind, 'prepared-catalogue');
-assert.equal(VIEW_IDS.length, 15);
+assert.equal(VIEW_IDS.length, 16);
 assert.equal(VIEW_DEFINITIONS['english-year2-11plus'], undefined);
 assert.equal(VIEW_DEFINITIONS['english-year3-11plus'], undefined);
+assert.equal(catalogue.views['maths-year6'].label, 'Lessons');
 assert.equal(catalogue.views['maths-year6'].lessonCount, 2);
+assert.equal(catalogue.views['maths-sats'].label, 'SATS');
+assert.equal(catalogue.views['maths-sats'].lessonCount, 1);
+assert.deepEqual(catalogue.views['maths-sats'].lessons.map(row => row.lessonId), ['Y6M51']);
+assert.equal(catalogue.views['maths-year6'].lessons.some(row => row.lessonId === 'Y6M51'), false);
+assert.deepEqual(catalogue.lessonToViews.Y6M51, ['maths-sats']);
 assert.equal(catalogue.views['maths-year4'].lessons[0].displayLessonId, 'Y4M01');
 assert.equal(catalogue.views['maths-level1'].lessons[0].displayLessonId, 'L1T1M01');
 assert.deepEqual(catalogue.lessonToViews.L1A, ['maths-year4', 'maths-level1']);
@@ -131,6 +138,7 @@ assert.equal(byId.get('maths-year4').group, 'previous');
 assert.equal(byId.get('maths-level1'), undefined, 'manual access to shared L1 curriculum must not widen into 11+');
 assert.equal(byId.get('english-year5-11plus').lockedPreview, true);
 assert.equal(byId.get('english-year5-11plus').openLessonCount, 0);
+assert.equal(byId.get('maths-sats'), undefined, 'no SATS entitlement means no SATS card');
 assert.equal(snapshot.lessonAccess.L2A.core, true, 'Full Library opens the view');
 assert.equal(snapshot.lessonAccess.L2B.blocked, true, 'blocked override wins over Full Library');
 assert.equal(snapshot.lessonAccess.L2B.core, false);
