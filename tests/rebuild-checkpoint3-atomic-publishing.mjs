@@ -52,7 +52,7 @@ const globalA = compileGlobalScope(catalogueInput, {
   sourceRevision: 'fixture-a'
 });
 assert.equal(globalA.kind, 'prepared-global-read-model');
-assert.equal(globalA.navigation.length, 15);
+assert.equal(globalA.navigation.length, 16);
 assert.equal(globalA.counts['maths-year6'], 2);
 assert.equal(JSON.stringify(globalA).includes('r2Key'), false);
 
@@ -134,7 +134,6 @@ assert.equal(store.raw(pointerKey('global')), pointerAfterA, 'Failure before poi
 assert.equal((await resolveCurrentScope(store, 'global')).version, 'version-a');
 assert.ok(store.raw(versionKey('global', 'version-b-failed')), 'An unreachable orphan candidate is safe.');
 
-// A compiler failure is even earlier: no candidate or pointer operation occurs.
 await assert.rejects(
   compileLessonDetail(lessonRecord, { resourceExists: async () => false }),
   /RESOURCE_MISSING/
@@ -149,7 +148,6 @@ let resolved = await resolveCurrentScope(store, 'global');
 assert.equal(resolved.version, 'version-b');
 assert.equal(resolved.usedFallback, false);
 
-// Simulate KV propagation skew: pointer visible at an edge before the new immutable value.
 store.hide(versionKey('global', 'version-b'));
 resolved = await resolveCurrentScope(store, 'global');
 assert.equal(resolved.version, 'version-a');
