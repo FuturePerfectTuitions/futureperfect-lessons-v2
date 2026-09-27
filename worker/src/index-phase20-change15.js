@@ -2,10 +2,35 @@ import change14Worker from './index-phase20-change14.js';
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
+const normLabel = value => norm(value).replace(/\s+/g, ' ');
 
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
+
+function isCurrentView(view) {
+  return view?.group === 'current' || view?.current === true || (view?.group !== 'previous' && view?.current !== false);
+}
+
+export function mathsPresentationRole(view) {
+  if (!view || !isCurrentView(view)) return '';
+  const id = norm(view?.viewId);
+  const label = normLabel(view?.label);
+
+  if (id === 'maths-year4' || label === 'year 4') return 'year4';
+  if (id === 'maths-level1' || label === 'l1' || /^level 1(?: \(11\+\))?$/.test(label)) return 'l1';
+  if (id === 'maths-year5' || label === 'year 5') return 'year5';
+  if (id === 'maths-level2' || label === 'l2' || /^level 2(?: \(11\+\))?$/.test(label)) return 'l2';
+  if (id === YEAR6_CANONICAL_VIEW || label === 'year 6') return 'year6';
+  if (id === 'maths-level3' || label === 'l3' || /^level 3(?: \(11\+\))?$/.test(label)) return 'l3';
+  if (id === YEAR6_SATS_VIEW || label === 'sats') return 'sats';
+  if (id === YEAR6_LESSONS_VIEW || label === 'lessons') return 'lessons';
+  return '';
+}
+
+function findCurrentRole(views, role) {
+  return (Array.isArray(views) ? views : []).find(view => mathsPresentationRole(view) === role) || null;
+}
 
 function mathsLevelForView(viewId) {
   let match = norm(viewId).match(/^maths-level([1-3])$/);
@@ -128,7 +153,7 @@ function mergeEquivalentView(target, incoming, level) {
   return {
     ...incoming,
     ...target,
-    viewId:levelViewId(level),
+    viewId:clean(target?.viewId) || levelViewId(level),
     subject:'maths',
     label:levelLabel(level),
     catalogueAvailable:target?.catalogueAvailable !== false || incoming?.catalogueAvailable !== false,
@@ -184,13 +209,12 @@ export function normaliseMathsEquivalentHome(body, year6Split = null) {
 
   let views = [...maths.views];
 
-  // Year 4/L1 and Year 5/L2 are presentation aliases for the same Maths
-  // curriculum. When both are present, the L-level is the authoritative label.
-  for (const level of [1, 2]) {
-    const yearId = `maths-year${level + 3}`;
-    const levelId = `maths-level${level}`;
-    const year = views.find(view => norm(view?.viewId) === yearId);
-    const levelView = views.find(view => norm(view?.viewId) === levelId);
+  // Equivalent Maths cards are detected from either their stable IDs or their
+  // live labels. This is deliberately presentation-driven so a prepared/live
+  // view-ID alias cannot leak duplicate Year/L cards to students.
+  for (const [level, yearRole, levelRole] of [[1, 'year4', 'l1'], [2, 'year5', 'l2']]) {
+    const year = findCurrentRole(views, yearRole);
+    const levelView = findCurrentRole(views, levelRole);
     if (!year || !levelView) continue;
 
     const merged = mergeEquivalentView(levelView, year, level);
@@ -199,23 +223,26 @@ export function normaliseMathsEquivalentHome(body, year6Split = null) {
     views.splice(Math.max(0, insertion), 0, merged);
   }
 
-  const year6 = views.find(view => norm(view?.viewId) === YEAR6_CANONICAL_VIEW) || null;
-  const l3 = views.find(view => norm(view?.viewId) === 'maths-level3') || null;
+  const year6 = findCurrentRole(views, 'year6');
+  const l3 = findCurrentRole(views, 'l3');
+  const existingSats = findCurrentRole(views, 'sats');
 
   if (l3) {
     l3.label = 'L3';
-    // A Year 6 card alongside L3 is never a second curriculum choice. It is
-    // the presentation surface created by Year 6 SAT direct entitlements.
+    // When Year 6 appears beside L3, it is not a second teaching curriculum.
+    // It is the extra Year-6-derived surface that must be presented as SATS.
     if (year6) views = views.filter(view => view !== year6);
 
-    const base = year6 || l3;
-    const sats = year6Split?.sats
-      ? summaryFrom(base, YEAR6_SATS_VIEW, 'SATS', year6Split.sats)
-      : fallbackSatsSummary(base);
-    const l3Index = views.indexOf(l3);
-    const existingSats = views.find(view => norm(view?.viewId) === YEAR6_SATS_VIEW);
-    if (existingSats) Object.assign(existingSats, sats);
-    else views.splice(l3Index + 1, 0, sats);
+    if (year6 || existingSats) {
+      const base = year6 || existingSats || l3;
+      const sats = year6Split?.sats
+        ? summaryFrom(base, YEAR6_SATS_VIEW, 'SATS', year6Split.sats)
+        : fallbackSatsSummary(base);
+      const l3Index = views.indexOf(l3);
+      const satsView = findCurrentRole(views, 'sats');
+      if (satsView) Object.assign(satsView, sats);
+      else views.splice(l3Index + 1, 0, sats);
+    }
   } else if (year6) {
     // An ordinary Year 6 student gets two explicit surfaces backed by the one
     // canonical Year 6 catalogue: teaching Lessons and SATS.
@@ -312,8 +339,8 @@ function homeHasYear6Equivalent(body) {
     ? body.subjects.find(subject => norm(subject?.subject) === 'maths')
     : null;
   return Array.isArray(maths?.views) && maths.views.some(view => {
-    const id = norm(view?.viewId);
-    return id === YEAR6_CANONICAL_VIEW || id === 'maths-level3';
+    const role = mathsPresentationRole(view);
+    return role === 'year6' || role === 'l3';
   });
 }
 
