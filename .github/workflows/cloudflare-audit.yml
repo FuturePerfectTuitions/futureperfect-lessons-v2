@@ -14,126 +14,141 @@ permissions:
 
 jobs:
   audit:
-    name: Trace exact live student home view selector
+    name: Trace prepared access snapshot producer
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
       STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
 
-      - name: Download live student Worker read-only
+      - name: Confirm read credentials
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'Cloudflare read credentials present.'
+
+      - name: Inspect stored prepared snapshots for only the two reported students
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${READ_MODELS_KV_ID}"
+          : > /tmp/kv-keys.txt
+          cursor=''
+          page=0
+          while :; do
+            page=$((page+1))
+            if [ -n "$cursor" ]; then
+              curl --fail --silent --show-error --get "$API/keys" -H "$AUTH" \
+                --data-urlencode 'limit=1000' --data-urlencode "cursor=$cursor" -o /tmp/kv-page.json
+            else
+              curl --fail --silent --show-error --get "$API/keys" -H "$AUTH" \
+                --data-urlencode 'limit=1000' -o /tmp/kv-page.json
+            fi
+            jq -e '.success == true' /tmp/kv-page.json >/dev/null
+            jq -r '.result[].name' /tmp/kv-page.json >> /tmp/kv-keys.txt
+            cursor="$(jq -r '.result_info.cursor // empty' /tmp/kv-page.json)"
+            [ -z "$cursor" ] && break
+            [ "$page" -lt 20 ] || { echo 'KV pagination safety stop'; exit 2; }
+          done
+          echo "READ_MODELS_KV_KEY_COUNT=$(wc -l < /tmp/kv-keys.txt | tr -d ' ')"
+
+          : > /tmp/matches.ndjson
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            encoded="$(jq -rn --arg v "$key" '$v|@uri')"
+            if ! curl --fail --silent --show-error "$API/values/$encoded" -H "$AUTH" -o /tmp/value.json; then
+              continue
+            fi
+            if ! jq -e . /tmp/value.json >/dev/null 2>&1; then
+              continue
+            fi
+            name="$(jq -r '.snapshot.student.displayName // .student.displayName // empty' /tmp/value.json)"
+            case "${name,,}" in
+              devansh|kiaan)
+                jq -c '{
+                  displayName:(.snapshot.student.displayName // .student.displayName),
+                  modelMetadata:{schema:(.schema // null),version:(.version // null),generatedAt:(.generatedAt // .snapshot.generatedAt // null),scopeType:(.scopeType // null),source:(.source // null),generations:(.snapshot.generations // .generations // null)},
+                  accessViews:(.views // []),
+                  subjects:[(.snapshot.subjects // [])[] | {
+                    subject,
+                    views:[(.views // [])[] | {viewId,label,current,group,visibleLessonCount,openLessonCount,lockedLessonCount,catalogueAvailable,lockedPreview}]
+                  }]
+                }' /tmp/value.json >> /tmp/matches.ndjson
+                ;;
+            esac
+          done < /tmp/kv-keys.txt
+
+          echo '=== MATCHED PREPARED SNAPSHOTS (ONLY DEVANSH/KIAAN) ==='
+          if [ -s /tmp/matches.ndjson ]; then
+            jq . /tmp/matches.ndjson
+          else
+            echo 'NO_MATCHING_PREPARED_SNAPSHOTS_FOUND'
+          fi
+
+      - name: Recover exact deployed scope-key construction
+        shell: bash
+        run: |
+          set -euo pipefail
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           curl --fail --silent --show-error --dump-header /tmp/student.headers \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${STUDENT_WORKER}" \
             -H "$AUTH" -o /tmp/student.package
-
-      - name: Extract deployed JavaScript module
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           from email.parser import BytesParser
           from email.policy import default
-          import re, hashlib
+          import re
           raw=open('/tmp/student.package','rb').read()
           headers=open('/tmp/student.headers','rb').read().decode('latin-1','replace')
           m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
           ct=m.group(1).strip() if m else ''
           if ct.lower().startswith('multipart/'):
               msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ct}\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+raw)
-              candidates=[]
+              parts=[]
               for p in msg.iter_parts():
-                  name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or '(unnamed)'
                   payload=p.get_payload(decode=True) or b''
-                  if payload and (name.endswith('.js') or b'/api/v2/student/home' in payload): candidates.append((name,payload))
-              if not candidates: raise SystemExit('NO_JS_MODULE')
-              name,payload=max(candidates,key=lambda x:len(x[1]))
-          else:
-              name,payload='single-script',raw
-          open('/tmp/student.js','wb').write(payload)
-          print('MODULE',name,'BYTES',len(payload),'SHA256',hashlib.sha256(payload).hexdigest())
+                  if b'/api/v2/student/home' in payload: parts.append(payload)
+              if not parts: raise SystemExit('NO_STUDENT_MODULE')
+              payload=max(parts,key=len)
+          else: payload=raw
+          text=payload.decode('utf-8','replace')
+          print('=== DEPLOYED SCOPE-KEY / READ-MODEL FUNCTIONS ===')
+          for needle in ['function accessObjectKey','function opaqueScopeId','function resolveAccess']:
+              pos=text.find(needle)
+              print('\n###',needle)
+              print(text[max(0,pos-800):min(len(text),pos+2400)] if pos>=0 else 'NOT_FOUND')
           PY
 
-      - name: Print module provenance and home-selector neighborhoods
+      - name: Locate the exact rebuild source and READ_MODELS_KV writer across rebuild branches
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import re
-          text=open('/tmp/student.js','r',encoding='utf-8',errors='replace').read()
-          lines=text.splitlines()
+          git fetch --no-tags origin '+refs/heads/rebuild/*:refs/remotes/origin/rebuild/*'
+          mapfile -t refs < <(git for-each-ref --format='%(refname)' 'refs/remotes/origin/rebuild/*')
+          echo "REBUILD_REF_COUNT=${#refs[@]}"
 
-          print('=== SOURCE / MODULE MARKERS ===')
-          for n,line in enumerate(lines,1):
-              s=line.strip()
-              if re.match(r'^//\s*(?:\.\.?/|src/|worker/|shared/|packages/)',s):
-                  print(f'{n}: {s}')
+          echo '=== SOURCE PATH CANDIDATES ==='
+          for ref in "${refs[@]}"; do
+            git ls-tree -r --name-only "$ref" | grep -E '(^|/)(shared/view-model\.js|src/student-worker\.js|access-read-model[^/]*\.js|[^/]*read-model[^/]*\.js|[^/]*access[^/]*sync[^/]*\.js)$' | sed "s#^#$ref #" || true
+          done | sort -u | head -n 500
 
-          needles=[
-              'source: "prepared-access-read-model"',
-              "source: 'prepared-access-read-model'",
-              'prepared-access-read-model',
-              '/api/v2/student/home',
-              'function snapshot(',
-              'snapshot =',
-              'function resolveAccess(',
-              'resolveAccess =',
-              'visibleLessonCount',
-              'openLessonCount',
-              'lockedLessonCount',
-              'catalogueAvailable',
-              'lockedPreview',
-              'maths-year4',
-              'maths-level1',
-              'maths-year5',
-              'maths-level2',
-              'maths-year6',
-              'maths-level3'
-          ]
-          print('\n=== MATCHING LINE NEIGHBORHOODS ===')
-          emitted=set()
-          for needle in needles:
-              for n,line in enumerate(lines,1):
-                  if needle not in line: continue
-                  key=(max(1,n-12),min(len(lines),n+30))
-                  if key in emitted: continue
-                  emitted.add(key)
-                  print(f'\n--- needle={needle!r} line={n} range={key[0]}..{key[1]} ---')
-                  for i in range(key[0],key[1]+1): print(f'{i:05d}: {lines[i-1]}')
+          echo '=== EXACT STRING LOCATIONS ==='
+          for ref in "${refs[@]}"; do
+            for needle in 'Access read model unavailable' 'prepared-access-read-model' 'MATHS_Y6_EXTRA' 'accessObjectKey' 'READ_MODELS_KV.put' 'snapshot.subjects'; do
+              git grep -n -F "$needle" "$ref" -- 2>/dev/null | sed "s#^#$ref | #" || true
+            done
+          done | sort -u | head -n 1000
 
-          print('\n=== FUNCTION NAMES CONTAINING ACCESS/HOME/VIEW/SNAPSHOT/CATALOGUE ===')
-          names=[]
-          patterns=[r'function\s+([A-Za-z_$][\w$]*)\s*\(',r'(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>']
-          for pat in patterns:
-              for m in re.finditer(pat,text):
-                  name=m.group(1)
-                  if re.search(r'access|home|view|snapshot|catalog|summary|lesson',name,re.I): names.append(name)
-          for name in sorted(set(names)): print(name)
-
-          print('\n=== HOME ROUTE LARGE CONTEXT ===')
-          pos=text.find('/api/v2/student/home')
-          if pos>=0:
-              start=max(0,pos-5000); end=min(len(text),pos+10000)
-              print(text[start:end])
-          else:
-              print('HOME_ROUTE_NOT_FOUND')
-
-          print('\n=== PREPARED ACCESS LARGE CONTEXT ===')
-          pos=text.find('prepared-access-read-model')
-          if pos>=0:
-              start=max(0,pos-10000); end=min(len(text),pos+10000)
-              print(text[start:end])
-          else:
-              print('PREPARED_ACCESS_MARKER_NOT_FOUND')
-          PY
+          echo '=== COMMITS TOUCHING LIKELY PRODUCER PATHS ==='
+          git log --all --date=iso --pretty='format:%H %ad %s' -- '**/shared/view-model.js' '**/src/student-worker.js' '**/*access*read*model*.js' '**/*read*model*.js' | head -n 200 || true
 
       - name: Audit complete
-        run: echo 'LIVE_STUDENT_HOME_SELECTOR_TRACE_COMPLETE'
+        run: echo 'PREPARED_ACCESS_SNAPSHOT_PRODUCER_TRACE_COMPLETE'
