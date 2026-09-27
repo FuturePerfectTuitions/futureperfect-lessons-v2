@@ -1,0 +1,41 @@
+name: Y6 L3 SATS prepared-model validation
+
+on:
+  push:
+    branches:
+      - fix/y6-l3-sats-prepared-model-2026-09-27
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          set -euo pipefail
+          node --check rebuild/shared/read-models/view-registry.mjs
+          node --check rebuild/shared/read-models/catalogue.mjs
+          node --check rebuild/shared/read-models/access-snapshot.mjs
+          node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
+          node --check tests/y6-l3-sats-prepared-model-regression.mjs
+      - name: Focused Year 6 L3 SATS regression
+        run: node tests/y6-l3-sats-prepared-model-regression.mjs
+      - name: Checkpoint 2 prepared read-model regression
+        run: node tests/rebuild-checkpoint2-read-models.mjs
+      - name: Checkpoint 8 access parity regression
+        run: node tests/rebuild-checkpoint8-backfill-access-parity.mjs
+      - name: Existing downstream regressions
+        run: |
+          set -euo pipefail
+          node tests/rebuild-checkpoint6-new-student-worker.mjs
+          node tests/rebuild-checkpoint5-auth-capability-core.mjs
+          node tests/rebuild-checkpoint4-dual-write-compatibility.mjs
+          node tests/rebuild-checkpoint3-atomic-publishing.mjs
