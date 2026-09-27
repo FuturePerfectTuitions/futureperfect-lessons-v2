@@ -71,6 +71,20 @@ function authoritativeBatchViewId(value, definitions) {
   return legacyBatchViewId(key);
 }
 
+function currentEquivalentProgramme(input, asOfDate) {
+  const ids = [...new Set((Array.isArray(input?.batchAssignments) ? input.batchAssignments : [])
+    .filter(row => currentAssignment(row, asOfDate))
+    .map(structuredViewId)
+    .filter(id => id === 'maths-year6' || id === 'maths-level3'))];
+  if (ids.length > 1) throw new Error('D1_YEAR6_L3_PROGRAMME_COLLISION');
+  return ids[0] || '';
+}
+
+function explicitDualFullLibrary(input) {
+  const full = new Set((input?.user?.fullLibraries || []).map(upper));
+  return full.has('MATHS_Y6_FULL') && full.has('MATHS_L3_FULL');
+}
+
 function stripTeachingSource(row, forcedViewId = '') {
   const next = { ...(row || {}) };
   delete next.source_batch_code;
@@ -89,12 +103,7 @@ function normaliseAuthoritativeInput(input, asOfDate) {
   const equivalentHistory = assignments
     .map(structuredViewId)
     .filter(id => id === 'maths-year6' || id === 'maths-level3');
-  const currentTeaching = [...new Set(assignments
-    .filter(row => currentAssignment(row, asOfDate))
-    .map(structuredViewId)
-    .filter(id => id === 'maths-year6' || id === 'maths-level3'))];
-  if (currentTeaching.length > 1) throw new Error('D1_YEAR6_L3_PROGRAMME_COLLISION');
-  const currentProgramme = currentTeaching[0] || '';
+  const currentProgramme = currentEquivalentProgramme(input, asOfDate);
   const hasEquivalentD1History = equivalentHistory.length > 0;
 
   // D1 assignment state is authoritative whenever Year6/L3 history exists,
@@ -161,7 +170,19 @@ function hasSatsPresentationAccess(input) {
       .some(row => isYear6SatsLessonId(lessonId(row)));
 }
 
-function decorateAuthoritativeSnapshot(payload, originalInput, catalogue) {
+function demoteDualFullLibraryViews(snapshot, originalInput, asOfDate) {
+  if (!explicitDualFullLibrary(originalInput) || !Array.isArray(snapshot?.views)) return;
+  const currentProgramme = currentEquivalentProgramme(originalInput, asOfDate);
+  for (const view of snapshot.views) {
+    const id = norm(view?.viewId);
+    if (id !== 'maths-year6' && id !== 'maths-level3') continue;
+    if (currentProgramme && id === currentProgramme) continue;
+    view.current = false;
+    view.group = 'previous';
+  }
+}
+
+function decorateAuthoritativeSnapshot(payload, originalInput, catalogue, asOfDate) {
   const snapshot = payload?.snapshot;
   if (!snapshot || !Array.isArray(snapshot.views)) throw new Error('READ_MODEL_COMPILED_SNAPSHOT_INVALID');
 
@@ -198,6 +219,10 @@ function decorateAuthoritativeSnapshot(payload, originalInput, catalogue) {
     snapshot.views.splice(teachingIndex >= 0 ? teachingIndex + 1 : snapshot.views.length, 0, sats);
   }
 
+  // Full Library is access, not current programme identity. Preserve both
+  // catalogues but show any non-D1 equivalent Full Library view under Previous.
+  demoteDualFullLibraryViews(snapshot, originalInput, asOfDate);
+
   const currentTeaching = snapshot.views.filter(view => view?.current && !view?.lockedPreview &&
     (norm(view?.viewId) === 'maths-year6' || norm(view?.viewId) === 'maths-level3'));
   if (currentTeaching.length > 1) throw new Error('COMPILED_YEAR6_L3_PROGRAMME_COLLISION');
@@ -207,7 +232,7 @@ function decorateAuthoritativeSnapshot(payload, originalInput, catalogue) {
 function compileAuthoritativeAccessScope(input, catalogue, scopeId, asOfDate) {
   const normalized = normaliseAuthoritativeInput(input, asOfDate);
   const payload = compileLegacyAccessScope(normalized, catalogue, scopeId, asOfDate);
-  return decorateAuthoritativeSnapshot(payload, input, catalogue);
+  return decorateAuthoritativeSnapshot(payload, input, catalogue, asOfDate);
 }
 
 function kvBindingStore(binding) {
@@ -315,8 +340,11 @@ async function refreshStudentAccessReadModel(env, portalUserIdNorm, options = {}
 export {
   ACCESS_READ_MODEL_SYNC_V2_MARKER,
   authoritativeBatchViewId,
+  currentEquivalentProgramme,
+  explicitDualFullLibrary,
   normaliseAuthoritativeInput,
   hasSatsPresentationAccess,
+  demoteDualFullLibraryViews,
   decorateAuthoritativeSnapshot,
   compileAuthoritativeAccessScope,
   loadStudentAccessInput,
