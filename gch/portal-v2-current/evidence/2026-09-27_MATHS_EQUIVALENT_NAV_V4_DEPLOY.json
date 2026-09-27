@@ -1,0 +1,47 @@
+{
+  "schema": "fpt.portal.evidence.maths-equivalent-navigation-v4.v1",
+  "date": "2026-09-27",
+  "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
+  "triggerEvidence": {
+    "devansh": "At approximately 17:16 BST the live portal still showed Year 6 plus L3 after the earlier v3/frontend repairs.",
+    "kiaan": "At approximately 17:16 BST the live portal still showed Year 4 plus L1 and Year 5 plus L2; owner requires only L1, L2, L3 and 11+ Practice."
+  },
+  "diagnosis": "The previous final normaliser matched assumed canonical view IDs. The new boundary treats the visible current Maths presentation role as authoritative by matching either stable IDs or labels, so prepared/live alias IDs cannot bypass equivalent-card collapse.",
+  "forwardOnlyChanges": {
+    "normaliser": {
+      "path": "worker/src/index-phase20-change15.js",
+      "commit": "e4f054d812c355c2643283127898aafa436db31a",
+      "rule": "Current Year 4/L1 -> L1; Year 5/L2 -> L2; Year 6/L3 -> L3 plus SATS presentation; L3 alone -> no SATS; ordinary Year 6 -> Lessons plus SATS. Preserve the actual L-level navigation target ID when aliases are used."
+    },
+    "regression": {
+      "path": "tests/maths-11plus-level-navigation-verification.mjs",
+      "commit": "067fac1ce1cfcd62e5d8f5663e9e9748a6e34f00",
+      "coverage": "Non-canonical internal IDs with Year/L labels, Kiaan shape, Devansh shape and ordinary Year 6 shape."
+    },
+    "finalBoundary": {
+      "path": "worker/src/index-maths-equivalent-navigation-final.js",
+      "commit": "ba4c94ff0a8f1ee8fb969102757a6a623c89f3c9",
+      "marker": "maths-equivalent-navigation-final-v4"
+    },
+    "preservationGate": {
+      "path": "tests/shared-worker-entrypoint-preservation.mjs",
+      "commit": "1092fdc6352c37a07c393de464674d4f8dca51b2"
+    }
+  },
+  "production": {
+    "workflowRun": 36333711373,
+    "result": "PASS",
+    "workerVersion": "166dc190-7dc4-4f02-bed6-9859b0906ac8",
+    "deployedAtUtc": "2026-09-27T16:34:19Z",
+    "deployedAtEuropeLondon": "2026-09-27T17:34:19+01:00",
+    "entrypoint": "worker/src/index-step10-quiz-bridge.js",
+    "preservation": "PASS: shared Worker composition, quiz bridge, Admin tools, Replace Resource, lesson-release import, Trial runtime, bindings and parent-email routing retained."
+  },
+  "ownerVerification": {
+    "status": "PENDING",
+    "expectedKiaan": ["L1", "L2", "L3", "11+ Practice"],
+    "expectedDevansh": ["L3", "SATS"],
+    "completionRule": "Do not declare CLOSED PASS until fresh owner browser evidence taken after 17:34 BST confirms both outcomes."
+  },
+  "recoveryMode": "FORWARD_ONLY_NO_ROLLBACK"
+}
