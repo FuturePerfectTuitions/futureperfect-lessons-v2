@@ -59,6 +59,14 @@ function safeLessonMetadata(record, viewId) {
   };
 }
 
+function lessonAllowedForDefinition(lessonId, definition) {
+  const id = clean(lessonId).toUpperCase();
+  const include = new Set((definition?.includeLessonIds || []).map(value => clean(value).toUpperCase()).filter(Boolean));
+  const exclude = new Set((definition?.excludeLessonIds || []).map(value => clean(value).toUpperCase()).filter(Boolean));
+  if (include.size && !include.has(id)) return false;
+  return !exclude.has(id);
+}
+
 function compileViewCatalogue(input, viewId) {
   const definition = viewDefinition(viewId);
   if (!definition) return null;
@@ -70,7 +78,7 @@ function compileViewCatalogue(input, viewId) {
   for (const curriculumCode of definition.curricula) {
     const raw = curricula[curriculumCode] ?? curricula[`curriculum:${curriculumCode}`];
     for (const lessonId of lessonIdsFromCurriculum(raw)) {
-      if (seen.has(lessonId)) continue;
+      if (seen.has(lessonId) || !lessonAllowedForDefinition(lessonId, definition)) continue;
       seen.add(lessonId);
       lessonIds.push(lessonId);
     }
@@ -90,6 +98,7 @@ function compileViewCatalogue(input, viewId) {
     schoolYear: definition.schoolYear,
     stream: definition.stream,
     ...(definition.mathsLevel ? { mathsLevel: definition.mathsLevel } : {}),
+    ...(definition.presentationOnly ? { presentationOnly: true } : {}),
     lessonCount: rows.length,
     lessons: rows
   };
@@ -114,6 +123,7 @@ function compileCatalogueReadModel(input, options = {}) {
       schoolYear: view.schoolYear,
       stream: view.stream,
       ...(view.mathsLevel ? { mathsLevel: view.mathsLevel } : {}),
+      ...(view.presentationOnly ? { presentationOnly: true } : {}),
       lessonCount: view.lessonCount
     };
   });
@@ -162,6 +172,7 @@ export {
   displayLessonId,
   cleanStudentTitle,
   safeLessonMetadata,
+  lessonAllowedForDefinition,
   compileViewCatalogue,
   compileCatalogueReadModel,
   assertMetadataOnlyCatalogue
