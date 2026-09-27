@@ -20,9 +20,9 @@ const catalogue = compileCatalogueReadModel({
   }
 });
 
-function assignment(batchKey) {
+function assignment(batchKey, effectiveTo = null) {
   const definition = definitions.find(row => row.batch_key === batchKey);
-  return { ...definition, effective_from:'2026-09-01', effective_to:null, batch_active_from:'2026-09-01', batch_active_to:null };
+  return { ...definition, effective_from:'2026-09-01', effective_to:effectiveTo, batch_active_from:'2026-09-01', batch_active_to:null };
 }
 function compile({ currentBatch, profileBatches=[currentBatch], entitlements=[], pre=[] }) {
   return compileAccessScopeV2({
@@ -60,9 +60,6 @@ const l3PreSatsFromNormalBatch = compile({
 assert.deepEqual(currentMaths(l3PreSatsFromNormalBatch), ['maths-level3:L3:0','maths-sats:SATS:1']);
 assert.equal(l3PreSatsFromNormalBatch.snapshot.lessonAccess.Y6M52.preLessonOnly, true);
 
-// A known stale KV profile batch cannot compete with the current D1 teaching
-// assignment. This is the broader historical-profile case caught by the guarded
-// publisher preflight.
 const l3WithStaleYear6Profile = compile({
   currentBatch:'Y511FM',
   profileBatches:['Y511FM','Y611FM']
@@ -74,5 +71,22 @@ const year6WithStaleL3Profile = compile({
   profileBatches:['Y611FM','Y511FM']
 });
 assert.deepEqual(currentMaths(year6WithStaleL3Profile), ['maths-year6:Lessons:0']);
+
+// Once D1 contains equivalent assignment history, stale profile batches cannot
+// resurrect either curriculum as current after the assignment has ended. The
+// legitimate D1 historical view is retained.
+const historicalInput = {
+  asOfDate,
+  user:{ name:'Fixture', batches:['Y511FM','Y611FM'], upsellViews:[] },
+  batchDefinitions:definitions,
+  batchAssignments:[assignment('Y511FM','2026-09-20')],
+  entitlements:[],
+  onlinePreLessonEntitlements:[]
+};
+const historicalPayload = compileAccessScopeV2(historicalInput, catalogue, { scopeId:'fixture-historical', asOfDate });
+assert.deepEqual(currentMaths(historicalPayload), []);
+const historicalL3 = historicalPayload.snapshot.views.find(v => v.viewId === 'maths-level3');
+assert.equal(Boolean(historicalL3), true);
+assert.equal(historicalL3.current, false);
 
 console.log('Y6_L3_SATS_PROGRAMME_NEUTRAL_ACCESS_V2_PASS');
