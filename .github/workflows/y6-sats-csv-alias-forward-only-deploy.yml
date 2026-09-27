@@ -9,9 +9,16 @@ on:
       - 'worker/src/index-admin-tools.js'
       - 'worker/src/index-phase20-change15.js'
       - 'worker/src/live-student-catalogue-overlay.js'
+      - 'worker/src/access-read-model-sync-v2.js'
+      - 'worker/src/admin-lesson-release-import-reconciled.js'
       - 'worker/src/admin-y6-sats-csv-alias.js'
       - 'worker/src/admin-lesson-release-import-email-reconciled.js'
       - 'worker/src/admin-lesson-release-import-manual-email-reconciled.js'
+      - 'rebuild/adminops/src/lib/compiler.mjs'
+      - 'rebuild/adminops/src/lib/backfill-parity-audit.mjs'
+      - 'rebuild/shared/read-models/access-snapshot.mjs'
+      - 'rebuild/shared/read-models/catalogue.mjs'
+      - 'rebuild/shared/read-models/view-registry.mjs'
       - 'tests/live-entitlement-view-classification-verification.mjs'
       - 'tests/maths-11plus-level-navigation-verification.mjs'
       - 'tests/final-maths-equivalent-navigation-verification.mjs'
@@ -40,7 +47,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify final navigation, entitlement classification, SATs semantics and current composed Worker
+      - name: Verify final navigation, authoritative reconciliation, SATs semantics and current composed Worker
         shell: bash
         run: |
           set -euo pipefail
@@ -48,9 +55,13 @@ jobs:
           node --check worker/src/index-admin-tools.js
           node --check worker/src/index-phase20-change15.js
           node --check worker/src/live-student-catalogue-overlay.js
+          node --check worker/src/access-read-model-sync-v2.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
           node --check worker/src/admin-y6-sats-csv-alias.js
           node --check worker/src/admin-lesson-release-import-email-reconciled.js
           node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
+          node --check rebuild/adminops/src/lib/compiler.mjs
+          node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
           node tests/live-entitlement-view-classification-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
           node tests/final-maths-equivalent-navigation-verification.mjs
@@ -62,7 +73,9 @@ jobs:
           grep -Fq "import currentWorker from './index-maths-equivalent-navigation-final.js';" worker/src/index-admin-tools.js
           grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-maths-equivalent-navigation-final.js
           grep -Fq "import nativePreparedWorker from './index-phase20-change14.js';" worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq "from './access-read-model-sync-v2.js';" worker/src/admin-lesson-release-import-reconciled.js
           grep -Fq 'maths-equivalent-navigation-final-v5-native-authority' worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq 'd1-authoritative-sats-presentation-v2' worker/src/access-read-model-sync-v2.js
           grep -Fq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' worker/src/live-student-catalogue-overlay.js
           echo 'MATHS_EQUIVALENT_NAV_FINAL_PREFLIGHT_PASS'
 
@@ -72,7 +85,7 @@ jobs:
           set -euo pipefail
           bash ops/deploy_current_worker_preserve.sh
 
-      - name: Verify live composition, batch-defined navigation code and live parent routing
+      - name: Verify live composition, authoritative reconciliation and live parent routing
         shell: bash
         run: |
           set -euo pipefail
@@ -94,5 +107,6 @@ jobs:
           grep -aFq 'maths-equivalent-navigation-final-v5-native-authority' /tmp/y6-sats-worker.bin
           grep -aFq 'nativeCurrentMathsAuthority' /tmp/y6-sats-worker.bin
           grep -aFq 'reconcileNativeMathsHome' /tmp/y6-sats-worker.bin
+          grep -aFq 'd1-authoritative-sats-presentation-v2' /tmp/y6-sats-worker.bin
           grep -aFq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' /tmp/y6-sats-worker.bin
           echo 'MATHS_EQUIVALENT_NAV_FINAL_FORWARD_ONLY_DEPLOY_PASS'
