@@ -1,16 +1,17 @@
 {
-  "schema": "fpt.portal.evidence.y6-equivalent-roster-audit.v1",
+  "schema": "fpt.portal.evidence.y6-equivalent-roster-audit.v2",
   "documentType": "READ_ONLY_PRODUCTION_AUDIT_EVIDENCE",
   "date": "2026-09-27",
-  "scope": "Current production Maths Year 6-equivalent roster and entitlement-source audit",
+  "scope": "Current production Maths Year 6-equivalent roster, entitlement distribution and canonical batch-source audit",
   "workflow": ".github/workflows/y6-equivalent-roster-audit.yml",
-  "workflowRun": 36311976128,
+  "workflowRun": 36312288635,
   "workflowResult": "PASS",
-  "privacy": "Aggregate counts only; no student IDs or credentials recorded in this evidence file.",
+  "privacy": "Aggregate counts only; no student IDs, batch codes or credentials recorded in this evidence file.",
   "mutationBoundary": {
     "mode": "READ_ONLY",
     "database": "fpt_portal_v2_db",
     "rowsWritten": 0,
+    "changedDb": false,
     "studentRecordsMutated": false,
     "entitlementsMutated": false,
     "batchAssignmentsMutated": false
@@ -20,23 +21,63 @@
     "ordinaryYear6Students": 6,
     "l3Students": 3,
     "dualCurrentAssignmentStudents": 0,
-    "interpretation": "No current production student is simultaneously assigned to both an ordinary Year 6 Maths batch and an L3 Maths 11+ batch. The duplicate Year 6/L3 navigation observed in the browser is therefore not explained by dual current batch enrolment."
+    "interpretation": "No current production student is simultaneously assigned to both an ordinary Year 6 Maths batch and an L3 Maths 11+ batch. The duplicate Year 6/L3 navigation observed in the browser is not caused by dual current enrolment."
   },
   "l3AccessSourceAudit": {
     "currentL3Students": 3,
     "l3StudentsWithAnyYear6Entitlement": 3,
     "l3StudentsWithSatAccess": 0,
-    "interpretation": "All current L3 students have at least one Year 6 canonical lesson entitlement or PreLesson entitlement even though none has a concurrent Year 6 batch assignment. This proves an entitlement-derived Year 6 view can coexist with the L3 teaching view unless the final navigation response enforces the equivalent-view invariant. The SAT-range query found no current L3 student with a Y6M51..Y6M69 entitlement at audit time, so this evidence does not attribute the duplicate specifically to a SAT entitlement."
+    "interpretation": "All current L3 students have canonical Y6 lesson entitlements because Year 6 and L3 share canonical lesson content. None had a Y6M51..Y6M69 SAT entitlement at audit time, so the duplicate Year 6 card was not caused by SAT access."
+  },
+  "l3CanonicalLessonDistribution": [
+    { "lessonId": "Y6M2.1", "mode": "FULL", "entitlementRows": 3, "students": 3 },
+    { "lessonId": "Y6M2.2", "mode": "FULL", "entitlementRows": 3, "students": 3 },
+    { "lessonId": "Y6M2.3", "mode": "FULL", "entitlementRows": 3, "students": 3 },
+    { "lessonId": "Y6M2.4", "mode": "FULL", "entitlementRows": 2, "students": 2 },
+    { "lessonId": "Y6M2.5", "mode": "FULL", "entitlementRows": 2, "students": 2 },
+    { "lessonId": "Y6M2.4", "mode": "PRELESSON", "entitlementRows": 1, "students": 1 }
+  ],
+  "canonicalBatchSourceClassification": {
+    "full": {
+      "sourceStream": "11plus",
+      "sourceMathsLevel": 3,
+      "sourceSchoolYear": 5,
+      "entitlementRows": 13,
+      "students": 3
+    },
+    "prelesson": {
+      "sourceStream": "11plus",
+      "sourceMathsLevel": 3,
+      "sourceSchoolYear": 5,
+      "entitlementRows": 1,
+      "students": 1
+    },
+    "interpretation": "Every audited canonical Y6 entitlement held by a current L3 student resolves through batch_definitions to an 11plus maths_level=3 source. These are L3 entitlements over shared canonical lesson IDs, not ordinary Year 6 enrolments."
+  },
+  "rootCause": {
+    "classification": "LIVE_CATALOGUE_ENTITLEMENT_STREAM_HEURISTIC_DEFECT",
+    "source": "worker/src/live-student-catalogue-overlay.js",
+    "defectiveRule": "The live catalogue overlay inferred normal-vs-11plus from whether the batch-code text contained the substring '11'.",
+    "whyItFailed": "Valid current L3 batch definitions are stream=11plus, maths_level=3 but their batch-code text is not required to contain '11'. The overlay therefore treated L3 canonical Y6 entitlements as ordinary Year 6 access, producing an open Year 6 alias while L3 appeared locked.",
+    "canonicalAuthority": "batch_definitions.subject/stream/school_year/maths_level",
+    "correction": "Live entitlement classification now joins batch_definitions and uses the canonical batch definition. Maths Year/L equivalent pairs are treated as one teaching curriculum for access while final navigation exposes only the student's programme label."
   },
   "runtimeRuleValidatedByAudit": {
-    "equivalentPairs": [
-      "Year 4/L1",
-      "Year 5/L2",
-      "Year 6/L3"
-    ],
+    "equivalentPairs": ["Year 4/L1", "Year 5/L2", "Year 6/L3"],
     "year6L3Presentation": "L3 + SATS",
     "ordinaryYear6Presentation": "Lessons + SATS",
-    "reason": "Presentation must be derived from programme/equivalent-view rules at the final response boundary rather than by exposing every entitlement-derived curriculum alias as a separate teaching card."
+    "accessRule": "Equivalent Maths Year/L presentations may share canonical lesson entitlements, but the home screen must expose one teaching-programme card only.",
+    "satsRule": "SATS remains a separate navigation surface and does not create a second Year 6 teaching card."
   },
-  "closureBoundary": "Production roster and entitlement-source audit is complete. The navigation incident remains pending owner browser verification of the final-boundary deployment on representative live students."
+  "productionRepair": {
+    "liveOverlayCommit": "b4eeb7b770936329fe561ec1f9f39e70bb6709ec",
+    "classificationTestCommit": "154c156b843979fe41224754c56820a27ff7dc24",
+    "finalHomeRefreshCommit": "95d78fec4dc8901e4d5744a7f4452d42338a94e6",
+    "runtimeMarkerCommit": "b4e5fe5b69e70c830ddca6a2b093aa7159d0280f",
+    "deploymentWorkflowRun": 36312702561,
+    "deploymentResult": "PASS",
+    "workerVersion": "d96188c3-5909-4828-bfbf-f0b471d23225",
+    "verification": "Preflight, forward-only deployment, live composition, runtime markers, shared Worker capabilities, bindings and live parent-email routing all passed."
+  },
+  "closureBoundary": "Production audit and forward-only deployment are complete. Owner browser verification of Devansh and representative ordinary Year 6/L3 students remains required before this incident is CLOSED PASS."
 }
