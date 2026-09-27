@@ -14,6 +14,7 @@ on:
       - 'worker/src/admin-lesson-release-import-manual-email-reconciled.js'
       - 'tests/live-entitlement-view-classification-verification.mjs'
       - 'tests/maths-11plus-level-navigation-verification.mjs'
+      - 'tests/final-maths-equivalent-navigation-verification.mjs'
       - 'tests/shared-worker-entrypoint-preservation.mjs'
       - 'tests/y6-sats-csv-alias-verification.mjs'
       - 'ops/deploy_current_worker_preserve.sh'
@@ -31,7 +32,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Forward-only batch-defined Maths equivalent navigation and Y6 SATs fix
+      DEPLOY_MESSAGE: Forward-only batch-defined Maths equivalent navigation and conditional L3 SATS fix
 
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +53,7 @@ jobs:
           node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
           node tests/live-entitlement-view-classification-verification.mjs
           node tests/maths-11plus-level-navigation-verification.mjs
+          node tests/final-maths-equivalent-navigation-verification.mjs
           node tests/y6-sats-csv-alias-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/y6-sats-direct-release-verification.mjs
@@ -87,6 +89,7 @@ jobs:
           grep -aFq 'Y6SM' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-year6-lessons' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-sats' /tmp/y6-sats-worker.bin
-          grep -aFq 'maths-equivalent-navigation-final-v2' /tmp/y6-sats-worker.bin
+          grep -aFq 'maths-equivalent-navigation-final-v3' /tmp/y6-sats-worker.bin
+          grep -aFq 'suppressUnreleasedL3Sats' /tmp/y6-sats-worker.bin
           grep -aFq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' /tmp/y6-sats-worker.bin
           echo 'MATHS_EQUIVALENT_NAV_FINAL_FORWARD_ONLY_DEPLOY_PASS'
