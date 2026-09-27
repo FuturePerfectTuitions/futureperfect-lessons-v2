@@ -1,11 +1,11 @@
 {
-  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v2",
+  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v3",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
-  "effectiveDate": "2026-09-26",
-  "scope": "PUBLIC_STUDENT_V2.Year6SatsReleaseSemantics",
+  "effectiveDate": "2026-09-27",
+  "scope": "PUBLIC_STUDENT_V2.Year6SatsReleaseSemanticsAndNavigationPresentation",
   "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
-  "precedence": "This override is higher authority only for Year 6 SAT lesson access/release semantics and SAT CSV/display-code resolution. All non-conflicting Portal V2 authority remains binding.",
+  "precedence": "This override is higher authority only for Year 6 SAT lesson access/release semantics, SAT CSV/display-code resolution, and the Year 6/L3/SATS Maths navigation presentation. All non-conflicting Portal V2 authority remains binding.",
   "ownerRequirement": {
     "canonicalSatLessonIds": "Y6M51..Y6M69",
     "authoritativeCsvAndDisplaySatLessonIds": "Y6SM1..Y6SM19",
@@ -17,7 +17,13 @@
       "FULL when the normal completed/continuing lesson release grants core access"
     ],
     "ordinaryYear6Boundary": "Normal Year 6 lessons retain existing full-library and direct-release semantics.",
-    "displayPreservation": "Admin tables, CSV-facing state and parent-facing lesson labels retain Y6SMn. Internal resolver compatibility may translate Y6SMn to legacy Y6MSn and then canonical Y6M(50+n), but must not expose the legacy alias to users."
+    "displayPreservation": "Admin tables, CSV-facing state and parent-facing lesson labels retain Y6SMn. Internal resolver compatibility may translate Y6SMn to legacy Y6MSn and then canonical Y6M(50+n), but must not expose the legacy alias to users.",
+    "navigationPresentation": {
+      "invariant": "A Year 6-equivalent Maths student must never be shown both Year 6 and L3 as separate teaching curriculum choices merely because SAT access exists.",
+      "l3Student": "Show L3 and SATS. The SATS card exposes only SAT lessons available to that student; SAT direct release must not create a second Year 6 teaching card.",
+      "ordinaryYear6Student": "Show Lessons and SATS. Lessons contains the normal Year 6 teaching curriculum; SATS contains the SAT lesson subset.",
+      "accessBoundary": "This is a navigation/presentation split only. It must not broaden lesson entitlements or convert SAT direct-release access into full Year 6 access."
+    }
   },
   "implementation": {
     "accessSource": "worker/src/access-read-model-sync.js",
@@ -27,6 +33,12 @@
     "manualEmailReconciledImporter": "worker/src/admin-lesson-release-import-manual-email-reconciled.js",
     "canonicalResolver": "worker/src/admin-lesson-release-import.js",
     "mapping": "Y6SM1..Y6SM19 -> internal compatibility Y6MS1..Y6MS19 -> canonical Y6M51..Y6M69",
+    "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
+    "frontendAsset": "assets/year6-display-sequence-fix.js",
+    "frontendNavigationCommit": "998f19895c8a7616037c8fd1d71c749645a676f1",
+    "frontendCacheBustCommit": "0e9d9c1e162dba9c6778fb5c262107fc0287efee",
+    "frontendPagesRun": 36308499425,
+    "frontendPagesResult": "PASS",
     "functionalCommits": [
       "68fb42d05cba8a7effe6a437386211d030c5f027",
       "10a9bdb03ce58e0fd886ac0059c8b5f6f02ad11b",
@@ -37,7 +49,8 @@
     ],
     "productionWorkflowRun": 36256460288,
     "productionWorkflowResult": "PASS",
-    "productionDeploymentVerified": true
+    "productionDeploymentVerified": true,
+    "ownerBrowserVerification": "PENDING_POST_CACHE_BUST_RETEST"
   },
   "verificationMatrix": [
     "Y6SM1 resolves to canonical Y6M51.",
@@ -47,13 +60,17 @@
     "MATHS_Y6_FULL alone does not open Y6M51..Y6M69.",
     "A direct canonical SAT entitlement opens only the released SAT lesson FULL.",
     "A normal SAT PreLesson entitlement opens only that SAT lesson PRELESSON_ONLY.",
+    "An L3 Year 6-equivalent student is presented with L3 plus SATS, not L3 plus Year 6.",
+    "An ordinary Year 6 student is presented with Lessons plus SATS.",
+    "SATS navigation filters to SAT lessons without widening access.",
     "Shared production Worker retains quiz bridge, Admin tools, Trial runtime, resource replacement, lesson release import and parent email capabilities."
   ],
   "preservationInvariants": [
     "Do not alter normal Year 6 lesson access.",
     "Do not renumber canonical Y6 SAT lesson IDs.",
     "Do not expose Y6MSn as the owner-facing code; Y6SMn is authoritative for CSV/display use.",
+    "Do not use a second Year 6 teaching card to represent SAT access for an L3 student.",
     "Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR, resource replacement or quiz bridge behaviour.",
-    "Student-visible completion still requires prepared access reconciliation/readback."
+    "Student-visible completion still requires prepared access reconciliation/readback and, for frontend presentation changes, successful Pages deployment plus browser verification."
   ]
 }
