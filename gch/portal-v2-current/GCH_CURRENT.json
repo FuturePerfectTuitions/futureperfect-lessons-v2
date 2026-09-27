@@ -3,7 +3,7 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-27",
-  "authorityVersion": "6.1-forward-only-maths-equivalent-navigation-pending-deploy",
+  "authorityVersion": "6.1-forward-only-maths-equivalent-navigation-production-pass",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
   "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, server-authoritative Maths equivalent Year/L-level navigation, manual parent-email delivery, and the permanent forward-only production-recovery rule.",
@@ -57,7 +57,7 @@
   "latestRepositoryChange": {
     "name": "Server-authoritative Maths equivalent Year/L-level navigation with Year 6 Lessons/SATS split",
     "date": "2026-09-27",
-    "status": "SOURCE_VERIFIED_PENDING_FORWARD_ONLY_PRODUCTION_DEPLOY",
+    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
     "equivalentPairs": ["Year 4/L1", "Year 5/L2", "Year 6/L3"],
     "year6Presentation": "L3 students: L3 + SATS; ordinary Year 6 students: Lessons + SATS",
@@ -65,10 +65,12 @@
     "canonicalLessonIds": "Y6M51..Y6M69",
     "legacyCompatibilityAlias": "Y6MS1..Y6MS19",
     "serverNavigationFunctionalCommit": "32ce803d847469c8bb5915e50fc6111506f9242a",
-    "functionalHead": "881665f4cbd1a1a16d51979bbf6da5690a0b9be7",
-    "productionWorkflowRun": null,
-    "productionWorkflowResult": "PENDING_FORWARD_ONLY_DEPLOY",
-    "ownerBrowserVerification": "PENDING_DEVANSH_AND_KIAAN_RETEST_AFTER_SERVER_DEPLOY"
+    "verificationCommit": "881665f4cbd1a1a16d51979bbf6da5690a0b9be7",
+    "productionDeploymentCommit": "8f7e5effaadaaa465a4249bb17c7d444bcb688ec",
+    "productionWorkflowRun": 36310766438,
+    "productionWorkflowResult": "PASS",
+    "preservationVerification": "PASS",
+    "ownerBrowserVerification": "PENDING_DEVANSH_AND_KIAAN_RETEST"
   },
   "latestProductionIncidentRecovery": {
     "name": "Parent-email test-routing/idempotency recovery",
