@@ -32,7 +32,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Forward-only live-label Maths equivalent navigation fix
+      DEPLOY_MESSAGE: Forward-only native prepared-model Maths programme and SATS presentation fix
 
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +61,8 @@ jobs:
           grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
           grep -Fq "import currentWorker from './index-maths-equivalent-navigation-final.js';" worker/src/index-admin-tools.js
           grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq "import nativePreparedWorker from './index-phase20-change14.js';" worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq 'maths-equivalent-navigation-final-v5-native-authority' worker/src/index-maths-equivalent-navigation-final.js
           grep -Fq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' worker/src/live-student-catalogue-overlay.js
           echo 'MATHS_EQUIVALENT_NAV_FINAL_PREFLIGHT_PASS'
 
@@ -89,7 +91,8 @@ jobs:
           grep -aFq 'Y6SM' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-year6-lessons' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-sats' /tmp/y6-sats-worker.bin
-          grep -aFq 'maths-equivalent-navigation-final-v4' /tmp/y6-sats-worker.bin
-          grep -aFq 'mathsPresentationRole' /tmp/y6-sats-worker.bin
+          grep -aFq 'maths-equivalent-navigation-final-v5-native-authority' /tmp/y6-sats-worker.bin
+          grep -aFq 'nativeCurrentMathsAuthority' /tmp/y6-sats-worker.bin
+          grep -aFq 'reconcileNativeMathsHome' /tmp/y6-sats-worker.bin
           grep -aFq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' /tmp/y6-sats-worker.bin
           echo 'MATHS_EQUIVALENT_NAV_FINAL_FORWARD_ONLY_DEPLOY_PASS'
