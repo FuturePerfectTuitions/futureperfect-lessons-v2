@@ -3,6 +3,7 @@ import {
   normaliseMathsEquivalentHome,
   splitYear6Lessons
 } from './index-phase20-change15.js';
+import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
 const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v2';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
@@ -18,6 +19,7 @@ function responseLike(response, body) {
   headers.set('content-type', 'application/json; charset=utf-8');
   headers.set('cache-control', 'no-store');
   headers.set('x-fpt-maths-equivalent-nav', FINAL_MATHS_EQUIVALENT_NAV_MARKER);
+  headers.set('x-fpt-entitlement-classification', LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER);
   headers.delete('content-length');
   return new Response(JSON.stringify(body), {
     status:response?.status ?? 200,
