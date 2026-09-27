@@ -1,5 +1,5 @@
 {
-  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v4",
+  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v5",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
   "effectiveDate": "2026-09-27",
@@ -20,7 +20,7 @@
     "displayPreservation": "Admin tables, CSV-facing state and parent-facing lesson labels retain Y6SMn. Internal resolver compatibility may translate Y6SMn to legacy Y6MSn and then canonical Y6M(50+n), but must not expose the legacy alias to users.",
     "navigationPresentation": {
       "globalEquivalentRule": "A Maths student must never be shown both members of an equivalent curriculum pair: Year 4/L1, Year 5/L2, or Year 6/L3. If the L-level exists, the L-level is the teaching-curriculum presentation.",
-      "l3Student": "Show L3 and SATS, never Year 6 and L3. The SATS card exposes only the Year 6 SAT subset authorised for that student.",
+      "l3Student": "Show L3 and SATS, never Year 6 and L3. The SATS card exposes the Year 6 SAT subset without widening entitlement.",
       "ordinaryYear6Student": "Show Lessons and SATS. Lessons contains the normal Year 6 teaching curriculum; SATS contains the SAT lesson subset.",
       "year4Level1": "If Year 4 and L1 are both present for the same Maths curriculum, present L1 only.",
       "year5Level2": "If Year 5 and L2 are both present for the same Maths curriculum, present L2 only.",
@@ -35,10 +35,17 @@
     "manualEmailReconciledImporter": "worker/src/admin-lesson-release-import-manual-email-reconciled.js",
     "canonicalResolver": "worker/src/admin-lesson-release-import.js",
     "mapping": "Y6SM1..Y6SM19 -> internal compatibility Y6MS1..Y6MS19 -> canonical Y6M51..Y6M69",
-    "serverNavigationSource": "worker/src/index-phase20-change15.js",
-    "serverNavigationFunctionalCommit": "32ce803d847469c8bb5915e50fc6111506f9242a",
-    "serverNavigationVerificationCommit": "881665f4cbd1a1a16d51979bbf6da5690a0b9be7",
-    "productionDeploymentCommit": "8f7e5effaadaaa465a4249bb17c7d444bcb688ec",
+    "lowerNavigationSource": "worker/src/index-phase20-change15.js",
+    "lowerNavigationFunctionalCommit": "32ce803d847469c8bb5915e50fc6111506f9242a",
+    "lowerNavigationVerificationCommit": "881665f4cbd1a1a16d51979bbf6da5690a0b9be7",
+    "finalNavigationSource": "worker/src/index-maths-equivalent-navigation-final.js",
+    "finalCompositionSource": "worker/src/index-admin-tools.js",
+    "finalCompositionRule": "index-admin-tools.js delegates ordinary requests to index-maths-equivalent-navigation-final.js; that wrapper delegates to the complete current index-phase24-trial-vr.js chain and normalises the final /api/v1/student/home response only after all lower student layers have completed.",
+    "finalNavigationMarker": "maths-equivalent-navigation-final-v1",
+    "finalWrapperCommit": "afc82b615de839f146b09447a2c6f6cede897e77",
+    "finalCompositionCommit": "a121c474594d5f37d1b41ff853cedb83aca9bd32",
+    "finalCompositionVerificationCommit": "274ca30d59178250695d932e483f4a5805944ca6",
+    "finalProductionDeploymentCommit": "a013b6f3ac19b478f267f11c6b5de6ca522d54ce",
     "syntheticPresentationViews": {
       "maths-year6-lessons": "delegates authorization to canonical maths-year6 and filters out Y6 SAT lessons",
       "maths-sats": "delegates authorization to canonical maths-year6 and filters to Y6 SAT lessons"
@@ -46,13 +53,24 @@
     "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
     "frontendAsset": "assets/year6-display-sequence-fix.js",
     "frontendFallbackCompatibilityCommit": "261f8975b07f3f5eb739a3fb8e5601ce9289fa33",
-    "previousFrontendPagesRun": 36308967999,
-    "previousFrontendPagesResult": "PASS_BUT_BROWSER_STILL_SHOWED_DUPLICATES_BECAUSE_SERVER_HOME_REMAINED_DUPLICATED",
-    "productionWorkflowRun": 36310766438,
+    "frontendRule": "The DOM compatibility layer must preserve real server-supplied L3+SATS or Lessons+SATS cards and must not manufacture a duplicate SATS card when the server already supplied one.",
+    "productionWorkflowRun": 36311592558,
     "productionWorkflowResult": "PASS",
     "productionDeploymentVerified": true,
-    "productionPreservationVerification": "PASS: current composed Worker preflight, forward-only deploy, live bindings, parent-email live routing, quiz bridge, Replace Resource, lesson-release import, Trial runtime, Y6SM alias and new maths-year6-lessons/maths-sats markers all verified by workflow",
-    "ownerBrowserVerification": "PENDING_DEVANSH_AND_KIAAN_RETEST"
+    "productionPreservationVerification": "PASS: final navigation syntax/composition, current shared Worker preflight, forward-only deploy, live bindings, parent-email live routing, quiz bridge, Replace Resource, lesson-release import, Trial runtime, Y6SM alias, maths-year6-lessons, maths-sats and maths-equivalent-navigation-final-v1 markers all verified by workflow.",
+    "ownerBrowserVerification": "PENDING_POST_FINAL_BOUNDARY_RETEST"
+  },
+  "incident20260927FinalComposition": {
+    "status": "FINAL_BOUNDARY_REPAIR_DEPLOYED_PENDING_OWNER_BROWSER_RETEST",
+    "ownerEvidenceBeforeRepair": "After the earlier server-navigation deployment and frontend Pages deployment had both reported PASS, Devansh's live Maths screen still showed Year 6 (1 open, 66 locked) and L3 (0 open, 43 locked).",
+    "meaning": "The earlier completion claim was invalid. Presence of change15 markers in the deployed bundle and passing pure-function tests did not prove that the final response returned through the complete shared-Worker composition satisfied the navigation invariant.",
+    "rootCauseClassification": "SHARED_WORKER_COMPOSITION_POSITION_DEFECT",
+    "rootCause": "Equivalent-view normalisation existed in a lower student phase. The deployment verification proved that code was bundled but did not prove the final /api/v1/student/home response at the Admin-tools boundary was normalised. The owner browser readback proved an unnormalised Year 6 + L3 response still escaped the complete production chain.",
+    "forwardOnlyRepair": "Add an outer final navigation wrapper immediately beneath index-admin-tools.js and above the complete phase24 student chain. It re-applies equivalent-view normalisation to the final home response and handles synthetic Lessons/SATS lists at that final boundary. No rollback or older Worker deployment was used.",
+    "verificationImprovement": "Shared-worker preservation CI now asserts the exact index-admin-tools -> final Maths wrapper -> phase24 composition, and production deployment greps for the runtime-used maths-equivalent-navigation-final-v1 marker in the live Worker bundle.",
+    "productionWorkflowRun": 36311592558,
+    "productionWorkflowResult": "PASS",
+    "remainingGate": "Owner browser retest of Devansh and a representative ordinary Year 6 student; representative L3/Year aliases such as Kiaan should also be checked before closure."
   },
   "verificationMatrix": [
     "Y6SM1 resolves to canonical Y6M51.",
@@ -67,7 +85,8 @@
     "Year 6 plus L3 collapses to L3 plus SATS; Year 6 is not retained as a second teaching card.",
     "An ordinary Year 6 student is presented with Lessons plus SATS.",
     "SATS navigation filters to Y6M51..Y6M69/Y6SM1..Y6SM19 without widening access.",
-    "Synthetic Lessons/SATS view IDs are mapped back to canonical maths-year6 before lower authorization/resource handling.",
+    "Synthetic Lessons/SATS view IDs map back to canonical maths-year6 before lower authorization/resource handling.",
+    "Final /api/v1/student/home normalisation occurs above the complete phase24 student chain and below Admin Tools.",
     "Trial selected-view semantics remain untouched.",
     "Shared production Worker retains quiz bridge, Admin tools, Trial runtime, resource replacement, lesson release import, protected-answer behaviour and parent email capabilities."
   ],
@@ -78,6 +97,6 @@
     "Do not expose Y6MSn as the owner-facing code; Y6SMn is authoritative for CSV/display use.",
     "Do not use Year 4, Year 5 or Year 6 duplicate cards when their L1, L2 or L3 equivalent is already present.",
     "Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR, resource replacement, parent-email routing or quiz bridge behaviour.",
-    "Do not declare this repair closed until owner browser evidence confirms representative live students after the successful production deployment."
+    "A marker being present in the Worker bundle is not sufficient browser verification; do not declare this repair closed until owner browser evidence confirms representative live students after the final-boundary deployment."
   ]
 }
