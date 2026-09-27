@@ -24,10 +24,10 @@ function assignment(batchKey) {
   const definition = definitions.find(row => row.batch_key === batchKey);
   return { ...definition, effective_from:'2026-09-01', effective_to:null, batch_active_from:'2026-09-01', batch_active_to:null };
 }
-function compile({ currentBatch, entitlements=[], pre=[] }) {
+function compile({ currentBatch, profileBatches=[currentBatch], entitlements=[], pre=[] }) {
   return compileAccessScopeV2({
     asOfDate,
-    user:{ name:'Fixture', batches:[currentBatch], upsellViews:[] },
+    user:{ name:'Fixture', batches:profileBatches, upsellViews:[] },
     batchDefinitions:definitions,
     batchAssignments:[assignment(currentBatch)],
     entitlements,
@@ -59,5 +59,20 @@ const l3PreSatsFromNormalBatch = compile({
 });
 assert.deepEqual(currentMaths(l3PreSatsFromNormalBatch), ['maths-level3:L3:0','maths-sats:SATS:1']);
 assert.equal(l3PreSatsFromNormalBatch.snapshot.lessonAccess.Y6M52.preLessonOnly, true);
+
+// A known stale KV profile batch cannot compete with the current D1 teaching
+// assignment. This is the broader historical-profile case caught by the guarded
+// publisher preflight.
+const l3WithStaleYear6Profile = compile({
+  currentBatch:'Y511FM',
+  profileBatches:['Y511FM','Y611FM']
+});
+assert.deepEqual(currentMaths(l3WithStaleYear6Profile), ['maths-level3:L3:0']);
+
+const year6WithStaleL3Profile = compile({
+  currentBatch:'Y611FM',
+  profileBatches:['Y611FM','Y511FM']
+});
+assert.deepEqual(currentMaths(year6WithStaleL3Profile), ['maths-year6:Lessons:0']);
 
 console.log('Y6_L3_SATS_PROGRAMME_NEUTRAL_ACCESS_V2_PASS');
