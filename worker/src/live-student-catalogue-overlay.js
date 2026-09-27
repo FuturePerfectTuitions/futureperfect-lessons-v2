@@ -2,10 +2,17 @@ import { VIEW_CURRICULA } from './phase11-navigation-cache.js';
 
 const LIVE_STUDENT_CATALOGUE_OVERLAY_MARKER = 'LIVE_STUDENT_CATALOGUE_OVERLAY_V1';
 const LIVE_HOME_COUNTS_AUTHORITY_MARKER = 'LIVE_HOME_COUNTS_AUTHORITY_V1';
+const LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER = 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1';
 const PRELESSON_MESSAGE = 'Only PreLesson Sheets are available before the lesson. Other resources will unlock once the lesson starts.';
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
+
+const MATHS_EQUIVALENT_VIEW_GROUPS = Object.freeze([
+  Object.freeze(['maths-year4', 'maths-level1']),
+  Object.freeze(['maths-year5', 'maths-level2']),
+  Object.freeze(['maths-year6', 'maths-level3'])
+]);
 
 function rawCatalogueItems(raw) {
   if (Array.isArray(raw)) return raw;
@@ -115,8 +122,47 @@ function elevenPlusView(viewId) {
   return /^maths-level[1-3]$/.test(id) || /-11plus$/.test(id);
 }
 
+function batchDefinitionViewId(row) {
+  const subject = norm(row?.batchSubject ?? row?.batch_subject);
+  const stream = norm(row?.batchStream ?? row?.batch_stream);
+  const year = Number(row?.batchSchoolYear ?? row?.batch_school_year ?? 0);
+  const mathsLevel = Number(row?.batchMathsLevel ?? row?.batch_maths_level ?? 0);
+
+  if (subject === 'maths') {
+    if (stream === '11plus') {
+      const level = mathsLevel >= 1 && mathsLevel <= 3 ? mathsLevel : year - 3;
+      return level >= 1 && level <= 3 ? `maths-level${level}` : '';
+    }
+    return year >= 2 && year <= 6 ? `maths-year${year}` : '';
+  }
+
+  if (subject === 'english') {
+    if (stream === '11plus') return year === 4 || year === 5 ? `english-year${year}-11plus` : '';
+    return year >= 2 && year <= 6 ? `english-year${year}` : '';
+  }
+
+  return '';
+}
+
+function mathsEquivalentViews(left, right) {
+  const a = norm(left);
+  const b = norm(right);
+  if (!a || !b) return false;
+  return MATHS_EQUIVALENT_VIEW_GROUPS.some(group => group.includes(a) && group.includes(b));
+}
+
 function entitlementMatchesView(row, record, viewId) {
   if (!row || !record || !hasView(record, viewId)) return false;
+  const target = norm(viewId);
+  const sourceView = batchDefinitionViewId(row);
+
+  // Canonical batch definitions are authoritative. Maths Year/L pairs share the
+  // same teaching curriculum, so an entitlement may be presented through either
+  // member of its equivalent pair while navigation decides which single card is
+  // visible. This preserves transfers and avoids batch-code naming heuristics.
+  if (sourceView) return sourceView === target || mathsEquivalentViews(sourceView, target);
+
+  // Compatibility only for legacy rows whose batch definition no longer exists.
   const batchKey = clean(row.batchKey);
   if (!batchKey) return false;
   return /11/.test(batchKey) === elevenPlusView(viewId);
@@ -203,14 +249,28 @@ async function accessState(env, portalUserIdNorm) {
   const accessPromise = env?.DB
     ? Promise.all([
         env.DB.prepare(
-          `SELECT lesson_id, source_batch_code
-           FROM lesson_entitlements
-           WHERE portal_user_id_norm = ? AND core_access = 1`
+          `SELECT
+             e.lesson_id,
+             e.source_batch_code,
+             b.subject AS batch_subject,
+             b.stream AS batch_stream,
+             b.school_year AS batch_school_year,
+             b.maths_level AS batch_maths_level
+           FROM lesson_entitlements e
+           LEFT JOIN batch_definitions b ON b.batch_key = e.source_batch_code
+           WHERE e.portal_user_id_norm = ? AND e.core_access = 1`
         ).bind(portalUserIdNorm).all(),
         env.DB.prepare(
-          `SELECT lesson_id, batch_key
-           FROM online_prelesson_entitlements
-           WHERE portal_user_id_norm = ?`
+          `SELECT
+             e.lesson_id,
+             e.batch_key,
+             b.subject AS batch_subject,
+             b.stream AS batch_stream,
+             b.school_year AS batch_school_year,
+             b.maths_level AS batch_maths_level
+           FROM online_prelesson_entitlements e
+           LEFT JOIN batch_definitions b ON b.batch_key = e.batch_key
+           WHERE e.portal_user_id_norm = ?`
         ).bind(portalUserIdNorm).all()
       ]).catch(() => [])
     : Promise.resolve([]);
@@ -230,13 +290,25 @@ async function accessState(env, portalUserIdNorm) {
     const lessonId = clean(row?.lesson_id);
     if (!lessonId) continue;
     if (!result.fullByLesson.has(lessonId)) result.fullByLesson.set(lessonId, []);
-    result.fullByLesson.get(lessonId).push({ batchKey:clean(row?.source_batch_code) });
+    result.fullByLesson.get(lessonId).push({
+      batchKey:clean(row?.source_batch_code),
+      batchSubject:clean(row?.batch_subject),
+      batchStream:clean(row?.batch_stream),
+      batchSchoolYear:row?.batch_school_year,
+      batchMathsLevel:row?.batch_maths_level
+    });
   }
   for (const row of Array.isArray(pre?.results) ? pre.results : []) {
     const lessonId = clean(row?.lesson_id);
     if (!lessonId) continue;
     if (!result.preByLesson.has(lessonId)) result.preByLesson.set(lessonId, []);
-    result.preByLesson.get(lessonId).push({ batchKey:clean(row?.batch_key) });
+    result.preByLesson.get(lessonId).push({
+      batchKey:clean(row?.batch_key),
+      batchSubject:clean(row?.batch_subject),
+      batchStream:clean(row?.batch_stream),
+      batchSchoolYear:row?.batch_school_year,
+      batchMathsLevel:row?.batch_maths_level
+    });
   }
   return result;
 }
@@ -420,11 +492,14 @@ async function repairLiveStudentCatalogueResponse(request, env, ctx, response, b
 export {
   LIVE_STUDENT_CATALOGUE_OVERLAY_MARKER,
   LIVE_HOME_COUNTS_AUTHORITY_MARKER,
+  LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER,
   lessonIdsFromCurriculum,
   displayLessonId,
   studentTitle,
   compareSequentialDisplayLessons,
   fullLibraryForView,
+  batchDefinitionViewId,
+  mathsEquivalentViews,
   entitlementMatchesView,
   liveCatalogueForView,
   repairHomeCatalogueCounts,
