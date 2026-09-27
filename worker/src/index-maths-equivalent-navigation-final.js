@@ -4,10 +4,11 @@ import {
   splitYear6Lessons
 } from './index-phase20-change15.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v1';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v2';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
+const L3_VIEW = 'maths-level3';
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
@@ -41,9 +42,9 @@ function syntheticListMatch(url) {
   return kind ? { kind, viewId:norm(viewId) } : null;
 }
 
-function canonicalYear6Request(request) {
+function viewListRequest(request, viewId) {
   const url = new URL(request.url);
-  url.pathname = `/api/v1/student/views/${encodeURIComponent(YEAR6_CANONICAL_VIEW)}/lessons`;
+  url.pathname = `/api/v1/student/views/${encodeURIComponent(viewId)}/lessons`;
   url.search = '';
   return new Request(url.toString(), request);
 }
@@ -73,22 +74,48 @@ function syntheticViewSummary(base, kind, rows) {
   };
 }
 
-async function canonicalYear6List(request, env, ctx) {
-  const response = await currentWorker.fetch(canonicalYear6Request(request), env, ctx);
-  if (!response.ok) return { response, body:null, split:null };
+async function loadViewList(request, env, ctx, viewId) {
+  const response = await currentWorker.fetch(viewListRequest(request, viewId), env, ctx);
+  if (!response.ok) return { response, body:null, rows:null };
   const body = await response.clone().json().catch(() => null);
-  if (!body?.ok || !Array.isArray(body.lessons)) return { response, body, split:null };
-  return { response, body, split:splitYear6Lessons(body.lessons) };
+  if (!body?.ok || !Array.isArray(body.lessons)) return { response, body, rows:null };
+  return { response, body, rows:body.lessons };
 }
 
-function homeHasYear6Equivalent(body) {
+async function canonicalYear6List(request, env, ctx) {
+  const loaded = await loadViewList(request, env, ctx, YEAR6_CANONICAL_VIEW);
+  return {
+    ...loaded,
+    split:loaded.rows ? splitYear6Lessons(loaded.rows) : null
+  };
+}
+
+function mathsViews(body) {
   const maths = Array.isArray(body?.subjects)
     ? body.subjects.find(subject => norm(subject?.subject) === 'maths')
     : null;
-  return Array.isArray(maths?.views) && maths.views.some(view => {
+  return Array.isArray(maths?.views) ? maths.views : [];
+}
+
+function homeHasYear6Equivalent(body) {
+  return mathsViews(body).some(view => {
     const id = norm(view?.viewId);
-    return id === YEAR6_CANONICAL_VIEW || id === 'maths-level3';
+    return id === YEAR6_CANONICAL_VIEW || id === L3_VIEW;
   });
+}
+
+function homeHasView(body, viewId) {
+  const wanted = norm(viewId);
+  return mathsViews(body).some(view => norm(view?.viewId) === wanted);
+}
+
+function refreshHomeViewSummary(body, viewId, rows) {
+  if (!Array.isArray(rows)) return false;
+  const wanted = norm(viewId);
+  const view = mathsViews(body).find(item => norm(item?.viewId) === wanted);
+  if (!view) return false;
+  Object.assign(view, countSummary(rows), { catalogueAvailable:true });
+  return true;
 }
 
 async function finalHome(request, env, ctx) {
@@ -101,6 +128,14 @@ async function finalHome(request, env, ctx) {
   if (homeHasYear6Equivalent(body)) {
     const loaded = await canonicalYear6List(request, env, ctx);
     year6Split = loaded.split;
+  }
+
+  // The prepared home snapshot can be older than the current entitlement/source
+  // classification. Before collapsing Year 6/L3, refresh L3 counts from the live
+  // list response repaired by the batch-definition-aware catalogue overlay.
+  if (homeHasView(body, L3_VIEW)) {
+    const l3 = await loadViewList(request, env, ctx, L3_VIEW);
+    refreshHomeViewSummary(body, L3_VIEW, l3.rows);
   }
 
   normaliseMathsEquivalentHome(body, year6Split);
@@ -137,7 +172,9 @@ export default {
 export {
   FINAL_MATHS_EQUIVALENT_NAV_MARKER,
   syntheticKind,
+  countSummary,
   homeHasYear6Equivalent,
+  refreshHomeViewSummary,
   finalHome,
   finalSyntheticList
 };
