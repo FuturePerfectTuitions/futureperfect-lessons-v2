@@ -110,19 +110,30 @@ function collisionDiagnostic(input, normalized, payload, asOfDate) {
   };
 }
 
+function demoteDualFullLibraryViews(input, payload, asOfDate) {
+  if (!explicitDualFullLibrary(input)) return payload;
+  const views = payload?.snapshot?.views;
+  if (!Array.isArray(views)) return payload;
+  const currentD1 = currentEquivalentProgramme(input, asOfDate);
+  for (const view of views) {
+    if (view?.viewId !== 'maths-year6' && view?.viewId !== 'maths-level3') continue;
+    if (currentD1 && view.viewId === currentD1) continue;
+    view.current = false;
+    view.group = 'previous';
+  }
+  return payload;
+}
+
 function compileAccessScopeV2(input, catalogue, options = {}) {
   const asOfDate = clean(options.asOfDate || input?.asOfDate);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) throw new Error('A deterministic YYYY-MM-DD asOfDate is required.');
   const normalized = normaliseProgrammeNeutralAccess(input, asOfDate);
-  const payload = compileBaseAccessScope(normalized, catalogue, { ...options, asOfDate });
+  let payload = compileBaseAccessScope(normalized, catalogue, { ...options, asOfDate });
+  payload = demoteDualFullLibraryViews(input, payload, asOfDate);
   const current = (payload?.snapshot?.views || []).filter(view => view?.current && !view?.lockedPreview &&
     (view?.viewId === 'maths-year6' || view?.viewId === 'maths-level3'));
   if (current.length > 1) {
-    const currentD1 = currentEquivalentProgramme(input, asOfDate);
-    const preserveDualFullLibrary = !currentD1 && explicitDualFullLibrary(input);
-    if (!preserveDualFullLibrary) {
-      throw new Error(`COMPILED_YEAR6_L3_PROGRAMME_COLLISION:${JSON.stringify(collisionDiagnostic(input, normalized, payload, asOfDate))}`);
-    }
+    throw new Error(`COMPILED_YEAR6_L3_PROGRAMME_COLLISION:${JSON.stringify(collisionDiagnostic(input, normalized, payload, asOfDate))}`);
   }
   return payload;
 }
@@ -134,5 +145,6 @@ export {
   explicitDualFullLibrary,
   normaliseProgrammeNeutralAccess,
   collisionDiagnostic,
+  demoteDualFullLibraryViews,
   compileAccessScopeV2
 };
