@@ -6,6 +6,8 @@ const bridge = fs.readFileSync('worker/src/index-step10-quiz-bridge.js', 'utf8')
 const admin = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
 const finalMathsNavigation = fs.readFileSync('worker/src/index-maths-equivalent-navigation-final.js', 'utf8');
 const liveCatalogueOverlay = fs.readFileSync('worker/src/live-student-catalogue-overlay.js', 'utf8');
+const reconciledImport = fs.readFileSync('worker/src/admin-lesson-release-import-reconciled.js', 'utf8');
+const readModelSyncV2 = fs.readFileSync('worker/src/access-read-model-sync-v2.js', 'utf8');
 const replaceConsistency = fs.readFileSync('worker/src/admin-resource-replace-consistency.js', 'utf8');
 const deploy = fs.readFileSync('ops/deploy_current_worker_preserve.sh', 'utf8');
 
@@ -30,6 +32,9 @@ must(finalMathsNavigation, 'YEAR6_SATS_VIEW', 'native SATS view routing');
 must(liveCatalogueOverlay, 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1', 'batch-definition entitlement classification marker');
 must(liveCatalogueOverlay, 'LEFT JOIN batch_definitions b ON b.batch_key = e.source_batch_code', 'full entitlement batch-definition join');
 must(liveCatalogueOverlay, 'LEFT JOIN batch_definitions b ON b.batch_key = e.batch_key', 'prelesson entitlement batch-definition join');
+must(reconciledImport, "from './access-read-model-sync-v2.js';", 'lesson-release read-model reconciliation v2 composition');
+must(readModelSyncV2, 'd1-authoritative-sats-presentation-v2', 'authoritative read-model reconciliation marker');
+must(readModelSyncV2, "from '../../rebuild/adminops/src/lib/compiler.mjs';", 'reconciliation reuses authoritative rebuild compiler');
 must(admin, "./admin-resource-replace-consistency.js", 'Admin Replace Resource consistency composition');
 must(replaceConsistency, "replace-resource-consistency-v1", 'Admin Replace Resource consistency marker');
 must(deploy, 'CONFIG_ENTRYPOINT=', 'deployment derives canonical entrypoint from wrangler');
