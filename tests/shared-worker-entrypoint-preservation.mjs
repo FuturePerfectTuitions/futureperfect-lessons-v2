@@ -1,4 +1,4 @@
-// deploy-trigger: maths-equivalent-navigation-final-v2
+// deploy-trigger: maths-equivalent-navigation-final-v3
 import fs from 'node:fs';
 
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
@@ -21,8 +21,9 @@ must(bridge, "'/api/v1/student/quiz/launch'", 'legacy quiz launch route');
 must(bridge, "const RELEASE_SOURCE='portal-live-maths11plus-release-v2'", 'L2/L3 release context marker');
 must(admin, "import currentWorker from './index-maths-equivalent-navigation-final.js';", 'final Maths navigation composition');
 must(finalMathsNavigation, "import currentWorker from './index-phase24-trial-vr.js';", 'final Maths navigation preserves current student chain');
-must(finalMathsNavigation, 'maths-equivalent-navigation-final-v2', 'final Maths navigation live marker');
+must(finalMathsNavigation, 'maths-equivalent-navigation-final-v3', 'final Maths navigation live marker');
 must(finalMathsNavigation, "url.pathname === '/api/v1/student/home'", 'final Maths home interception');
+must(finalMathsNavigation, 'suppressUnreleasedL3Sats', 'L3 SATS conditional presentation guard');
 must(liveCatalogueOverlay, 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1', 'batch-definition entitlement classification marker');
 must(liveCatalogueOverlay, 'LEFT JOIN batch_definitions b ON b.batch_key = e.source_batch_code', 'full entitlement batch-definition join');
 must(liveCatalogueOverlay, 'LEFT JOIN batch_definitions b ON b.batch_key = e.batch_key', 'prelesson entitlement batch-definition join');
