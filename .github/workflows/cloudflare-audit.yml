@@ -14,14 +14,13 @@ permissions:
 
 jobs:
   audit:
-    name: Trace prepared access snapshot producer
+    name: Trace exact prepared access snapshots and producer
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
-      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
     steps:
       - uses: actions/checkout@v6
         with:
@@ -33,101 +32,76 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo 'Cloudflare read credentials present.'
 
-      - name: Inspect stored prepared snapshots for only the two reported students
+      - name: Read only access-model keys and identify Devansh/Kiaan snapshots
         shell: bash
         run: |
           set -euo pipefail
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${READ_MODELS_KV_ID}"
-          : > /tmp/kv-keys.txt
+          PREFIX='rm:v1:scope:access_3A'
+          : > /tmp/access-keys.txt
           cursor=''
           page=0
           while :; do
             page=$((page+1))
-            if [ -n "$cursor" ]; then
-              curl --fail --silent --show-error --get "$API/keys" -H "$AUTH" \
-                --data-urlencode 'limit=1000' --data-urlencode "cursor=$cursor" -o /tmp/kv-page.json
-            else
-              curl --fail --silent --show-error --get "$API/keys" -H "$AUTH" \
-                --data-urlencode 'limit=1000' -o /tmp/kv-page.json
-            fi
-            jq -e '.success == true' /tmp/kv-page.json >/dev/null
-            jq -r '.result[].name' /tmp/kv-page.json >> /tmp/kv-keys.txt
-            cursor="$(jq -r '.result_info.cursor // empty' /tmp/kv-page.json)"
+            args=(--get "$API/keys" -H "$AUTH" --data-urlencode 'limit=1000' --data-urlencode "prefix=$PREFIX")
+            if [ -n "$cursor" ]; then args+=(--data-urlencode "cursor=$cursor"); fi
+            curl --fail --silent --show-error "${args[@]}" -o /tmp/access-page.json
+            jq -e '.success == true' /tmp/access-page.json >/dev/null
+            jq -r '.result[].name' /tmp/access-page.json >> /tmp/access-keys.txt
+            cursor="$(jq -r '.result_info.cursor // empty' /tmp/access-page.json)"
             [ -z "$cursor" ] && break
-            [ "$page" -lt 20 ] || { echo 'KV pagination safety stop'; exit 2; }
+            [ "$page" -lt 10 ] || { echo 'ACCESS_KEY_PAGINATION_SAFETY_STOP'; exit 2; }
           done
-          echo "READ_MODELS_KV_KEY_COUNT=$(wc -l < /tmp/kv-keys.txt | tr -d ' ')"
+          sort -u /tmp/access-keys.txt -o /tmp/access-keys.txt
+          echo "ACCESS_MODEL_KEY_COUNT=$(wc -l < /tmp/access-keys.txt | tr -d ' ')"
+          grep ':current$' /tmp/access-keys.txt > /tmp/access-pointers.txt || true
+          echo "ACCESS_POINTER_COUNT=$(wc -l < /tmp/access-pointers.txt | tr -d ' ')"
 
           : > /tmp/matches.ndjson
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            encoded="$(jq -rn --arg v "$key" '$v|@uri')"
-            if ! curl --fail --silent --show-error "$API/values/$encoded" -H "$AUTH" -o /tmp/value.json; then
+          while IFS= read -r pointerKey; do
+            [ -n "$pointerKey" ] || continue
+            encodedPointer="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$pointerKey")"
+            curl --fail --silent --show-error "$API/values/$encodedPointer" -H "$AUTH" -o /tmp/pointer.json
+            version="$(jq -r '.current.version // empty' /tmp/pointer.json)"
+            [ -n "$version" ] || continue
+            scopeEncoded="${pointerKey#rm:v1:scope:}"
+            scopeEncoded="${scopeEncoded%:current}"
+            versionEncoded="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="-_.!~*\x27()" ).replace("%","_"))' "$version")"
+            envelopeKey="rm:v1:scope:${scopeEncoded}:version:${versionEncoded}"
+            encodedEnvelope="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$envelopeKey")"
+            if ! curl --fail --silent --show-error "$API/values/$encodedEnvelope" -H "$AUTH" -o /tmp/envelope.json; then
               continue
             fi
-            if ! jq -e . /tmp/value.json >/dev/null 2>&1; then
-              continue
-            fi
-            name="$(jq -r '.snapshot.student.displayName // .student.displayName // empty' /tmp/value.json)"
-            case "${name,,}" in
+            firstName="$(jq -r '.payload.snapshot.account.firstName // empty' /tmp/envelope.json)"
+            case "${firstName,,}" in
               devansh|kiaan)
-                jq -c '{
-                  displayName:(.snapshot.student.displayName // .student.displayName),
-                  modelMetadata:{schema:(.schema // null),version:(.version // null),generatedAt:(.generatedAt // .snapshot.generatedAt // null),scopeType:(.scopeType // null),source:(.source // null),generations:(.snapshot.generations // .generations // null)},
-                  accessViews:(.views // []),
-                  subjects:[(.snapshot.subjects // [])[] | {
-                    subject,
-                    views:[(.views // [])[] | {viewId,label,current,group,visibleLessonCount,openLessonCount,lockedLessonCount,catalogueAvailable,lockedPreview}]
-                  }]
-                }' /tmp/value.json >> /tmp/matches.ndjson
+                jq -c --arg pointerKey "$pointerKey" '{
+                  firstName:.payload.snapshot.account.firstName,
+                  pointerKey:$pointerKey,
+                  envelope:{schemaVersion,kind,scope,version,generatedAt,sha256},
+                  snapshot:{
+                    asOfDate:.payload.snapshot.asOfDate,
+                    account:.payload.snapshot.account,
+                    fullViewIds:.payload.snapshot.fullViewIds,
+                    views:[(.payload.snapshot.views // [])[] | {viewId,subject,label,current,group,lockedPreview,catalogueAvailable,visibleLessonCount,openLessonCount,lockedLessonCount}],
+                    lessonAccessCount:(.payload.snapshot.lessonAccess // {} | length)
+                  }
+                }' /tmp/envelope.json >> /tmp/matches.ndjson
                 ;;
             esac
-          done < /tmp/kv-keys.txt
+          done < /tmp/access-pointers.txt
 
-          echo '=== MATCHED PREPARED SNAPSHOTS (ONLY DEVANSH/KIAAN) ==='
+          echo '=== EXACT CURRENT PREPARED SNAPSHOTS: DEVANSH/KIAAN ==='
           if [ -s /tmp/matches.ndjson ]; then
             jq . /tmp/matches.ndjson
           else
-            echo 'NO_MATCHING_PREPARED_SNAPSHOTS_FOUND'
+            echo 'TARGET_SNAPSHOTS_NOT_FOUND'
+            exit 3
           fi
 
-      - name: Recover exact deployed scope-key construction
-        shell: bash
-        run: |
-          set -euo pipefail
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl --fail --silent --show-error --dump-header /tmp/student.headers \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${STUDENT_WORKER}" \
-            -H "$AUTH" -o /tmp/student.package
-          python3 - <<'PY'
-          from email.parser import BytesParser
-          from email.policy import default
-          import re
-          raw=open('/tmp/student.package','rb').read()
-          headers=open('/tmp/student.headers','rb').read().decode('latin-1','replace')
-          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
-          ct=m.group(1).strip() if m else ''
-          if ct.lower().startswith('multipart/'):
-              msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ct}\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+raw)
-              parts=[]
-              for p in msg.iter_parts():
-                  payload=p.get_payload(decode=True) or b''
-                  if b'/api/v2/student/home' in payload: parts.append(payload)
-              if not parts: raise SystemExit('NO_STUDENT_MODULE')
-              payload=max(parts,key=len)
-          else: payload=raw
-          text=payload.decode('utf-8','replace')
-          print('=== DEPLOYED SCOPE-KEY / READ-MODEL FUNCTIONS ===')
-          for needle in ['function accessObjectKey','function opaqueScopeId','function resolveAccess']:
-              pos=text.find(needle)
-              print('\n###',needle)
-              print(text[max(0,pos-800):min(len(text),pos+2400)] if pos>=0 else 'NOT_FOUND')
-          PY
-
-      - name: Locate the exact rebuild source and READ_MODELS_KV writer across rebuild branches
+      - name: Locate access-snapshot producer and publisher across rebuild branches
         shell: bash
         run: |
           set -euo pipefail
@@ -135,20 +109,26 @@ jobs:
           mapfile -t refs < <(git for-each-ref --format='%(refname)' 'refs/remotes/origin/rebuild/*')
           echo "REBUILD_REF_COUNT=${#refs[@]}"
 
-          echo '=== SOURCE PATH CANDIDATES ==='
+          echo '=== EXACT PRODUCER SOURCE MATCHES ==='
           for ref in "${refs[@]}"; do
-            git ls-tree -r --name-only "$ref" | grep -E '(^|/)(shared/view-model\.js|src/student-worker\.js|access-read-model[^/]*\.js|[^/]*read-model[^/]*\.js|[^/]*access[^/]*sync[^/]*\.js)$' | sed "s#^#$ref #" || true
-          done | sort -u | head -n 500
-
-          echo '=== EXACT STRING LOCATIONS ==='
-          for ref in "${refs[@]}"; do
-            for needle in 'Access read model unavailable' 'prepared-access-read-model' 'MATHS_Y6_EXTRA' 'accessObjectKey' 'READ_MODELS_KV.put' 'snapshot.subjects'; do
-              git grep -n -F "$needle" "$ref" -- 2>/dev/null | sed "s#^#$ref | #" || true
+            for needle in 'function compileAccessSnapshot' 'compileAccessSnapshot(' 'prepared-access-read-model' 'READ_MODELS_KV.put' 'publishPrepared' 'rm:v1:scope:'; do
+              git grep -n -F "$needle" "$ref" -- 'rebuild/**' 'scripts/**' '.github/workflows/**' 2>/dev/null | sed "s#^#$ref | #" || true
             done
+          done | sort -u > /tmp/producer-matches.txt
+          cat /tmp/producer-matches.txt | head -n 1500
+
+          echo '=== ACCESS SNAPSHOT SOURCE HASHES BY REBUILD REF ==='
+          for ref in "${refs[@]}"; do
+            if git cat-file -e "$ref:rebuild/shared/read-models/access-snapshot.mjs" 2>/dev/null; then
+              printf '%s ' "$ref"
+              git show "$ref:rebuild/shared/read-models/access-snapshot.mjs" | sha256sum | awk '{print $1}'
+            fi
+          done | sort -k2,2 -k1,1
+
+          echo '=== CURRENT/HISTORICAL PUBLISH WORKFLOW PATHS ==='
+          for ref in "${refs[@]}"; do
+            git ls-tree -r --name-only "$ref" | grep -E '(^|/)(.*compile.*publish.*|.*read.*model.*publish.*|.*backfill.*access.*|.*snapshot.*)\.(mjs|js|yml|yaml)$' | sed "s#^#$ref | #" || true
           done | sort -u | head -n 1000
 
-          echo '=== COMMITS TOUCHING LIKELY PRODUCER PATHS ==='
-          git log --all --date=iso --pretty='format:%H %ad %s' -- '**/shared/view-model.js' '**/src/student-worker.js' '**/*access*read*model*.js' '**/*read*model*.js' | head -n 200 || true
-
       - name: Audit complete
-        run: echo 'PREPARED_ACCESS_SNAPSHOT_PRODUCER_TRACE_COMPLETE'
+        run: echo 'EXACT_PREPARED_ACCESS_ROOT_TRACE_COMPLETE'
