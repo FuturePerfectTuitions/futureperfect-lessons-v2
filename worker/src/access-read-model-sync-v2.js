@@ -1,6 +1,8 @@
-import { compileAccessScope as compileAuthoritativeAccessScope } from '../../rebuild/adminops/src/lib/compiler.mjs';
 import {
   SCOPE_SALT_KEY,
+  legacyBatchViewId,
+  isYear6SatsLessonId,
+  compileAccessScope as compileLegacyAccessScope,
   assertCanonicalAccessProjected,
   publishScopeAtomic,
   resolveCurrentScope,
@@ -11,11 +13,188 @@ import {
 const ACCESS_READ_MODEL_SYNC_V2_MARKER = 'd1-authoritative-sats-presentation-v2';
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
+const upper = value => clean(value).toUpperCase();
+const lessonId = row => clean(row?.lesson_id ?? row?.lessonId);
 
 function londonToday() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone:'Europe/London', year:'numeric', month:'2-digit', day:'2-digit'
   }).format(new Date());
+}
+
+function asDate(value) {
+  const text = clean(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
+function currentAssignment(row, asOfDate) {
+  const from = asDate(row?.effective_from ?? row?.effectiveFrom);
+  const to = asDate(row?.effective_to ?? row?.effectiveTo);
+  const batchFrom = asDate(row?.batch_active_from ?? row?.batchActiveFrom ?? row?.active_from ?? row?.activeFrom);
+  const batchTo = asDate(row?.batch_active_to ?? row?.batchActiveTo ?? row?.active_to ?? row?.activeTo);
+  return (!from || from <= asOfDate) && (!to || asOfDate < to) &&
+    (!batchFrom || batchFrom <= asOfDate) && (!batchTo || asOfDate < batchTo);
+}
+
+function structuredViewId(row) {
+  const subject = norm(row?.subject);
+  const stream = norm(row?.stream);
+  const year = Number(row?.school_year ?? row?.schoolYear ?? 0);
+  const level = Number(row?.maths_level ?? row?.mathsLevel ?? 0);
+  if (subject === 'maths') {
+    if (stream === '11plus') {
+      const resolved = level >= 1 && level <= 3 ? level : year - 3;
+      return resolved >= 1 && resolved <= 3 ? `maths-level${resolved}` : '';
+    }
+    return year >= 2 && year <= 6 ? `maths-year${year}` : '';
+  }
+  if (subject === 'english') {
+    if (stream === '11plus') return year === 4 || year === 5 ? `english-year${year}-11plus` : '';
+    return year >= 2 && year <= 6 ? `english-year${year}` : '';
+  }
+  return '';
+}
+
+function definitionMap(rows = []) {
+  const map = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = upper(row?.batch_key ?? row?.batchKey);
+    if (key) map.set(key, row);
+  }
+  return map;
+}
+
+function authoritativeBatchViewId(value, definitions) {
+  const key = upper(value);
+  if (!key) return '';
+  if (definitions.has(key)) return structuredViewId(definitions.get(key));
+  return legacyBatchViewId(key);
+}
+
+function stripTeachingSource(row) {
+  const next = { ...(row || {}) };
+  delete next.source_batch_code;
+  delete next.sourceBatchCode;
+  delete next.batch_key;
+  delete next.batchKey;
+  delete next.viewId;
+  delete next.view_id;
+  return next;
+}
+
+function normaliseAuthoritativeInput(input, asOfDate) {
+  const definitions = definitionMap(input?.batchDefinitions);
+  const assignments = (Array.isArray(input?.batchAssignments) ? input.batchAssignments : []).map(row => ({ ...row }));
+  const currentTeaching = [...new Set(assignments
+    .filter(row => currentAssignment(row, asOfDate))
+    .map(structuredViewId)
+    .filter(id => id === 'maths-year6' || id === 'maths-level3'))];
+  if (currentTeaching.length > 1) throw new Error('D1_YEAR6_L3_PROGRAMME_COLLISION');
+  const currentProgramme = currentTeaching[0] || '';
+
+  // A legacy profile batch remains a compatibility source only when D1 has no
+  // definition for it. If D1 knows the batch but the assignment row is absent,
+  // synthesize the D1-defined shape rather than re-parsing the batch name.
+  const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
+  const legacyFallbackBatches = [];
+  const assignmentKeys = new Set(assignments.map(row => upper(row?.batch_key ?? row?.batchKey)).filter(Boolean));
+  for (const value of Array.isArray(sourceUser.batches) ? sourceUser.batches : []) {
+    const key = upper(value);
+    if (!key) continue;
+    const definition = definitions.get(key);
+    if (!definition) {
+      legacyFallbackBatches.push(value);
+      continue;
+    }
+    if (!assignmentKeys.has(key)) {
+      assignments.push({
+        ...definition,
+        batch_key:key,
+        effective_from:'',
+        effective_to:null,
+        batch_active_from:definition.active_from ?? definition.activeFrom ?? '',
+        batch_active_to:definition.active_to ?? definition.activeTo ?? null,
+        __reconcile_source:'d1-defined-profile-batch'
+      });
+      assignmentKeys.add(key);
+    }
+  }
+
+  const sanitiseAccessRow = row => {
+    const lid = lessonId(row);
+    if (isYear6SatsLessonId(lid)) return stripTeachingSource(row);
+    if (!currentProgramme) return { ...(row || {}) };
+    const batch = clean(row?.source_batch_code ?? row?.sourceBatchCode ?? row?.batch_key ?? row?.batchKey);
+    const sourceView = authoritativeBatchViewId(batch, definitions);
+    if ((sourceView === 'maths-year6' || sourceView === 'maths-level3') && sourceView !== currentProgramme) {
+      return stripTeachingSource(row);
+    }
+    return { ...(row || {}) };
+  };
+
+  return {
+    ...(input || {}),
+    user:{ ...sourceUser, batches:legacyFallbackBatches },
+    batchAssignments:assignments,
+    entitlements:(Array.isArray(input?.entitlements) ? input.entitlements : []).map(sanitiseAccessRow),
+    onlinePreLessonEntitlements:(Array.isArray(input?.onlinePreLessonEntitlements) ? input.onlinePreLessonEntitlements : []).map(sanitiseAccessRow)
+  };
+}
+
+function hasSatsPresentationAccess(input) {
+  return (Array.isArray(input?.entitlements) ? input.entitlements : [])
+    .some(row => Number(row?.core_access ?? row?.coreAccess ?? 1) !== 0 && isYear6SatsLessonId(lessonId(row))) ||
+    (Array.isArray(input?.onlinePreLessonEntitlements) ? input.onlinePreLessonEntitlements : [])
+      .some(row => isYear6SatsLessonId(lessonId(row)));
+}
+
+function decorateAuthoritativeSnapshot(payload, originalInput, catalogue) {
+  const snapshot = payload?.snapshot;
+  if (!snapshot || !Array.isArray(snapshot.views)) throw new Error('READ_MODEL_COMPILED_SNAPSHOT_INVALID');
+
+  for (const view of snapshot.views) {
+    if (norm(view?.viewId) === 'maths-year6') view.label = 'Lessons';
+    if (norm(view?.viewId) === 'maths-level3') view.label = 'L3';
+  }
+  snapshot.views = snapshot.views.filter(view => norm(view?.viewId) !== 'maths-sats');
+
+  if (hasSatsPresentationAccess(originalInput)) {
+    const lessons = Array.isArray(catalogue?.views?.['maths-sats']?.lessons)
+      ? catalogue.views['maths-sats'].lessons : [];
+    if (!lessons.length) throw new Error('SATS_PRESENTATION_CATALOGUE_MISSING');
+    const open = lessons.reduce((count, row) => {
+      const state = snapshot.lessonAccess?.[clean(row?.lessonId)];
+      return count + (state && !state.blocked && (state.core || state.preLessonOnly) ? 1 : 0);
+    }, 0);
+    const sats = {
+      viewId:'maths-sats',
+      subject:'maths',
+      label:'SATS',
+      current:true,
+      group:'current',
+      lockedPreview:false,
+      catalogueAvailable:true,
+      visibleLessonCount:lessons.length,
+      openLessonCount:open,
+      lockedLessonCount:Math.max(0, lessons.length - open)
+    };
+    const teachingIndex = snapshot.views.findIndex(view => {
+      const id = norm(view?.viewId);
+      return view?.current && (id === 'maths-year6' || id === 'maths-level3');
+    });
+    snapshot.views.splice(teachingIndex >= 0 ? teachingIndex + 1 : snapshot.views.length, 0, sats);
+  }
+
+  const currentTeaching = snapshot.views.filter(view => view?.current && !view?.lockedPreview &&
+    (norm(view?.viewId) === 'maths-year6' || norm(view?.viewId) === 'maths-level3'));
+  if (currentTeaching.length > 1) throw new Error('COMPILED_YEAR6_L3_PROGRAMME_COLLISION');
+  return payload;
+}
+
+function compileAuthoritativeAccessScope(input, catalogue, scopeId, asOfDate) {
+  const normalized = normaliseAuthoritativeInput(input, asOfDate);
+  const payload = compileLegacyAccessScope(normalized, catalogue, scopeId, asOfDate);
+  return decorateAuthoritativeSnapshot(payload, input, catalogue);
 }
 
 function kvBindingStore(binding) {
@@ -70,20 +249,11 @@ async function loadStudentAccessInput(env, portalUserIdNorm, asOfDate = londonTo
     ).bind(userId))
   ]);
 
-  return {
-    asOfDate,
-    user,
-    batchDefinitions,
-    batchAssignments,
-    entitlements,
-    onlinePreLessonEntitlements:preLesson
-  };
+  return { asOfDate, user, batchDefinitions, batchAssignments, entitlements, onlinePreLessonEntitlements:preLesson };
 }
 
 async function assertReadModelReconciliationReady(env) {
-  if (!env?.READ_MODELS_KV || !env?.STUDENTS_KV || !env?.DB) {
-    throw new Error('READ_MODEL_RECONCILIATION_NOT_CONFIGURED');
-  }
+  if (!env?.READ_MODELS_KV || !env?.STUDENTS_KV || !env?.DB) throw new Error('READ_MODEL_RECONCILIATION_NOT_CONFIGURED');
   const store = kvBindingStore(env.READ_MODELS_KV);
   const scopeSalt = clean(await env.READ_MODELS_KV.get(SCOPE_SALT_KEY));
   if (!/^[0-9a-f]{64}$/i.test(scopeSalt)) throw new Error('READ_MODEL_SCOPE_SALT_INVALID');
@@ -96,9 +266,7 @@ async function assertReadModelReconciliationReady(env) {
 }
 
 async function refreshStudentAccessReadModel(env, portalUserIdNorm, options = {}) {
-  if (!env?.READ_MODELS_KV || !env?.STUDENTS_KV || !env?.DB) {
-    throw new Error('READ_MODEL_RECONCILIATION_NOT_CONFIGURED');
-  }
+  if (!env?.READ_MODELS_KV || !env?.STUDENTS_KV || !env?.DB) throw new Error('READ_MODEL_RECONCILIATION_NOT_CONFIGURED');
   const store = kvBindingStore(env.READ_MODELS_KV);
   const scopeSalt = clean(await env.READ_MODELS_KV.get(SCOPE_SALT_KEY));
   if (!/^[0-9a-f]{64}$/i.test(scopeSalt)) throw new Error('READ_MODEL_SCOPE_SALT_INVALID');
@@ -112,7 +280,7 @@ async function refreshStudentAccessReadModel(env, portalUserIdNorm, options = {}
   const asOfDate = clean(options.asOfDate) || londonToday();
   const input = await loadStudentAccessInput(env, portalUserIdNorm, asOfDate);
   const scopeId = await opaqueAccessScopeId(portalUserIdNorm, scopeSalt);
-  const payload = compileAuthoritativeAccessScope(input, catalogue, { scopeId, asOfDate });
+  const payload = compileAuthoritativeAccessScope(input, catalogue, scopeId, asOfDate);
   assertCanonicalAccessProjected(input, payload);
 
   const published = await publishScopeAtomic(store, {
@@ -133,6 +301,11 @@ async function refreshStudentAccessReadModel(env, portalUserIdNorm, options = {}
 
 export {
   ACCESS_READ_MODEL_SYNC_V2_MARKER,
+  authoritativeBatchViewId,
+  normaliseAuthoritativeInput,
+  hasSatsPresentationAccess,
+  decorateAuthoritativeSnapshot,
+  compileAuthoritativeAccessScope,
   loadStudentAccessInput,
   assertReadModelReconciliationReady,
   refreshStudentAccessReadModel
