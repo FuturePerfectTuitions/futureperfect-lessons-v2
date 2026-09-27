@@ -1,0 +1,42 @@
+{
+  "schema": "fpt.portal.evidence.y6-equivalent-roster-audit.v1",
+  "documentType": "READ_ONLY_PRODUCTION_AUDIT_EVIDENCE",
+  "date": "2026-09-27",
+  "scope": "Current production Maths Year 6-equivalent roster and entitlement-source audit",
+  "workflow": ".github/workflows/y6-equivalent-roster-audit.yml",
+  "workflowRun": 36311976128,
+  "workflowResult": "PASS",
+  "privacy": "Aggregate counts only; no student IDs or credentials recorded in this evidence file.",
+  "mutationBoundary": {
+    "mode": "READ_ONLY",
+    "database": "fpt_portal_v2_db",
+    "rowsWritten": 0,
+    "studentRecordsMutated": false,
+    "entitlementsMutated": false,
+    "batchAssignmentsMutated": false
+  },
+  "currentRoster": {
+    "year6EquivalentStudents": 9,
+    "ordinaryYear6Students": 6,
+    "l3Students": 3,
+    "dualCurrentAssignmentStudents": 0,
+    "interpretation": "No current production student is simultaneously assigned to both an ordinary Year 6 Maths batch and an L3 Maths 11+ batch. The duplicate Year 6/L3 navigation observed in the browser is therefore not explained by dual current batch enrolment."
+  },
+  "l3AccessSourceAudit": {
+    "currentL3Students": 3,
+    "l3StudentsWithAnyYear6Entitlement": 3,
+    "l3StudentsWithSatAccess": 0,
+    "interpretation": "All current L3 students have at least one Year 6 canonical lesson entitlement or PreLesson entitlement even though none has a concurrent Year 6 batch assignment. This proves an entitlement-derived Year 6 view can coexist with the L3 teaching view unless the final navigation response enforces the equivalent-view invariant. The SAT-range query found no current L3 student with a Y6M51..Y6M69 entitlement at audit time, so this evidence does not attribute the duplicate specifically to a SAT entitlement."
+  },
+  "runtimeRuleValidatedByAudit": {
+    "equivalentPairs": [
+      "Year 4/L1",
+      "Year 5/L2",
+      "Year 6/L3"
+    ],
+    "year6L3Presentation": "L3 + SATS",
+    "ordinaryYear6Presentation": "Lessons + SATS",
+    "reason": "Presentation must be derived from programme/equivalent-view rules at the final response boundary rather than by exposing every entitlement-derived curriculum alias as a separate teaching card."
+  },
+  "closureBoundary": "Production roster and entitlement-source audit is complete. The navigation incident remains pending owner browser verification of the final-boundary deployment on representative live students."
+}
