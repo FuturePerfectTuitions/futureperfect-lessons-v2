@@ -93,9 +93,11 @@ function normaliseAuthoritativeInput(input, asOfDate) {
   if (currentTeaching.length > 1) throw new Error('D1_YEAR6_L3_PROGRAMME_COLLISION');
   const currentProgramme = currentTeaching[0] || '';
 
-  // A legacy profile batch remains a compatibility source only when D1 has no
-  // definition for it. If D1 knows the batch but the assignment row is absent,
-  // synthesize the D1-defined shape rather than re-parsing the batch name.
+  // D1 current Year6/L3 assignment state is authoritative. Known profile batch
+  // entries for either equivalent curriculum are ignored once such a current D1
+  // programme exists, so stale KV profile state cannot synthesize the opposite
+  // programme. Undefined legacy batches remain fallback. Known non-equivalent
+  // profile batches retain the prior D1-defined synthetic-assignment behaviour.
   const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
   const legacyFallbackBatches = [];
   const assignmentKeys = new Set(assignments.map(row => upper(row?.batch_key ?? row?.batchKey)).filter(Boolean));
@@ -105,6 +107,10 @@ function normaliseAuthoritativeInput(input, asOfDate) {
     const definition = definitions.get(key);
     if (!definition) {
       legacyFallbackBatches.push(value);
+      continue;
+    }
+    const definedView = structuredViewId(definition);
+    if (currentProgramme && (definedView === 'maths-year6' || definedView === 'maths-level3')) {
       continue;
     }
     if (!assignmentKeys.has(key)) {
@@ -124,18 +130,12 @@ function normaliseAuthoritativeInput(input, asOfDate) {
   const sanitiseAccessRow = row => {
     const lid = lessonId(row);
     if (isYear6SatsLessonId(lid)) {
-      // SATS is presentation-only. When a teaching programme exists, bind the
-      // underlying access row to that current programme solely to stop the
-      // legacy compiler from inferring a second teaching assignment. With no
-      // teaching programme, the maths-sats sentinel cannot create one.
       return stripTeachingSource(row, currentProgramme || 'maths-sats');
     }
     if (!currentProgramme) return { ...(row || {}) };
     const batch = clean(row?.source_batch_code ?? row?.sourceBatchCode ?? row?.batch_key ?? row?.batchKey);
     const sourceView = authoritativeBatchViewId(batch, definitions);
     if ((sourceView === 'maths-year6' || sourceView === 'maths-level3') && sourceView !== currentProgramme) {
-      // Transfers retain lesson access, but an old equivalent-curriculum source
-      // batch must not become a second current programme card.
       return stripTeachingSource(row, currentProgramme);
     }
     return { ...(row || {}) };
