@@ -47,10 +47,7 @@ function compile({ currentBatch, profileBatches=[currentBatch], entitlements=[],
     entitlements,
     onlinePreLessonEntitlements:pre
   };
-  return {
-    input,
-    payload:compileAuthoritativeAccessScope(input, catalogue, 'fixture-scope', asOfDate)
-  };
+  return { input, payload:compileAuthoritativeAccessScope(input, catalogue, 'fixture-scope', asOfDate) };
 }
 
 function currentMaths(payload) {
@@ -64,43 +61,26 @@ function currentMaths(payload) {
   const { payload } = compile({ currentBatch:'Y611FM' });
   assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
 }
-
 {
-  const { payload } = compile({
-    currentBatch:'Y611FM',
-    entitlements:[{ lesson_id:'Y6M51', core_access:1, source:'excel', source_batch_code:'Y611FM', source_lesson_date:asOfDate }]
-  });
+  const { payload } = compile({ currentBatch:'Y611FM', entitlements:[{ lesson_id:'Y6M51', core_access:1, source:'excel', source_batch_code:'Y611FM', source_lesson_date:asOfDate }] });
   assert.deepEqual(currentMaths(payload), ['maths-sats:SATS:1','maths-year6:Lessons:0']);
   assert.equal(payload.snapshot.lessonAccess.Y6M51.core, true);
 }
-
 {
-  const { payload } = compile({
-    currentBatch:'Y511FM',
-    entitlements:[{ lesson_id:'Y6M51', core_access:1, source:'excel', source_batch_code:'Y611FM', source_lesson_date:asOfDate }]
-  });
+  const { payload } = compile({ currentBatch:'Y511FM', entitlements:[{ lesson_id:'Y6M51', core_access:1, source:'excel', source_batch_code:'Y611FM', source_lesson_date:asOfDate }] });
   assert.deepEqual(currentMaths(payload), ['maths-level3:L3:0','maths-sats:SATS:1']);
   assert.equal(payload.snapshot.lessonAccess.Y6M51.core, true);
 }
-
 {
-  const { payload } = compile({
-    currentBatch:'Y511FM',
-    entitlements:[{ lesson_id:'Y6M50', core_access:1, source:'excel', source_batch_code:'Y611FM', source_lesson_date:asOfDate }]
-  });
+  const { payload } = compile({ currentBatch:'Y511FM', entitlements:[{ lesson_id:'Y6M50', core_access:1, source:'excel', source_batch_code:'Y611FM', source_lesson_date:asOfDate }] });
   assert.deepEqual(currentMaths(payload), ['maths-level3:L3:1']);
   assert.equal(payload.snapshot.lessonAccess.Y6M50.core, true);
 }
-
 {
-  const { payload } = compile({
-    currentBatch:'Y511FM',
-    pre:[{ lesson_id:'Y6M52', batch_key:'Y611FM', lesson_date:asOfDate }]
-  });
+  const { payload } = compile({ currentBatch:'Y511FM', pre:[{ lesson_id:'Y6M52', batch_key:'Y611FM', lesson_date:asOfDate }] });
   assert.deepEqual(currentMaths(payload), ['maths-level3:L3:0','maths-sats:SATS:1']);
   assert.equal(payload.snapshot.lessonAccess.Y6M52.preLessonOnly, true);
 }
-
 {
   const { payload } = compile({ currentBatch:'Y511FM', profileBatches:['Y511FM','Y611FM'] });
   assert.deepEqual(currentMaths(payload), ['maths-level3:L3:0']);
@@ -110,8 +90,7 @@ function currentMaths(payload) {
   assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
 }
 
-// An ended D1 assignment stays historical even if stale KV profile batches still
-// name both equivalent curricula.
+// Ended D1 assignment stays historical even if stale KV profile batches remain.
 {
   const input = {
     asOfDate,
@@ -126,6 +105,48 @@ function currentMaths(payload) {
   const historicalL3 = payload.snapshot.views.find(view => view.viewId === 'maths-level3');
   assert.equal(Boolean(historicalL3), true);
   assert.equal(historicalL3.current, false);
+}
+
+// Dual Full Library access is retained but is not current programme identity.
+{
+  const input = {
+    asOfDate,
+    user:{ name:'Fixture', batches:[], upsellViews:[], fullLibraries:['MATHS_Y6_FULL','MATHS_L3_FULL'] },
+    batchDefinitions:definitions,
+    batchAssignments:[],
+    entitlements:[],
+    onlinePreLessonEntitlements:[]
+  };
+  const payload = compileAuthoritativeAccessScope(input, catalogue, 'fixture-full-library', asOfDate);
+  assert.deepEqual(currentMaths(payload), []);
+  const y6 = payload.snapshot.views.find(view => view.viewId === 'maths-year6');
+  const l3 = payload.snapshot.views.find(view => view.viewId === 'maths-level3');
+  assert.equal(Boolean(y6), true);
+  assert.equal(Boolean(l3), true);
+  assert.equal(y6.current, false);
+  assert.equal(y6.group, 'previous');
+  assert.equal(l3.current, false);
+  assert.equal(l3.group, 'previous');
+  assert.equal(payload.snapshot.views.some(view => view.viewId === 'maths-sats'), false);
+}
+
+// With a current D1 programme plus both Full Libraries, D1 remains current and
+// the opposite equivalent Full Library is preserved under Previous.
+{
+  const input = {
+    asOfDate,
+    user:{ name:'Fixture', batches:['Y511FM'], upsellViews:[], fullLibraries:['MATHS_Y6_FULL','MATHS_L3_FULL'] },
+    batchDefinitions:definitions,
+    batchAssignments:[assignment('Y511FM')],
+    entitlements:[],
+    onlinePreLessonEntitlements:[]
+  };
+  const payload = compileAuthoritativeAccessScope(input, catalogue, 'fixture-current-plus-full', asOfDate);
+  assert.deepEqual(currentMaths(payload), ['maths-level3:L3:1']);
+  const y6 = payload.snapshot.views.find(view => view.viewId === 'maths-year6');
+  assert.equal(Boolean(y6), true);
+  assert.equal(y6.current, false);
+  assert.equal(y6.group, 'previous');
 }
 
 // Known D1 profile batch with no D1 assignment history remains a migration
