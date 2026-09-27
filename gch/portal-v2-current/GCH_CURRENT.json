@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-27",
-  "authorityVersion": "6.3-forward-only-batch-defined-maths-navigation-production-pass",
+  "authorityVersion": "6.4-forward-only-primary-maths-home-normalization-production-pass",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification and final-boundary navigation, manual parent-email delivery, and the permanent forward-only production-recovery rule.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -47,7 +47,7 @@
     },
     "y6SatsAndMathsEquivalentOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
-      "role": "higher authority for Year 6 SAT lesson-by-lesson access, authoritative Y6SM1..Y6SM19 mapping, canonical batch-definition classification of Maths equivalent-view entitlements, and final-boundary navigation for Year 4/L1, Year 5/L2 and Year 6/L3"
+      "role": "higher authority for Year 6 SAT lesson-by-lesson access, authoritative Y6SM1..Y6SM19 mapping, canonical batch-definition classification of Maths equivalent-view entitlements, conditional L3 SATS presentation, and final/browser-boundary navigation for Year 4/L1, Year 5/L2 and Year 6/L3"
     },
     "y6EquivalentRosterEvidence": {
       "path": "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
@@ -60,12 +60,12 @@
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Batch-definition-aware Maths equivalent access classification plus final Year/L navigation",
+    "name": "Primary Maths home-response normalization plus conditional L3 SATS presentation",
     "date": "2026-09-27",
-    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
+    "status": "FRONTEND_AND_PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
     "evidence": "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
-    "ownerEvidenceThatTriggeredRepair": "Devansh still showed Year 6 (1 open, 66 locked) and L3 (0 open, 43 locked) after an earlier navigation deployment had reported PASS.",
+    "ownerEvidenceThatTriggeredRepair": "Devansh continued to show Year 6 + L3, and Kiaan showed Year 4 + L1 and Year 5 + L2. Owner requires Kiaan to show only L1, L2, L3 and 11+ Practice.",
     "productionAudit": {
       "year6EquivalentStudents": 9,
       "ordinaryYear6Students": 6,
@@ -75,23 +75,29 @@
       "l3StudentsWithSatAccess": 0,
       "sourceClassification": "All current L3 canonical Y6 entitlement rows audited resolve to stream=11plus, maths_level=3 batch definitions."
     },
-    "rootCauseClassification": "LIVE_CATALOGUE_ENTITLEMENT_STREAM_HEURISTIC_DEFECT_PLUS_FINAL_RESPONSE_GUARD_REQUIREMENT",
-    "rootCause": "The live catalogue overlay classified normal-vs-11plus from whether the batch-code text contained '11'. Current L3 batch definitions are explicitly stream=11plus, maths_level=3 but the batch-code text is not required to contain '11', so valid L3 canonical Y6 lesson entitlements appeared as ordinary Year 6 access. The final response also needs an equivalent-view guard so duplicate aliases can never escape as separate teaching cards.",
+    "rootCauseClassification": "MULTI_LAYER_EQUIVALENT_ALIAS_PRESENTATION_DEFECT",
+    "rootCause": "Equivalent curriculum aliases can legitimately coexist in underlying prepared/live data because Year/L levels share canonical lessons. Server normalisation alone did not provide sufficient browser protection, while the prior post-render DOM guard assumed cards remained direct children of #view-grid. phase10-history reparents cards into grouped nested grids, making that fallback unreliable as the primary boundary.",
     "equivalentPairs": ["Year 4/L1", "Year 5/L2", "Year 6/L3"],
-    "year6Presentation": "L3 students: L3 + SATS; ordinary Year 6 students: Lessons + SATS",
+    "l3Presentation": "L3 only unless at least one SATS lesson is genuinely released or PreLesson-available; then L3 + SATS",
+    "ordinaryYear6Presentation": "Lessons + SATS",
     "liveCatalogueSource": "worker/src/live-student-catalogue-overlay.js",
     "liveEntitlementMarker": "LIVE_ENTITLEMENT_BATCH_DEFINITION_V1",
-    "liveEntitlementCommit": "b4eeb7b770936329fe561ec1f9f39e70bb6709ec",
-    "classificationTestCommit": "154c156b843979fe41224754c56820a27ff7dc24",
     "finalNavigationSource": "worker/src/index-maths-equivalent-navigation-final.js",
-    "finalNavigationMarker": "maths-equivalent-navigation-final-v2",
-    "finalHomeRefreshCommit": "95d78fec4dc8901e4d5744a7f4452d42338a94e6",
-    "runtimeMarkerCommit": "b4e5fe5b69e70c830ddca6a2b093aa7159d0280f",
-    "productionWorkflowRun": 36312702561,
+    "finalNavigationMarker": "maths-equivalent-navigation-final-v3",
+    "backendConditionalSatsCommit": "0e5abb6c267f549a6a75a641a1690bff65f196f3",
+    "backendConditionalSatsVerificationCommit": "e0c071bf37540152d43512f0a18c91d6c8da7ac4",
+    "backendDeploymentCommit": "5994c5df1fed5324c6927f364b0f4ef6781da3ed",
+    "productionWorkflowRun": 36313764780,
     "productionWorkflowResult": "PASS",
-    "workerVersion": "d96188c3-5909-4828-bfbf-f0b471d23225",
-    "preservationVerification": "PASS: classification tests, equivalent navigation tests, Y6 SAT tests, exact shared Worker composition, forward-only deployment, live runtime markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
-    "ownerBrowserVerification": "PENDING_DEVANSH_AND_REPRESENTATIVE_YEAR6_L3_RETEST"
+    "workerVersion": "176996e8-ca8a-43d6-8a5a-da5684a464d6",
+    "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
+    "frontendPrimaryNormalizer": "assets/maths-equivalent-home-normalizer.js",
+    "frontendPrimaryNormalizerCommit": "a80e08ef865c9b5b8205351608bcbb3c658466e5",
+    "frontendLoaderCommit": "122a229db6914676c682ca61baceeb99ae96a4c3",
+    "frontendPagesRun": 36313574498,
+    "frontendPagesResult": "PASS",
+    "preservationVerification": "PASS: classification, equivalent-navigation and conditional-L3-SATS tests, exact shared Worker composition, forward-only deployment, live runtime markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
+    "ownerBrowserVerification": "PENDING_KIAAN_AND_DEVANSH_RETEST"
   },
   "latestProductionIncidentRecovery": {
     "name": "Parent-email test-routing/idempotency recovery",
@@ -204,7 +210,9 @@
     "student authentication and logout",
     "student home/subjects/views/lesson navigation",
     "batch-definition-aware Maths equivalent entitlement classification",
+    "primary frontend home-response normalization before history grouping/rendering",
     "final-boundary Maths equivalent Year/L-level navigation: Year 4/L1, Year 5/L2 and Year 6/L3",
+    "conditional L3 SATS presentation based on actual released/PreLesson-available SATS access",
     "Year 6 Lessons/SATS synthetic navigation backed by canonical Year 6 authorization",
     "lesson release import and prepared access publication",
     "Year 6 SAT direct release and Y6SM CSV/display resolution",
@@ -226,7 +234,7 @@
     "shared Worker deployment preservation and regression verification",
     "forward-only production recovery"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes.",
   "nextChangeProtocol": [
     "classify surface",
     "prove current main and live owner/version/bindings",
