@@ -26,13 +26,13 @@ const catalogue = {
   }
 };
 
-function assignment(batchKey) {
+function assignment(batchKey, effectiveTo = null) {
   const definition = definitions.find(row => row.batch_key === batchKey);
   return {
     ...definition,
     portal_user_id_norm:'fixture',
     effective_from:'2026-09-01',
-    effective_to:null,
+    effective_to:effectiveTo,
     batch_active_from:'2026-09-01',
     batch_active_to:null
   };
@@ -60,14 +60,11 @@ function currentMaths(payload) {
     .sort();
 }
 
-// Exact live root-cause shape: D1 says Y611FM = Year 6 while the legacy parser
-// would call that same profile batch L3. D1 must win.
 {
   const { payload } = compile({ currentBatch:'Y611FM' });
   assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
 }
 
-// A SATS release on normal Year 6 adds SATS only; it does not change teaching identity.
 {
   const { payload } = compile({
     currentBatch:'Y611FM',
@@ -77,8 +74,6 @@ function currentMaths(payload) {
   assert.equal(payload.snapshot.lessonAccess.Y6M51.core, true);
 }
 
-// Strong transfer/mixed-history invariant: current L3 + SATS whose audit source
-// is a normal-Year6 batch remains L3 + SATS. SATS must never synthesize Year 6.
 {
   const { payload } = compile({
     currentBatch:'Y511FM',
@@ -88,8 +83,6 @@ function currentMaths(payload) {
   assert.equal(payload.snapshot.lessonAccess.Y6M51.core, true);
 }
 
-// Existing old-Year6 lesson access survives a transfer to L3 without becoming a
-// second current teaching programme.
 {
   const { payload } = compile({
     currentBatch:'Y511FM',
@@ -99,7 +92,6 @@ function currentMaths(payload) {
   assert.equal(payload.snapshot.lessonAccess.Y6M50.core, true);
 }
 
-// Online PreLesson SATS has the same programme-neutral behaviour.
 {
   const { payload } = compile({
     currentBatch:'Y511FM',
@@ -109,25 +101,35 @@ function currentMaths(payload) {
   assert.equal(payload.snapshot.lessonAccess.Y6M52.preLessonOnly, true);
 }
 
-// A stale known profile batch for the opposite equivalent curriculum cannot
-// compete with the current D1 programme.
 {
-  const { payload } = compile({
-    currentBatch:'Y511FM',
-    profileBatches:['Y511FM','Y611FM']
-  });
+  const { payload } = compile({ currentBatch:'Y511FM', profileBatches:['Y511FM','Y611FM'] });
   assert.deepEqual(currentMaths(payload), ['maths-level3:L3:0']);
 }
 {
-  const { payload } = compile({
-    currentBatch:'Y611FM',
-    profileBatches:['Y611FM','Y511FM']
-  });
+  const { payload } = compile({ currentBatch:'Y611FM', profileBatches:['Y611FM','Y511FM'] });
   assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
 }
 
-// Known D1 profile batch with a temporarily absent assignment is interpreted by
-// its D1 definition, never by regex. This preserves the old parity/backfill role.
+// An ended D1 assignment stays historical even if stale KV profile batches still
+// name both equivalent curricula.
+{
+  const input = {
+    asOfDate,
+    user:{ name:'Fixture', batches:['Y511FM','Y611FM'], upsellViews:[] },
+    batchDefinitions:definitions,
+    batchAssignments:[assignment('Y511FM','2026-09-20')],
+    entitlements:[],
+    onlinePreLessonEntitlements:[]
+  };
+  const payload = compileAuthoritativeAccessScope(input, catalogue, 'fixture-historical', asOfDate);
+  assert.deepEqual(currentMaths(payload), []);
+  const historicalL3 = payload.snapshot.views.find(view => view.viewId === 'maths-level3');
+  assert.equal(Boolean(historicalL3), true);
+  assert.equal(historicalL3.current, false);
+}
+
+// Known D1 profile batch with no D1 assignment history remains a migration
+// fallback, but uses the D1 definition rather than the legacy regex.
 {
   const input = {
     asOfDate,
