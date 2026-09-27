@@ -86,18 +86,22 @@ function stripTeachingSource(row, forcedViewId = '') {
 function normaliseAuthoritativeInput(input, asOfDate) {
   const definitions = definitionMap(input?.batchDefinitions);
   const assignments = (Array.isArray(input?.batchAssignments) ? input.batchAssignments : []).map(row => ({ ...row }));
+  const equivalentHistory = assignments
+    .map(structuredViewId)
+    .filter(id => id === 'maths-year6' || id === 'maths-level3');
   const currentTeaching = [...new Set(assignments
     .filter(row => currentAssignment(row, asOfDate))
     .map(structuredViewId)
     .filter(id => id === 'maths-year6' || id === 'maths-level3'))];
   if (currentTeaching.length > 1) throw new Error('D1_YEAR6_L3_PROGRAMME_COLLISION');
   const currentProgramme = currentTeaching[0] || '';
+  const hasEquivalentD1History = equivalentHistory.length > 0;
 
-  // D1 current Year6/L3 assignment state is authoritative. Known profile batch
-  // entries for either equivalent curriculum are ignored once such a current D1
-  // programme exists, so stale KV profile state cannot synthesize the opposite
-  // programme. Undefined legacy batches remain fallback. Known non-equivalent
-  // profile batches retain the prior D1-defined synthetic-assignment behaviour.
+  // D1 assignment state is authoritative whenever Year6/L3 history exists,
+  // including after an assignment has ended. Known stale KV profile batches must
+  // not resurrect either equivalent curriculum as current. Undefined legacy
+  // batches remain fallback. If D1 has no equivalent assignment history at all,
+  // a known profile batch may still synthesize its D1-defined shape for parity.
   const sourceUser = input?.user && typeof input.user === 'object' ? input.user : {};
   const legacyFallbackBatches = [];
   const assignmentKeys = new Set(assignments.map(row => upper(row?.batch_key ?? row?.batchKey)).filter(Boolean));
@@ -110,7 +114,7 @@ function normaliseAuthoritativeInput(input, asOfDate) {
       continue;
     }
     const definedView = structuredViewId(definition);
-    if (currentProgramme && (definedView === 'maths-year6' || definedView === 'maths-level3')) {
+    if (hasEquivalentD1History && (definedView === 'maths-year6' || definedView === 'maths-level3')) {
       continue;
     }
     if (!assignmentKeys.has(key)) {
