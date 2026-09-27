@@ -1,3 +1,6 @@
+const SATS_LESSON_IDS = Object.freeze(Array.from({ length: 19 }, (_, index) => `Y6M${51 + index}`));
+const SATS_LESSON_ID_SET = new Set(SATS_LESSON_IDS);
+
 const VIEW_DEFINITIONS = Object.freeze({
   'maths-year2': Object.freeze({
     viewId: 'maths-year2', subject: 'maths', label: 'Year 2', rank: 20,
@@ -30,14 +33,22 @@ const VIEW_DEFINITIONS = Object.freeze({
     fullLibraryIds: Object.freeze(['MATHS_L2_FULL'])
   }),
   'maths-year6': Object.freeze({
-    viewId: 'maths-year6', subject: 'maths', label: 'Year 6', rank: 60,
+    viewId: 'maths-year6', subject: 'maths', label: 'Lessons', rank: 60,
     schoolYear: 6, stream: 'normal', curricula: Object.freeze(['MATHS_L3', 'MATHS_Y6_EXTRA']),
+    excludeLessonIds: SATS_LESSON_IDS,
     fullLibraryIds: Object.freeze(['MATHS_Y6_FULL'])
   }),
   'maths-level3': Object.freeze({
     viewId: 'maths-level3', subject: 'maths', label: 'L3', rank: 61,
     schoolYear: 6, stream: '11plus', mathsLevel: 3, curricula: Object.freeze(['MATHS_L3']),
     fullLibraryIds: Object.freeze(['MATHS_L3_FULL'])
+  }),
+  'maths-sats': Object.freeze({
+    viewId: 'maths-sats', subject: 'maths', label: 'SATS', rank: 62,
+    schoolYear: 6, stream: 'presentation', presentationOnly: true,
+    curricula: Object.freeze(['MATHS_L3', 'MATHS_Y6_EXTRA']),
+    includeLessonIds: SATS_LESSON_IDS,
+    fullLibraryIds: Object.freeze([])
   }),
   'english-year2': Object.freeze({
     viewId: 'english-year2', subject: 'english', label: 'Year 2', rank: 20,
@@ -81,6 +92,10 @@ const VIEW_IDS = Object.freeze(Object.keys(VIEW_DEFINITIONS));
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
 
+function isSatsLessonId(value) {
+  return SATS_LESSON_ID_SET.has(clean(value).toUpperCase());
+}
+
 function viewDefinition(viewId) {
   return VIEW_DEFINITIONS[norm(viewId)] || null;
 }
@@ -96,6 +111,7 @@ function viewIdForBatch(row) {
       const resolved = level >= 1 && level <= 3 ? level : year - 3;
       return viewDefinition(`maths-level${resolved}`)?.viewId || '';
     }
+    if (stream !== 'normal') return '';
     return viewDefinition(`maths-year${year}`)?.viewId || '';
   }
 
@@ -104,6 +120,7 @@ function viewIdForBatch(row) {
       if (year !== 4 && year !== 5) return '';
       return viewDefinition(`english-year${year}-11plus`)?.viewId || '';
     }
+    if (stream !== 'normal') return '';
     return viewDefinition(`english-year${year}`)?.viewId || '';
   }
 
@@ -118,6 +135,7 @@ function counterpartViewId(row) {
 
   if (subject === 'maths') {
     if (stream === '11plus' && (year === 4 || year === 5)) return `english-year${year}-11plus`;
+    if (stream !== 'normal' && stream !== '11plus') return '';
     return viewDefinition(`english-year${year}`)?.viewId || '';
   }
 
@@ -126,6 +144,7 @@ function counterpartViewId(row) {
       const resolved = level >= 1 && level <= 3 ? level : year - 3;
       return viewDefinition(`maths-level${resolved}`)?.viewId || '';
     }
+    if (stream !== 'normal') return '';
     return viewDefinition(`maths-year${year}`)?.viewId || '';
   }
 
@@ -150,10 +169,12 @@ function fullLibraryViewIds(values = []) {
 }
 
 export {
+  SATS_LESSON_IDS,
   VIEW_DEFINITIONS,
   VIEW_IDS,
   clean,
   norm,
+  isSatsLessonId,
   viewDefinition,
   viewIdForBatch,
   counterpartViewId,
