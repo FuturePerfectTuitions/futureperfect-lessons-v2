@@ -1,0 +1,90 @@
+name: Year 6 equivalent roster read-only audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/y6-equivalent-roster-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: 4.125.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Audit current Year 6-equivalent assignments without exposing student IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL=$(cat <<'SQL'
+          WITH current_equiv AS (
+            SELECT
+              a.portal_user_id_norm,
+              MAX(CASE WHEN lower(b.subject)='maths' AND lower(b.stream)='normal' AND CAST(b.school_year AS INTEGER)=6 THEN 1 ELSE 0 END) AS has_y6,
+              MAX(CASE WHEN lower(b.subject)='maths' AND lower(b.stream)='11plus' AND CAST(b.maths_level AS INTEGER)=3 THEN 1 ELSE 0 END) AS has_l3
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key = a.batch_key
+            WHERE
+              (a.effective_from IS NULL OR a.effective_from='' OR a.effective_from <= date('now')) AND
+              (a.effective_to IS NULL OR a.effective_to='' OR date('now') < a.effective_to) AND
+              (b.active_from IS NULL OR b.active_from='' OR b.active_from <= date('now')) AND
+              (b.active_to IS NULL OR b.active_to='' OR date('now') < b.active_to) AND
+              lower(b.subject)='maths' AND
+              ((lower(b.stream)='normal' AND CAST(b.school_year AS INTEGER)=6) OR
+               (lower(b.stream)='11plus' AND CAST(b.maths_level AS INTEGER)=3))
+            GROUP BY a.portal_user_id_norm
+          )
+          SELECT
+            COUNT(*) AS y6_equivalent_students,
+            COALESCE(SUM(has_y6),0) AS ordinary_y6_students,
+            COALESCE(SUM(has_l3),0) AS l3_students,
+            COALESCE(SUM(CASE WHEN has_y6=1 AND has_l3=1 THEN 1 ELSE 0 END),0) AS dual_current_assignment_students
+          FROM current_equiv;
+          SQL
+          )
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-roster-audit.json
+          echo 'Y6_EQUIVALENT_ROSTER_AUDIT_PASS'
+
+      - name: Audit L3 students with direct SAT entitlement without exposing student IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL=$(cat <<'SQL'
+          WITH current_l3 AS (
+            SELECT DISTINCT a.portal_user_id_norm
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key = a.batch_key
+            WHERE
+              (a.effective_from IS NULL OR a.effective_from='' OR a.effective_from <= date('now')) AND
+              (a.effective_to IS NULL OR a.effective_to='' OR date('now') < a.effective_to) AND
+              (b.active_from IS NULL OR b.active_from='' OR b.active_from <= date('now')) AND
+              (b.active_to IS NULL OR b.active_to='' OR date('now') < b.active_to) AND
+              lower(b.subject)='maths' AND lower(b.stream)='11plus' AND CAST(b.maths_level AS INTEGER)=3
+          ),
+          sat_access AS (
+            SELECT DISTINCT portal_user_id_norm
+            FROM lesson_entitlements
+            WHERE core_access=1 AND lesson_id GLOB 'Y6M*'
+              AND CAST(substr(lesson_id,4) AS INTEGER) BETWEEN 51 AND 69
+          )
+          SELECT
+            (SELECT COUNT(*) FROM current_l3) AS current_l3_students,
+            COUNT(*) AS l3_students_with_direct_sat_access
+          FROM current_l3 l
+          JOIN sat_access s ON s.portal_user_id_norm = l.portal_user_id_norm;
+          SQL
+          )
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-sat-audit.json
+          echo 'Y6_L3_SAT_ENTITLEMENT_AUDIT_PASS'
