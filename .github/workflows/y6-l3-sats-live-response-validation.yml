@@ -1,0 +1,49 @@
+name: Year 6 L3 SATS live response validation
+
+on:
+  push:
+    branches:
+      - fix/y6-l3-sats-live-response-2026-09-27
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-maths-equivalent-navigation-final.js
+          node --check worker/src/index-phase20-change15.js
+          node --check worker/src/access-read-model-sync-v2.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
+      - name: Maths navigation and release reconciliation regressions
+        run: |
+          set -euo pipefail
+          node tests/live-entitlement-view-classification-verification.mjs
+          node tests/maths-11plus-level-navigation-verification.mjs
+          node tests/final-maths-equivalent-navigation-verification.mjs
+          node tests/access-read-model-sync-v2-verification.mjs
+          node tests/y6-sats-csv-alias-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/y6-sats-direct-release-verification.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+      - name: Wrangler production-composition bundle dry run
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/y6-worker-bundle
+          npx --yes wrangler@4.125.0 deploy --dry-run --config worker/wrangler.toml --outdir /tmp/y6-worker-bundle
+          test -n "$(find /tmp/y6-worker-bundle -maxdepth 2 -type f -print -quit)"
+      - name: Confirm validation has no production mutation
+        run: |
+          set -euo pipefail
+          grep -Fq 'wrangler@4.125.0 deploy --dry-run' .github/workflows/y6-l3-sats-live-response-validation.yml
+          ! grep -F 'ops/deploy_current_worker_preserve.sh' .github/workflows/y6-l3-sats-live-response-validation.yml
+          echo Y6_L3_SATS_LIVE_RESPONSE_VALIDATION_PASS
