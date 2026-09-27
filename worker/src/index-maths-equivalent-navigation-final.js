@@ -1,11 +1,12 @@
 import currentWorker from './index-phase24-trial-vr.js';
 import {
   normaliseMathsEquivalentHome,
-  splitYear6Lessons
+  splitYear6Lessons,
+  mathsPresentationRole
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v3';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v4';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
@@ -99,15 +100,21 @@ function mathsViews(body) {
   return Array.isArray(maths?.views) ? maths.views : [];
 }
 
+function currentRoleView(body, role) {
+  return mathsViews(body).find(view => mathsPresentationRole(view) === role) || null;
+}
+
 function homeHasYear6Equivalent(body) {
   return mathsViews(body).some(view => {
-    const id = norm(view?.viewId);
-    return id === YEAR6_CANONICAL_VIEW || id === L3_VIEW;
+    const role = mathsPresentationRole(view);
+    return role === 'year6' || role === 'l3';
   });
 }
 
 function homeHasView(body, viewId) {
   const wanted = norm(viewId);
+  if (wanted === L3_VIEW) return Boolean(currentRoleView(body, 'l3'));
+  if (wanted === YEAR6_CANONICAL_VIEW) return Boolean(currentRoleView(body, 'year6'));
   return mathsViews(body).some(view => norm(view?.viewId) === wanted);
 }
 
@@ -124,6 +131,9 @@ function hasReleasedSats(year6Split) {
   return Array.isArray(year6Split?.sats) && year6Split.sats.some(row => row?.locked === false);
 }
 
+// Retained for compatibility with existing verification code. The production
+// final-home rule now uses the presence of the extra Year 6 alias alongside L3
+// as the presentation signal, because that is exactly the live defect surface.
 function suppressUnreleasedL3Sats(body, hadL3BeforeNormalisation, year6Split) {
   if (!hadL3BeforeNormalisation || hasReleasedSats(year6Split)) return false;
   const maths = Array.isArray(body?.subjects)
@@ -131,7 +141,18 @@ function suppressUnreleasedL3Sats(body, hadL3BeforeNormalisation, year6Split) {
     : null;
   if (!maths || !Array.isArray(maths.views)) return false;
   const before = maths.views.length;
-  maths.views = maths.views.filter(view => norm(view?.viewId) !== YEAR6_SATS_VIEW);
+  maths.views = maths.views.filter(view => mathsPresentationRole(view) !== 'sats');
+  return maths.views.length !== before;
+}
+
+function suppressUnpairedL3Sats(body, hadL3BeforeNormalisation, hadYear6BeforeNormalisation) {
+  if (!hadL3BeforeNormalisation || hadYear6BeforeNormalisation) return false;
+  const maths = Array.isArray(body?.subjects)
+    ? body.subjects.find(subject => norm(subject?.subject) === 'maths')
+    : null;
+  if (!maths || !Array.isArray(maths.views)) return false;
+  const before = maths.views.length;
+  maths.views = maths.views.filter(view => mathsPresentationRole(view) !== 'sats');
   return maths.views.length !== before;
 }
 
@@ -141,7 +162,13 @@ async function finalHome(request, env, ctx) {
   const body = await response.clone().json().catch(() => null);
   if (!body?.ok) return response;
 
-  const hadL3BeforeNormalisation = homeHasView(body, L3_VIEW);
+  // Capture the live presentation before final normalisation. Matching uses
+  // either view IDs or labels so prepared/live alias IDs cannot bypass the rule.
+  const l3Before = currentRoleView(body, 'l3');
+  const year6Before = currentRoleView(body, 'year6');
+  const hadL3BeforeNormalisation = Boolean(l3Before);
+  const hadYear6BeforeNormalisation = Boolean(year6Before);
+
   let year6Split = null;
   if (homeHasYear6Equivalent(body)) {
     const loaded = await canonicalYear6List(request, env, ctx);
@@ -149,20 +176,19 @@ async function finalHome(request, env, ctx) {
   }
 
   // The prepared home snapshot can be older than the current entitlement/source
-  // classification. Before collapsing Year 6/L3, refresh L3 counts from the live
-  // list response repaired by the batch-definition-aware catalogue overlay.
-  if (hadL3BeforeNormalisation) {
-    const l3 = await loadViewList(request, env, ctx, L3_VIEW);
-    refreshHomeViewSummary(body, L3_VIEW, l3.rows);
+  // classification. Refresh the actual L3 navigation target when one exists;
+  // do not assume its internal ID is the canonical presentation ID.
+  if (l3Before?.viewId) {
+    const l3 = await loadViewList(request, env, ctx, clean(l3Before.viewId));
+    refreshHomeViewSummary(body, clean(l3Before.viewId), l3.rows);
   }
 
   normaliseMathsEquivalentHome(body, year6Split);
 
-  // L3 students do not get a permanent SATS card merely because L3 and Year 6
-  // share canonical content. SATS appears for L3 only when at least one SATS
-  // lesson is genuinely released/prelesson-available to that student. Ordinary
-  // Year 6 students continue to receive the explicit Lessons + SATS split.
-  suppressUnreleasedL3Sats(body, hadL3BeforeNormalisation, year6Split);
+  // If L3 existed without an extra Year 6 alias (Kiaan's shape), there is no
+  // separate SATS presentation card. If Year 6 existed beside L3 (Devansh's
+  // shape), normalisation converts that duplicate alias into SATS.
+  suppressUnpairedL3Sats(body, hadL3BeforeNormalisation, hadYear6BeforeNormalisation);
 
   return responseLike(response, body);
 }
@@ -202,6 +228,7 @@ export {
   refreshHomeViewSummary,
   hasReleasedSats,
   suppressUnreleasedL3Sats,
+  suppressUnpairedL3Sats,
   finalHome,
   finalSyntheticList
 };
