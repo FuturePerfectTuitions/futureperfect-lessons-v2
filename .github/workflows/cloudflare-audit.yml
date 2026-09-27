@@ -14,140 +14,81 @@ permissions:
 
 jobs:
   audit:
-    name: Trace source inputs behind duplicate current Maths views
+    name: Compare stored access snapshots with current source compilation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
       DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
       AS_OF_DATE: '2026-09-26'
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
 
-      - name: Confirm read credentials
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-
-      - name: Inspect only source access inputs for Devansh and Kiaan
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const token=process.env.CLOUDFLARE_API_TOKEN;
-          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
-          const studentsNs=process.env.STUDENTS_KV_ID;
-          const db=process.env.DB_ID;
-          const asOf=process.env.AS_OF_DATE;
-          const base='https://api.cloudflare.com/client/v4';
-          const headers={Authorization:`Bearer ${token}`};
-          const clean=v=>String(v??'').trim();
-          const norm=v=>clean(v).toLowerCase();
-
-          async function envelope(path,init={}){
-            const r=await fetch(`${base}${path}`,{...init,headers:{...headers,...(init.headers||{})}});
-            const body=await r.json().catch(()=>null);
-            if(!r.ok||body?.success!==true) throw new Error(`CF_READ_FAILED ${r.status} ${path}`);
-            return body;
-          }
-          async function kvKeys(prefix){
-            const out=[]; let cursor='';
-            do{
-              const q=new URLSearchParams({limit:'1000',prefix}); if(cursor)q.set('cursor',cursor);
-              const b=await envelope(`/accounts/${account}/storage/kv/namespaces/${studentsNs}/keys?${q}`);
-              out.push(...(b.result||[]).map(x=>x.name)); cursor=clean(b.result_info?.cursor);
-            }while(cursor);
-            return out;
-          }
-          async function kvGet(key){
-            const r=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${studentsNs}/values/${encodeURIComponent(key)}`,{headers});
-            if(r.status===404)return null; if(!r.ok)throw new Error(`KV ${r.status}`); return r.json();
-          }
-          async function d1(sql,params=[]){
-            if(!/^\s*(SELECT|PRAGMA)\b/i.test(sql)) throw new Error('READ_ONLY_SQL_ONLY');
-            const b=await envelope(`/accounts/${account}/d1/database/${db}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql,params})});
-            const first=Array.isArray(b.result)?b.result[0]:b.result; return first?.results||[];
-          }
-          function active(row){
-            const from=clean(row.effective_from),to=clean(row.effective_to),af=clean(row.active_from),at=clean(row.active_to);
-            return (!from||from<=asOf)&&(!to||asOf<to)&&(!af||af<=asOf)&&(!at||asOf<at);
-          }
-          function viewForDef(r){
-            const subject=norm(r.subject),stream=norm(r.stream),year=Number(r.school_year),level=Number(r.maths_level||0);
-            if(subject==='maths'){
-              if(stream==='11plus'||level>=1){const l=level||year-3; return l>=1&&l<=3?`maths-level${l}`:'';}
-              return year>=2&&year<=6?`maths-year${year}`:'';
-            }
-            if(subject==='english'){
-              if(stream==='11plus'&&(year===4||year===5))return `english-year${year}-11plus`;
-              return year>=2&&year<=6?`english-year${year}`:'';
-            }
-            return '';
-          }
-          function legacyBatchViewId(value){
-            const key=clean(value).toUpperCase(); let m=key.match(/^Y([2-6])M(?:O)?$/); if(m)return `maths-year${m[1]}`;
-            m=key.match(/^Y([2-6])E(?:O)?$/); if(m)return `english-year${m[1]}`;
-            m=key.match(/^Y([4-6])(?:11|M11|11M).*$/); if(m)return `maths-level${Number(m[1])-3}`;
-            m=key.match(/^Y([45])(?:E11|11E).*$/); return m?`english-year${m[1]}-11plus`:'';
-          }
-
-          const allDefs=await d1('SELECT batch_key, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions');
-          const defMap=new Map(allDefs.map(r=>[clean(r.batch_key),r]));
-          const keys=await kvKeys('user:');
-          const targets=[];
-          for(const key of keys){
-            const user=await kvGet(key); const first=norm(user?.firstName||user?.name);
-            if(first==='devansh'||first==='kiaan') targets.push({label:first==='devansh'?'DEVANSH':'KIAAN',key,user,id:norm(key.replace(/^user:/,''))});
-          }
-          if(targets.length!==2) throw new Error(`TARGET_COUNT_${targets.length}`);
-
-          for(const t of targets){
-            const assignments=await d1(`SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.batch_key`,[t.id]);
-            const ent=await d1(`SELECT lesson_id,core_access,vr_access,source,source_batch_code,source_lesson_date,first_granted_at,last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm=? ORDER BY source_lesson_date,lesson_id`,[t.id]);
-            const pre=await d1(`SELECT lesson_id,batch_key,lesson_date,first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_date,lesson_id`,[t.id]);
-
-            const profileBatches=(Array.isArray(t.user?.batches)?t.user.batches:[]).map(b=>({batch:clean(b),legacyView:legacyBatchViewId(b)}));
-            const fullLibraries=Array.isArray(t.user?.fullLibraries)?t.user.fullLibraries:[];
-            const historicalViews=Array.isArray(t.user?.historicalViews)?t.user.historicalViews:[];
-            const assignmentRows=assignments.map(r=>({batch:clean(r.batch_key),view:viewForDef(r),effectiveFrom:r.effective_from||null,effectiveTo:r.effective_to||null,batchActiveFrom:r.active_from||null,batchActiveTo:r.active_to||null,isCurrent:active(r)}));
-            const currentAssignments=assignmentRows.filter(r=>r.isCurrent);
-
-            const entByPresentation={};
-            for(const r of ent){
-              const batch=clean(r.source_batch_code),def=defMap.get(batch),view=def?viewForDef(def):legacyBatchViewId(batch)||'(unresolved)';
-              const k=view||'(none)'; const s=entByPresentation[k]||(entByPresentation[k]={rows:0,currentAcademicYearRows:0,openCoreRows:0,sourceBatches:new Set(),examples:[]});
-              s.rows++; if(clean(r.source_lesson_date)>='2026-09-01')s.currentAcademicYearRows++; if(Number(r.core_access||0)!==0)s.openCoreRows++; if(batch)s.sourceBatches.add(batch);
-              if(s.examples.length<5)s.examples.push({lessonId:r.lesson_id,sourceLessonDate:r.source_lesson_date||null,source:r.source||null,batch});
-            }
-            for(const s of Object.values(entByPresentation))s.sourceBatches=[...s.sourceBatches].sort();
-            const preByPresentation={};
-            for(const r of pre){const batch=clean(r.batch_key),def=defMap.get(batch),view=def?viewForDef(def):legacyBatchViewId(batch)||'(unresolved)'; const k=view||'(none)'; const s=preByPresentation[k]||(preByPresentation[k]={rows:0,currentAcademicYearRows:0,sourceBatches:new Set(),examples:[]}); s.rows++; if(clean(r.lesson_date)>='2026-09-01')s.currentAcademicYearRows++; if(batch)s.sourceBatches.add(batch); if(s.examples.length<5)s.examples.push({lessonId:r.lesson_id,lessonDate:r.lesson_date||null,batch});}
-            for(const s of Object.values(preByPresentation))s.sourceBatches=[...s.sourceBatches].sort();
-
-            console.log(`=== ${t.label} SOURCE INPUT ===`);
-            console.log(JSON.stringify({
-              profile:{batches:profileBatches,fullLibraries,historicalViews,upsellViews:Array.isArray(t.user?.upsellViews)?t.user.upsellViews:null,manualCoreLessonCount:Array.isArray(t.user?.manualAccess?.coreLessons)?t.user.manualAccess.coreLessons.length:0},
-              assignments:assignmentRows,
-              currentAssignmentViews:[...new Set(currentAssignments.map(r=>r.view))].sort(),
-              entitlementPresentation:entByPresentation,
-              preLessonPresentation:preByPresentation
-            },null,2));
-          }
-          NODE
-
-      - name: Print exact parity-normalizer mechanisms that can synthesize current cards
+      - name: Prepare exact compiler source used by rebuilt pipeline
         shell: bash
         run: |
           set -euo pipefail
           git fetch --no-tags origin 'rebuild/post-cp13-entitlement-fix-2026-09-15:refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15'
-          echo '=== prepareAccessInputForParity source ==='
-          git show 'refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15:rebuild/adminops/src/lib/backfill-parity-audit.mjs' | sed -n '1,150p'
-          echo '=== compileAccessSnapshot current flag source ==='
-          git show 'refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15:rebuild/shared/read-models/access-snapshot.mjs' | sed -n '235,310p'
+          git worktree add --detach /tmp/rebuild-source refs/remotes/origin/rebuild/post-cp13-entitlement-fix-2026-09-15
+
+      - name: Compare stored current snapshots to freshly compiled current inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/rebuild-source/scripts/diagnose-current-vs-stored.mjs <<'NODE'
+          import { compileAccessScope, globalToCatalogue } from '../rebuild/adminops/src/lib/compiler.mjs';
+          import { pointerKey, versionKey } from '../rebuild/adminops/src/lib/atomic-publisher.mjs';
+
+          const token=process.env.CLOUDFLARE_API_TOKEN, account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const studentsNs=process.env.STUDENTS_KV_ID, readNs=process.env.READ_MODELS_KV_ID, db=process.env.DB_ID, asOf=process.env.AS_OF_DATE;
+          const base='https://api.cloudflare.com/client/v4', headers={Authorization:`Bearer ${token}`};
+          const clean=v=>String(v??'').trim(), norm=v=>clean(v).toLowerCase();
+          async function env(path,init={}){const r=await fetch(`${base}${path}`,{...init,headers:{...headers,...(init.headers||{})}});const b=await r.json().catch(()=>null);if(!r.ok||b?.success!==true)throw new Error(`CF ${r.status} ${path}`);return b;}
+          async function kvJson(ns,key){const r=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers});if(r.status===404)return null;if(!r.ok)throw new Error(`KV ${r.status}`);return r.json();}
+          async function kvKeys(ns,prefix){const out=[];let cursor='';do{const q=new URLSearchParams({limit:'1000',prefix});if(cursor)q.set('cursor',cursor);const b=await env(`/accounts/${account}/storage/kv/namespaces/${ns}/keys?${q}`);out.push(...(b.result||[]).map(x=>x.name));cursor=clean(b.result_info?.cursor);}while(cursor);return out;}
+          async function d1(sql,params=[]){const b=await env(`/accounts/${account}/d1/database/${db}/query`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql,params})});const x=Array.isArray(b.result)?b.result[0]:b.result;return x?.results||[];}
+
+          const globalPointer=await kvJson(readNs,pointerKey('global'));
+          const globalEnvelope=await kvJson(readNs,versionKey('global',globalPointer.current.version));
+          const catalogue=globalToCatalogue(globalEnvelope.payload);
+          const defs=await d1('SELECT batch_key, academic_year, subject, school_year, stream, maths_level, active_from, active_to FROM batch_definitions');
+          const studentKeys=await kvKeys(studentsNs,'user:');
+          const targetProfiles=[];
+          for(const key of studentKeys){const user=await kvJson(studentsNs,key);const first=norm(user?.firstName||user?.name);if(first==='devansh'||first==='kiaan')targetProfiles.push({label:first==='devansh'?'DEVANSH':'KIAAN',id:norm(key.slice(5)),user});}
+          if(targetProfiles.length!==2)throw new Error(`TARGETS ${targetProfiles.length}`);
+
+          const accessPointers=await kvKeys(readNs,'rm:v1:scope:access_3A');
+          const currentPointers=accessPointers.filter(k=>k.endsWith(':current'));
+          const storedByName=new Map();
+          for(const key of currentPointers){const p=await kvJson(readNs,key);if(!p?.current?.version)continue;const scopeEncoded=key.slice('rm:v1:scope:'.length,-':current'.length);const ekey=`rm:v1:scope:${scopeEncoded}:version:${encodeURIComponent(p.current.version).replace(/%/g,'_')}`;const e=await kvJson(readNs,ekey);const first=norm(e?.payload?.snapshot?.account?.firstName);if(first==='devansh'||first==='kiaan')storedByName.set(first,{pointer:p,envelope:e});}
+
+          const maths=v=>(v||[]).filter(x=>x.subject==='maths').map(x=>({viewId:x.viewId,label:x.label,current:x.current,group:x.group,open:x.openLessonCount,locked:x.lockedLessonCount}));
+          for(const t of targetProfiles){
+            const assignments=await d1('SELECT a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from AS batch_active_from,b.active_to AS batch_active_to FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=?',[t.id]);
+            const ent=await d1('SELECT lesson_id,core_access,vr_access,source,source_batch_code,source_lesson_date,first_granted_at,last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm=?',[t.id]);
+            const pre=await d1('SELECT lesson_id,batch_key,lesson_date,first_granted_at FROM online_prelesson_entitlements WHERE portal_user_id_norm=?',[t.id]);
+            const input={asOfDate:asOf,user:t.user,batchDefinitions:defs,batchAssignments:assignments,entitlements:ent,onlinePreLessonEntitlements:pre};
+            const fresh=compileAccessScope(input,catalogue,{scopeId:'diagnostic',asOfDate:asOf}).snapshot;
+            const stored=storedByName.get(t.label.toLowerCase());
+            if(!stored)throw new Error(`NO_STORED_${t.label}`);
+            console.log(`=== ${t.label} STORED VS FRESH ===`);
+            console.log(JSON.stringify({
+              pointerUpdatedAt:stored.pointer.updatedAt||null,
+              storedVersion:stored.pointer.current.version,
+              previousVersion:stored.pointer.previous?.version||null,
+              storedMaths:maths(stored.envelope.payload.snapshot.views),
+              freshMaths:maths(fresh.views),
+              exactViewIdsEqual:JSON.stringify((stored.envelope.payload.snapshot.views||[]).map(x=>x.viewId))===JSON.stringify((fresh.views||[]).map(x=>x.viewId))
+            },null,2));
+          }
+          NODE
+          cd /tmp/rebuild-source
+          node scripts/diagnose-current-vs-stored.mjs
 
       - name: Audit complete
-        run: echo 'DUPLICATE_CURRENT_VIEW_SOURCE_INPUT_TRACE_COMPLETE'
+        run: echo 'STORED_VS_FRESH_ACCESS_SNAPSHOT_COMPARE_COMPLETE'
