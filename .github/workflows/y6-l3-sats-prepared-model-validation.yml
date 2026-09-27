@@ -25,10 +25,15 @@ jobs:
           node --check rebuild/shared/read-models/catalogue.mjs
           node --check rebuild/shared/read-models/access-snapshot.mjs
           node --check rebuild/adminops/src/lib/backfill-parity-audit.mjs
+          node --check rebuild/adminops/src/lib/access-compiler-v2.mjs
           node --check tests/y6-l3-sats-prepared-model-regression.mjs
+          node --check tests/y6-l3-sats-programme-neutral-access-v2.mjs
           node --check scripts/audit-y6-l3-sats-candidate-live.mjs
       - name: Focused Year 6 L3 SATS regression
-        run: node tests/y6-l3-sats-prepared-model-regression.mjs
+        run: |
+          set -euo pipefail
+          node tests/y6-l3-sats-prepared-model-regression.mjs
+          node tests/y6-l3-sats-programme-neutral-access-v2.mjs
       - name: Checkpoint 2 prepared read-model regression
         run: node tests/rebuild-checkpoint2-read-models.mjs
       - name: Checkpoint 8 access parity regression
