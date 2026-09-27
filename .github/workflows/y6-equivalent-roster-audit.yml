@@ -147,3 +147,57 @@ jobs:
           )
           npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-l3-lesson-distribution.json
           echo 'Y6_L3_LESSON_DISTRIBUTION_AUDIT_PASS'
+
+      - name: Audit L3 entitlement source definitions without exposing batch codes or student IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          SQL=$(cat <<'SQL'
+          WITH current_l3 AS (
+            SELECT DISTINCT a.portal_user_id_norm
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key = a.batch_key
+            WHERE
+              (a.effective_from IS NULL OR a.effective_from='' OR a.effective_from <= date('now')) AND
+              (a.effective_to IS NULL OR a.effective_to='' OR date('now') < a.effective_to) AND
+              (b.active_from IS NULL OR b.active_from='' OR b.active_from <= date('now')) AND
+              (b.active_to IS NULL OR b.active_to='' OR date('now') < b.active_to) AND
+              lower(b.subject)='maths' AND lower(b.stream)='11plus' AND CAST(b.maths_level AS INTEGER)=3
+          ),
+          sources AS (
+            SELECT
+              'FULL' AS mode,
+              COALESCE(lower(b.stream),'unresolved') AS source_stream,
+              COALESCE(CAST(b.maths_level AS TEXT),'') AS source_maths_level,
+              COALESCE(CAST(b.school_year AS TEXT),'') AS source_school_year,
+              e.portal_user_id_norm
+            FROM lesson_entitlements e
+            JOIN current_l3 l ON l.portal_user_id_norm=e.portal_user_id_norm
+            LEFT JOIN batch_definitions b ON b.batch_key=e.source_batch_code
+            WHERE e.core_access=1 AND e.lesson_id GLOB 'Y6M*'
+            UNION ALL
+            SELECT
+              'PRELESSON' AS mode,
+              COALESCE(lower(b.stream),'unresolved') AS source_stream,
+              COALESCE(CAST(b.maths_level AS TEXT),'') AS source_maths_level,
+              COALESCE(CAST(b.school_year AS TEXT),'') AS source_school_year,
+              e.portal_user_id_norm
+            FROM online_prelesson_entitlements e
+            JOIN current_l3 l ON l.portal_user_id_norm=e.portal_user_id_norm
+            LEFT JOIN batch_definitions b ON b.batch_key=e.batch_key
+            WHERE e.lesson_id GLOB 'Y6M*'
+          )
+          SELECT
+            mode,
+            source_stream,
+            source_maths_level,
+            source_school_year,
+            COUNT(*) AS entitlement_rows,
+            COUNT(DISTINCT portal_user_id_norm) AS students
+          FROM sources
+          GROUP BY mode, source_stream, source_maths_level, source_school_year
+          ORDER BY mode, source_stream, source_maths_level, source_school_year;
+          SQL
+          )
+          npx --yes wrangler@${WRANGLER_VERSION} d1 execute fpt_portal_v2_db --remote --command "$SQL" --json | tee /tmp/y6-l3-source-definitions.json
+          echo 'Y6_L3_SOURCE_DEFINITION_AUDIT_PASS'
