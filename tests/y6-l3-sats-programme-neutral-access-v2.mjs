@@ -86,9 +86,9 @@ const historicalL3 = historicalPayload.snapshot.views.find(v => v.viewId === 'ma
 assert.equal(Boolean(historicalL3), true);
 assert.equal(historicalL3.current, false);
 
-// Explicit dual Full Library grants are a legitimate access exception and must
-// not be deleted simply because they expose both equivalent catalogues. SATS is
-// still not granted by either Full Library alias.
+// Explicit dual Full Library grants are preserved, but they are not teaching
+// programme identity. With no current D1 programme, both equivalent catalogues
+// remain accessible under Previous and SATS is still not inherited.
 const dualFullLibraryInput = {
   asOfDate,
   user:{ name:'Fixture', batches:[], upsellViews:[], fullLibraries:['MATHS_Y6_FULL','MATHS_L3_FULL'] },
@@ -98,7 +98,16 @@ const dualFullLibraryInput = {
   onlinePreLessonEntitlements:[]
 };
 const dualFullLibraryPayload = compileAccessScopeV2(dualFullLibraryInput, catalogue, { scopeId:'fixture-full-library', asOfDate });
-assert.deepEqual(currentMaths(dualFullLibraryPayload), ['maths-level3:L3:1','maths-year6:Lessons:1']);
+assert.deepEqual(currentMaths(dualFullLibraryPayload), []);
+const dualY6 = dualFullLibraryPayload.snapshot.views.find(v => v.viewId === 'maths-year6');
+const dualL3 = dualFullLibraryPayload.snapshot.views.find(v => v.viewId === 'maths-level3');
+assert.equal(Boolean(dualY6), true);
+assert.equal(Boolean(dualL3), true);
+assert.equal(dualY6.current, false);
+assert.equal(dualY6.group, 'previous');
+assert.equal(dualL3.current, false);
+assert.equal(dualL3.group, 'previous');
+assert.equal(dualFullLibraryPayload.snapshot.lessonAccess.Y6M50.core, true);
 assert.equal(dualFullLibraryPayload.snapshot.views.some(v => v.viewId === 'maths-sats'), false);
 
 console.log('Y6_L3_SATS_PROGRAMME_NEUTRAL_ACCESS_V2_PASS');
