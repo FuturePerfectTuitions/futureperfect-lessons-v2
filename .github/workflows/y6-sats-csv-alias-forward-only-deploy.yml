@@ -1,13 +1,15 @@
-name: Y6 SATs CSV alias forward-only deploy
+name: Y6 SATs and Maths equivalent navigation forward-only deploy
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/y6-sats-csv-alias-forward-only-deploy.yml'
+      - 'worker/src/index-phase20-change15.js'
       - 'worker/src/admin-y6-sats-csv-alias.js'
       - 'worker/src/admin-lesson-release-import-email-reconciled.js'
       - 'worker/src/admin-lesson-release-import-manual-email-reconciled.js'
+      - 'tests/maths-11plus-level-navigation-verification.mjs'
       - 'tests/y6-sats-csv-alias-verification.mjs'
       - 'ops/deploy_current_worker_preserve.sh'
 
@@ -24,7 +26,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Forward-only Y6SM SATs CSV alias fix
+      DEPLOY_MESSAGE: Forward-only Maths equivalent navigation and Y6 SATs presentation fix
 
     steps:
       - uses: actions/checkout@v4
@@ -32,19 +34,21 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify alias and current composed Worker
+      - name: Verify navigation, SATs semantics and current composed Worker
         shell: bash
         run: |
           set -euo pipefail
+          node --check worker/src/index-phase20-change15.js
           node --check worker/src/admin-y6-sats-csv-alias.js
           node --check worker/src/admin-lesson-release-import-email-reconciled.js
           node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
+          node tests/maths-11plus-level-navigation-verification.mjs
           node tests/y6-sats-csv-alias-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/y6-sats-direct-release-verification.mjs
           node tests/shared-worker-entrypoint-preservation.mjs
           grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
-          echo 'Y6_SATS_ALIAS_PREFLIGHT_PASS'
+          echo 'MATHS_EQUIVALENT_NAV_PREFLIGHT_PASS'
 
       - name: Deploy current main forward-only
         shell: bash
@@ -52,7 +56,7 @@ jobs:
           set -euo pipefail
           bash ops/deploy_current_worker_preserve.sh
 
-      - name: Verify live composition and live parent routing
+      - name: Verify live composition, new navigation code and live parent routing
         shell: bash
         run: |
           set -euo pipefail
@@ -69,4 +73,6 @@ jobs:
           grep -aFq '/api/v1/admin/lesson-releases/confirm' /tmp/y6-sats-worker.bin
           grep -aFq 'trial-runtime-access-v2' /tmp/y6-sats-worker.bin
           grep -aFq 'Y6SM' /tmp/y6-sats-worker.bin
-          echo 'Y6_SATS_ALIAS_FORWARD_ONLY_DEPLOY_PASS'
+          grep -aFq 'maths-year6-lessons' /tmp/y6-sats-worker.bin
+          grep -aFq 'maths-sats' /tmp/y6-sats-worker.bin
+          echo 'MATHS_EQUIVALENT_NAV_FORWARD_ONLY_DEPLOY_PASS'
