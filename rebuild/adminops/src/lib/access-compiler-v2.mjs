@@ -45,6 +45,11 @@ function currentEquivalentProgramme(input, asOfDate) {
   return ids[0] || '';
 }
 
+function explicitDualFullLibrary(input) {
+  const full = new Set((input?.user?.fullLibraries || []).map(upper));
+  return full.has('MATHS_Y6_FULL') && full.has('MATHS_L3_FULL');
+}
+
 function normaliseProgrammeNeutralAccess(input, asOfDate) {
   const definitions = definitionMap(input?.batchDefinitions);
   const currentProgramme = currentEquivalentProgramme(input, asOfDate);
@@ -113,7 +118,11 @@ function compileAccessScopeV2(input, catalogue, options = {}) {
   const current = (payload?.snapshot?.views || []).filter(view => view?.current && !view?.lockedPreview &&
     (view?.viewId === 'maths-year6' || view?.viewId === 'maths-level3'));
   if (current.length > 1) {
-    throw new Error(`COMPILED_YEAR6_L3_PROGRAMME_COLLISION:${JSON.stringify(collisionDiagnostic(input, normalized, payload, asOfDate))}`);
+    const currentD1 = currentEquivalentProgramme(input, asOfDate);
+    const preserveDualFullLibrary = !currentD1 && explicitDualFullLibrary(input);
+    if (!preserveDualFullLibrary) {
+      throw new Error(`COMPILED_YEAR6_L3_PROGRAMME_COLLISION:${JSON.stringify(collisionDiagnostic(input, normalized, payload, asOfDate))}`);
+    }
   }
   return payload;
 }
@@ -122,6 +131,7 @@ export {
   ACCESS_COMPILER_V2_MARKER,
   equivalentAssignmentViews,
   currentEquivalentProgramme,
+  explicitDualFullLibrary,
   normaliseProgrammeNeutralAccess,
   collisionDiagnostic,
   compileAccessScopeV2
