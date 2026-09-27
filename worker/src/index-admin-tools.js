@@ -1,4 +1,4 @@
-import currentWorker from './index-phase24-trial-vr.js';
+import currentWorker from './index-maths-equivalent-navigation-final.js';
 import {
   liveBatchCompatEnv,
   needsCompatibility
@@ -8,6 +8,8 @@ import { handleAdminBatchManagerV2 } from './admin-batch-manager-v2.js';
 import { handleAdminPortalLoginLookup } from './admin-portal-login-lookup.js';
 
 // Admin-specific routes are composed here so fixes deploy with the shared Worker.
+// The delegated student chain is wrapped last by the Maths equivalent-navigation
+// guard so no later student response layer can reintroduce Year/L-level aliases.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
