@@ -1,0 +1,141 @@
+{
+  "schema": "fpt.portal.gch.override.completed-l3-quiz-v2.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "IMPLEMENTATION_PREFLIGHT_PASS_PENDING_FORWARD_ONLY_PRODUCTION_DEPLOY",
+  "effectiveDate": "2026-09-28",
+  "scope": "PUBLIC_STUDENT_V2.CompletedL3QuizEligibilityAndLaunch",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "quizBridgeAuthority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-23_QUIZ_BRIDGE_COMPOSITION.json",
+  "precedence": "This override is higher authority for completed-L3 11+ Practice eligibility and launch on the public /api/v2 Student runtime only. Existing active L2/L3 Quiz rules, Trial Quiz rules, Quiz bridge redemption, Maths navigation, SATS presentation and all unrelated Portal/Admin behaviour remain unchanged.",
+  "ownerRequirement": {
+    "symptom": "Aarav's live Maths page correctly showed L1, L2, L3 and SATS but did not show 11+ Practice.",
+    "requiredOutcome": "Preserve the existing L1, L2, L3 and SATS cards exactly and restore 11+ Practice for a student who has completed L3 and retains explicit Quiz access.",
+    "recoveryMode": "FORWARD_ONLY",
+    "noUserInterventionRequiredForEngineeringRepair": true
+  },
+  "freshLiveDiagnosis20260928": {
+    "auditWorkflowRun": 36438554630,
+    "studentWorker": "fpt-portal-v2-rebuild-student-prod",
+    "studentWorkerVersion": "9baf3815-19ed-4fa0-9cd1-26c0478b24bd",
+    "browserWorker": "fpt-portal-v2-rebuild-browser-prod",
+    "browserServiceBinding": "STAGING_API -> fpt-portal-v2-rebuild-student-prod",
+    "publicRoutes": [
+      "/api/v2/student/quiz/eligibility",
+      "/api/v2/student/quiz/launch"
+    ],
+    "liveStudentBundleBeforeRepair": {
+      "v2EligibilityRoutePresent": true,
+      "v2LaunchRoutePresent": true,
+      "releasePolicyMarkerPresent": "quiz-release-context-v2.0",
+      "releaseSourceMarkerPresent": "portal-live-maths11plus-release-v2",
+      "completedL3ProfileMarkerLogicPresent": false,
+      "completedL3EligibilityModePresent": false
+    },
+    "aaravLiveProfile": {
+      "portalUserIdNorm": "aar1811",
+      "requiredFullLibraryPresent": "MATHS_L3_FULL",
+      "requiredSpecialAccessPresent": "MATHS_11PLUS_QUIZ_L3_COMPLETED",
+      "activeMathsAssignmentPresent": false,
+      "note": "The explicit profile marker is already present. Do not fabricate or reopen a D1 Maths assignment merely to expose the Quiz."
+    },
+    "rootCauseClassification": "PUBLIC_V2_RUNTIME_LAYER_MISMATCH",
+    "rootCause": "The durable completed-L3 contract had been added to the shared v1 Quiz bridge compatibility layer, but the live browser calls /api/v2/student/quiz/eligibility and /api/v2/student/quiz/launch on the rebuilt Student Worker. That public-v2 runtime still required an active L2/L3 Maths 11+ assignment, so a completed-L3 student with preserved L3 access failed eligibility before the card could render."
+  },
+  "sourceLineage": {
+    "liveVersionSourceCommit": "3278eada72b5f4423d282b245db138ee81fb88ad",
+    "sourceProofWorkflowRun": 35698785034,
+    "sourceProofResult": "PASS",
+    "sourceProofMeaning": "The historical guarded Student deployment at this exact commit produced current live version 9baf3815-19ed-4fa0-9cd1-26c0478b24bd. The repair therefore starts from exact current deployed Student source lineage rather than an older guessed Phase implementation.",
+    "restoredDurableSourceCommit": "09d4d8976ba14cf9b06ce7332f49f1de2ffa4c8f",
+    "restoredSourceBoundary": "rebuild/ subtree only, preserving current repository authority and unrelated later files"
+  },
+  "requiredEligibilityContract": {
+    "activeAssignmentPrecedence": "A current active L2 or L3 Maths 11+ D1 assignment remains the primary authority and preserves the existing active-assignment release-context shape.",
+    "completedL3Fallback": {
+      "currentLevel": "L3",
+      "requiredProfileConditions": [
+        "STUDENTS_KV fullLibraries contains MATHS_L3_FULL",
+        "STUDENTS_KV specialAccess contains MATHS_11PLUS_QUIZ_L3_COMPLETED"
+      ],
+      "preparedAccessStillRequired": "The current prepared access model must independently expose a valid current, unlocked, catalogue-available maths-level3 view backed by the global 11plus L3 catalogue.",
+      "d1AssignmentRequired": false,
+      "fabricateD1Assignment": false,
+      "eligibilityMode": "completed-l3"
+    },
+    "failClosed": [
+      "special marker without MATHS_L3_FULL is not enough",
+      "MATHS_L3_FULL without the special marker is not enough",
+      "missing or invalid current prepared L3 access is not enough",
+      "Trial, Admin, inactive/expired and invalid-session users remain excluded by existing rules"
+    ]
+  },
+  "launchContextContract": {
+    "activeAssignment": "Preserve portalAssignmentId and the existing release-context shape; do not add eligibilityMode to active-assignment launch contexts.",
+    "completedL3": "Emit eligibilityMode=completed-l3 and omit portalAssignmentId.",
+    "releasePolicyVersion": "quiz-release-context-v2.0",
+    "releaseSource": "portal-live-maths11plus-release-v2",
+    "l3Inheritance": ["L2"],
+    "releasedL3Codes": "Derived from the same current prepared L3 access/catalogue logic as the existing runtime; blocked and PreLesson-only lessons remain excluded.",
+    "identityContinuity": "portal_user_id_norm remains unchanged so Quiz history/cooldown/adaptive identity carries forward."
+  },
+  "implementation": {
+    "studentRuntime": "rebuild/student/src/lib/quiz-runtime.mjs",
+    "runtimeCommit": "ec3175bba491059358a5a070ac7e3c9cf3186996",
+    "focusedRegression": "tests/completed-l3-v2-quiz-runtime.mjs",
+    "focusedRegressionCommit": "dc95cd7938c470672c645090d7025dedc90305c7",
+    "restoredActiveAssignmentRegression": "tests/cp12-l2-l3-quiz-runtime.mjs",
+    "restoredTrialRegression": "tests/trial-full-l2-quiz-runtime.mjs",
+    "preflightWorkflow": ".github/workflows/completed-l3-v2-quiz-preflight.yml",
+    "preflightRun": 36440832291,
+    "preflightResult": "PASS",
+    "preflightHeadSha": "f97607ca1c11b27a2054db6c0086a053762efc57",
+    "preflightProved": [
+      "completed-L3 fallback requires both explicit profile gates",
+      "completed-L3 launch context is bridge-compatible",
+      "existing active L2/L3 Quiz semantics are preserved",
+      "Trial full-L2 Quiz semantics are preserved",
+      "current live Student version and Browser service binding remain unchanged before deployment",
+      "candidate dry-run bundle contains the completed-L3 markers, public-v2 Quiz routes and Trial runtime marker",
+      "preflight performs no production mutation"
+    ]
+  },
+  "productionDeploymentBoundary": {
+    "status": "PENDING",
+    "targetWorker": "fpt-portal-v2-rebuild-student-prod",
+    "allowedMutation": "Deploy only the rebuilt Student Worker from the current forward branch using bindings reconstructed from fresh live settings with keep-vars.",
+    "prohibited": [
+      "wrangler rollback",
+      "versions deploy of an older Worker",
+      "git revert",
+      "restoring an older entrypoint",
+      "changing Browser Worker",
+      "changing shared Quiz bridge Worker",
+      "creating a replacement active Maths assignment for Aarav"
+    ],
+    "postDeployRequirements": [
+      "Student Worker version advances",
+      "Browser Worker version and Student service binding are unchanged",
+      "shared Quiz bridge Worker version is unchanged",
+      "Student bindings and secret names are unchanged",
+      "public route remains Browser Worker -> rebuilt Student Worker",
+      "live Student bundle contains MATHS_11PLUS_QUIZ_L3_COMPLETED and completed-l3",
+      "unauthenticated eligibility remains 401",
+      "unauthenticated launch remains 401",
+      "hostile-origin launch remains 403",
+      "shared bridge unauthenticated redeem remains protected",
+      "deployment itself does not create Quiz launch rows"
+    ]
+  },
+  "preservationInvariants": [
+    "Do not alter the four Maths cards already visible for Aarav: L1, L2, L3 and SATS.",
+    "Do not broaden completed-L3 Quiz access to arbitrary L3-profile students; the explicit special-access marker is mandatory.",
+    "Do not weaken current prepared access validation.",
+    "Do not change active L2/L3 assignment semantics.",
+    "Do not change Trial Quiz semantics.",
+    "Do not change Quiz question-bank content or Quiz Worker runtime for this Portal defect.",
+    "Do not change shared Quiz bridge redemption except to rely on its already-deployed completed-l3 compatibility contract.",
+    "Do not change normal-student session semantics, Maths/SATS navigation, protected Answer Packs, PreLesson/VR, Replace Resource, Admin tools or parent-email behaviour.",
+    "Production recovery remains forward-only."
+  ],
+  "closureGate": "Do not declare CLOSED PASS until the forward-only Student Worker deployment passes all post-deploy preservation/security checks and the live browser can receive eligible=true for the completed-L3 contract. Owner browser refresh may be used as final visual confirmation but is not an engineering prerequisite for deployment."
+}
