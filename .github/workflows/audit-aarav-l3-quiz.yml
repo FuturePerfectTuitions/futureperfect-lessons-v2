@@ -17,26 +17,32 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
       DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
-      PORTAL_USER_ID_NORM: aarav1234
     steps:
       - uses: actions/checkout@v4
-      - name: Audit exact live account read-only
+      - name: Audit live Aarav account read-only
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          encoded=$(python - <<'PY'
-          import urllib.parse
-          print(urllib.parse.quote('user:aarav1234', safe=''))
-          PY
-          )
+
+          curl --fail --silent --show-error \
+            "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/keys?prefix=user%3Aaarav&limit=100" \
+            -H "$AUTH" -o /tmp/keys.json
+          jq -e '.success == true' /tmp/keys.json >/dev/null
+          count=$(jq '.result|length' /tmp/keys.json)
+          echo "AARAV_PREFIX_MATCH_COUNT=$count"
+          test "$count" -eq 1
+
+          key=$(jq -r '.result[0].name' /tmp/keys.json)
+          id="${key#user:}"
+          encoded=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")
           curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${encoded}" -H "$AUTH" -o /tmp/user.json
           jq -e '(.name // "" | ascii_downcase) == "aarav"' /tmp/user.json >/dev/null
           jq -c '{name,batches:(.batches//[]),fullLibraries:(.fullLibraries//[]),upsellViews:(.upsellViews//[]),mathsYears:(.mathsYears//[]),vrBuckets:(.vrBuckets//[])}' /tmp/user.json
 
           sql='SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
+          jq -n --arg sql "$sql" --arg id "$id" '{sql:$sql,params:[$id]}' >/tmp/query.json
           curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/assignments.json
           jq -e '.success == true' /tmp/assignments.json >/dev/null
           echo 'ASSIGNMENTS_BEGIN'
@@ -45,7 +51,7 @@ jobs:
 
           today=$(TZ=Europe/London date +%F)
           sql='SELECT a.assignment_id,a.batch_key,(CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) AS maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(b.subject)="maths" AND lower(b.stream)="11plus" AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to) ORDER BY a.effective_from DESC,a.assignment_id DESC'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" --arg d "$today" '{sql:$sql,params:[$id,$d,$d,$d,$d]}' >/tmp/query.json
+          jq -n --arg sql "$sql" --arg id "$id" --arg d "$today" '{sql:$sql,params:[$id,$d,$d,$d,$d]}' >/tmp/query.json
           curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/quiz.json
           jq -e '.success == true' /tmp/quiz.json >/dev/null
           echo "ACTIVE_QUIZ_ROWS=$(jq '.result[0].results|length' /tmp/quiz.json)"
