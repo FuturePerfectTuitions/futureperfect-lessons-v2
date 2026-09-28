@@ -1,0 +1,34 @@
+name: Aar1811 completed L3 target preflight
+
+on:
+  push:
+    branches: ['fix/y6-l3-sats-prepared-model-2026-09-27']
+    paths:
+      - 'scripts/preflight-aar1811-completed-l3.mjs'
+      - '.github/workflows/aar1811-completed-l3-preflight.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LESSONS_KV_NAMESPACE_ID: 49619b1a24b244bc8aaa6223fcd24e80
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Regenerate catalogue from live lesson source
+        run: |
+          set -euo pipefail
+          node scripts/rebuild-checkpoint2-prepare-catalogue.mjs rebuild/student/src/prepared-catalogue.generated.js /tmp/aar1811-catalogue.json
+          test "$(jq -r '.viewLessonCounts["maths-sats"]' /tmp/aar1811-catalogue.json)" = "19"
+      - name: Compile intended Aar1811 state without writes
+        run: node scripts/preflight-aar1811-completed-l3.mjs
