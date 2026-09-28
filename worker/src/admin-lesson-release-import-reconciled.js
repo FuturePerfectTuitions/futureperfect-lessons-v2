@@ -2,7 +2,7 @@ import { handleAdminLessonReleaseImport as handleBaseImport } from './admin-less
 import {
   assertReadModelReconciliationReady,
   refreshStudentAccessReadModel
-} from './access-read-model-sync-v2.js';
+} from './access-read-model-sync-v3.js';
 
 const CONFIRM_PATH = '/api/v1/admin/lesson-releases/confirm';
 const clean = value => String(value ?? '').trim();
@@ -81,8 +81,6 @@ export async function handleAdminLessonReleaseImport(request, env) {
     return handleBaseImport(request, env);
   }
 
-  // Fail closed before the canonical D1 mutation if the rebuilt Portal's
-  // prepared-access publication path is not available.
   try {
     await assertReadModelReconciliationReady(env);
   } catch {
