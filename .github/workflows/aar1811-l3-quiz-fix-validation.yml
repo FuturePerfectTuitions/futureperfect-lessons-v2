@@ -1,0 +1,49 @@
+name: 11+ history and quiz release-context validation
+
+on:
+  push:
+    branches:
+      - fix/aar1811-l3-quiz-preserve-history-2026-09-28
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and focused regressions
+        run: |
+          set -euo pipefail
+          node --check worker/src/access-read-model-sync-v3.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
+          node --check worker/src/index-step10-quiz-bridge.js
+          node tests/access-read-model-sync-v2-verification.mjs
+          node tests/access-read-model-sync-v3-verification.mjs
+          node tests/quiz-entitlement-release-context-verification.mjs
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/live-entitlement-view-classification-verification.mjs
+          node tests/maths-11plus-level-navigation-verification.mjs
+          node tests/final-maths-equivalent-navigation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/y6-sats-direct-release-verification.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+      - name: Wrangler production composition dry run
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/aarav-worker-bundle
+          npx --yes wrangler@4.125.0 deploy --dry-run --config worker/wrangler.toml --outdir /tmp/aarav-worker-bundle
+          test -n "$(find /tmp/aarav-worker-bundle -maxdepth 2 -type f -print -quit)"
+          grep -aRFq 'd1-authoritative-11plus-history-presentation-v3' /tmp/aarav-worker-bundle
+          grep -aRFq 'releasedLessonCodesFromView' /tmp/aarav-worker-bundle
+      - name: Confirm no production mutation
+        run: |
+          set -euo pipefail
+          ! grep -F 'ops/deploy_current_worker_preserve.sh' .github/workflows/aar1811-l3-quiz-fix-validation.yml
+          echo AAR1811_L3_QUIZ_FIX_VALIDATION_PASS
