@@ -11,6 +11,7 @@ const studentsKv = 'c9723c8806334e4ea54d1b456d31b794';
 const readModelsKv = '77b35165c8694087bc1b0515c35a7e89';
 const userId = 'aar1811';
 const today = new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 
 async function cfJson(path, options={}) {
   const r = await fetch(`${api}${path}`, { ...options, headers:{...headers,...(options.headers||{})} });
@@ -30,6 +31,14 @@ async function kvJson(ns,key) {
   if(!r.ok) throw new Error(`KV_${r.status}:${ns}:${key}`);
   return JSON.parse(await r.text());
 }
+async function fetchWithRetry(url, attempts=4) {
+  let last;
+  for (let i=1;i<=attempts;i+=1) {
+    try { return await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(10000)}); }
+    catch (error) { last=error; if(i<attempts) await sleep(i*500); }
+  }
+  throw last;
+}
 
 const sharedSettings = await cfJson('/workers/scripts/fpt-portal-v2-worker/settings');
 const sharedBindings = sharedSettings.result?.bindings || [];
@@ -46,8 +55,6 @@ const deployments = await cfJson('/workers/scripts/fpt-portal-v2-worker/deployme
 const deployment = (deployments.result?.deployments || deployments.result || [])[0] || null;
 console.log('SHARED_WORKER_DEPLOYMENT='+JSON.stringify(deployment ? {id:deployment.id,source:deployment.source,created_on:deployment.created_on,versions:deployment.versions} : null));
 
-// Current authority names the rebuilt Student Worker explicitly. This must exist
-// and consume the same prepared namespace before a student-visible state write.
 const studentSettings = await cfJson('/workers/scripts/fpt-portal-v2-rebuild-student-prod/settings');
 const studentBindings = studentSettings.result?.bindings || [];
 const studentReadModels = studentBindings.find(b=>b.name==='READ_MODELS_KV');
@@ -65,9 +72,10 @@ console.log('ASSIGNMENT_SCHEMA_PASS');
 
 const indexes = await d1('PRAGMA index_list(student_batch_assignments)');
 console.log('ASSIGNMENT_INDEXES='+JSON.stringify(indexes.map(r=>({name:r.name,unique:r.unique,origin:r.origin}))));
+const openIndex = await d1(`SELECT name,sql FROM sqlite_master WHERE type='index' AND name='idx_student_batch_assignments_open_unique'`);
+assert.equal(openIndex.length,1,'Open-assignment unique index missing');
+console.log('OPEN_ASSIGNMENT_INDEX_SQL='+openIndex[0].sql);
 
-// Verify REST batch-query shape using SELECT only. Cloudflare documents batch
-// queries as the transactional multi-statement interface used for the apply.
 const batchProbe = await cfJson(`/d1/database/${db}/query`, {
   method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({batch:[
     {sql:'SELECT ? AS probe',params:['one']},
@@ -99,7 +107,7 @@ assert.ok(!l3defs[0].active_from || l3defs[0].active_from<=today);
 assert.ok(!l3defs[0].active_to || today<l3defs[0].active_to);
 console.log('AAR1811_CANONICAL_PRESTATE_PASS');
 
-const publicHome = await fetch('https://lessons.futureperfect.education/api/v2/student/home',{redirect:'manual'});
+const publicHome = await fetchWithRetry('https://lessons.futureperfect.education/api/v2/student/home');
 console.log(`PUBLIC_V2_UNAUTH_HOME_STATUS=${publicHome.status}`);
 assert.ok([401,403].includes(publicHome.status),'Public v2 route did not enforce authentication as expected');
 
