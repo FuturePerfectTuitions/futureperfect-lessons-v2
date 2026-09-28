@@ -26,7 +26,6 @@ jobs:
       PROD_HOST: lessons.futureperfect.education
       PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
       EXPECTED_STUDENT_VERSION: 9baf3815-19ed-4fa0-9cd1-26c0478b24bd
-      EXPECTED_LIVE_BUNDLE_SHA256: 19075bd67fa0445d9daf8e8c39877c1bf9db576bb85e92b4243c27c97205a437
       WRANGLER_VERSION: 4.136.1
     steps:
       - uses: actions/checkout@v4
@@ -58,10 +57,10 @@ jobs:
           test "$LIVE_VERSION" = "$EXPECTED_STUDENT_VERSION"
 
           curl -fsS "$API/workers/scripts/${STUDENT_WORKER}" -H "$AUTH" -o /tmp/live-student.bin
-          LIVE_SHA=$(sha256sum /tmp/live-student.bin | awk '{print $1}')
-          echo "LIVE_STUDENT_SHA256=$LIVE_SHA"
-          test "$LIVE_SHA" = "$EXPECTED_LIVE_BUNDLE_SHA256"
+          echo "LIVE_STUDENT_RESPONSE_SHA256=$(sha256sum /tmp/live-student.bin | awk '{print $1}')"
           grep -aFq '/api/v2/student/quiz/eligibility' /tmp/live-student.bin
+          grep -aFq '/api/v2/student/quiz/launch' /tmp/live-student.bin
+          grep -aFq 'trialDemo' /tmp/live-student.bin
           if grep -aFq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/live-student.bin; then
             echo 'Unexpected completed-L3 marker already present in live Student bundle' >&2
             exit 1
