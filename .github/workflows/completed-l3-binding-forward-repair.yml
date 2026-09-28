@@ -1,0 +1,103 @@
+name: Completed L3 binding forward repair
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-aar1811-2026-09-28']
+    paths: ['.github/workflows/completed-l3-binding-forward-repair.yml']
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Recover canonical non-secret bindings from rebuilt Student Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${STUDENT_WORKER}/settings" -H "$AUTH" -o /tmp/student-settings.json
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/portal-settings.json
+          field(){ jq -r --arg n "$1" --arg t "$2" --arg f "$3" '[.result.bindings[]|select(.name==$n and .type==$t)|.[$f]][0] // ""' /tmp/student-settings.json; }
+          STUDENTS="$(field STUDENTS_KV kv_namespace namespace_id)"
+          LESSONS="$(field LESSONS_KV kv_namespace namespace_id)"
+          DBID="$(field DB d1 id)"
+          R2="$(field MATERIALS_R2 r2_bucket bucket_name)"
+          READMODELS="$(field READ_MODELS_KV kv_namespace namespace_id)"
+          for x in "$STUDENTS" "$LESSONS" "$DBID" "$R2" "$READMODELS"; do test -n "$x"; done
+          test "$READMODELS" = '77b35165c8694087bc1b0515c35a7e89'
+          printf 'STUDENTS=%s\nLESSONS=%s\nDBID=%s\nR2=%s\nREADMODELS=%s\n' "$STUDENTS" "$LESSONS" "$DBID" "$R2" "$READMODELS" > /tmp/bindings.env
+          cat /tmp/bindings.env
+      - name: Regenerate canonical navigation bundle
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/fpt-navigation-package
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/fpt-navigation-package >/tmp/fpt-navigation-package.log
+          grep -Fq 'Generated from the immutable Phase 11 canonical catalogue.' worker/src/phase11-navigation-manifest.generated.js
+      - name: Deploy new forward version with complete bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /tmp/bindings.env
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/current.json
+          plain(){ jq -r --arg n "$1" '[.result.bindings[]|select(.name==$n and .type=="plain_text")|.text][0] // ""' /tmp/current.json; }
+          cat > worker/wrangler.completed-l3-forward.toml <<EOF
+          name = "fpt-portal-v2-worker"
+          main = "src/index-step10-quiz-bridge.js"
+          compatibility_date = "2026-08-20"
+          keep_vars = true
+          workers_dev = true
+
+          [vars]
+          ENVIRONMENT = "$(plain ENVIRONMENT)"
+          ALLOWED_ORIGINS = "$(plain ALLOWED_ORIGINS)"
+          DEV_LOGIN_ALLOWLIST = "$(plain DEV_LOGIN_ALLOWLIST)"
+          PROD_LOGIN_ALLOWLIST = "$(plain PROD_LOGIN_ALLOWLIST)"
+          STUDENT_LOGIN_ENABLED = "$(plain STUDENT_LOGIN_ENABLED)"
+          PARENT_EMAIL_TEST_TO = ""
+
+          [[send_email]]
+          name = "EMAIL"
+          [[kv_namespaces]]
+          binding = "STUDENTS_KV"
+          id = "$STUDENTS"
+          [[kv_namespaces]]
+          binding = "LESSONS_KV"
+          id = "$LESSONS"
+          [[kv_namespaces]]
+          binding = "READ_MODELS_KV"
+          id = "$READMODELS"
+          [[r2_buckets]]
+          binding = "MATERIALS_R2"
+          bucket_name = "$R2"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "fpt_portal_v2_db"
+          database_id = "$DBID"
+          EOF
+          (cd worker && npx --yes wrangler@4 deploy --config wrangler.completed-l3-forward.toml --keep-vars --message 'Completed L3 quiz + forward binding repair')
+      - name: Verify full live binding set and code markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /tmp/bindings.env
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}/settings" -H "$AUTH" -o /tmp/after.json
+          for n in STUDENTS_KV LESSONS_KV READ_MODELS_KV MATERIALS_R2 DB EMAIL; do jq -e --arg n "$n" '.result.bindings[]|select(.name==$n)' /tmp/after.json >/dev/null; done
+          curl --fail --silent --show-error "$API/workers/scripts/${WORKER_NAME}" -H "$AUTH" -o /tmp/live.bin
+          grep -aFq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/live.bin
+          grep -aFq 'completed-l3' /tmp/live.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/live.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/live.bin
+          echo FORWARD_BINDING_REPAIR_AND_COMPLETED_L3_LIVE_PASS
