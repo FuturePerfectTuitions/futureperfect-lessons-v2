@@ -1,0 +1,74 @@
+name: Temporary patch current GCH manifest
+
+on:
+  push:
+    branches:
+      - fix/aar1811-l3-quiz-preserve-history-2026-09-28
+    paths:
+      - '.github/workflows/_temp_patch_gch_current.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch manifest deterministically
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('gch/portal-v2-current/GCH_CURRENT.json')
+          d=json.loads(p.read_text())
+          override='gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_11PLUS_HISTORY_QUIZ_RELEASE_CONTEXT.json'
+          d['effectiveDate']='2026-09-28'
+          d['authorityVersion']='6.5-11plus-history-earned-quiz-release-context'
+          phrase=' Current authority also preserves historical/full-library Maths access under Previous when D1 defines an active 11+ programme, and restricts Quiz release context to earned core lesson entitlements rather than Full Library/open-state inference.'
+          if phrase.strip() not in d.get('purpose',''):
+              d['purpose']=d.get('purpose','').rstrip()+phrase
+          order=d.setdefault('readOrder',[])
+          if override not in order:
+              insert_at=order.index('gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json') if 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json' in order else len(order)
+              order.insert(insert_at,override)
+          d.setdefault('authorityComposition',{})['elevenPlusHistoryQuizReleaseOverride']={
+              'path':override,
+              'role':'higher authority for preserving normal Maths Full Library/history under Previous when D1 defines the current 11+ programme, retaining the L1/L2/L3 ladder, and restricting Quiz released-lesson context to earned core lesson entitlements'
+          }
+          d['latestRepositoryChange']={
+              'name':'11+ Maths history presentation and earned Quiz release context',
+              'date':'2026-09-28',
+              'status':'SOURCE_VALIDATED_PENDING_PRODUCTION_DEPLOYMENT',
+              'authority':override,
+              'preparedAccessSource':'worker/src/access-read-model-sync-v3.js',
+              'preparedAccessMarker':'d1-authoritative-11plus-history-presentation-v3',
+              'quizBridgeSource':'worker/src/index-step10-quiz-bridge.js',
+              'quizPolicyVersionPreserved':'quiz-release-context-v2.0',
+              'quizReleaseSourcePreserved':'portal-live-maths11plus-release-v2',
+              'quizReleaseEvidence':'lesson_entitlements.core_access=1 intersected with the live L2/L3 lesson view',
+              'preservation':'Full Library and historical access are not deleted to repair Current-card presentation.',
+              'validation':'Focused regressions plus full shared-Worker Wrangler dry-run PASS; targeted production-shaped read-only preflight PASS.'
+          }
+          coverage=d.setdefault('websiteWorkflowCoverage',[])
+          for item in [
+              '11+ current-programme presentation that preserves normal Maths Full Library/history under Previous without deleting access',
+              '11+ Quiz release context restricted to earned core lesson entitlements rather than Full Library/open-state inference'
+          ]:
+              if item not in coverage: coverage.append(item)
+          req=d.setdefault('sharedWorkerInvariant',{}).setdefault('requiredCapabilities',[])
+          item='11+ Quiz earned-entitlement release-context enforcement'
+          if item not in req: req.append(item)
+          p.write_text(json.dumps(d,indent=2,ensure_ascii=False)+'\n')
+          PY
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add gch/portal-v2-current/GCH_CURRENT.json
+          git diff --cached --quiet && exit 0
+          git commit -m 'Advance GCH authority for 11+ history and quiz release context'
+          git push origin HEAD:fix/aar1811-l3-quiz-preserve-history-2026-09-28
