@@ -50,7 +50,7 @@ simulatedUser.fullLibraries=[...(user.fullLibraries||[]).filter(v=>!['MATHS_Y3_F
 simulatedUser.specialAccess=[...new Set([...(user.specialAccess||[]),'MATHS_11PLUS_QUIZ_L3_COMPLETED'])];
 const simulatedAssignments=assignments.map(r=>r.assignment_id===activeY6[0].assignment_id?{...r,effective_to:asOf}:r);
 const input={asOfDate:asOf,user:simulatedUser,batchDefinitions:defs,batchAssignments:simulatedAssignments,entitlements,onlinePreLessonEntitlements:pre};
-const payload=compileAccessScopeV2(input,PREPARED_CATALOGUE,{asOfDate:asOf});
+const payload=compileAccessScopeV2(input,PREPARED_CATALOGUE,{asOfDate:asOf,scopeId:'preflight-aar1811-completed-l3'});
 const views=(payload?.snapshot?.views||[]).filter(v=>v.subject==='maths'&&!v.lockedPreview);
 const ids=new Set(views.map(v=>v.viewId));
 for(const wanted of ['maths-level1','maths-level2','maths-level3','maths-sats']) if(!ids.has(wanted)) throw new Error(`MISSING_TARGET_VIEW:${wanted}`);
