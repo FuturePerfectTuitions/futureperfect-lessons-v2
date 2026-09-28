@@ -20,39 +20,40 @@ jobs:
       PORTAL_USER_ID_NORM: aar1811
     steps:
       - uses: actions/checkout@v4
-      - name: Audit exact live Aar1811 account read-only
+      - name: Trace exact live Aar1811 programme read-only
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          d1(){
+            local sql="$1"; shift
+            jq -n --arg sql "$sql" --args "$@" '{sql:$sql,params:$ARGS.positional}' >/tmp/query.json
+            curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json
+          }
+
           key="user:${PORTAL_USER_ID_NORM}"
           encoded=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")
           curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${encoded}" -H "$AUTH" -o /tmp/user.json
-          echo 'PROFILE_BEGIN'
-          jq -c '{portalUserId:(.portalUserId//null),name:(.name//.firstName//null),batches:(.batches//[]),fullLibraries:(.fullLibraries//[]),upsellViews:(.upsellViews//[]),mathsYears:(.mathsYears//[]),vrBuckets:(.vrBuckets//[]),expires:(.expires//null)}' /tmp/user.json
-          echo 'PROFILE_END'
+          echo PROFILE
+          jq -c '{portalUserId,name,batches:(.batches//[]),fullLibraries:(.fullLibraries//[]),upsellViews:(.upsellViews//[])}' /tmp/user.json
 
-          sql='SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
-          curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/assignments.json
-          jq -e '.success == true' /tmp/assignments.json >/dev/null
-          echo 'ASSIGNMENTS_BEGIN'
-          jq -c '.result[0].results[] | {assignment_id,batch_key,effective_from,effective_to,subject,school_year,stream,maths_level,active_from,active_to}' /tmp/assignments.json
-          echo 'ASSIGNMENTS_END'
+          echo AAR_ASSIGNMENTS
+          d1 'SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id' "$PORTAL_USER_ID_NORM" | jq -c '.result[0].results[]'
 
-          sql='SELECT lesson_id,core_access,prelesson_access,source,source_batch_code,source_lesson_date FROM student_lesson_entitlements WHERE portal_user_id_norm=? ORDER BY lesson_id'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
-          curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/entitlements.json
-          jq -e '.success == true' /tmp/entitlements.json >/dev/null
-          echo "ENTITLEMENT_COUNT=$(jq '.result[0].results|length' /tmp/entitlements.json)"
-          jq -c '.result[0].results[] | {lesson_id,core_access,prelesson_access,source,source_batch_code,source_lesson_date}' /tmp/entitlements.json
-
+          echo ACTIVE_Y6_EQUIVALENT_BATCH_DEFINITIONS
           today=$(TZ=Europe/London date +%F)
-          sql='SELECT a.assignment_id,a.batch_key,(CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) AS maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(b.subject)="maths" AND lower(b.stream)="11plus" AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to) ORDER BY a.effective_from DESC,a.assignment_id DESC'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" --arg d "$today" '{sql:$sql,params:[$id,$d,$d,$d,$d]}' >/tmp/query.json
-          curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/quiz.json
-          jq -e '.success == true' /tmp/quiz.json >/dev/null
-          echo "ACTIVE_QUIZ_ROWS=$(jq '.result[0].results|length' /tmp/quiz.json)"
-          jq -c '.result[0].results[] | {assignment_id,batch_key,maths_level}' /tmp/quiz.json
-          echo AAR1811_L3_QUIZ_READONLY_AUDIT_PASS
+          d1 'SELECT b.batch_key,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to,COUNT(a.assignment_id) AS active_student_count FROM batch_definitions b LEFT JOIN student_batch_assignments a ON a.batch_key=b.batch_key AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) WHERE lower(b.subject)="maths" AND (b.school_year=6 OR b.maths_level=3 OR (lower(b.stream)="11plus" AND b.school_year-3=3)) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to) GROUP BY b.batch_key,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to ORDER BY b.stream,b.maths_level,b.batch_key' "$today" "$today" "$today" "$today" | jq -c '.result[0].results[]'
+
+          echo Y611FM_ACTIVE_ASSIGNMENT_COUNT
+          d1 'SELECT COUNT(*) AS n FROM student_batch_assignments WHERE batch_key="Y611FM" AND effective_from<=? AND (effective_to IS NULL OR ?<effective_to)' "$today" "$today" | jq -c '.result[0].results[0]'
+
+          echo D1_RELEVANT_TABLES
+          d1 'SELECT name FROM sqlite_master WHERE type="table" AND (lower(name) LIKE "%program%" OR lower(name) LIKE "%track%" OR lower(name) LIKE "%batch%" OR lower(name) LIKE "%student%") ORDER BY name' | jq -c '.result[0].results[]'
+
+          echo ENTITLEMENT_SCHEMA
+          d1 'PRAGMA table_info(student_lesson_entitlements)' | jq -c '.result[0].results[] | {name,type}'
+
+          echo QUIZ_ELIGIBILITY
+          d1 'SELECT a.assignment_id,a.batch_key,(CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) AS maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(b.subject)="maths" AND lower(b.stream)="11plus" AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to)' "$PORTAL_USER_ID_NORM" "$today" "$today" "$today" "$today" | jq -c '{rows:.result[0].results,count:(.result[0].results|length)}'
+          echo AAR1811_TRACE_PASS
