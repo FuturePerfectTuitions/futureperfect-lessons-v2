@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/audit-aarav-l3-quiz.yml'
       - 'ops/aar1811-l3-quiz-preflight.mjs'
+      - 'ops/aar1811-live-production-guard.mjs'
 
 permissions:
   contents: read
@@ -27,8 +28,13 @@ jobs:
           set -euo pipefail
           node --check ops/aar1811-l3-quiz-preflight.mjs
           node ops/aar1811-l3-quiz-preflight.mjs
+      - name: Run final live production guard read-only
+        run: |
+          set -euo pipefail
+          node --check ops/aar1811-live-production-guard.mjs
+          node ops/aar1811-live-production-guard.mjs
       - name: Confirm no production mutation in this workflow
         run: |
           set -euo pipefail
-          ! grep -E 'PUT|DELETE|d1.*execute|wrangler.*deploy' ops/aar1811-l3-quiz-preflight.mjs
+          ! grep -E 'method:.PUT.|method:.DELETE.|d1.*execute|wrangler.*deploy' ops/aar1811-l3-quiz-preflight.mjs ops/aar1811-live-production-guard.mjs
           echo AAR1811_TARGET_PREFLIGHT_READONLY_PASS
