@@ -1,0 +1,19 @@
+name: Read prior Worker version bindings
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-aar1811-2026-09-28']
+    paths: ['.github/workflows/read-prior-worker-version-bindings.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/fpt-portal-v2-worker/versions/e6776acd-3bd4-42c0-8b86-ef77516af8db"
+          curl --fail --silent --show-error "$API" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/v.json
+          jq -c '{id:.result.id,resources:.result.resources,bindings:.result.resources.bindings}' /tmp/v.json
