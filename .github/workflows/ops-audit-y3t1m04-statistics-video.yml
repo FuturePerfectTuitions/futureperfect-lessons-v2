@@ -2,10 +2,8 @@ name: Ops audit Y3T1M04 Statistics video
 
 on:
   push:
-    branches:
-      - ops/y3t1m04-video-audit-2026-09-28
-    paths:
-      - .github/workflows/ops-audit-y3t1m04-statistics-video.yml
+    branches: [ops/y3t1m04-video-audit-2026-09-28]
+    paths: [.github/workflows/ops-audit-y3t1m04-statistics-video.yml]
   workflow_dispatch:
 
 permissions:
@@ -18,154 +16,53 @@ env:
 
 jobs:
   audit:
-    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-
-      - name: Guard production bindings and audit target lesson read-only
+      - name: Read current production lesson and prepared state
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-
           SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
-          curl --fail --silent --show-error "$SETTINGS" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/settings.json
+          curl --fail --silent --show-error "$SETTINGS" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/settings.json
           jq -e '.success == true' /tmp/settings.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
-          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
-          READ_MODELS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          export LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          export READ_MODELS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
           test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
           test -n "$READ_MODELS_KV_ID"; test "$READ_MODELS_KV_ID" != null
-          export LESSONS_KV_ID READ_MODELS_KV_ID
 
-          node --input-type=module <<'NODE'
+          node --input-type=module > /tmp/y3t1m04-audit.txt <<'NODE'
           import { pointerKey, resolveCurrentScope } from './worker/src/access-read-model-sync.js';
-
-          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const lessonsNs = process.env.LESSONS_KV_ID;
-          const readNs = process.env.READ_MODELS_KV_ID;
-          const auth = { Authorization: `Bearer ${token}` };
-          const apiBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces`;
-
-          async function getText(ns, key) {
-            const r = await fetch(`${apiBase}/${ns}/values/${encodeURIComponent(key)}`, { headers: auth });
-            if (r.status === 404) return null;
-            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
-            return r.text();
-          }
-          async function getJson(ns, key) {
-            const text = await getText(ns, key);
-            if (text == null) return null;
-            try { return JSON.parse(text); } catch { throw new Error(`${key} is not valid JSON`); }
-          }
-          async function listKeys(ns, prefix) {
-            const out = [];
-            let cursor = '';
-            do {
-              const u = new URL(`${apiBase}/${ns}/keys`);
-              u.searchParams.set('prefix', prefix);
-              u.searchParams.set('limit', '1000');
-              if (cursor) u.searchParams.set('cursor', cursor);
-              const r = await fetch(u, { headers: auth });
-              if (!r.ok) throw new Error(`LIST ${prefix} failed HTTP ${r.status}`);
-              const body = await r.json();
-              if (!body?.success || !Array.isArray(body.result)) throw new Error('Unexpected key-list payload');
-              out.push(...body.result.map(x => x.name).filter(Boolean));
-              cursor = String(body?.result_info?.cursor || '');
-            } while (cursor);
-            return out;
-          }
-          function displayValues(rec) {
-            const maps = [rec?.displayIds, rec?.displayLessonIds, rec?.presentation?.displayIds];
-            return maps.flatMap(m => m && typeof m === 'object' && !Array.isArray(m) ? Object.values(m) : []).map(v => String(v || '').trim()).filter(Boolean);
-          }
-          function videoSummary(rec) {
-            const v = rec?.video || rec?.core?.video || null;
-            if (!v || typeof v !== 'object') return v;
-            return {
-              screenpal: v.screenpal || null,
-              contentUrl: v.contentUrl || null,
-              embedUrl: v.embedUrl || v.playerUrl || null,
-              watchUrl: v.watchUrl || null,
-              quizEmbedUrl: v.quizEmbedUrl || v?.quiz?.embedUrl || null,
-              quizShareUrl: v.quizShareUrl || v?.quiz?.shareUrl || null
-            };
-          }
-          function collectUrlLike(value, path = '$', out = []) {
-            if (value == null) return out;
-            if (typeof value === 'string') {
-              if (/screenpal|https?:\/\//i.test(value)) out.push({ path, value });
-              return out;
-            }
-            if (Array.isArray(value)) {
-              value.forEach((v, i) => collectUrlLike(v, `${path}[${i}]`, out));
-              return out;
-            }
-            if (typeof value === 'object') {
-              for (const [k, v] of Object.entries(value)) collectUrlLike(v, `${path}.${k}`, out);
-            }
-            return out;
-          }
-
-          const keys = await listKeys(lessonsNs, 'lesson:');
-          const matches = [];
-          for (let i = 0; i < keys.length; i += 25) {
-            const batch = keys.slice(i, i + 25);
-            const records = await Promise.all(batch.map(async key => ({ key, rec: await getJson(lessonsNs, key) })));
-            for (const item of records) {
-              const vals = displayValues(item.rec);
-              const title = String(item.rec?.title || '').trim();
-              if (vals.includes('Y3T1M04') || /^statistics and measurements$/i.test(title)) matches.push(item);
-            }
-          }
-          if (matches.length !== 1) {
-            console.log('MATCH_DEBUG=' + JSON.stringify(matches.map(x => ({ key:x.key, lessonId:x.rec?.lessonId, title:x.rec?.title, displayIds:x.rec?.displayIds }))));
-            throw new Error(`Expected exactly one Y3T1M04 Statistics and Measurements lesson; found ${matches.length}`);
-          }
-          const { key, rec } = matches[0];
-          console.log('CANONICAL_TARGET=' + JSON.stringify({
-            key,
-            lessonId: rec?.lessonId || null,
-            title: rec?.title || null,
-            displayIds: rec?.displayIds || null,
-            contentStatus: rec?.contentStatus || null,
-            video: videoSummary(rec)
-          }));
-
-          const readStore = {
-            async get(k, options) {
-              const text = await getText(readNs, k);
-              if (text == null) return null;
-              return options?.type === 'json' ? JSON.parse(text) : text;
-            }
-          };
-          const scope = `lesson:${rec.lessonId}`;
-          const pKey = pointerKey(scope);
-          const rawPointer = await readStore.get(pKey);
-          console.log('PREPARED_POINTER=' + JSON.stringify({ scope, pointerKey:pKey, exists:rawPointer != null, rawPointer }));
-          if (rawPointer != null) {
-            const prepared = await resolveCurrentScope(readStore, scope);
-            console.log('PREPARED_SCOPE_META=' + JSON.stringify({ version:prepared?.version || null, payloadSha256:prepared?.payloadSha256 || null }));
-            console.log('PREPARED_URL_LIKE=' + JSON.stringify(collectUrlLike(prepared?.payload)));
-          }
-
-          const currentVideo = videoSummary(rec) || {};
-          const targetCode = 'cOjtl4nwixU';
-          const targetEmbed = `https://go.screenpal.com/player/${targetCode}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
-          console.log('TARGET_VIDEO=' + JSON.stringify({
-            screenpal: targetCode,
-            contentUrl: `https://screenpal.com/content/video/${targetCode}`,
-            embedUrl: targetEmbed,
-            watchUrl: `https://go.screenpal.com/watch/${targetCode}`,
-            differsFromCanonical: currentVideo.screenpal !== targetCode || currentVideo.embedUrl !== targetEmbed
-          }));
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const lessonsNs=process.env.LESSONS_KV_ID, readNs=process.env.READ_MODELS_KV_ID;
+          const auth={Authorization:`Bearer ${token}`};
+          const base=`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces`;
+          async function text(ns,key){const r=await fetch(`${base}/${ns}/values/${encodeURIComponent(key)}`,{headers:auth});if(r.status===404)return null;if(!r.ok)throw new Error(`GET ${key} ${r.status}`);return r.text();}
+          async function json(ns,key){const t=await text(ns,key);return t==null?null:JSON.parse(t);}
+          async function keys(ns,prefix){const out=[];let cursor='';do{const u=new URL(`${base}/${ns}/keys`);u.searchParams.set('prefix',prefix);u.searchParams.set('limit','1000');if(cursor)u.searchParams.set('cursor',cursor);const r=await fetch(u,{headers:auth});if(!r.ok)throw new Error(`LIST ${r.status}`);const b=await r.json();out.push(...(b.result||[]).map(x=>x.name).filter(Boolean));cursor=String(b?.result_info?.cursor||'');}while(cursor);return out;}
+          const vals=r=>Object.values(r?.displayIds||{}).map(String);
+          const lessonKeys=await keys(lessonsNs,'lesson:');
+          const matches=[];
+          for(let i=0;i<lessonKeys.length;i+=25){const batch=lessonKeys.slice(i,i+25);const rows=await Promise.all(batch.map(async key=>({key,rec:await json(lessonsNs,key)})));for(const x of rows){if(vals(x.rec).includes('Y3T1M04')||/^statistics and measurements$/i.test(String(x.rec?.title||'').trim()))matches.push(x);}}
+          if(matches.length!==1)throw new Error(`MATCH_COUNT_${matches.length}`);
+          const {key,rec}=matches[0];
+          const v=rec?.video||rec?.core?.video||null;
+          const summary=v&&typeof v==='object'?{screenpal:v.screenpal||null,contentUrl:v.contentUrl||null,embedUrl:v.embedUrl||v.playerUrl||null,watchUrl:v.watchUrl||null}:v;
+          console.log('CANONICAL='+JSON.stringify({key,lessonId:rec.lessonId,title:rec.title,displayIds:rec.displayIds,contentStatus:rec.contentStatus||null,video:summary}));
+          const store={async get(k,o){const t=await text(readNs,k);return t==null?null:(o?.type==='json'?JSON.parse(t):t);}};
+          const scope=`lesson:${rec.lessonId}`, pk=pointerKey(scope), rp=await store.get(pk);
+          console.log('PREPARED_POINTER='+JSON.stringify({scope,pointerKey:pk,exists:rp!=null,rawPointer:rp}));
+          if(rp!=null){const p=await resolveCurrentScope(store,scope);const urls=[];const walk=(x,path='$')=>{if(x==null)return;if(typeof x==='string'){if(/screenpal|https?:\/\//i.test(x))urls.push({path,value:x});return;}if(Array.isArray(x)){x.forEach((y,i)=>walk(y,`${path}[${i}]`));return;}if(typeof x==='object')for(const [k,y] of Object.entries(x))walk(y,`${path}.${k}`);};walk(p?.payload);console.log('PREPARED='+JSON.stringify({version:p?.version||null,payloadSha256:p?.payloadSha256||null,urlLike:urls}));}
+          const code='cOjtl4nwixU';
+          const target={screenpal:code,contentUrl:`https://screenpal.com/content/video/${code}`,embedUrl:`https://go.screenpal.com/player/${code}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,watchUrl:`https://go.screenpal.com/watch/${code}`};
+          console.log('TARGET='+JSON.stringify({...target,differsFromCanonical:summary?.screenpal!==target.screenpal||summary?.embedUrl!==target.embedUrl}));
           NODE
-
-      - name: Audit completed
-        run: echo "Read-only Y3T1M04 video audit completed; no Cloudflare write or deployment command was executed."
+          cat /tmp/y3t1m04-audit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y3t1m04-video-audit-evidence
+          path: /tmp/y3t1m04-audit.txt
+          if-no-files-found: error
+          retention-days: 7
