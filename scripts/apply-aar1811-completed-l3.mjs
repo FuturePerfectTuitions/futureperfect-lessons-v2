@@ -103,11 +103,12 @@ const sats=state.entitlements.filter(r=>/^Y6M(5[1-9]|6[0-9])$/.test(String(r.les
 if(JSON.stringify(sats)!==JSON.stringify(['Y6M51'])) throw new Error(`SATS_SOURCE_CHANGED:${JSON.stringify(sats)}`);
 const scopeSalt=String(await kvRaw(readModelsNs,'meta:scope-salt')||'').trim();
 if(!/^[0-9a-f]{64}$/i.test(scopeSalt)) throw new Error('SCOPE_SALT_INVALID');
-const scope=`u-${nodeCrypto.createHmac('sha256',scopeSalt).update(`rebuild-shadow-scope-v1:${id}`).digest('hex').slice(0,40)}`;
+const scopeId=`u-${nodeCrypto.createHmac('sha256',scopeSalt).update(`rebuild-shadow-scope-v1:${id}`).digest('hex').slice(0,40)}`;
+const scope=`access:${scopeId}`;
 const baseline=await resolveCurrentScope(store,scope);
 if(baseline.usedFallback) throw new Error('BASELINE_READ_MODEL_USING_FALLBACK');
-const preview=compileTarget(state,scope);
-console.log(JSON.stringify({apply,profileState,assignmentBefore,scope,baselineVersion:baseline.version,views:preview.views,counts:preview.counts,sats}));
+const preview=compileTarget(state,scopeId);
+console.log(JSON.stringify({apply,profileState,assignmentBefore,scope,scopeId,baselineVersion:baseline.version,views:preview.views,counts:preview.counts,sats}));
 if(!apply){console.log('AAR1811_COMPLETED_L3_DRY_RUN_PASS');process.exit(0);}
 
 if(assignmentBefore==='old'){
@@ -126,7 +127,7 @@ const actualSats=actual.entitlements.filter(r=>/^Y6M(5[1-9]|6[0-9])$/.test(Strin
 if(JSON.stringify(actualSats)!==JSON.stringify(['Y6M51'])) throw new Error(`SATS_CHANGED_DURING_APPLY:${JSON.stringify(actualSats)}`);
 const currentBeforePublish=await resolveCurrentScope(store,scope);
 if(currentBeforePublish.version!==baseline.version||currentBeforePublish.sha256!==baseline.sha256) throw new Error('READ_MODEL_POINTER_CHANGED_CONCURRENTLY');
-const compiled=compileTarget(actual,scope);
+const compiled=compileTarget(actual,scopeId);
 const published=await publishScopeAtomic(store,{scope,payload:compiled.payload,updatedAt:new Date().toISOString()});
 const resolved=await resolveCurrentScope(store,scope);
 if(resolved.usedFallback||resolved.version!==published.version) throw new Error('POSTPUBLISH_RESOLVE_FAILED');
