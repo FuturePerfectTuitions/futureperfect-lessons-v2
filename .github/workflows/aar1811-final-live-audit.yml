@@ -28,7 +28,7 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           uid=$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]')
-          key="user:${USER_ID}"
+          key="user:${uid}"
           enc=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")
           curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${enc}" -H "$AUTH" -o /tmp/user.json
           jq -e '(.name // "" | ascii_downcase) == "aarav"' /tmp/user.json >/dev/null
