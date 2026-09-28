@@ -48,7 +48,7 @@ if(activeY6.length!==1) throw new Error(`EXPECTED_ONE_ACTIVE_Y611FM:${activeY6.l
 const simulatedUser=structuredClone(user);
 simulatedUser.fullLibraries=[...(user.fullLibraries||[]).filter(v=>!['MATHS_Y3_FULL','MATHS_Y6_FULL'].includes(String(v).toUpperCase())),'MATHS_L3_FULL'];
 simulatedUser.specialAccess=[...new Set([...(user.specialAccess||[]),'MATHS_11PLUS_QUIZ_L3_COMPLETED'])];
-const simulatedAssignments=assignments.map(r=>r.assignment_id===activeY6[0].assignment_id?{...r,effective_to:asOf}:r);
+const simulatedAssignments=assignments.filter(r=>r.assignment_id!==activeY6[0].assignment_id);
 const input={asOfDate:asOf,user:simulatedUser,batchDefinitions:defs,batchAssignments:simulatedAssignments,entitlements,onlinePreLessonEntitlements:pre};
 const payload=compileAccessScopeV2(input,PREPARED_CATALOGUE,{asOfDate:asOf,scopeId:'preflight-aar1811-completed-l3'});
 const views=(payload?.snapshot?.views||[]).filter(v=>v.subject==='maths'&&!v.lockedPreview);
