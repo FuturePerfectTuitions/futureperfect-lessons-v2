@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-27",
-  "authorityVersion": "6.4-forward-only-primary-maths-home-normalization-production-pass",
+  "authorityVersion": "6.5-forward-only-completed-l3-v2-quiz-preflight",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule. Current authority also covers completed-L3 11+ Practice eligibility/launch on the public rebuilt Student Worker, requiring explicit preserved L3 Quiz profile access without fabricating a new active Maths assignment.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -18,7 +18,8 @@
     "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
     "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
-    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json"
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_COMPLETED_L3_QUIZ_V2.json"
   ],
   "authorityComposition": {
     "base": {
@@ -56,6 +57,10 @@
     "forwardOnlyAdminEmailRecoveryOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
       "role": "higher authority for no-rollback production recovery, shared Worker preservation, live parent-email routing/idempotency and manual-send UI counters"
+    },
+    "completedL3QuizV2Override": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_COMPLETED_L3_QUIZ_V2.json",
+      "role": "higher authority for completed-L3 11+ Practice eligibility and launch on the public /api/v2 rebuilt Student Worker while preserving active L2/L3, Trial and shared Quiz bridge contracts"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
@@ -77,7 +82,11 @@
     },
     "rootCauseClassification": "MULTI_LAYER_EQUIVALENT_ALIAS_PRESENTATION_DEFECT",
     "rootCause": "Equivalent curriculum aliases can legitimately coexist in underlying prepared/live data because Year/L levels share canonical lessons. Server normalisation alone did not provide sufficient browser protection, while the prior post-render DOM guard assumed cards remained direct children of #view-grid. phase10-history reparents cards into grouped nested grids, making that fallback unreliable as the primary boundary.",
-    "equivalentPairs": ["Year 4/L1", "Year 5/L2", "Year 6/L3"],
+    "equivalentPairs": [
+      "Year 4/L1",
+      "Year 5/L2",
+      "Year 6/L3"
+    ],
     "l3Presentation": "L3 only unless at least one SATS lesson is genuinely released or PreLesson-available; then L3 + SATS",
     "ordinaryYear6Presentation": "Lessons + SATS",
     "liveCatalogueSource": "worker/src/live-student-catalogue-overlay.js",
@@ -115,7 +124,10 @@
     "name": "Manual parent-email send counters refresh",
     "date": "2026-09-26",
     "status": "SOURCE_COMMITTED_PAGES_DEPLOY_TRIGGERED",
-    "commits": ["3c1f125f4013dfb2f6610a27c0c4697f343c67bb", "46846566482203c6d0299329d334bc03e9e1d349"],
+    "commits": [
+      "3c1f125f4013dfb2f6610a27c0c4697f343c67bb",
+      "46846566482203c6d0299329d334bc03e9e1d349"
+    ],
     "rule": "The post-send summary pills must reflect the manual-send response; repairing display state must never trigger a second email send."
   },
   "permanentProductionRecoveryRule": {
@@ -232,7 +244,8 @@
     "manual parent-email post-send counter refresh",
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification",
-    "forward-only production recovery"
+    "forward-only production recovery",
+    "completed-L3 11+ Practice public-v2 eligibility/launch with explicit L3 profile marker and prepared-access verification"
   ],
   "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes.",
   "nextChangeProtocol": [
@@ -247,5 +260,24 @@
     "verify public API/browser when applicable",
     "run shared-capability regressions",
     "record evidence and update GCH authority"
-  ]
+  ],
+  "latestCompletedL3QuizRepair": {
+    "name": "Completed-L3 11+ Practice public-v2 runtime repair",
+    "date": "2026-09-28",
+    "status": "IMPLEMENTATION_PREFLIGHT_PASS_PENDING_FORWARD_ONLY_PRODUCTION_DEPLOY",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_COMPLETED_L3_QUIZ_V2.json",
+    "liveStudentWorker": "fpt-portal-v2-rebuild-student-prod",
+    "preRepairVersion": "9baf3815-19ed-4fa0-9cd1-26c0478b24bd",
+    "exactLiveSourceCommit": "3278eada72b5f4423d282b245db138ee81fb88ad",
+    "liveAuditRun": 36438554630,
+    "preflightRun": 36440832291,
+    "preflightResult": "PASS",
+    "requiredProfileGate": [
+      "MATHS_L3_FULL",
+      "MATHS_11PLUS_QUIZ_L3_COMPLETED"
+    ],
+    "activeMathsAssignmentRequiredForCompletedL3": false,
+    "fabricateMathsAssignment": false,
+    "recoveryMode": "FORWARD_ONLY"
+  }
 }
