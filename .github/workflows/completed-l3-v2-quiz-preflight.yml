@@ -1,0 +1,116 @@
+name: Completed L3 v2 Quiz preflight
+
+on:
+  push:
+    branches: ['fix/aarav-v2-quiz-runtime-forward-2026-09-28']
+    paths:
+      - 'rebuild/student/src/lib/quiz-runtime.mjs'
+      - 'tests/completed-l3-v2-quiz-runtime.mjs'
+      - 'tests/cp12-l2-l3-quiz-runtime.mjs'
+      - 'tests/trial-full-l2-quiz-runtime.mjs'
+      - '.github/workflows/completed-l3-v2-quiz-preflight.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+      BRIDGE_WORKER: fpt-portal-v2-worker
+      PROD_HOST: lessons.futureperfect.education
+      PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      EXPECTED_STUDENT_VERSION: 9baf3815-19ed-4fa0-9cd1-26c0478b24bd
+      EXPECTED_LIVE_BUNDLE_SHA256: 19075bd67fa0445d9daf8e8c39877c1bf9db576bb85e92b4243c27c97205a437
+      WRANGLER_VERSION: 4.136.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Runtime regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check rebuild/student/src/lib/trial-quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node tests/completed-l3-v2-quiz-runtime.mjs
+          node tests/cp12-l2-l3-quiz-runtime.mjs
+          node tests/trial-full-l2-quiz-runtime.mjs
+
+      - name: Fresh live topology and source-drift gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+
+          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/deployments.json
+          LIVE_VERSION=$(jq -r '.result.deployments[0].versions[] | select(.percentage==100) | .version_id' /tmp/deployments.json)
+          test "$LIVE_VERSION" = "$EXPECTED_STUDENT_VERSION"
+
+          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}" -H "$AUTH" -o /tmp/live-student.bin
+          LIVE_SHA=$(sha256sum /tmp/live-student.bin | awk '{print $1}')
+          test "$LIVE_SHA" = "$EXPECTED_LIVE_BUNDLE_SHA256"
+          grep -aFq '/api/v2/student/quiz/eligibility' /tmp/live-student.bin
+          ! grep -aFq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/live-student.bin
+
+          curl -fsS "$API/workers/scripts/${BROWSER_WORKER}/settings" -H "$AUTH" -o /tmp/browser-settings.json
+          jq -e --arg s "$STUDENT_WORKER" '.result.bindings[] | select(.type=="service" and .service==$s)' /tmp/browser-settings.json >/dev/null
+
+          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/settings" -H "$AUTH" -o /tmp/student-settings.json
+          jq -e '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace")' /tmp/student-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace")' /tmp/student-settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="DB" and .type=="d1")' /tmp/student-settings.json >/dev/null
+
+          echo "LIVE_STUDENT_VERSION=$LIVE_VERSION"
+          echo "LIVE_STUDENT_SHA256=$LIVE_SHA"
+          echo COMPLETED_L3_V2_LIVE_BASELINE_PASS
+
+      - name: Build candidate from exact live-derived bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/settings" -H "$AUTH" -o /tmp/settings.json
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const settings=JSON.parse(fs.readFileSync('/tmp/settings.json','utf8')).result;
+          const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const nonSecret=(settings.bindings||[]).filter(b=>!/secret/i.test(String(b.type)));
+          const unsupported=nonSecret.filter(b=>!supported.has(b.type));
+          if(unsupported.length) throw new Error(`Unsupported Student bindings: ${JSON.stringify(unsupported)}`);
+          const q=v=>JSON.stringify(String(v??''));
+          let toml=`name = ${q(process.env.STUDENT_WORKER)}\nmain = "src/index.js"\ncompatibility_date = "2026-08-20"\nkeep_vars = true\nworkers_dev = true\n`;
+          const plains=nonSecret.filter(b=>b.type==='plain_text');
+          if(plains.length){toml+='\n[vars]\n'; for(const b of plains) toml+=`${b.name} = ${q(b.text)}\n`;}
+          for(const b of nonSecret.filter(b=>b.type==='kv_namespace')) toml+=`\n[[kv_namespaces]]\nbinding = ${q(b.name)}\nid = ${q(b.namespace_id)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='r2_bucket')) toml+=`\n[[r2_buckets]]\nbinding = ${q(b.name)}\nbucket_name = ${q(b.bucket_name)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='d1')) toml+=`\n[[d1_databases]]\nbinding = ${q(b.name)}\ndatabase_name = "fpt_portal_v2_db"\ndatabase_id = ${q(b.id||b.database_id)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='send_email')) toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
+          fs.writeFileSync('rebuild/student/wrangler.completed-l3-preflight.toml',toml);
+          NODE
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/completed-l3-dry --config rebuild/student/wrangler.completed-l3-preflight.toml >/tmp/dry.log
+          grep -R -Fq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/completed-l3-dry
+          grep -R -Fq 'completed-l3' /tmp/completed-l3-dry
+          grep -R -Fq '/api/v2/student/quiz/eligibility' /tmp/completed-l3-dry
+          grep -R -Fq '/api/v2/student/quiz/launch' /tmp/completed-l3-dry
+          grep -R -Fq 'trialDemo' /tmp/completed-l3-dry
+          echo COMPLETED_L3_V2_CANDIDATE_BUILD_PASS
+
+      - name: Confirm preflight is mutation-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -E 'wrangler.*deploy.*--config.*completed-l3.*[^-]$|versions deploy|method:.PUT.|method:.DELETE.' .github/workflows/completed-l3-v2-quiz-preflight.yml
+          echo COMPLETED_L3_V2_PREFLIGHT_READONLY_PASS
