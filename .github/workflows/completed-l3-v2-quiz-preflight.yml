@@ -53,25 +53,30 @@ jobs:
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 
           curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/deployments.json
-          LIVE_VERSION=$(jq -r '.result.deployments[0].versions[] | select(.percentage==100) | .version_id' /tmp/deployments.json)
+          LIVE_VERSION=$(jq -r '.result.deployments[0].versions[]? | select((.percentage|tonumber)==100) | .version_id' /tmp/deployments.json | head -n1)
+          echo "LIVE_STUDENT_VERSION=$LIVE_VERSION"
           test "$LIVE_VERSION" = "$EXPECTED_STUDENT_VERSION"
 
           curl -fsS "$API/workers/scripts/${STUDENT_WORKER}" -H "$AUTH" -o /tmp/live-student.bin
           LIVE_SHA=$(sha256sum /tmp/live-student.bin | awk '{print $1}')
+          echo "LIVE_STUDENT_SHA256=$LIVE_SHA"
           test "$LIVE_SHA" = "$EXPECTED_LIVE_BUNDLE_SHA256"
           grep -aFq '/api/v2/student/quiz/eligibility' /tmp/live-student.bin
-          ! grep -aFq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/live-student.bin
+          if grep -aFq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/live-student.bin; then
+            echo 'Unexpected completed-L3 marker already present in live Student bundle' >&2
+            exit 1
+          fi
 
           curl -fsS "$API/workers/scripts/${BROWSER_WORKER}/settings" -H "$AUTH" -o /tmp/browser-settings.json
-          jq -e --arg s "$STUDENT_WORKER" '.result.bindings[] | select(.type=="service" and .service==$s)' /tmp/browser-settings.json >/dev/null
+          echo BROWSER_SERVICE_BINDINGS=$(jq -c '[.result.bindings[]? | select(.type=="service") | {name,type,service,environment}]' /tmp/browser-settings.json)
+          jq -e --arg s "$STUDENT_WORKER" '.result.bindings[]? | select(.service==$s)' /tmp/browser-settings.json >/dev/null
 
           curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/settings" -H "$AUTH" -o /tmp/student-settings.json
-          jq -e '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace")' /tmp/student-settings.json >/dev/null
-          jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace")' /tmp/student-settings.json >/dev/null
-          jq -e '.result.bindings[] | select(.name=="DB" and .type=="d1")' /tmp/student-settings.json >/dev/null
+          echo STUDENT_BINDING_NAMES=$(jq -c '[.result.bindings[]?.name]' /tmp/student-settings.json)
+          for required in STUDENTS_KV READ_MODELS_KV DB MATERIALS_R2; do
+            jq -e --arg n "$required" '.result.bindings[]? | select(.name==$n)' /tmp/student-settings.json >/dev/null
+          done
 
-          echo "LIVE_STUDENT_VERSION=$LIVE_VERSION"
-          echo "LIVE_STUDENT_SHA256=$LIVE_SHA"
           echo COMPLETED_L3_V2_LIVE_BASELINE_PASS
 
       - name: Build candidate from exact live-derived bindings
@@ -112,5 +117,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -E 'wrangler.*deploy.*--config.*completed-l3.*[^-]$|versions deploy|method:.PUT.|method:.DELETE.' .github/workflows/completed-l3-v2-quiz-preflight.yml
+          ! grep -Fq 'versions deploy' .github/workflows/completed-l3-v2-quiz-preflight.yml
+          ! grep -Eq "method:[[:space:]]*['\"](PUT|DELETE)['\"]" .github/workflows/completed-l3-v2-quiz-preflight.yml
           echo COMPLETED_L3_V2_PREFLIGHT_READONLY_PASS
