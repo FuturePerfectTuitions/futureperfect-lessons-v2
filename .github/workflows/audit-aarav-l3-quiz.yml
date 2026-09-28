@@ -20,50 +20,43 @@ jobs:
       PORTAL_USER_ID_NORM: aar1811
     steps:
       - uses: actions/checkout@v4
-      - name: Trace exact live Aar1811 programme read-only
+      - name: Trace Aar1811 operational L3 batch context read-only
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          query(){
-            curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json
-          }
-
-          key="user:${PORTAL_USER_ID_NORM}"
-          encoded=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")
-          curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${encoded}" -H "$AUTH" -o /tmp/user.json
-          echo PROFILE
-          jq -c '{portalUserId,name,batches:(.batches//[]),fullLibraries:(.fullLibraries//[]),upsellViews:(.upsellViews//[])}' /tmp/user.json
+          query(){ curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json; }
+          today=$(TZ=Europe/London date +%F)
 
           echo AAR_ASSIGNMENTS
-          sql='SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id'
+          sql='SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id'
           jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
           query | jq -c '.result[0].results[]'
 
-          today=$(TZ=Europe/London date +%F)
-          echo ACTIVE_Y6_EQUIVALENT_BATCH_DEFINITIONS
-          sql='SELECT b.batch_key,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to,COUNT(a.assignment_id) AS active_student_count FROM batch_definitions b LEFT JOIN student_batch_assignments a ON a.batch_key=b.batch_key AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) WHERE lower(b.subject)="maths" AND (b.school_year=6 OR b.maths_level=3 OR (lower(b.stream)="11plus" AND b.school_year-3=3)) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to) GROUP BY b.batch_key,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to ORDER BY b.stream,b.maths_level,b.batch_key'
+          echo ACTIVE_L3_BATCHES_AND_ENGLISH_PAIRINGS
+          sql='WITH active AS (SELECT a.portal_user_id_norm,a.batch_key,b.subject,b.stream,b.maths_level,b.school_year FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to)) SELECT m.batch_key AS maths_batch,COALESCE(e.batch_key,"(none)") AS english_batch,COUNT(DISTINCT m.portal_user_id_norm) AS student_count FROM active m LEFT JOIN active e ON e.portal_user_id_norm=m.portal_user_id_norm AND lower(e.subject)="english" WHERE lower(m.subject)="maths" AND lower(m.stream)="11plus" AND m.maths_level=3 GROUP BY m.batch_key,e.batch_key ORDER BY m.batch_key,e.batch_key'
           jq -n --arg sql "$sql" --arg d "$today" '{sql:$sql,params:[$d,$d,$d,$d]}' >/tmp/query.json
           query | jq -c '.result[0].results[]'
 
-          echo Y611FM_ACTIVE_ASSIGNMENT_COUNT
-          sql='SELECT COUNT(*) AS n FROM student_batch_assignments WHERE batch_key="Y611FM" AND effective_from<=? AND (effective_to IS NULL OR ?<effective_to)'
+          echo Y611FM_ENGLISH_PAIRINGS
+          sql='WITH active AS (SELECT a.portal_user_id_norm,a.batch_key,b.subject FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to)) SELECT COALESCE(e.batch_key,"(none)") AS english_batch,COUNT(DISTINCT m.portal_user_id_norm) AS student_count FROM active m LEFT JOIN active e ON e.portal_user_id_norm=m.portal_user_id_norm AND lower(e.subject)="english" WHERE m.batch_key="Y611FM" GROUP BY e.batch_key ORDER BY e.batch_key'
           jq -n --arg sql "$sql" --arg d "$today" '{sql:$sql,params:[$d,$d]}' >/tmp/query.json
-          query | jq -c '.result[0].results[0]'
-
-          echo D1_RELEVANT_TABLES
-          sql='SELECT name FROM sqlite_master WHERE type="table" AND (lower(name) LIKE "%program%" OR lower(name) LIKE "%track%" OR lower(name) LIKE "%batch%" OR lower(name) LIKE "%student%") ORDER BY name'
-          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' >/tmp/query.json
           query | jq -c '.result[0].results[]'
 
-          echo ENTITLEMENT_SCHEMA
-          sql='PRAGMA table_info(student_lesson_entitlements)'
+          echo AAR_SESSION_PROFILE_SCHEMA
+          sql='PRAGMA table_info(student_session_profiles)'
           jq -n --arg sql "$sql" '{sql:$sql,params:[]}' >/tmp/query.json
           query | jq -c '.result[0].results[] | {name,type}'
 
-          echo QUIZ_ELIGIBILITY
-          sql='SELECT a.assignment_id,a.batch_key,(CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) AS maths_level FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(b.subject)="maths" AND lower(b.stream)="11plus" AND (CASE WHEN b.maths_level BETWEEN 1 AND 3 THEN b.maths_level ELSE b.school_year-3 END) IN (2,3) AND a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to)'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" --arg d "$today" '{sql:$sql,params:[$id,$d,$d,$d,$d]}' >/tmp/query.json
-          query | jq -c '{rows:.result[0].results,count:(.result[0].results|length)}'
-          echo AAR1811_TRACE_PASS
+          echo AAR_SESSION_PROFILE
+          sql='SELECT * FROM student_session_profiles WHERE portal_user_id_norm=?'
+          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
+          query | jq -c '.result[0].results[]'
+
+          echo L3_RELEASE_COUNTS
+          sql='SELECT r.batch_key,COUNT(*) AS releases,MIN(r.lesson_date) AS first_release,MAX(r.lesson_date) AS last_release FROM batch_lesson_releases r WHERE r.batch_key IN ("Y511FM","Y511OM1") GROUP BY r.batch_key ORDER BY r.batch_key'
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' >/tmp/query.json
+          query | jq -c '.result[0].results[]'
+
+          echo AAR1811_OPERATIONAL_TRACE_PASS
