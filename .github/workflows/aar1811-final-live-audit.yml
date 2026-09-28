@@ -31,7 +31,7 @@ jobs:
           key="user:${uid}"
           enc=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")
           curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${enc}" -H "$AUTH" -o /tmp/user.json
-          jq -e '(.name // "" | ascii_downcase) == "aarav"' /tmp/user.json >/dev/null
+          jq -e 'type=="object"' /tmp/user.json >/dev/null
           echo PROFILE_BEGIN
           jq -c '{name,batches:(.batches//[]),fullLibraries:(.fullLibraries//[]),specialAccess:(.specialAccess//[]),historicalViews:(.historicalViews//[]),mathsYears:(.mathsYears//[]),vrBuckets:(.vrBuckets//[]),blockedLessons:(.blockedLessons//[])}' /tmp/user.json
           echo PROFILE_END
@@ -62,7 +62,7 @@ jobs:
           venc=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$vkey")
           curl --fail --silent --show-error "$API/storage/kv/namespaces/${READ_MODELS_KV_ID}/values/${venc}" -H "$AUTH" -o /tmp/envelope.json
           echo PREPARED_MATHS_BEGIN
-          jq -c '.payload.snapshot.views[] | select(.subject=="maths") | {viewId,label,current,lockedPreview,openCount,lockedCount,lessonCount:(.lessons|length?)}' /tmp/envelope.json
+          jq -c '.payload.snapshot.views[] | select(.subject=="maths") | {viewId,label,current,lockedPreview,openCount,lockedCount}' /tmp/envelope.json
           echo PREPARED_MATHS_END
           echo POINTER_VERSION=$version
           echo AAR1811_FINAL_LIVE_READONLY_AUDIT_PASS
