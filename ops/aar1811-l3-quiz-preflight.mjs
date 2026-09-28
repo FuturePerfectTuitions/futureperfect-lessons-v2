@@ -89,7 +89,13 @@ assert.ok(ids.has('maths-level1'),'L1 access would be lost');
 assert.ok(ids.has('maths-level2'),'L2 access would be lost');
 assert.ok(ids.has('maths-level3'),'L3 access missing');
 assert.ok(ids.has('maths-sats'),'SATS access missing');
-assert.ok(!ids.has('maths-year6'),'Year 6 Lessons card would remain');
+const currentEquivalent=maths.filter(v=>v.current&&(v.id==='maths-year6'||v.id==='maths-level3'));
+assert.deepEqual(currentEquivalent.map(v=>v.id),['maths-level3'],'Current Year 6/L3 identity is not uniquely L3');
+const historicalYear6=maths.find(v=>v.id==='maths-year6');
+if(historicalYear6){
+  assert.equal(historicalYear6.current,false,'Year 6 history must not remain current');
+  assert.equal(historicalYear6.group,'previous','Year 6 history must be Previous');
+}
 const l3=maths.find(v=>v.id==='maths-level3');
 assert.equal(l3.current,true,'L3 is not current');
 const sats=maths.find(v=>v.id==='maths-sats');
