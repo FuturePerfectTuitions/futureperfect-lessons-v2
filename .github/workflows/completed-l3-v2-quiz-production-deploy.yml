@@ -1,0 +1,296 @@
+name: Completed L3 v2 Quiz forward-only production deploy
+
+on:
+  push:
+    branches: ['fix/aarav-v2-quiz-runtime-forward-2026-09-28']
+    paths: ['.github/workflows/completed-l3-v2-quiz-production-deploy.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: completed-l3-v2-quiz-student-production
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  BRIDGE_WORKER: fpt-portal-v2-worker
+  PROD_HOST: lessons.futureperfect.education
+  PORTAL_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  AARAV_ID: aar1811
+  EXPECTED_PREDEPLOY_STUDENT_VERSION: 9baf3815-19ed-4fa0-9cd1-26c0478b24bd
+  WRANGLER_VERSION: 4.136.1
+
+jobs:
+  deploy-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Full Quiz runtime regression gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check rebuild/student/src/lib/quiz-runtime.mjs
+          node --check rebuild/student/src/lib/trial-quiz-runtime.mjs
+          node --check rebuild/student/src/index.js
+          node tests/completed-l3-v2-quiz-runtime.mjs
+          node tests/cp12-l2-l3-quiz-runtime.mjs
+          node tests/trial-full-l2-quiz-runtime.mjs
+          grep -Fq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' rebuild/student/src/lib/quiz-runtime.mjs
+          grep -Fq "eligibilityMode: 'completed-l3'" rebuild/student/src/lib/quiz-runtime.mjs
+          grep -Fq 'createTrialQuizRuntime(quizRuntime)' rebuild/student/src/index.js
+
+      - name: Fresh production snapshot and exact live-derived config
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const student=process.env.STUDENT_WORKER;
+          const browser=process.env.BROWSER_WORKER;
+          const bridge=process.env.BRIDGE_WORKER;
+          const host=process.env.PROD_HOST;
+          const d1Expected=process.env.PORTAL_D1_ID;
+          const kvExpected=process.env.STUDENTS_KV_ID;
+          const aarav=process.env.AARAV_ID;
+          const expectedVersion=process.env.EXPECTED_PREDEPLOY_STUDENT_VERSION;
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`,'content-type':'application/json'};
+          async function cf(path,init={}){
+            const r=await fetch(base+path,{...init,headers:{...headers,...(init.headers||{})}});
+            const j=await r.json();
+            if(!r.ok||j.success!==true) throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);
+            return j.result;
+          }
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){
+            const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);
+            const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];
+            const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];
+            return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');
+          }
+          async function d1(sql,params=[]){
+            const result=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(d1Expected)}/query`,{method:'POST',body:JSON.stringify({sql,params})});
+            const block=Array.isArray(result)?result[0]:result;
+            if(block?.success===false) throw new Error(`D1 query failed: ${JSON.stringify(block)}`);
+            return block?.results||[];
+          }
+          const studentVersion=await active(student);
+          const browserVersion=await active(browser);
+          const bridgeVersion=await active(bridge);
+          if(studentVersion!==expectedVersion) throw new Error(`Student production drift: expected ${expectedVersion}, got ${studentVersion}`);
+          if(!browserVersion||!bridgeVersion) throw new Error('Browser/bridge production version unresolved');
+
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          if(!zone) throw new Error('Production zone unresolved');
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hostRoutes.length!==1||String(hostRoutes[0].pattern).toLowerCase()!==`${host.toLowerCase()}/*`||hostRoutes[0].script!==browser) throw new Error(`Public route drift ${JSON.stringify(hostRoutes)}`);
+
+          const browserSettings=await settings(browser);
+          const services=(browserSettings.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].service!==student) throw new Error(`Browser service drift ${JSON.stringify(services)}`);
+
+          const supported=new Set(['plain_text','kv_namespace','d1','r2_bucket','send_email']);
+          const normalize=b=>({
+            name:b.name,type:b.type,
+            ...(b.type==='plain_text'?{text:b.text}:{}),
+            ...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),
+            ...(b.type==='d1'?{id:b.id||b.database_id}:{}),
+            ...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),
+            ...(b.type==='send_email'?{}:{})
+          });
+          const studentSettings=await settings(student);
+          const unsupported=(studentSettings.bindings||[]).filter(b=>!/secret/i.test(String(b.type))&&!supported.has(b.type));
+          if(unsupported.length) throw new Error(`Unsupported Student bindings ${JSON.stringify(unsupported)}`);
+          const nonSecret=(studentSettings.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+          const secretNames=(studentSettings.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort();
+          for(const n of ['READ_MODELS_KV','STUDENTS_KV','DB','MATERIALS_R2']) if(!nonSecret.some(b=>b.name===n)) throw new Error(`Student missing ${n}`);
+          for(const n of ['AUTH_SIGNING_SECRET','ACCESS_SCOPE_SECRET']) if(!secretNames.includes(n)) throw new Error(`Student missing ${n}`);
+          const d1Binding=nonSecret.find(b=>b.name==='DB'&&b.type==='d1');
+          if(!d1Binding||d1Binding.id!==d1Expected) throw new Error(`Portal D1 drift ${JSON.stringify(d1Binding)}`);
+          const kvBinding=nonSecret.find(b=>b.name==='STUDENTS_KV'&&b.type==='kv_namespace');
+          if(!kvBinding||kvBinding.namespace_id!==kvExpected) throw new Error(`Students KV drift ${JSON.stringify(kvBinding)}`);
+
+          const kvResponse=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${kvExpected}/values/${encodeURIComponent(`user:${aarav}`)}`,{headers:{Authorization:`Bearer ${token}`}});
+          if(!kvResponse.ok) throw new Error(`Aarav profile read failed ${kvResponse.status}`);
+          const profile=await kvResponse.json();
+          const full=new Set((profile.fullLibraries||[]).map(v=>String(v).toUpperCase()));
+          const special=new Set((profile.specialAccess||[]).map(v=>String(v).toUpperCase()));
+          if(!full.has('MATHS_L3_FULL')||!special.has('MATHS_11PLUS_QUIZ_L3_COMPLETED')) throw new Error('Aarav completed-L3 profile contract is not present');
+          const activeMaths=await d1(`SELECT a.assignment_id,a.batch_key,b.subject,b.stream,b.maths_level FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(COALESCE(b.subject,''))='maths' AND a.effective_to IS NULL`,[aarav]);
+          if(activeMaths.length!==0) throw new Error(`Unexpected active Aarav Maths assignment ${JSON.stringify(activeMaths)}`);
+          const launchRows=Number((await d1('SELECT COUNT(*) AS c FROM quiz_launch_codes'))[0]?.c);
+          if(!Number.isFinite(launchRows)) throw new Error('quiz_launch_codes count unresolved');
+
+          const snap={
+            oldVersion:studentVersion,
+            nonSecret,
+            secretNames,
+            browserVersion,
+            bridgeVersion,
+            route:{pattern:hostRoutes[0].pattern,script:hostRoutes[0].script},
+            service:{name:services[0].name,service:services[0].service},
+            launchRowsBefore:launchRows,
+            aaravProfileGate:true,
+            aaravActiveMathsAssignments:0
+          };
+          fs.writeFileSync('/tmp/completed-l3-before.json',JSON.stringify(snap,null,2),{mode:0o600});
+
+          function q(v){return JSON.stringify(String(v??''));}
+          let toml=`name = ${q(student)}\nmain = \"src/index.js\"\ncompatibility_date = \"2026-08-20\"\nkeep_vars = true\nworkers_dev = true\n`;
+          const plains=nonSecret.filter(b=>b.type==='plain_text');
+          if(plains.length){toml+='\n[vars]\n';for(const b of plains)toml+=`${b.name} = ${q(b.text)}\n`;}
+          for(const b of nonSecret.filter(b=>b.type==='kv_namespace')) toml+=`\n[[kv_namespaces]]\nbinding = ${q(b.name)}\nid = ${q(b.namespace_id)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='r2_bucket')) toml+=`\n[[r2_buckets]]\nbinding = ${q(b.name)}\nbucket_name = ${q(b.bucket_name)}\n`;
+          for(const b of nonSecret.filter(b=>b.type==='d1')) {
+            const db=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(b.id)}`);
+            toml+=`\n[[d1_databases]]\nbinding = ${q(b.name)}\ndatabase_name = ${q(db.name)}\ndatabase_id = ${q(b.id)}\n`;
+          }
+          for(const b of nonSecret.filter(b=>b.type==='send_email')) toml+=`\n[[send_email]]\nname = ${q(b.name)}\n`;
+          fs.writeFileSync('rebuild/student/wrangler.completed-l3-prod.toml',toml);
+          console.log(JSON.stringify({marker:'COMPLETED_L3_V2_PRODUCTION_PREFLIGHT_PASS',studentVersion,browserVersion,bridgeVersion,launchRows},null,2));
+          NODE
+
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --dry-run --outdir /tmp/completed-l3-prod-dry --config rebuild/student/wrangler.completed-l3-prod.toml >/tmp/completed-l3-prod-dry.log
+          grep -R -Fq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/completed-l3-prod-dry
+          grep -R -Fq 'completed-l3' /tmp/completed-l3-prod-dry
+          grep -R -Fq '/api/v2/student/quiz/eligibility' /tmp/completed-l3-prod-dry
+          grep -R -Fq '/api/v2/student/quiz/launch' /tmp/completed-l3-prod-dry
+          grep -R -Fq 'trialDemo' /tmp/completed-l3-prod-dry
+
+      - name: Deploy Student Worker forward-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'FORWARD_ONLY_DEPLOYMENT: no rollback, no versions deploy, no old-entrypoint restore'
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config rebuild/student/wrangler.completed-l3-prod.toml --keep-vars --message 'Forward-only: completed L3 Quiz eligibility in v2 Student runtime'
+          sleep 6
+
+      - name: Verify production topology, preservation and security
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          const student=process.env.STUDENT_WORKER;
+          const browser=process.env.BROWSER_WORKER;
+          const bridge=process.env.BRIDGE_WORKER;
+          const host=process.env.PROD_HOST;
+          const d1Expected=process.env.PORTAL_D1_ID;
+          const kvExpected=process.env.STUDENTS_KV_ID;
+          const aarav=process.env.AARAV_ID;
+          const base='https://api.cloudflare.com/client/v4';
+          const headers={Authorization:`Bearer ${token}`,'content-type':'application/json'};
+          async function cf(path,init={}){
+            const r=await fetch(base+path,{...init,headers:{...headers,...(init.headers||{})}});
+            const j=await r.json();
+            if(!r.ok||j.success!==true) throw new Error(`${r.status} ${path}: ${JSON.stringify(j.errors||j)}`);
+            return j.result;
+          }
+          async function settings(name){return cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/settings`);}
+          async function active(name){
+            const x=await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(name)}/deployments`);
+            const ds=Array.isArray(x?.deployments)?x.deployments:Array.isArray(x)?x:[];
+            const vs=Array.isArray(ds[0]?.versions)?ds[0].versions:[];
+            return String((vs.find(v=>Number(v.percentage||0)===100)||vs[0])?.version_id||'');
+          }
+          async function d1(sql,params=[]){
+            const result=await cf(`/accounts/${account}/d1/database/${encodeURIComponent(d1Expected)}/query`,{method:'POST',body:JSON.stringify({sql,params})});
+            const block=Array.isArray(result)?result[0]:result;
+            return block?.results||[];
+          }
+          const normalize=b=>({
+            name:b.name,type:b.type,
+            ...(b.type==='plain_text'?{text:b.text}:{}),
+            ...(b.type==='kv_namespace'?{namespace_id:b.namespace_id}:{}),
+            ...(b.type==='d1'?{id:b.id||b.database_id}:{}),
+            ...(b.type==='r2_bucket'?{bucket_name:b.bucket_name}:{}),
+            ...(b.type==='send_email'?{}:{})
+          });
+          const before=JSON.parse(fs.readFileSync('/tmp/completed-l3-before.json','utf8'));
+          const s=await settings(student);
+          const now={
+            nonSecret:(s.bindings||[]).filter(b=>!/secret/i.test(String(b.type))).map(normalize).sort((a,b)=>String(a.name).localeCompare(String(b.name))),
+            secretNames:(s.bindings||[]).filter(b=>/secret/i.test(String(b.type))).map(b=>b.name).sort()
+          };
+          if(JSON.stringify(now)!==JSON.stringify({nonSecret:before.nonSecret,secretNames:before.secretNames})) throw new Error('Student bindings changed');
+          const newVersion=await active(student);
+          if(!newVersion||newVersion===before.oldVersion) throw new Error('Student version did not advance');
+          if(await active(browser)!==before.browserVersion) throw new Error('Browser version changed during Student deploy');
+          if(await active(bridge)!==before.bridgeVersion) throw new Error('Bridge version changed during Student deploy');
+          const bs=await settings(browser);
+          const services=(bs.bindings||[]).filter(b=>b.type==='service');
+          if(services.length!==1||services[0].service!==student) throw new Error('Browser service binding changed');
+          const zones=await cf(`/zones?per_page=50&account.id=${encodeURIComponent(account)}`);
+          const zone=zones.filter(z=>host===z.name||host.endsWith('.'+z.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+          const routes=await cf(`/zones/${zone.id}/workers/routes`);
+          const hostRoutes=routes.filter(r=>String(r.pattern||'').toLowerCase().includes(host.toLowerCase()));
+          if(hostRoutes.length!==1||hostRoutes[0].pattern!==before.route.pattern||hostRoutes[0].script!==before.route.script) throw new Error('Public route changed');
+          const launchRows=Number((await d1('SELECT COUNT(*) AS c FROM quiz_launch_codes'))[0]?.c);
+          if(launchRows!==before.launchRowsBefore) throw new Error(`Deployment changed quiz_launch_codes ${before.launchRowsBefore}->${launchRows}`);
+          const activeMaths=await d1(`SELECT a.assignment_id FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? AND lower(COALESCE(b.subject,''))='maths' AND a.effective_to IS NULL`,[aarav]);
+          if(activeMaths.length!==0) throw new Error('Aarav active Maths assignment was unexpectedly created');
+          const kvResponse=await fetch(`${base}/accounts/${account}/storage/kv/namespaces/${kvExpected}/values/${encodeURIComponent(`user:${aarav}`)}`,{headers:{Authorization:`Bearer ${token}`}});
+          if(!kvResponse.ok) throw new Error(`Aarav profile read failed ${kvResponse.status}`);
+          const profile=await kvResponse.json();
+          const full=new Set((profile.fullLibraries||[]).map(v=>String(v).toUpperCase()));
+          const special=new Set((profile.specialAccess||[]).map(v=>String(v).toUpperCase()));
+          if(!full.has('MATHS_L3_FULL')||!special.has('MATHS_11PLUS_QUIZ_L3_COMPLETED')) throw new Error('Aarav completed-L3 profile gate changed');
+          fs.writeFileSync('/tmp/completed-l3-result.json',JSON.stringify({newVersion,browserVersion:before.browserVersion,bridgeVersion:before.bridgeVersion,launchRows,aaravProfileGate:true,aaravActiveMathsAssignments:0},null,2));
+          console.log(JSON.stringify({marker:'COMPLETED_L3_V2_TOPOLOGY_PRESERVATION_PASS',newVersion,launchRows},null,2));
+          NODE
+
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$API/workers/scripts/${STUDENT_WORKER}" -o /tmp/student-script.bin
+          grep -aFq 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/student-script.bin
+          grep -aFq 'completed-l3' /tmp/student-script.bin
+          grep -aFq '/api/v2/student/quiz/eligibility' /tmp/student-script.bin
+          grep -aFq '/api/v2/student/quiz/launch' /tmp/student-script.bin
+          grep -aFq 'trialDemo' /tmp/student-script.bin
+
+          code="$(curl -sS -o /tmp/e.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/quiz/eligibility")"
+          test "$code" = 401
+          jq -e '.error=="AUTH_REQUIRED" and .eligible==false' /tmp/e.json >/dev/null
+
+          code="$(curl -sS -o /tmp/l.json -w '%{http_code}' -X POST "https://${PROD_HOST}/api/v2/student/quiz/launch" -H "Origin: https://${PROD_HOST}" -H 'Content-Type: application/json' --data '{}')"
+          test "$code" = 401
+          jq -e '.error=="AUTH_REQUIRED"' /tmp/l.json >/dev/null
+
+          code="$(curl -sS -o /tmp/h.json -w '%{http_code}' -X POST "https://${PROD_HOST}/api/v2/student/quiz/launch" -H 'Origin: https://evil.example' -H 'Content-Type: application/json' --data '{}')"
+          test "$code" = 403
+          jq -e '.error=="FORBIDDEN_ORIGIN"' /tmp/h.json >/dev/null
+
+          code="$(curl -sS -o /tmp/home.json -w '%{http_code}' "https://${PROD_HOST}/api/v2/student/home")"
+          test "$code" = 401
+
+          code="$(curl -sS -o /tmp/redeem.json -w '%{http_code}' -X POST 'https://fpt-portal-v2-worker.futureperfectlessons.workers.dev/api/v1/quiz-bridge/redeem' -H 'Content-Type: application/json' --data '{"code":"invalid"}')"
+          test "$code" = 401
+          grep -Fq 'UNAUTHORIZED' /tmp/redeem.json
+
+          echo COMPLETED_L3_V2_PRODUCTION_DEPLOY_PASS
+
+      - name: Enforce forward-only workflow invariant
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Fq 'versions deploy' .github/workflows/completed-l3-v2-quiz-production-deploy.yml
+          ! grep -Fq 'wrangler rollback' .github/workflows/completed-l3-v2-quiz-production-deploy.yml
+          ! grep -Eq 'git[[:space:]]+revert|ROLLBACK_' .github/workflows/completed-l3-v2-quiz-production-deploy.yml
+          echo FORWARD_ONLY_WORKFLOW_PASS
