@@ -7,6 +7,7 @@ on:
       - '.github/workflows/audit-aarav-l3-quiz.yml'
       - 'ops/aar1811-l3-quiz-preflight.mjs'
       - 'ops/aar1811-live-production-guard.mjs'
+      - 'ops/y611fm-cohort-semantics-audit.mjs'
 
 permissions:
   contents: read
@@ -28,6 +29,11 @@ jobs:
           set -euo pipefail
           node --check ops/aar1811-l3-quiz-preflight.mjs
           node ops/aar1811-l3-quiz-preflight.mjs
+      - name: Audit Y611FM cohort semantics read-only
+        run: |
+          set -euo pipefail
+          node --check ops/y611fm-cohort-semantics-audit.mjs
+          node ops/y611fm-cohort-semantics-audit.mjs
       - name: Run final live production guard read-only
         run: |
           set -euo pipefail
@@ -36,5 +42,5 @@ jobs:
       - name: Confirm no production mutation in this workflow
         run: |
           set -euo pipefail
-          ! grep -E 'method:.PUT.|method:.DELETE.|d1.*execute|wrangler.*deploy' ops/aar1811-l3-quiz-preflight.mjs ops/aar1811-live-production-guard.mjs
+          ! grep -E 'method:.PUT.|method:.DELETE.|d1.*execute|wrangler.*deploy' ops/aar1811-l3-quiz-preflight.mjs ops/aar1811-live-production-guard.mjs ops/y611fm-cohort-semantics-audit.mjs
           echo AAR1811_TARGET_PREFLIGHT_READONLY_PASS
