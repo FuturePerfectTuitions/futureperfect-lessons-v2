@@ -1,0 +1,13 @@
+name = "fpt-portal-v2-rebuild-browser-staging-cp9"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+workers_dev = true
+
+[[services]]
+binding = "STAGING_API"
+service = "fpt-portal-v2-rebuild-student-staging"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
