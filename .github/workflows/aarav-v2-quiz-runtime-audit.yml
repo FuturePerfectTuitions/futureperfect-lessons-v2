@@ -1,9 +1,7 @@
 name: Aarav v2 Quiz runtime audit
 
 on:
-  push:
-    branches: ['fix/aarav-v2-quiz-runtime-2026-09-28']
-    paths: ['.github/workflows/aarav-v2-quiz-runtime-audit.yml']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,83 +9,5 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
-      BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
-      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
-      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
-      USER_ID: aar1811
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Prove current v2 topology and inspect live Quiz runtime read-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-
-          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/deployments" -H "$AUTH" -o /tmp/student-deployments.json
-          jq -e '.success==true' /tmp/student-deployments.json >/dev/null
-          echo STUDENT_DEPLOYMENT_BEGIN
-          jq -c '.result.deployments[0] // .result[0] // .result' /tmp/student-deployments.json
-          echo STUDENT_DEPLOYMENT_END
-
-          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}/settings" -H "$AUTH" -o /tmp/student-settings.json
-          jq -e '.success==true' /tmp/student-settings.json >/dev/null
-          echo STUDENT_BINDINGS_BEGIN
-          jq -c '[.result.bindings[] | {name,type,namespace_id,id,database_id,bucket_name,service,environment}]' /tmp/student-settings.json
-          echo STUDENT_BINDINGS_END
-
-          curl -fsS "$API/workers/scripts/${BROWSER_WORKER}/settings" -H "$AUTH" -o /tmp/browser-settings.json
-          jq -e '.success==true' /tmp/browser-settings.json >/dev/null
-          echo BROWSER_SERVICE_BINDINGS_BEGIN
-          jq -c '[.result.bindings[] | select(.type=="service") | {name,type,service,environment}]' /tmp/browser-settings.json
-          echo BROWSER_SERVICE_BINDINGS_END
-          jq -e --arg s "$STUDENT_WORKER" '.result.bindings[] | select(.type=="service" and .service==$s)' /tmp/browser-settings.json >/dev/null
-
-          curl -fsS "$API/workers/scripts/${STUDENT_WORKER}" -H "$AUTH" -o /tmp/student-worker.bin
-          echo STUDENT_BUNDLE_BYTES=$(wc -c </tmp/student-worker.bin)
-          echo STUDENT_BUNDLE_SHA256=$(sha256sum /tmp/student-worker.bin | awk '{print $1}')
-          for marker in '/api/v2/student/quiz/eligibility' '/api/v2/student/quiz/launch' 'quiz-release-context-v2.0' 'portal-live-maths11plus-release-v2' 'MATHS_11PLUS_QUIZ_L3_COMPLETED' 'completed-l3' 'NOT_ELIGIBLE'; do
-            if grep -aFq "$marker" /tmp/student-worker.bin; then echo "MARKER_PRESENT=$marker"; else echo "MARKER_ABSENT=$marker"; fi
-          done
-          python3 - <<'PY'
-          from pathlib import Path
-          text=Path('/tmp/student-worker.bin').read_bytes().decode('utf-8','replace')
-          for needle in ['/api/v2/student/quiz/eligibility','/api/v2/student/quiz/launch','quiz-release-context-v2.0','portal-live-maths11plus-release-v2','NOT_ELIGIBLE']:
-              print('CONTEXT_BEGIN='+needle)
-              start=0; count=0
-              while count<4:
-                  i=text.find(needle,start)
-                  if i<0: break
-                  print(text[max(0,i-900):min(len(text),i+1800)].replace('\n',' '))
-                  start=i+len(needle); count+=1
-              print('CONTEXT_END='+needle)
-          PY
-
-          key="user:${USER_ID}"
-          enc=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")
-          curl -fsS "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${enc}" -H "$AUTH" -o /tmp/user.json
-          jq -e 'type=="object"' /tmp/user.json >/dev/null
-          echo AARAV_PROFILE_BEGIN
-          jq -c '{portalUserId,fullLibraries:(.fullLibraries//[]),specialAccess:(.specialAccess//[]),batches:(.batches//[]),historicalViews:(.historicalViews//[]),blockedLessons:(.blockedLessons//[])}' /tmp/user.json
-          echo AARAV_PROFILE_END
-
-          SQL="SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from,b.active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.assignment_id"
-          jq -n --arg sql "$SQL" --arg uid "$USER_ID" '{sql:$sql,params:[$uid]}' >/tmp/query.json
-          curl -fsS -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/d1.json
-          jq -e '.success==true and .result[0].success==true' /tmp/d1.json >/dev/null
-          echo AARAV_ASSIGNMENTS_BEGIN
-          jq -c '.result[0].results[]?' /tmp/d1.json
-          echo AARAV_ASSIGNMENTS_END
-
-          code=$(curl -sS -o /tmp/public-elig.json -w '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/quiz/eligibility')
-          echo PUBLIC_UNAUTH_ELIGIBILITY_HTTP=$code
-          cat /tmp/public-elig.json
-          test "$code" = 401
-
-          echo AARAV_V2_QUIZ_RUNTIME_AUDIT_PASS
+      - run: echo retained read-only audit
