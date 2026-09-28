@@ -1,0 +1,75 @@
+name: Update completed L3 v2 Quiz GCH
+
+on:
+  push:
+    branches: ['fix/aarav-v2-quiz-runtime-forward-2026-09-28']
+    paths: ['.github/workflows/update-completed-l3-v2-gch.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  update-gch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/aarav-v2-quiz-runtime-forward-2026-09-28
+      - name: Patch GCH_CURRENT without replacing unrelated authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('gch/portal-v2-current/GCH_CURRENT.json')
+          data = json.loads(path.read_text())
+          override = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_COMPLETED_L3_QUIZ_V2.json'
+          read_order = data.setdefault('readOrder', [])
+          if override not in read_order:
+              read_order.append(override)
+          data['authorityVersion'] = '6.5-forward-only-completed-l3-v2-quiz-preflight'
+          purpose = str(data.get('purpose') or '')
+          addition = ' Current authority also covers completed-L3 11+ Practice eligibility/launch on the public rebuilt Student Worker, requiring explicit preserved L3 Quiz profile access without fabricating a new active Maths assignment.'
+          if 'completed-L3 11+ Practice eligibility/launch' not in purpose:
+              data['purpose'] = purpose.rstrip() + addition
+          data.setdefault('authorityComposition', {})['completedL3QuizV2Override'] = {
+              'path': override,
+              'role': 'higher authority for completed-L3 11+ Practice eligibility and launch on the public /api/v2 rebuilt Student Worker while preserving active L2/L3, Trial and shared Quiz bridge contracts'
+          }
+          data['latestCompletedL3QuizRepair'] = {
+              'name': 'Completed-L3 11+ Practice public-v2 runtime repair',
+              'date': '2026-09-28',
+              'status': 'IMPLEMENTATION_PREFLIGHT_PASS_PENDING_FORWARD_ONLY_PRODUCTION_DEPLOY',
+              'authority': override,
+              'liveStudentWorker': 'fpt-portal-v2-rebuild-student-prod',
+              'preRepairVersion': '9baf3815-19ed-4fa0-9cd1-26c0478b24bd',
+              'exactLiveSourceCommit': '3278eada72b5f4423d282b245db138ee81fb88ad',
+              'liveAuditRun': 36438554630,
+              'preflightRun': 36440832291,
+              'preflightResult': 'PASS',
+              'requiredProfileGate': ['MATHS_L3_FULL', 'MATHS_11PLUS_QUIZ_L3_COMPLETED'],
+              'activeMathsAssignmentRequiredForCompletedL3': False,
+              'fabricateMathsAssignment': False,
+              'recoveryMode': 'FORWARD_ONLY'
+          }
+          coverage = data.setdefault('websiteWorkflowCoverage', [])
+          item = 'completed-L3 11+ Practice public-v2 eligibility/launch with explicit L3 profile marker and prepared-access verification'
+          if item not in coverage:
+              coverage.append(item)
+          path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+          PY
+          python3 -m json.tool gch/portal-v2-current/GCH_CURRENT.json >/dev/null
+          grep -Fq 'GCH_OVERRIDE_2026-09-28_COMPLETED_L3_QUIZ_V2.json' gch/portal-v2-current/GCH_CURRENT.json
+          grep -Fq 'FORWARD_ONLY' gch/portal-v2-current/GCH_CURRENT.json
+      - name: Commit machine-oriented authority update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'FuturePerfectTuitions'
+          git config user.email 'futureperfectlessons@gmail.com'
+          git add gch/portal-v2-current/GCH_CURRENT.json
+          git diff --cached --quiet && exit 0
+          git commit -m 'Register completed L3 Quiz v2 authority'
+          git push origin HEAD:fix/aarav-v2-quiz-runtime-forward-2026-09-28
