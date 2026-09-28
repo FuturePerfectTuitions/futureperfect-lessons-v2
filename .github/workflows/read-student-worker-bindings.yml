@@ -1,0 +1,19 @@
+name: Read rebuilt Student Worker bindings
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-aar1811-2026-09-28']
+    paths: ['.github/workflows/read-student-worker-bindings.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl --fail --silent --show-error "$API/workers/scripts/fpt-portal-v2-rebuild-student-prod/settings" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/s.json
+          jq -c '.result.bindings | map({name,type,namespace_id,id,database_id,bucket_name})' /tmp/s.json
