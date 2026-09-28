@@ -1,0 +1,55 @@
+{
+  "schema": "fpt.portal.evidence.y3t1m04-screenpal-video-fix.v1",
+  "documentType": "PRODUCTION_CONTENT_CORRECTION_EVIDENCE",
+  "date": "2026-09-28",
+  "scope": "PUBLIC_STUDENT_V2.Y3T1M04.LessonVideo",
+  "authorityChange": false,
+  "reasonNoAuthorityChange": "This is a content-reference correction only. Existing Portal V2 source-to-prepared publication and verification rules remain unchanged.",
+  "target": {
+    "canonicalLessonId": "Y3M5",
+    "displayLessonId": "Y3T1M04",
+    "title": "Statistics and Measurements"
+  },
+  "ownerSuppliedScreenPalContentUrl": "https://screenpal.com/content/video/cOjtl4nwixU",
+  "rootCause": {
+    "classification": "CASE_SENSITIVE_SCREENPAL_ID_TRANSCRIPTION_ERROR",
+    "incorrectProductionCode": "cOjtI4nwixU",
+    "correctCode": "cOjtl4nwixU",
+    "difference": "The production reference contained uppercase I where the live ScreenPal content ID contains lowercase l.",
+    "preFixCanonical": "LESSONS_KV lesson:Y3M5 core.video pointed to cOjtI4nwixU.",
+    "preFixPrepared": "READ_MODELS_KV lesson:Y3M5 videoVariants.normal.targetUrl and videoVariants.elevenPlus.targetUrl both pointed to the same incorrect player ID."
+  },
+  "implementation": {
+    "strategy": "FORWARD_ONLY",
+    "rollbackOrRevertUsed": false,
+    "repositoryCommit": "a8afb4d8e164c0a3e68505bbd0ab11412c3d0e99",
+    "workflow": ".github/workflows/ops-fix-y3t1m04-statistics-video.yml",
+    "workflowRun": 36463530486,
+    "workflowResult": "SUCCESS",
+    "canonicalWrite": true,
+    "preparedWrite": true,
+    "correctContentUrl": "https://screenpal.com/content/video/cOjtl4nwixU",
+    "correctEmbedUrl": "https://go.screenpal.com/player/cOjtl4nwixU?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+    "correctWatchUrl": "https://go.screenpal.com/watch/cOjtl4nwixU"
+  },
+  "verification": {
+    "screenpalContentProbeHttpStatus": 302,
+    "screenpalEmbedProbeHttpStatus": 200,
+    "canonicalReadback": "PASS",
+    "preparedPublication": "PASS",
+    "preparedVersion": "y3t1m04-video-fix-1790619148392",
+    "preparedPayloadSha256": "b8912db9d9b152ca4ab20da23047d7cd416b0e95ed4827f07ae77276d50d99a0",
+    "preparedEnvelopeSha256": "604f704ed6b419953e60ae29e352e280c4be9c2a16b9deb975243490f038bb9d",
+    "previousPreparedVersion": "cp12-ui-71b4a1cac3f305f0-34949406556",
+    "normalVideoVariantCorrect": true,
+    "elevenPlusVideoVariantCorrect": true,
+    "incorrectIdAbsentFromCanonical": true,
+    "incorrectIdAbsentFromPrepared": true,
+    "evidenceArtifactId": 10989085184,
+    "evidenceArtifactName": "y3t1m04-video-fix-evidence"
+  },
+  "remainingGate": {
+    "ownerBrowserVerification": "PENDING",
+    "instruction": "Reload the live Student Portal lesson Y3T1M04 and confirm the embedded lesson video plays."
+  }
+}
