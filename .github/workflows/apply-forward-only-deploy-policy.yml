@@ -1,0 +1,72 @@
+name: Apply forward-only deploy policy
+
+on:
+  push:
+    branches: ['fix/forward-only-production-deploy-2026-09-28']
+    paths: ['.github/workflows/apply-forward-only-deploy-policy.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  edit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/forward-only-production-deploy-2026-09-28
+      - name: Remove legacy automatic rollback path
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('.github/workflows/admin-superuser-production-deploy.yml')
+          text = path.read_text()
+
+          capture = '''      - name: Capture production rollback anchor
+        id: rollback
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/portal-before.json
+          OLD="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/portal-before.json | head -n1)"
+          test -n "$OLD"
+          echo "old_version=$OLD" >> "$GITHUB_OUTPUT"
+          echo "PORTAL_COMPOSED_ROLLBACK_ANCHOR=$OLD"
+'''
+          rollback = '''      - name: Roll back production Worker if any verification failed
+        if: ${{ failure() && steps.rollback.outputs.old_version != '' }}
+        run: |
+          set -euo pipefail
+          OLD='${{ steps.rollback.outputs.old_version }}'
+          echo "ROLLING_BACK_SHARED_WORKER_TO=$OLD" >&2
+          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD@100%" --name "$WORKER_NAME" --message 'Rollback composed Quiz Bridge and Admin Tools deploy' -y
+'''
+
+          assert capture in text, 'expected rollback-anchor step not found'
+          assert rollback in text, 'expected automatic rollback step not found'
+          text = text.replace(capture, '')
+          text = text.replace(rollback, '')
+          text = text.replace(
+              '# Production Worker gate for authenticated Admin operations, quiz-bridge compatibility and protected-view stability.',
+              '# Forward-only production Worker gate for authenticated Admin operations, quiz-bridge compatibility and protected-view stability. Failed verification requires a later forward fix; this workflow never rolls production back.'
+          )
+          assert 'ROLLING_BACK_SHARED_WORKER_TO' not in text
+          assert 'versions deploy "$OLD@100%"' not in text
+          assert 'Capture production rollback anchor' not in text
+          path.write_text(text)
+      - name: Verify forward-only policy
+        run: |
+          set -euo pipefail
+          ! grep -Fq 'Roll back production Worker' .github/workflows/admin-superuser-production-deploy.yml
+          ! grep -Fq 'ROLLING_BACK_SHARED_WORKER_TO' .github/workflows/admin-superuser-production-deploy.yml
+          ! grep -Fq 'versions deploy "$OLD@100%"' .github/workflows/admin-superuser-production-deploy.yml
+          grep -Fq 'Failed verification requires a later forward fix' .github/workflows/admin-superuser-production-deploy.yml
+      - name: Commit policy hardening
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/admin-superuser-production-deploy.yml
+          git diff --cached --check
+          git commit -m 'Make production deploy strictly forward-only'
+          git push origin HEAD:fix/forward-only-production-deploy-2026-09-28
