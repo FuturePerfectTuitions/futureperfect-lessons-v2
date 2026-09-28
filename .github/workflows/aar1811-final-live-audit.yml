@@ -1,0 +1,68 @@
+name: Aar1811 final live state audit
+
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-aar1811-2026-09-28']
+    paths: ['.github/workflows/aar1811-final-live-audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+      READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+      USER_ID: Aar1811
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read exact live Aarav sources and prepared model
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          uid=$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]')
+          key="user:${USER_ID}"
+          enc=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$key")
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${STUDENTS_KV_ID}/values/${enc}" -H "$AUTH" -o /tmp/user.json
+          jq -e '(.name // "" | ascii_downcase) == "aarav"' /tmp/user.json >/dev/null
+          echo PROFILE_BEGIN
+          jq -c '{name,batches:(.batches//[]),fullLibraries:(.fullLibraries//[]),specialAccess:(.specialAccess//[]),historicalViews:(.historicalViews//[]),mathsYears:(.mathsYears//[]),vrBuckets:(.vrBuckets//[]),blockedLessons:(.blockedLessons//[])}' /tmp/user.json
+          echo PROFILE_END
+
+          query(){
+            local sql="$1"; shift
+            jq -n --arg sql "$sql" --args '$ARGS.positional as $p | {sql:$sql,params:$p}' -- "$@" >/tmp/query.json
+            curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json -o /tmp/out.json
+            jq -e '.success == true' /tmp/out.json >/dev/null
+            jq -c '.result[0].results[]?' /tmp/out.json
+          }
+
+          echo ASSIGNMENTS_BEGIN
+          query 'SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level,b.active_from AS batch_active_from,b.active_to AS batch_active_to FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id' "$uid"
+          echo ASSIGNMENTS_END
+
+          echo SATS_ENTITLEMENTS_BEGIN
+          query "SELECT lesson_id,core_access,vr_access,source,source_batch_code,source_lesson_date,first_granted_at,last_confirmed_at FROM lesson_entitlements WHERE portal_user_id_norm=? AND lesson_id GLOB 'Y6M*' ORDER BY lesson_id" "$uid"
+          echo SATS_ENTITLEMENTS_END
+
+          salt=$(curl --fail --silent --show-error "$API/storage/kv/namespaces/${READ_MODELS_KV_ID}/values/meta%3Ascope-salt" -H "$AUTH")
+          scope=$(node -e 'const c=require("crypto"); const s=process.argv[1],u=process.argv[2]; console.log("u-"+c.createHmac("sha256",s).update("rebuild-shadow-scope-v1:"+u).digest("hex").slice(0,40))' "$salt" "$uid")
+          pkey="readmodel:${scope}:pointer"
+          penc=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$pkey")
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${READ_MODELS_KV_ID}/values/${penc}" -H "$AUTH" -o /tmp/pointer.json
+          version=$(jq -r '.current.version' /tmp/pointer.json)
+          vkey="readmodel:${scope}:version:${version}"
+          venc=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$vkey")
+          curl --fail --silent --show-error "$API/storage/kv/namespaces/${READ_MODELS_KV_ID}/values/${venc}" -H "$AUTH" -o /tmp/envelope.json
+          echo PREPARED_MATHS_BEGIN
+          jq -c '.payload.snapshot.views[] | select(.subject=="maths") | {viewId,label,current,lockedPreview,openCount,lockedCount,lessonCount:(.lessons|length?)}' /tmp/envelope.json
+          echo PREPARED_MATHS_END
+          echo POINTER_VERSION=$version
+          echo AAR1811_FINAL_LIVE_READONLY_AUDIT_PASS
