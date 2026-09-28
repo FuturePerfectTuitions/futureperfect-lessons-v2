@@ -2,11 +2,11 @@
   "schema": "fpt.portal.gch.current-manifest.v1",
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
-  "effectiveDate": "2026-09-27",
-  "authorityVersion": "6.4-forward-only-primary-maths-home-normalization-production-pass",
+  "effectiveDate": "2026-09-28",
+  "authorityVersion": "6.5-11plus-history-earned-quiz-release-context",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule. Current authority also preserves historical/full-library Maths access under Previous when D1 defines an active 11+ programme, and restricts Quiz release context to earned core lesson entitlements rather than Full Library/open-state inference.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -18,6 +18,7 @@
     "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
     "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_11PLUS_HISTORY_QUIZ_RELEASE_CONTEXT.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json"
   ],
   "authorityComposition": {
@@ -56,48 +57,26 @@
     "forwardOnlyAdminEmailRecoveryOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
       "role": "higher authority for no-rollback production recovery, shared Worker preservation, live parent-email routing/idempotency and manual-send UI counters"
+    },
+    "elevenPlusHistoryQuizReleaseOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_11PLUS_HISTORY_QUIZ_RELEASE_CONTEXT.json",
+      "role": "higher authority for preserving normal Maths Full Library/history under Previous when D1 defines the current 11+ programme, retaining the L1/L2/L3 ladder, and restricting Quiz released-lesson context to earned core lesson entitlements"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
   "latestRepositoryChange": {
-    "name": "Primary Maths home-response normalization plus conditional L3 SATS presentation",
-    "date": "2026-09-27",
-    "status": "FRONTEND_AND_PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
-    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
-    "evidence": "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
-    "ownerEvidenceThatTriggeredRepair": "Devansh continued to show Year 6 + L3, and Kiaan showed Year 4 + L1 and Year 5 + L2. Owner requires Kiaan to show only L1, L2, L3 and 11+ Practice.",
-    "productionAudit": {
-      "year6EquivalentStudents": 9,
-      "ordinaryYear6Students": 6,
-      "l3Students": 3,
-      "dualCurrentAssignmentStudents": 0,
-      "l3StudentsWithCanonicalY6Entitlement": 3,
-      "l3StudentsWithSatAccess": 0,
-      "sourceClassification": "All current L3 canonical Y6 entitlement rows audited resolve to stream=11plus, maths_level=3 batch definitions."
-    },
-    "rootCauseClassification": "MULTI_LAYER_EQUIVALENT_ALIAS_PRESENTATION_DEFECT",
-    "rootCause": "Equivalent curriculum aliases can legitimately coexist in underlying prepared/live data because Year/L levels share canonical lessons. Server normalisation alone did not provide sufficient browser protection, while the prior post-render DOM guard assumed cards remained direct children of #view-grid. phase10-history reparents cards into grouped nested grids, making that fallback unreliable as the primary boundary.",
-    "equivalentPairs": ["Year 4/L1", "Year 5/L2", "Year 6/L3"],
-    "l3Presentation": "L3 only unless at least one SATS lesson is genuinely released or PreLesson-available; then L3 + SATS",
-    "ordinaryYear6Presentation": "Lessons + SATS",
-    "liveCatalogueSource": "worker/src/live-student-catalogue-overlay.js",
-    "liveEntitlementMarker": "LIVE_ENTITLEMENT_BATCH_DEFINITION_V1",
-    "finalNavigationSource": "worker/src/index-maths-equivalent-navigation-final.js",
-    "finalNavigationMarker": "maths-equivalent-navigation-final-v3",
-    "backendConditionalSatsCommit": "0e5abb6c267f549a6a75a641a1690bff65f196f3",
-    "backendConditionalSatsVerificationCommit": "e0c071bf37540152d43512f0a18c91d6c8da7ac4",
-    "backendDeploymentCommit": "5994c5df1fed5324c6927f364b0f4ef6781da3ed",
-    "productionWorkflowRun": 36313764780,
-    "productionWorkflowResult": "PASS",
-    "workerVersion": "176996e8-ca8a-43d6-8a5a-da5684a464d6",
-    "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
-    "frontendPrimaryNormalizer": "assets/maths-equivalent-home-normalizer.js",
-    "frontendPrimaryNormalizerCommit": "a80e08ef865c9b5b8205351608bcbb3c658466e5",
-    "frontendLoaderCommit": "122a229db6914676c682ca61baceeb99ae96a4c3",
-    "frontendPagesRun": 36313574498,
-    "frontendPagesResult": "PASS",
-    "preservationVerification": "PASS: classification, equivalent-navigation and conditional-L3-SATS tests, exact shared Worker composition, forward-only deployment, live runtime markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
-    "ownerBrowserVerification": "PENDING_KIAAN_AND_DEVANSH_RETEST"
+    "name": "11+ Maths history presentation and earned Quiz release context",
+    "date": "2026-09-28",
+    "status": "SOURCE_VALIDATED_PENDING_PRODUCTION_DEPLOYMENT",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-28_11PLUS_HISTORY_QUIZ_RELEASE_CONTEXT.json",
+    "preparedAccessSource": "worker/src/access-read-model-sync-v3.js",
+    "preparedAccessMarker": "d1-authoritative-11plus-history-presentation-v3",
+    "quizBridgeSource": "worker/src/index-step10-quiz-bridge.js",
+    "quizPolicyVersionPreserved": "quiz-release-context-v2.0",
+    "quizReleaseSourcePreserved": "portal-live-maths11plus-release-v2",
+    "quizReleaseEvidence": "lesson_entitlements.core_access=1 intersected with the live L2/L3 lesson view",
+    "preservation": "Full Library and historical access are not deleted to repair Current-card presentation.",
+    "validation": "Focused regressions plus full shared-Worker Wrangler dry-run PASS; targeted production-shaped read-only preflight PASS."
   },
   "latestProductionIncidentRecovery": {
     "name": "Parent-email test-routing/idempotency recovery",
@@ -115,7 +94,10 @@
     "name": "Manual parent-email send counters refresh",
     "date": "2026-09-26",
     "status": "SOURCE_COMMITTED_PAGES_DEPLOY_TRIGGERED",
-    "commits": ["3c1f125f4013dfb2f6610a27c0c4697f343c67bb", "46846566482203c6d0299329d334bc03e9e1d349"],
+    "commits": [
+      "3c1f125f4013dfb2f6610a27c0c4697f343c67bb",
+      "46846566482203c6d0299329d334bc03e9e1d349"
+    ],
     "rule": "The post-send summary pills must reflect the manual-send response; repairing display state must never trigger a second email send."
   },
   "permanentProductionRecoveryRule": {
@@ -141,7 +123,8 @@
       "prepared access/read-model reconciliation",
       "Trial runtime",
       "Replace Resource consistency",
-      "parent email capability"
+      "parent email capability",
+      "11+ Quiz earned-entitlement release-context enforcement"
     ]
   },
   "previousResetShowDeployment": {
@@ -232,7 +215,9 @@
     "manual parent-email post-send counter refresh",
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification",
-    "forward-only production recovery"
+    "forward-only production recovery",
+    "11+ current-programme presentation that preserves normal Maths Full Library/history under Previous without deleting access",
+    "11+ Quiz release context restricted to earned core lesson entitlements rather than Full Library/open-state inference"
   ],
   "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes.",
   "nextChangeProtocol": [
