@@ -1,0 +1,40 @@
+name: Durable completed L3 quiz gates
+
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-durable-2026-09-28']
+    paths:
+      - 'worker/src/index-step10-quiz-bridge.js'
+      - 'ops/completed-l3-quiz-regression.mjs'
+      - '.github/workflows/completed-l3-quiz-durable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and completed-L3 policy regression
+        run: |
+          set -euo pipefail
+          node --check worker/src/index-step10-quiz-bridge.js
+          node ops/completed-l3-quiz-regression.mjs
+      - name: Production Worker composition dry run
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --dry-run --config wrangler.toml --outdir /tmp/completed-l3-worker
+          grep -R -q 'MATHS_11PLUS_QUIZ_L3_COMPLETED' /tmp/completed-l3-worker
+          grep -R -q 'completed-l3' /tmp/completed-l3-worker
+          grep -R -q 'replace-resource-consistency-v1' /tmp/completed-l3-worker
+          grep -R -q 'trial-runtime-access-v2' /tmp/completed-l3-worker
+          echo DURABLE_COMPLETED_L3_WORKER_DRYRUN_PASS
