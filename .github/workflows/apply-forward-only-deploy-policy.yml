@@ -16,47 +16,44 @@ jobs:
         with:
           ref: fix/forward-only-production-deploy-2026-09-28
       - name: Remove legacy automatic rollback path
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path('.github/workflows/admin-superuser-production-deploy.yml')
           text = path.read_text()
 
-          capture = '''      - name: Capture production rollback anchor
-        id: rollback
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@"$WRANGLER_VERSION" deployments status --name "$WORKER_NAME" --json > /tmp/portal-before.json
-          OLD="$(jq -r '.versions[] | select(.percentage==100) | .version_id' /tmp/portal-before.json | head -n1)"
-          test -n "$OLD"
-          echo "old_version=$OLD" >> "$GITHUB_OUTPUT"
-          echo "PORTAL_COMPOSED_ROLLBACK_ANCHOR=$OLD"
-'''
-          rollback = '''      - name: Roll back production Worker if any verification failed
-        if: ${{ failure() && steps.rollback.outputs.old_version != '' }}
-        run: |
-          set -euo pipefail
-          OLD='${{ steps.rollback.outputs.old_version }}'
-          echo "ROLLING_BACK_SHARED_WORKER_TO=$OLD" >&2
-          npx --yes wrangler@"$WRANGLER_VERSION" versions deploy "$OLD@100%" --name "$WORKER_NAME" --message 'Rollback composed Quiz Bridge and Admin Tools deploy' -y
-'''
+          def remove_step(source, start_name, next_name):
+              start = source.index(f'      - name: {start_name}\n')
+              end = source.index(f'      - name: {next_name}\n', start)
+              return source[:start] + source[end:]
 
-          assert capture in text, 'expected rollback-anchor step not found'
-          assert rollback in text, 'expected automatic rollback step not found'
-          text = text.replace(capture, '')
-          text = text.replace(rollback, '')
+          text = remove_step(
+              text,
+              'Capture production rollback anchor',
+              'Deploy Worker preserving bindings and secrets'
+          )
+          text = remove_step(
+              text,
+              'Roll back production Worker if any verification failed',
+              'Complete'
+          )
           text = text.replace(
               '# Production Worker gate for authenticated Admin operations, quiz-bridge compatibility and protected-view stability.',
               '# Forward-only production Worker gate for authenticated Admin operations, quiz-bridge compatibility and protected-view stability. Failed verification requires a later forward fix; this workflow never rolls production back.'
           )
+
+          assert 'Capture production rollback anchor' not in text
+          assert 'Roll back production Worker' not in text
           assert 'ROLLING_BACK_SHARED_WORKER_TO' not in text
           assert 'versions deploy "$OLD@100%"' not in text
-          assert 'Capture production rollback anchor' not in text
+          assert 'Failed verification requires a later forward fix' in text
           path.write_text(text)
+          PY
       - name: Verify forward-only policy
         run: |
           set -euo pipefail
+          ! grep -Fq 'Capture production rollback anchor' .github/workflows/admin-superuser-production-deploy.yml
           ! grep -Fq 'Roll back production Worker' .github/workflows/admin-superuser-production-deploy.yml
           ! grep -Fq 'ROLLING_BACK_SHARED_WORKER_TO' .github/workflows/admin-superuser-production-deploy.yml
           ! grep -Fq 'versions deploy "$OLD@100%"' .github/workflows/admin-superuser-production-deploy.yml
