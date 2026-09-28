@@ -1,0 +1,47 @@
+{
+  "schema": "fpt.portal.gch.override.v1",
+  "documentType": "GCH_SCOPE_OVERRIDE",
+  "status": "AUTHORITATIVE_CURRENT",
+  "effectiveDate": "2026-09-28",
+  "scope": "11PLUS_MATHS_HISTORY_PRESENTATION_AND_QUIZ_RELEASE_CONTEXT",
+  "authority": {
+    "ownerRules": [
+      "For a student with one authoritative current D1 Maths 11+ programme, normal Maths Year full-library access remains available but does not become an additional current teaching programme unless that normal Year also has its own current D1 assignment.",
+      "Historical/full-library access must be preserved; presentation demotion to Previous is not deletion or entitlement revocation.",
+      "L1, L2 and L3 Full Library access may coexist as current 11+ ladder access when the current authoritative D1 programme is L3.",
+      "SATS remains a separate entitlement-driven presentation and does not define or change the student's teaching programme.",
+      "11+ Practice eligibility remains D1 Maths 11+ assignment-driven.",
+      "11+ Practice released lesson context must be derived from actual student core lesson entitlements, intersected with the live L2/L3 view, and must not be inferred merely because Full Library makes a lesson appear open."
+    ],
+    "implementation": {
+      "preparedAccess": "worker/src/access-read-model-sync-v3.js",
+      "preparedAccessMarker": "d1-authoritative-11plus-history-presentation-v3",
+      "lessonReleaseReconciliation": "worker/src/admin-lesson-release-import-reconciled.js",
+      "quizBridge": "worker/src/index-step10-quiz-bridge.js",
+      "quizPolicyVersionPreserved": "quiz-release-context-v2.0",
+      "quizReleaseSourcePreserved": "portal-live-maths11plus-release-v2",
+      "quizReleaseEvidence": "lesson_entitlements.core_access=1 intersected with the live L2/L3 lesson view"
+    },
+    "preservationInvariants": [
+      "No rollback or revert.",
+      "No Full Library deletion as a presentation fix.",
+      "No SATS-to-programme inference.",
+      "No quiz release inference from Full Library/open-card state.",
+      "Shared Worker canonical entrypoint remains worker/src/index-step10-quiz-bridge.js.",
+      "Existing Admin, Trial, Replace Resource, parent-email, lesson-release and protected-resource capabilities must remain composed."
+    ],
+    "regressionGates": [
+      "Current L3 plus historical normal Maths Full Library renders the normal Year view under Previous, not Current.",
+      "L1 and L2 Full Library access is retained alongside current L3.",
+      "SATS appears only when SATS entitlement/PreLesson access exists.",
+      "Year6/L3 same-curriculum current collision remains impossible.",
+      "Quiz release-context filtering returns no lesson merely because it is open through Full Library.",
+      "Quiz launch context includes the signed Portal-session metadata required by CP12 redeem validation.",
+      "Wrangler production composition dry-run passes before deployment."
+    ]
+  },
+  "productionState": {
+    "status": "SOURCE_VALIDATED_PENDING_PRODUCTION_DEPLOYMENT",
+    "note": "No student-identifying data is recorded in this public authority file. Targeted production data corrections, if any, must be independently guarded and evidence only the generic invariant/results."
+  }
+}
