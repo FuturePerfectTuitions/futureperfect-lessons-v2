@@ -1,0 +1,26 @@
+name: Completed L3 live binding check
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-aar1811-2026-09-28']
+    paths: ['.github/workflows/completed-l3-live-binding-check.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect live bindings
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/fpt-portal-v2-worker/settings"
+          curl --fail --silent --show-error "$api" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /tmp/settings.json
+          jq -c '.result.bindings | map({name,type,namespace_id,id,database_id,bucket_name})' /tmp/settings.json
+          names=$(jq -r '.result.bindings[].name' /tmp/settings.json | sort)
+          printf '%s\n' "$names"
+          grep -qx 'DB' <<<"$names"
+          grep -qx 'STUDENTS_KV' <<<"$names"
+          grep -qx 'READ_MODELS_KV' <<<"$names"
+          echo LIVE_REQUIRED_BINDINGS_PASS
