@@ -3,7 +3,9 @@ name: Targeted Aarav L3 and Quiz audit
 on:
   push:
     branches: ['audit/aarav-l3-quiz-2026-09-28']
-    paths: ['.github/workflows/audit-aarav-l3-quiz.yml']
+    paths:
+      - '.github/workflows/audit-aarav-l3-quiz.yml'
+      - 'ops/aar1811-l3-quiz-preflight.mjs'
 
 permissions:
   contents: read
@@ -15,48 +17,18 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
-      DB_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
-      PORTAL_USER_ID_NORM: aar1811
     steps:
       - uses: actions/checkout@v4
-      - name: Trace Aar1811 operational L3 batch context read-only
-        shell: bash
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Aar1811 target preflight against live sources read-only
         run: |
           set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          query(){ curl --fail --silent --show-error -X POST "$API/d1/database/${DB_ID}/query" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/query.json; }
-          today=$(TZ=Europe/London date +%F)
-
-          echo AAR_ASSIGNMENTS
-          sql='SELECT a.assignment_id,a.batch_key,a.effective_from,a.effective_to,b.subject,b.school_year,b.stream,b.maths_level FROM student_batch_assignments a LEFT JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.portal_user_id_norm=? ORDER BY a.effective_from,a.assignment_id'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
-          query | jq -c '.result[0].results[]'
-
-          echo ACTIVE_L3_BATCHES_AND_ENGLISH_PAIRINGS
-          sql='WITH active AS (SELECT a.portal_user_id_norm,a.batch_key,b.subject,b.stream,b.maths_level,b.school_year FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to) AND (b.active_from IS NULL OR b.active_from<=?) AND (b.active_to IS NULL OR ?<b.active_to)) SELECT m.batch_key AS maths_batch,COALESCE(e.batch_key,"(none)") AS english_batch,COUNT(DISTINCT m.portal_user_id_norm) AS student_count FROM active m LEFT JOIN active e ON e.portal_user_id_norm=m.portal_user_id_norm AND lower(e.subject)="english" WHERE lower(m.subject)="maths" AND lower(m.stream)="11plus" AND m.maths_level=3 GROUP BY m.batch_key,e.batch_key ORDER BY m.batch_key,e.batch_key'
-          jq -n --arg sql "$sql" --arg d "$today" '{sql:$sql,params:[$d,$d,$d,$d]}' >/tmp/query.json
-          query | jq -c '.result[0].results[]'
-
-          echo Y611FM_ENGLISH_PAIRINGS
-          sql='WITH active AS (SELECT a.portal_user_id_norm,a.batch_key,b.subject FROM student_batch_assignments a JOIN batch_definitions b ON b.batch_key=a.batch_key WHERE a.effective_from<=? AND (a.effective_to IS NULL OR ?<a.effective_to)) SELECT COALESCE(e.batch_key,"(none)") AS english_batch,COUNT(DISTINCT m.portal_user_id_norm) AS student_count FROM active m LEFT JOIN active e ON e.portal_user_id_norm=m.portal_user_id_norm AND lower(e.subject)="english" WHERE m.batch_key="Y611FM" GROUP BY e.batch_key ORDER BY e.batch_key'
-          jq -n --arg sql "$sql" --arg d "$today" '{sql:$sql,params:[$d,$d]}' >/tmp/query.json
-          query | jq -c '.result[0].results[]'
-
-          echo AAR_SESSION_PROFILE_SCHEMA
-          sql='PRAGMA table_info(student_session_profiles)'
-          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' >/tmp/query.json
-          query | jq -c '.result[0].results[] | {name,type}'
-
-          echo AAR_SESSION_PROFILE
-          sql='SELECT * FROM student_session_profiles WHERE portal_user_id_norm=?'
-          jq -n --arg sql "$sql" --arg id "$PORTAL_USER_ID_NORM" '{sql:$sql,params:[$id]}' >/tmp/query.json
-          query | jq -c '.result[0].results[]'
-
-          echo L3_RELEASE_COUNTS
-          sql='SELECT r.batch_key,COUNT(*) AS releases,MIN(r.lesson_date) AS first_release,MAX(r.lesson_date) AS last_release FROM batch_lesson_releases r WHERE r.batch_key IN ("Y511FM","Y511OM1") GROUP BY r.batch_key ORDER BY r.batch_key'
-          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' >/tmp/query.json
-          query | jq -c '.result[0].results[]'
-
-          echo AAR1811_OPERATIONAL_TRACE_PASS
+          node --check ops/aar1811-l3-quiz-preflight.mjs
+          node ops/aar1811-l3-quiz-preflight.mjs
+      - name: Confirm no production mutation in this workflow
+        run: |
+          set -euo pipefail
+          ! grep -E 'PUT|DELETE|d1.*execute|wrangler.*deploy' ops/aar1811-l3-quiz-preflight.mjs
+          echo AAR1811_TARGET_PREFLIGHT_READONLY_PASS
