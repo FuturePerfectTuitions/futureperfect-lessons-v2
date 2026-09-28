@@ -6,6 +6,7 @@ const resourceBrowser = fs.readFileSync('assets/admin-replace-resource.js', 'utf
 const adminBrowser = fs.readFileSync('assets/admin-trials.js', 'utf8');
 const bridge = fs.readFileSync('worker/src/index-step10-quiz-bridge.js', 'utf8');
 const wrapper = fs.readFileSync('worker/src/index-admin-tools.js', 'utf8');
+const mathsFinal = fs.readFileSync('worker/src/index-maths-equivalent-navigation-final.js', 'utf8');
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
 
 assert.match(html, /Admin Tools/);
@@ -42,7 +43,8 @@ assert.match(adminBrowser, /scrollIntoView/);
 assert.match(adminBrowser, /button\('Delete', 'delete'/);
 
 assert.match(bridge, /import currentWorker from ['"]\.\/index-admin-tools\.js['"]/);
-assert.match(wrapper, /index-phase24-trial-vr\.js/);
+assert.match(wrapper, /index-maths-equivalent-navigation-final\.js/);
+assert.match(mathsFinal, /index-phase24-trial-vr\.js/);
 assert.match(wrapper, /handleAdminResourceRequest/);
 assert.match(wrapper, /startsWith\('\/api\/v1\/admin\/resources\/'\)/);
 assert.match(wrangler, /main = "src\/index-step10-quiz-bridge\.js"/);
