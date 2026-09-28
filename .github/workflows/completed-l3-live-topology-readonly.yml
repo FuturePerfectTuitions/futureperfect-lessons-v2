@@ -1,0 +1,33 @@
+name: Completed L3 live topology read-only audit
+
+on:
+  push:
+    branches: ['fix/completed-l3-quiz-aar1811-2026-09-28']
+    paths: ['.github/workflows/completed-l3-live-topology-readonly.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read live Worker topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts"
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          for worker in fpt-portal-v2-worker fpt-portal-v2-rebuild-student-prod futureperfect-11plus-practice-step10-preview; do
+            curl --fail --silent --show-error "$api/$worker/deployments" -H "$auth" -o "/tmp/${worker}.json"
+            echo "$worker=$(jq -c '(.result.deployments // .result // [])[0] | {id,created_on,source,versions}' "/tmp/${worker}.json")"
+          done
+          curl --fail --silent --show-error "$api/futureperfect-11plus-practice-step10-preview/content" -H "$auth" -o /tmp/quiz-worker
+          grep -a -q 'quiz-release-context-v2.0' /tmp/quiz-worker
+          grep -a -q 'portal-live-maths11plus-release-v2' /tmp/quiz-worker
+          grep -a -q 'portalAssignmentId' /tmp/quiz-worker
+          echo LIVE_QUIZ_V2_RELEASE_CONTEXT_CONTRACT_PRESENT
