@@ -1,10 +1,13 @@
 import {
-  compileAuthoritativeAccessScope as compileV2AccessScope,
+  normaliseAuthoritativeInput,
+  currentEquivalentProgramme,
+  hasSatsPresentationAccess,
   loadStudentAccessInput,
   assertReadModelReconciliationReady as assertV2ReadModelReady
 } from './access-read-model-sync-v2.js';
 import {
   SCOPE_SALT_KEY,
+  compileAccessScope as compileLegacyAccessScope,
   assertCanonicalAccessProjected,
   publishScopeAtomic,
   resolveCurrentScope,
@@ -15,6 +18,7 @@ import {
 const ACCESS_READ_MODEL_SYNC_V3_MARKER = 'd1-authoritative-11plus-history-presentation-v3';
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
+const upper = value => clean(value).toUpperCase();
 
 function londonToday() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -59,6 +63,27 @@ function currentD1ElevenPlusMathsViews(input, asOfDate) {
   return currentD1MathsViews(input, asOfDate).filter(id => /^maths-level[1-3]$/.test(id));
 }
 
+function demoteEquivalentFullLibraryHistory(snapshot, originalInput, asOfDate) {
+  if (!snapshot || !Array.isArray(snapshot.views)) return snapshot;
+  const full = new Set((originalInput?.user?.fullLibraries || []).map(upper));
+  const hasY6 = full.has('MATHS_Y6_FULL');
+  const hasL3 = full.has('MATHS_L3_FULL');
+  if (!hasY6 && !hasL3) return snapshot;
+
+  const currentProgramme = currentEquivalentProgramme(originalInput, asOfDate);
+  if (!currentProgramme && !(hasY6 && hasL3)) return snapshot;
+
+  for (const view of snapshot.views) {
+    const id = norm(view?.viewId);
+    const explicitlyGranted = (id === 'maths-year6' && hasY6) || (id === 'maths-level3' && hasL3);
+    if (!explicitlyGranted) continue;
+    if (currentProgramme && id === currentProgramme) continue;
+    view.current = false;
+    view.group = 'previous';
+  }
+  return snapshot;
+}
+
 function demoteNormalMathsHistoryForElevenPlus(snapshot, originalInput, asOfDate) {
   if (!snapshot || !Array.isArray(snapshot.views)) return snapshot;
   const elevenPlus = currentD1ElevenPlusMathsViews(originalInput, asOfDate);
@@ -75,10 +100,49 @@ function demoteNormalMathsHistoryForElevenPlus(snapshot, originalInput, asOfDate
   return snapshot;
 }
 
-function compileAuthoritativeAccessScope(input, catalogue, scopeId, asOfDate) {
-  const payload = compileV2AccessScope(input, catalogue, scopeId, asOfDate);
-  demoteNormalMathsHistoryForElevenPlus(payload?.snapshot, input, asOfDate);
+function decorateV3Snapshot(payload, originalInput, catalogue, asOfDate) {
+  const snapshot = payload?.snapshot;
+  if (!snapshot || !Array.isArray(snapshot.views)) throw new Error('READ_MODEL_COMPILED_SNAPSHOT_INVALID');
+
+  for (const view of snapshot.views) {
+    if (norm(view?.viewId) === 'maths-year6') view.label = 'Lessons';
+    if (norm(view?.viewId) === 'maths-level3') view.label = 'L3';
+  }
+  snapshot.views = snapshot.views.filter(view => norm(view?.viewId) !== 'maths-sats');
+
+  if (hasSatsPresentationAccess(originalInput)) {
+    const lessons = Array.isArray(catalogue?.views?.['maths-sats']?.lessons)
+      ? catalogue.views['maths-sats'].lessons : [];
+    if (!lessons.length) throw new Error('SATS_PRESENTATION_CATALOGUE_MISSING');
+    const open = lessons.reduce((count, row) => {
+      const state = snapshot.lessonAccess?.[clean(row?.lessonId)];
+      return count + (state && !state.blocked && (state.core || state.preLessonOnly) ? 1 : 0);
+    }, 0);
+    const sats = {
+      viewId:'maths-sats', subject:'maths', label:'SATS', current:true, group:'current',
+      lockedPreview:false, catalogueAvailable:true, visibleLessonCount:lessons.length,
+      openLessonCount:open, lockedLessonCount:Math.max(0, lessons.length - open)
+    };
+    const teachingIndex = snapshot.views.findIndex(view => {
+      const id = norm(view?.viewId);
+      return view?.current && (id === 'maths-year6' || id === 'maths-level3');
+    });
+    snapshot.views.splice(teachingIndex >= 0 ? teachingIndex + 1 : snapshot.views.length, 0, sats);
+  }
+
+  demoteEquivalentFullLibraryHistory(snapshot, originalInput, asOfDate);
+  demoteNormalMathsHistoryForElevenPlus(snapshot, originalInput, asOfDate);
+
+  const currentEquivalent = snapshot.views.filter(view => view?.current && !view?.lockedPreview &&
+    (norm(view?.viewId) === 'maths-year6' || norm(view?.viewId) === 'maths-level3'));
+  if (currentEquivalent.length > 1) throw new Error('COMPILED_YEAR6_L3_PROGRAMME_COLLISION');
   return payload;
+}
+
+function compileAuthoritativeAccessScope(input, catalogue, scopeId, asOfDate) {
+  const normalized = normaliseAuthoritativeInput(input, asOfDate);
+  const payload = compileLegacyAccessScope(normalized, catalogue, scopeId, asOfDate);
+  return decorateV3Snapshot(payload, input, catalogue, asOfDate);
 }
 
 function kvBindingStore(binding) {
@@ -136,7 +200,9 @@ export {
   ACCESS_READ_MODEL_SYNC_V3_MARKER,
   currentD1MathsViews,
   currentD1ElevenPlusMathsViews,
+  demoteEquivalentFullLibraryHistory,
   demoteNormalMathsHistoryForElevenPlus,
+  decorateV3Snapshot,
   compileAuthoritativeAccessScope,
   loadStudentAccessInput,
   assertReadModelReconciliationReady,
