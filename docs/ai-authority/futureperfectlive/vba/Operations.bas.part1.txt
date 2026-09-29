@@ -1,0 +1,200 @@
+Attribute VB_Name = "Operations"
+Option Explicit
+
+'=========================================================
+' COMPLETED
+'
+' Behaviour:
+' - One selected Live row:
+'     marks the whole physical class Completed.
+'
+' - Multiple selected Live rows:
+'     treats EACH selected row as a class anchor and marks
+'     every represented physical class Completed.
+'
+' Completion key:
+'     Lesson Date + Subject + Tutor + Time + EXACT Live lesson code
+'
+' Batch ID is deliberately NOT part of the key.
+' Therefore normal + 11+ students taught together are
+' completed together ONLY when they are on the same lesson.
+' A second continuing lesson at the same date/time remains
+' untouched until that specific lesson is completed.
+'
+' Only Lesson Status is changed.
+'=========================================================
+Public Sub Completed(Optional ByVal control As IRibbonControl)
+
+    Dim ws As Worksheet
+    Dim selectedRows As Object
+    Dim classKeys As Object
+
+    Dim area As Range
+    Dim rowRange As Range
+
+    Dim lastRow As Long
+    Dim r As Long
+    Dim rowNum As Long
+
+    Dim cName As Long
+    Dim cLessonDate As Long
+    Dim cSubject As Long
+    Dim cTutor As Long
+    Dim cTime As Long
+    Dim cLesson As Long
+    Dim cStatus As Long
+
+    Dim k As Variant
+    Dim classKey As String
+
+    Dim changedRows As Long
+    Dim matchedRows As Long
+
+    Set ws = ThisWorkbook.Worksheets("Live")
+
+    If ActiveSheet.Name <> ws.Name Then
+        MsgBox "Run Completed from the Live sheet.", vbExclamation
+        Exit Sub
+    End If
+
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Select one or more Live lesson rows first.", vbExclamation
+        Exit Sub
+    End If
+
+    cName = FPT_HeaderCol(ws, "Name")
+    cLessonDate = FPT_HeaderCol(ws, "Lesson date", "LessonDated")
+    cSubject = FPT_HeaderCol(ws, "Subject")
+    cTutor = FPT_HeaderCol(ws, "Tutor")
+    cTime = FPT_HeaderCol(ws, "Time")
+    cLesson = FPT_HeaderCol(ws, "Lesson")
+    cStatus = FPT_HeaderCol(ws, "Ready", "Lesson Status", "LessonStatus")
+
+    If cName = 0 Or cLessonDate = 0 Or cSubject = 0 _
+       Or cTutor = 0 Or cTime = 0 Or cLesson = 0 Or cStatus = 0 Then
+
+        MsgBox "One or more required Live columns could not be found.", vbCritical
+        Exit Sub
+    End If
+
+    lastRow = ws.Cells(ws.Rows.Count, cName).End(xlUp).Row
+
+    Set selectedRows = CreateObject("Scripting.Dictionary")
+    Set classKeys = CreateObject("Scripting.Dictionary")
+
+    'Collect every valid selected student row.
+    For Each area In Selection.Areas
+        For Each rowRange In area.Rows
+
+            rowNum = rowRange.Row
+
+            If rowNum >= 5 And rowNum <= lastRow Then
+                If Len(Trim$(CStr(ws.Cells(rowNum, cName).Value2))) > 0 Then
+                    selectedRows(CStr(rowNum)) = True
+                End If
+            End If
+
+        Next rowRange
+    Next area
+
+    If selectedRows.Count = 0 Then
+        MsgBox "Select one or more Live student lesson rows first.", vbExclamation
+        Exit Sub
+    End If
+
+    'Turn the selected rows into unique physical-class keys.
+    For Each k In selectedRows.Keys
+
+        classKey = CompletedPhysicalClassKey( _
+                        ws, _
+                        CLng(k), _
+                        cLessonDate, _
+                        cSubject, _
+                        cTutor, _
+                        cTime, _
+                        cLesson)
+
+        If classKey <> "" Then
+            classKeys(classKey) = True
+        End If
+
+    Next k
+
+    If classKeys.Count = 0 Then
+        MsgBox _
+            "None of the selected rows had a complete Lesson Date, Subject, Tutor, Time and Lesson.", _
+            vbExclamation
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    On Error GoTo CleanFail
+
+    'Mark every student belonging to every represented class.
+    For r = 5 To lastRow
+
+        If Len(Trim$(CStr(ws.Cells(r, cName).Value2))) > 0 Then
+
+            classKey = CompletedPhysicalClassKey( _
+                            ws, _
+                            r, _
+                            cLessonDate, _
+                            cSubject, _
+                            cTutor, _
+                            cTime, _
+                            cLesson)
+
+            If classKey <> "" Then
+                If classKeys.Exists(classKey) Then
+
+                    matchedRows = matchedRows + 1
+
+                    If StrComp( _
+                            Trim$(CStr(ws.Cells(r, cStatus).Value2)), _
+                            "Completed", _
+                            vbTextCompare) <> 0 Then
+
+                        ws.Cells(r, cStatus).Value2 = "Completed"
+                        changedRows = changedRows + 1
+
+                    End If
+                End If
+            End If
+
+        End If
+
+    Next r
+
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    'Completed runs silently on success.
+    Exit Sub
+
+CleanFail:
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox _
+        "Completed could not finish." & vbCrLf & _
+        Err.Description, _
+        vbCritical
+
+End Sub
+
+
+Private Function CompletedPhysicalClassKey( _
+                    ByVal ws As Worksheet, _
+                    ByVal rowNum As Long, _
+                    ByVal cLessonDate As Long, _
+                    ByVal cSubject As Long, _
+                    ByVal cTutor As Long, _
+                    ByVal cTime As Long, _
+                    ByVal cLesson As Long) As String
+
+    Dim dateKey As Double
+    Dim timeKey As Double
+    Dim subjectText As String
+    Dim tutorText As String
