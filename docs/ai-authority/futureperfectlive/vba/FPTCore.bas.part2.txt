@@ -1,0 +1,204 @@
+
+    'If the hyperlink is already a valid Windows folder, use it unchanged.
+    If fso.FolderExists(rawPath) Then
+        FPT_LessonFolderFromCell = rawPath
+        Exit Function
+    End If
+
+    'Legacy workbook hyperlinks can be relative, e.g.
+    '..\Videos\YTUpload\To DO\My Drive\Lessons\Math\Year 6\...'
+    '
+    'The old macro used Hyperlink.Follow, so Excel resolved that relative
+    'address automatically. The new planner needs a real filesystem path.
+    localRoot = Environ$("USERPROFILE") & "\My Drive\Lessons\"
+
+    marker = "My Drive\Lessons\"
+    p = InStr(1, rawPath, marker, vbTextCompare)
+
+    If p > 0 Then
+        candidate = localRoot & Mid$(rawPath, p + Len(marker))
+        FPT_LessonFolderFromCell = candidate
+        Exit Function
+    End If
+
+    'Fallback for hyperlinks which contain only a Lessons-relative tail.
+    marker = "Lessons\"
+    p = InStr(1, rawPath, marker, vbTextCompare)
+
+    If p > 0 Then
+        candidate = localRoot & Mid$(rawPath, p + Len(marker))
+        FPT_LessonFolderFromCell = candidate
+        Exit Function
+    End If
+
+    'Last resort: return the original path so the caller can report it.
+    FPT_LessonFolderFromCell = rawPath
+
+End Function
+
+Public Function FPT_LessonCode(ByVal lessonName As String) As String
+    Dim s As String, p As Long
+    s = Trim$(lessonName): p = InStr(1, s, " ")
+    If p > 1 Then FPT_LessonCode = Left$(s, p - 1) Else FPT_LessonCode = s
+End Function
+
+Private Function FPT_ParseLessonSerial(ByVal folderName As String, ByRef family As String, ByRef serialNo As Long) As Boolean
+    Dim re As Object, m As Object
+    Set re = CreateObject("VBScript.RegExp")
+    re.IgnoreCase = True: re.Global = False
+
+    'Normal term-coded lessons, e.g. Y6T1M04 / L3T2M24.
+    re.Pattern = "^(Y[2-6]|L[1-3])T[0-9]+([MEG])([0-9]+)"
+    If re.Test(folderName) Then
+        Set m = re.Execute(folderName)(0)
+        family = UCase$(m.SubMatches(0) & m.SubMatches(1))
+        serialNo = CLng(m.SubMatches(2))
+        FPT_ParseLessonSerial = True
+        Exit Function
+    End If
+
+    'Year 6 Maths SATS sequence, e.g. Y6MS1 / Y6MS2 / Y6MS19.
+    'Keep Y6MS as its own family so SATS is not mixed with ordinary Y6 Maths.
+    re.Pattern = "^(Y6)(MS)([0-9]+)"
+    If re.Test(folderName) Then
+        Set m = re.Execute(folderName)(0)
+        family = UCase$(m.SubMatches(0) & m.SubMatches(1))
+        serialNo = CLng(m.SubMatches(2))
+        FPT_ParseLessonSerial = True
+        Exit Function
+    End If
+
+    'Legacy non-term-coded lessons, e.g. Y6M38.
+    re.Pattern = "^(Y[2-6]|L[1-3])([MEG])([0-9]+)"
+    If re.Test(folderName) Then
+        Set m = re.Execute(folderName)(0)
+        family = UCase$(m.SubMatches(0) & m.SubMatches(1))
+        serialNo = CLng(m.SubMatches(2))
+        FPT_ParseLessonSerial = True
+    End If
+End Function
+
+Public Function FPT_NextLessonFolder(ByVal previousPath As String, ByRef nextPath As String, ByRef nextName As String, Optional ByRef errText As String = "") As Boolean
+    Dim fso As Object, parent As Object, fld As Object
+    Dim fam As String, fam2 As String, n As Long, n2 As Long, best As Long
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If previousPath = "" Or Not fso.FolderExists(previousPath) Then errText = "Previous lesson folder cannot be found: " & previousPath: Exit Function
+    If Not FPT_ParseLessonSerial(fso.GetFolder(previousPath).Name, fam, n) Then errText = "Cannot read lesson serial from: " & fso.GetFolder(previousPath).Name: Exit Function
+    Set parent = fso.GetFolder(fso.GetParentFolderName(previousPath))
+    best = 2147483647
+    For Each fld In parent.SubFolders
+        fam2 = "": n2 = 0
+        If FPT_ParseLessonSerial(fld.Name, fam2, n2) Then
+            If fam2 = fam And n2 > n And n2 < best Then best = n2: nextPath = fld.path: nextName = fld.Name
+        End If
+    Next fld
+    If nextPath = "" Then errText = "No next lesson found after " & fso.GetFolder(previousPath).Name & ".": Exit Function
+    FPT_NextLessonFolder = True
+End Function
+
+Public Function FPT_PrelLessonRemark(ByVal folderPath As String, ByVal batchId As String) As String
+    Dim fso As Object
+    Dim ordinary As Boolean
+    Dim vr As Boolean
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    If folderPath <> "" And fso.FolderExists(folderPath) Then
+        FPT_ScanPreLessonFolders fso.GetFolder(folderPath), False, ordinary, vr
+    End If
+
+    If ordinary And vr And FPT_IsVRBatch(batchId) Then
+        FPT_PrelLessonRemark = "VR Sheets AND PreLesson Sheets BOTH to be printed"
+    ElseIf vr And FPT_IsVRBatch(batchId) Then
+        FPT_PrelLessonRemark = "VR Sheets to be printed"
+    ElseIf ordinary Then
+        FPT_PrelLessonRemark = "PreLesson Sheets to be printed"
+    Else
+        FPT_PrelLessonRemark = "No PreLesson Sheets to be printed"
+    End If
+End Function
+
+Private Sub FPT_ScanPreLessonFolders(ByVal fld As Object, ByVal vrContext As Boolean, ByRef ordinary As Boolean, ByRef vr As Boolean)
+    Dim subFld As Object
+    Dim fil As Object
+    Dim folderKey As String
+    Dim nextVR As Boolean
+
+    folderKey = FPT_FolderKey(CStr(fld.Name))
+    nextVR = vrContext Or folderKey = "vr" Or InStr(1, folderKey, "verbalreasoning", vbTextCompare) > 0 Or InStr(1, folderKey, "vrprelesson", vbTextCompare) > 0
+
+    If InStr(1, folderKey, "prelessonsheet", vbTextCompare) > 0 Then
+        For Each fil In fld.Files
+            If FPT_IsPrintablePreLessonFile(CStr(fil.Name)) Then
+                If nextVR Then
+                    vr = True
+                Else
+                    ordinary = True
+                End If
+                Exit For
+            End If
+        Next fil
+    End If
+
+    If ordinary And vr Then Exit Sub
+
+    For Each subFld In fld.SubFolders
+        FPT_ScanPreLessonFolders subFld, nextVR, ordinary, vr
+        If ordinary And vr Then Exit For
+    Next subFld
+End Sub
+
+Private Function FPT_FolderKey(ByVal folderName As String) As String
+    Dim s As String
+    s = LCase$(Trim$(folderName))
+    s = Replace(s, " ", "")
+    s = Replace(s, "-", "")
+    s = Replace(s, "_", "")
+    FPT_FolderKey = s
+End Function
+
+Private Function FPT_IsPrintablePreLessonFile(ByVal fileName As String) As Boolean
+    Dim s As String
+    s = LCase$(fileName)
+
+    If InStr(1, s, "answer", vbTextCompare) > 0 Then Exit Function
+    If InStr(1, s, "marking scheme", vbTextCompare) > 0 Then Exit Function
+    If InStr(1, s, "mark scheme", vbTextCompare) > 0 Then Exit Function
+
+    FPT_IsPrintablePreLessonFile = True
+End Function
+
+Public Function FPT_StudentAlreadyHasLesson(ByVal ws As Worksheet, ByVal targetRow As Long, ByVal lessonName As String, Optional ByVal ignoreRow As Long = 0) As Boolean
+    Dim cName As Long, cSub As Long, cLesson As Long, lastRow As Long, r As Long
+    cName = FPT_HeaderCol(ws, "Name"): cSub = FPT_HeaderCol(ws, "Subject"): cLesson = FPT_HeaderCol(ws, "Lesson")
+    lastRow = ws.Cells(ws.rows.Count, cName).End(xlUp).Row
+    For r = 5 To lastRow
+        If r <> targetRow And r <> ignoreRow _
+           And FPT_Norm(ws.Cells(r, cName).value2) = FPT_Norm(ws.Cells(targetRow, cName).value2) _
+           And FPT_Norm(ws.Cells(r, cSub).value2) = FPT_Norm(ws.Cells(targetRow, cSub).value2) _
+           And FPT_Norm(FPT_LessonCode(ws.Cells(r, cLesson).value2)) = FPT_Norm(FPT_LessonCode(lessonName)) Then
+            FPT_StudentAlreadyHasLesson = True: Exit Function
+        End If
+    Next r
+End Function
+
+'============================================================
+' SHARED LEGACY HELPERS
+'============================================================
+Sub ClearClipboard()
+    If OpenClipboard(0&) Then
+        EmptyClipboard
+        CloseClipboard
+    End If
+End Sub
+
+Public Function SumByAutoBlack(rng As Range) As Double
+    Dim c As Range, total As Double
+    For Each c In rng.Cells
+        ' -4105 = Automatic; vbBlack = explicit black
+        If c.Font.ColorIndex = -4105 Or c.Font.Color = vbBlack Then
+            If IsNumeric(c.value2) Then total = total + c.value2
+        End If
+    Next c
+    SumByAutoBlack = total
+End Function

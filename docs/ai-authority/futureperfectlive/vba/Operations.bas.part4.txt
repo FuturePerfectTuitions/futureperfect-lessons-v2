@@ -1,0 +1,176 @@
+        Exit Sub
+    End If
+
+    'Process bottom-to-top, exactly as the old working design did.
+    'That prevents one inserted row changing the source row numbers
+    'we have not processed yet.
+    ReDim arr(1 To dict.Count)
+
+    i = 0
+
+    For Each key In dict.Keys
+        i = i + 1
+        arr(i) = CLng(dict(key))
+    Next key
+
+    For i = LBound(arr) To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+
+            If arr(i) < arr(j) Then
+                tmp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = tmp
+            End If
+
+        Next j
+    Next i
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    On Error GoTo Fail
+
+    For i = LBound(arr) To UBound(arr)
+
+        srcRow = arr(i)
+        destRow = srcRow + 1
+
+        'If we have already created the continuation row belonging
+        'to the originally selected student, keep track of it when
+        'later row insertions above it move it down.
+        If planRow > 0 And destRow <= planRow Then
+            planRow = planRow + 1
+        End If
+
+        'Insert directly below the student's existing lesson row.
+        ws.Rows(destRow).Insert _
+            Shift:=xlDown, _
+            CopyOrigin:=xlFormatFromLeftOrAbove
+
+        ConLessonCopyContinueRow ws, srcRow, destRow
+
+        'Remember the new row created from the row the user
+        'originally selected.
+        If srcRow = anchorRow Then
+            planRow = destRow
+        End If
+
+        updated = updated + 1
+
+    Next i
+
+    'If Live is a table and Excel did not automatically extend it,
+    'extend it once now to include the inserted rows.
+    If ws.ListObjects.Count > 0 Then
+
+        Set lo = ws.ListObjects(1)
+
+        finalLastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+        tableLastRow = lo.Range.Row + lo.Range.Rows.Count - 1
+
+        If finalLastRow > tableLastRow Then
+            lo.Resize ws.Range( _
+                ws.Cells(lo.HeaderRowRange.Row, lo.Range.Column), _
+                ws.Cells(finalLastRow, _
+                         lo.Range.Column + lo.Range.Columns.Count - 1))
+        End If
+
+    End If
+
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    'Automatically plan the newly-created continuation lesson.
+    'LessonPlan will apply the planned lesson to the other blank
+    'continuation rows belonging to the same physical class.
+    If planRow > 0 Then
+        ws.Activate
+        ws.Cells(planRow, "E").Select
+        Call LessonPlan
+    End If
+
+    'Sort Live after the continuation lesson has been planned.
+    Call Live
+
+    MsgBox updated & " continuing lesson row(s) created and lesson planned.", _
+           vbInformation, "Future Perfect"
+
+    Exit Sub
+
+Fail:
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox "Continuing Lesson could not finish:" & vbCrLf & vbCrLf & _
+           Err.Description, vbCritical, "Future Perfect"
+
+End Sub
+
+
+Private Sub ConLessonCopyContinueRow( _
+                ByVal ws As Worksheet, _
+                ByVal srcRow As Long, _
+                ByVal destRow As Long)
+
+    'Current Live layout:
+    'A Date
+    'B Name
+    'C Year
+    'D Subject
+    'E Lesson
+    'F Quoted
+    'G Lesson Date
+    'H Received
+    'I Remarks
+    'J Ready / Lesson Status
+    'K Tutor
+    'L Time
+    'M PLSS Informed
+    'N HW Informed
+
+    'Remove anything Excel may have auto-filled into the inserted row.
+    ws.Range("A" & destRow & ":N" & destRow).ClearContents
+
+    ws.Cells(destRow, "A").Value = ws.Cells(srcRow, "A").Value
+    ws.Cells(destRow, "B").Value = ws.Cells(srcRow, "B").Value
+    ws.Cells(destRow, "C").Value = ws.Cells(srcRow, "C").Value
+    ws.Cells(destRow, "D").Value = ws.Cells(srcRow, "D").Value
+
+    'The continuation line has no planned lesson yet.
+    On Error Resume Next
+    ws.Cells(destRow, "E").Hyperlinks.Delete
+    On Error GoTo 0
+    ws.Cells(destRow, "E").ClearContents
+
+    'No additional charge.
+    ws.Cells(destRow, "F").Value = 0
+
+    'Match the original workbook: "Continuing lesson" is a cell
+    'comment/note on Quoted (column F), NOT text in Remarks.
+    On Error Resume Next
+    If Not ws.Cells(destRow, "F").Comment Is Nothing Then
+        ws.Cells(destRow, "F").Comment.Delete
+    End If
+    On Error GoTo 0
+
+    ws.Cells(destRow, "F").AddComment "Continuing lesson"
+
+    ws.Cells(destRow, "G").Value = ws.Cells(srcRow, "G").Value
+
+    'No payment carried forward.
+    ws.Cells(destRow, "H").Value2 = 0
+
+    'Remarks stays blank, as in the original workflow.
+    ws.Cells(destRow, "I").ClearContents
+
+    'Not Ready until it is planned.
+    ws.Cells(destRow, "J").ClearContents
+
+    ws.Cells(destRow, "K").Value = ws.Cells(srcRow, "K").Value
+    ws.Cells(destRow, "L").Value = ws.Cells(srcRow, "L").Value
+
+    'No workflow dates carried forward.
+    ws.Cells(destRow, "M").ClearContents
+    ws.Cells(destRow, "N").ClearContents
+
+End Sub

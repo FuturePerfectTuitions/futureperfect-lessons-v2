@@ -1,0 +1,97 @@
+{
+  "schema": "fpt.futureperfectlive.ai_authority.v1",
+  "status": "CURRENT",
+  "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
+  "canonical_path": "docs/ai-authority/futureperfectlive/CURRENT.json",
+  "effective_date": "2026-09-29",
+  "purpose": "Machine-readable restart authority for FuturePerfectLive 2026-27. Do not request or regenerate a human-readable master ZIP unless the owner explicitly asks.",
+  "owner_invariants": [
+    "Never rollback/revert as recovery. Fix forward from current state and preserve later valid changes and unrelated features.",
+    "Do not infer or broaden business rules beyond owner approval.",
+    "Inspect current workbook/repo before mutation when later state may exist.",
+    "After owner-approved workbook changes, update this same GitHub authority; Git history is the version history."
+  ],
+  "binary_workbook": {
+    "last_uploaded": "FuturePerfectLive 2026-27(20260928-183535).xlsm",
+    "caveat": "The exact binary after all 28-Sep VBA edits was not uploaded. This authority plus the verbatim source chunks below records the confirmed state. If a future task depends on exact live binary state, inspect the then-current workbook before mutation."
+  },
+  "live_sheet": {
+    "name": "Live",
+    "data_start_row": 5,
+    "columns": {"A":"Date","B":"Name","C":"Year","D":"Subject","E":"Lesson","F":"Quoted","G":"Lesson date","H":"Received","I":"Remarks","J":"Ready / Lesson Status","K":"Tutor","L":"Time","M":"PLSS Informed","N":"HW Informed"},
+    "lesson_cell": "<LessonCode><space><Lesson Title>",
+    "physical_class_key": "Lesson Date + Subject + Tutor + Time",
+    "completed_tbc_key": "Lesson Date + Subject + Tutor + Time + EXACT Live lesson code",
+    "batch_id_is_not_part_of_physical_class_key": true
+  },
+  "confirmed_rules": {
+    "Completed": [
+      "Selected row(s) identify exact class/lesson combinations.",
+      "All matching student rows are marked Completed.",
+      "Already Completed rows remain unchanged.",
+      "Success is silent; warning/failure MsgBoxes remain."
+    ],
+    "TBC": [
+      "Prompt for slide number.",
+      "Affect only the exact selected lesson; never reopen Completed rows.",
+      "Current row Remarks becomes Completed till slide X and Status becomes Slide X.",
+      "Copy the same lesson to each matching student's next future row; Remarks becomes Start from slide X and Status becomes Ready.",
+      "On that future row M / PLSS Informed = Not Applicable because PreLesson Sheets were already issued.",
+      "On that future row N / HW Informed remains blank because homework is still outstanding."
+    ],
+    "Continuing_Lesson": [
+      "Create one new row per unique student in the selected physical class, processing bottom-to-top.",
+      "New row copies A-D,G,K,L; E is blank before planning; F=0 with cell comment Continuing lesson; H/Received=0; I,J,M,N blank.",
+      "Track the new row belonging to the originally selected student as later insertions shift row numbers.",
+      "After all new rows are created, select column E of that tracked row and call LessonPlan exactly once so LessonPlan fills the other blank continuation rows for the class.",
+      "Call Live sorter after planning."
+    ],
+    "Y6MS_parser": [
+      "FPT_ParseLessonSerial supports term-coded Y6T1M04/Y6T1E04/L3T2M24.",
+      "It supports Year 6 Maths SATS Y6MS1..Y6MS19 as separate family Y6MS.",
+      "It supports legacy non-term-coded Y6M38.",
+      "Do not rename Drive Y6MS folders to Y6Mxx to accommodate an outdated parser."
+    ]
+  },
+  "verified_Y6MS_examples": [
+    "Y6MS1 SATs Preparation Measurement",
+    "Y6MS2 SATs Preparation Measurement & Addition Subtraction",
+    "Y6MS3 SATs Preparation Algebra",
+    "Y6MS19 End of SATs Games"
+  ],
+  "portal_interface": {
+    "manual_parent_email_separation": "CSV import can occur without sending parent email; parent email send is a separate deliberate admin action.",
+    "absence_guardrail": "Owner rejected classifying the prior absence/email discussion as a defect or encoding a broad absent-row suppression rule. Reconfirm exact desired behaviour before changing absence/email logic."
+  },
+  "verbatim_source_chunks": {
+    "Operations.bas": [
+      "docs/ai-authority/futureperfectlive/vba/Operations.bas.part1.txt",
+      "docs/ai-authority/futureperfectlive/vba/Operations.bas.part2.txt",
+      "docs/ai-authority/futureperfectlive/vba/Operations.bas.part3.txt",
+      "docs/ai-authority/futureperfectlive/vba/Operations.bas.part4.txt"
+    ],
+    "FPTCore.bas": [
+      "docs/ai-authority/futureperfectlive/vba/FPTCore.bas.part1.txt",
+      "docs/ai-authority/futureperfectlive/vba/FPTCore.bas.part2.txt"
+    ],
+    "assembly_rule": "Concatenate each module's chunks in numeric order with no inserted text. The resulting source must match the recorded SHA-256 below."
+  },
+  "source_hashes": {
+    "Operations.bas": "161993bc0e4f0401be107854e631c1766e2d6a0d72d6f33eb56d7119d91208a4",
+    "FPTCore.bas": "71e7a82c541929db0eae8279f082dd109785fd4ffce0ad6ecc815619fd50a3b2",
+    "PortalCSV.bas": "bd0b8a6632c6e6e684f4d7d85c299b5d0cacc661d416691714ee8df33058ce02",
+    "Day2Day.bas": "94f0fa95102559f4548beba3fe56bd179ace437552342de116a006e2bc0c1979",
+    "Daily.bas": "3efdf0475b783fbf632af497fc3dce4137cad1ba0c8f88a4294529c530053192",
+    "Scheduling.bas": "585eeb5f6b0fef076ae7bd13c650543ee494777007f97387cb586532145b7cdd",
+    "NewRecords.bas": "0853c46b866fab2ef87cf8f01bbddccf8d834b1529223cd11c25b8f9c8bc02b9",
+    "Invoicing.bas": "55bd498732eb1f83672351e4261e3288515bbaa9ef9c64a7cf970a87f680258d"
+  },
+  "restart_protocol": [
+    "Read this entire CURRENT.json first.",
+    "Then read all verbatim source chunks for any module being changed and concatenate in numeric order if exact source is needed.",
+    "Treat owner_invariants and confirmed_rules as binding until explicitly superseded.",
+    "For workbook modules not stored verbatim here, use source_hashes to detect drift and inspect the current workbook before editing.",
+    "For Portal V2 public/live code, inspect current main HEAD and production; do not assume workbook-side snapshots represent later portal changes.",
+    "After an approved change, update CURRENT.json and any affected verbatim source chunks rather than creating another human-readable master ZIP."
+  ]
+}

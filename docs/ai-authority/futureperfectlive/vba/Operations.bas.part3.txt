@@ -1,0 +1,200 @@
+                    "Slide " & CLng(slideNo)
+
+                changedRows = changedRows + 1
+
+                nextR = FindNextStudentRow( _
+                            ws, _
+                            r, _
+                            cName, _
+                            cSub, _
+                            colLessonDate)
+
+                If nextR > 0 Then
+
+                    ws.Cells(r, cLesson).Copy _
+                        Destination:=ws.Cells(nextR, cLesson)
+
+                    ws.Cells(nextR, cRemarks).Value2 = _
+                        "Start from slide " & CLng(slideNo)
+
+                    ws.Cells(nextR, cStatus).Value2 = "Ready"
+
+                    'PreLesson Sheets were already issued for the original lesson.
+                    'Do not request them again for the continuation session.
+                    ws.Cells(nextR, cPLS).Value2 = "Not Applicable"
+
+                    'Homework remains outstanding until the continuing lesson is completed.
+                    ws.Cells(nextR, cHW).ClearContents
+
+                End If
+
+            End If
+
+        End If
+
+    Next r
+
+    Application.CutCopyMode = False
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    If changedRows = 0 Then
+        MsgBox _
+            "No active rows were changed." & vbCrLf & _
+            "Completed lessons were left untouched.", _
+            vbInformation
+    End If
+
+    Exit Sub
+
+CleanFail:
+    Application.CutCopyMode = False
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox _
+        "Continue from slide could not finish." & vbCrLf & _
+        Err.Description, _
+        vbCritical
+
+End Sub
+
+
+Private Function FindNextStudentRow( _
+                    ByVal ws As Worksheet, _
+                    ByVal sourceRow As Long, _
+                    ByVal cName As Long, _
+                    ByVal cSub As Long, _
+                    ByVal colLessonDate As Long) As Long
+
+    Dim r As Long
+    Dim lastRow As Long
+    Dim bestDate As Double
+    Dim d As Double
+
+    lastRow = ws.Cells(ws.Rows.Count, cName).End(xlUp).Row
+    bestDate = 1E+99
+
+    For r = 5 To lastRow
+
+        If r <> sourceRow _
+           And FPT_Norm(ws.Cells(r, cName).Value2) = _
+               FPT_Norm(ws.Cells(sourceRow, cName).Value2) _
+           And FPT_Norm(ws.Cells(r, cSub).Value2) = _
+               FPT_Norm(ws.Cells(sourceRow, cSub).Value2) Then
+
+            d = FPT_DateKey(ws.Cells(r, colLessonDate).Value)
+
+            If d > FPT_DateKey(ws.Cells(sourceRow, colLessonDate).Value) _
+               And d < bestDate Then
+
+                bestDate = d
+                FindNextStudentRow = r
+
+            End If
+
+        End If
+
+    Next r
+
+End Function
+
+
+Public Sub ConLesson(Optional ByVal control As IRibbonControl)
+
+    Dim ws As Worksheet
+    Dim lo As ListObject
+
+    Dim anchorRow As Long
+    Dim lastRow As Long
+    Dim r As Long
+
+    Dim kSubject As Variant
+    Dim kDate As Variant
+    Dim kTutor As Variant
+    Dim kTime As Variant
+
+    Dim studentName As String
+    Dim dict As Object
+
+    Dim srcRow As Long
+    Dim destRow As Long
+    Dim planRow As Long
+
+    Dim updated As Long
+    Dim key As Variant
+
+    Dim arr() As Long
+    Dim i As Long
+    Dim j As Long
+    Dim tmp As Long
+
+    Dim tableLastRow As Long
+    Dim finalLastRow As Long
+
+    Set ws = ThisWorkbook.Worksheets("Live")
+
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Please select a cell in the class row first.", vbExclamation
+        Exit Sub
+    End If
+
+    If ActiveSheet.Name <> ws.Name Or Selection.Row < 5 Then
+        MsgBox "Please select a Live lesson row first.", vbExclamation
+        Exit Sub
+    End If
+
+    anchorRow = Selection.Row
+
+    'CURRENT Live layout:
+    'D = Subject
+    'G = Lesson Date
+    'K = Tutor
+    'L = Time
+    '
+    'Year and Batch are deliberately NOT part of the physical-class key.
+    kSubject = ws.Cells(anchorRow, "D").Value2
+    kDate = ws.Cells(anchorRow, "G").Value2
+    kTutor = ws.Cells(anchorRow, "K").Value2
+    kTime = ws.Cells(anchorRow, "L").Value2
+
+    If Len(Trim$(CStr(kSubject))) = 0 Or _
+       Len(Trim$(CStr(kTutor))) = 0 Or _
+       Len(Trim$(CStr(kTime))) = 0 Or _
+       IsEmpty(kDate) Then
+
+        MsgBox "The selected row is missing Subject, Lesson Date, Tutor or Time.", _
+               vbExclamation
+        Exit Sub
+    End If
+
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
+
+    'Use the same proven pattern as the old workbook:
+    'find each unique student in the physical class first.
+    For r = 5 To lastRow
+
+        If StrComp(Trim$(CStr(ws.Cells(r, "D").Value2)), _
+                   Trim$(CStr(kSubject)), vbTextCompare) = 0 _
+           And ws.Cells(r, "G").Value2 = kDate _
+           And StrComp(Trim$(CStr(ws.Cells(r, "K").Value2)), _
+                       Trim$(CStr(kTutor)), vbTextCompare) = 0 _
+           And ws.Cells(r, "L").Value2 = kTime Then
+
+            studentName = Trim$(CStr(ws.Cells(r, "B").Value2))
+
+            If studentName <> "" Then
+                If Not dict.Exists(studentName) Then
+                    dict.Add studentName, r
+                End If
+            End If
+
+        End If
+
+    Next r
+
+    If dict.Count = 0 Then
+        MsgBox "No students were found in the selected physical class.", vbExclamation
