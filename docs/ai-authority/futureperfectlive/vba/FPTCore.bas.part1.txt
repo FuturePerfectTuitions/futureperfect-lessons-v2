@@ -1,0 +1,205 @@
+Attribute VB_Name = "FPTCore"
+Option Explicit
+
+' Shared Windows/worksheet helpers
+Declare PtrSafe Function OpenClipboard Lib "user32" (ByVal hwnd As LongPtr) As Long
+Declare PtrSafe Function EmptyClipboard Lib "user32" () As Long
+Declare PtrSafe Function CloseClipboard Lib "user32" () As Long
+
+Public Const FPT_LIVE_SHEET As String = "Live"
+Public Const FPT_DB_SHEET As String = "Email Database"
+Public Const FPT_SCHEDULE_SHEET As String = "Schedule"
+Public Const FPT_LESSON_ROOT As String = "C:\Users\sejal\My Drive\Lessons"
+
+Public Function FPT_HeaderCol(ByVal ws As Worksheet, ParamArray names()) As Long
+    Dim lastCol As Long, c As Long, i As Long, h As String
+    lastCol = ws.Cells(4, ws.Columns.Count).End(xlToLeft).Column
+    If ws.Name <> FPT_LIVE_SHEET Then lastCol = ws.Cells(2, ws.Columns.Count).End(xlToLeft).Column
+    For c = 1 To lastCol
+        h = FPT_Norm(ws.Cells(IIf(ws.Name = FPT_LIVE_SHEET, 4, 2), c).value2)
+        For i = LBound(names) To UBound(names)
+            If h = FPT_Norm(CStr(names(i))) Then FPT_HeaderCol = c: Exit Function
+        Next i
+    Next c
+End Function
+
+Public Function FPT_Norm(ByVal v As Variant) As String
+    FPT_Norm = LCase$(Trim$(Replace(CStr(v), ChrW(160), " ")))
+End Function
+
+Public Function FPT_DateKey(ByVal v As Variant) As Double
+    On Error GoTo Bad
+    If IsDate(v) Then FPT_DateKey = Fix(CDbl(CDate(v))): Exit Function
+    If IsNumeric(v) Then FPT_DateKey = Fix(CDbl(v)): Exit Function
+Bad:
+    FPT_DateKey = -1
+End Function
+
+Public Function FPT_TimeKey(ByVal v As Variant) As Double
+    On Error GoTo Bad
+    Dim t As Double
+    If IsDate(v) Then
+        t = CDbl(CDate(v)) - Fix(CDbl(CDate(v)))
+    ElseIf IsNumeric(v) Then
+        t = CDbl(v) - Fix(CDbl(v))
+    Else
+        t = CDbl(timeValue(CStr(v)))
+    End If
+    FPT_TimeKey = Round(t * 1440, 0) / 1440
+    Exit Function
+Bad:
+    FPT_TimeKey = -1
+End Function
+
+Public Function FPT_FindMembershipRow(ByVal wsLive As Worksheet, ByVal liveRow As Long, ByRef dbRow As Long, Optional ByRef errText As String = "") As Boolean
+    Dim wsDB As Worksheet, lastRow As Long, r As Long
+    Dim baseHits As Long, strictHits As Long
+    Dim cName As Long, cSubject As Long, colLessonDate As Long, cTime As Long, cTutor As Long
+    Dim nm As String, subj As String, dayText As String, tutor As String, tm As Double
+    Dim candidates As Collection, candidateRow As Variant
+
+    Set wsDB = ThisWorkbook.Worksheets(FPT_DB_SHEET)
+    Set candidates = New Collection
+
+    cName = FPT_HeaderCol(wsLive, "Name")
+    cSubject = FPT_HeaderCol(wsLive, "Subject")
+    colLessonDate = FPT_HeaderCol(wsLive, "Lesson date", "LessonDated")
+    cTime = FPT_HeaderCol(wsLive, "Time")
+    cTutor = FPT_HeaderCol(wsLive, "Tutor")
+
+    If cName = 0 Or cSubject = 0 Then
+        errText = "Required Live Name/Subject headers are missing."
+        Exit Function
+    End If
+
+    nm = Trim$(CStr(wsLive.Cells(liveRow, cName).value2))
+    subj = Trim$(CStr(wsLive.Cells(liveRow, cSubject).value2))
+
+    If nm = "" Or subj = "" Then
+        errText = "Live row is missing Name or Subject."
+        Exit Function
+    End If
+
+    lastRow = wsDB.Cells(wsDB.rows.Count, "A").End(xlUp).Row
+
+    'PRIMARY MATCH: Name + Subject is authoritative.
+    'A rescheduled lesson must not fail merely because its current Live
+    'day/time differs from the student's normal Email Database schedule.
+    For r = 3 To lastRow
+        If FPT_Norm(wsDB.Cells(r, "A").value2) = FPT_Norm(nm) _
+           And FPT_Norm(wsDB.Cells(r, "B").value2) = FPT_Norm(subj) Then
+            candidates.Add r
+            baseHits = baseHits + 1
+            dbRow = r
+        End If
+    Next r
+
+    If baseHits = 1 Then
+        FPT_FindMembershipRow = True
+        Exit Function
+    End If
+
+    If baseHits = 0 Then
+        dbRow = 0
+        errText = "No Email Database membership for " & nm & " / " & subj & "."
+        Exit Function
+    End If
+
+    'ONLY when the student genuinely has multiple memberships for the same
+    'subject do Day / Time / Tutor become disambiguators.
+    If colLessonDate > 0 Then
+        If IsDate(wsLive.Cells(liveRow, colLessonDate).value) Then
+            dayText = Format$(CDate(wsLive.Cells(liveRow, colLessonDate).value), "dddd")
+        End If
+    End If
+
+    tm = -1
+    If cTime > 0 Then tm = FPT_TimeKey(wsLive.Cells(liveRow, cTime).value)
+    If cTutor > 0 Then tutor = Trim$(CStr(wsLive.Cells(liveRow, cTutor).value2))
+
+    dbRow = 0
+    For Each candidateRow In candidates
+        r = CLng(candidateRow)
+
+        If (dayText = "" Or FPT_Norm(wsDB.Cells(r, "C").value2) = FPT_Norm(dayText)) _
+           And (tm < 0 Or FPT_TimeKey(wsDB.Cells(r, "D").value) = tm) _
+           And (tutor = "" Or FPT_Norm(wsDB.Cells(r, "J").value2) = FPT_Norm(tutor)) Then
+            strictHits = strictHits + 1
+            dbRow = r
+        End If
+    Next candidateRow
+
+    If strictHits = 1 Then
+        FPT_FindMembershipRow = True
+    ElseIf strictHits = 0 Then
+        dbRow = 0
+        errText = "Multiple Email Database memberships exist for " & nm & " / " & subj & _
+                  ", but none uniquely match this lesson's Day / Time / Tutor."
+    Else
+        dbRow = 0
+        errText = "Ambiguous Email Database membership for " & nm & " / " & subj & _
+                  " (" & strictHits & " schedule matches from " & baseHits & " memberships)."
+    End If
+End Function
+
+Public Function FPT_BatchForLiveRow(ByVal wsLive As Worksheet, ByVal liveRow As Long, ByRef batchId As String, Optional ByRef dbRow As Long = 0, Optional ByRef errText As String = "") As Boolean
+    If Not FPT_FindMembershipRow(wsLive, liveRow, dbRow, errText) Then Exit Function
+    batchId = Trim$(CStr(ThisWorkbook.Worksheets(FPT_DB_SHEET).Cells(dbRow, "H").value2))
+    If batchId = "" Then errText = "Email Database Batch ID is blank.": Exit Function
+    FPT_BatchForLiveRow = True
+End Function
+
+Public Function FPT_IsVRBatch(ByVal batchId As String) As Boolean
+    FPT_IsVRBatch = (InStr(1, batchId, "11", vbTextCompare) > 0)
+End Function
+
+Public Function FPT_ScheduleRowByBatch(ByVal batchId As String) As Long
+    Dim ws As Worksheet, lastRow As Long, r As Long
+    Set ws = ThisWorkbook.Worksheets(FPT_SCHEDULE_SHEET)
+    lastRow = ws.Cells(ws.rows.Count, "B").End(xlUp).Row
+    For r = 2 To lastRow
+        If FPT_Norm(ws.Cells(r, "B").value2) = FPT_Norm(batchId) Then FPT_ScheduleRowByBatch = r: Exit Function
+    Next r
+End Function
+
+Public Function FPT_SamePhysicalClass(ByVal ws As Worksheet, ByVal row1 As Long, ByVal row2 As Long) As Boolean
+    Dim cSub As Long, colLessonDate As Long, cTutor As Long, cTime As Long
+    cSub = FPT_HeaderCol(ws, "Subject")
+    colLessonDate = FPT_HeaderCol(ws, "Lesson date", "LessonDated")
+    cTutor = FPT_HeaderCol(ws, "Tutor")
+    cTime = FPT_HeaderCol(ws, "Time")
+    If cSub * colLessonDate * cTutor * cTime = 0 Then Exit Function
+    FPT_SamePhysicalClass = _
+        (FPT_Norm(ws.Cells(row1, cSub).value2) = FPT_Norm(ws.Cells(row2, cSub).value2)) And _
+        (FPT_DateKey(ws.Cells(row1, colLessonDate).value) = FPT_DateKey(ws.Cells(row2, colLessonDate).value)) And _
+        (FPT_Norm(ws.Cells(row1, cTutor).value2) = FPT_Norm(ws.Cells(row2, cTutor).value2)) And _
+        (FPT_TimeKey(ws.Cells(row1, cTime).value) = FPT_TimeKey(ws.Cells(row2, cTime).value))
+End Function
+Public Function FPT_LessonFolderFromCell(ByVal c As Range) As String
+
+    Dim rawPath As String
+    Dim localRoot As String
+    Dim candidate As String
+    Dim marker As String
+    Dim p As Long
+    Dim fso As Object
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    On Error Resume Next
+    If c.Hyperlinks.Count > 0 Then
+        rawPath = c.Hyperlinks(1).Address
+    End If
+    On Error GoTo 0
+
+    rawPath = Trim$(rawPath)
+
+    If rawPath = "" Then Exit Function
+
+    'Normalise hyperlink separators / simple URL encoding.
+    rawPath = Replace(rawPath, "%20", " ")
+    rawPath = Replace(rawPath, "/", "\")
+
+    If LCase$(Left$(rawPath, 8)) = "file:\\\" Then
+        rawPath = Mid$(rawPath, 9)
+    End If
