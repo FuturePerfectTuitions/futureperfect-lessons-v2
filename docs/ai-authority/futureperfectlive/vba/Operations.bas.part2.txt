@@ -1,0 +1,200 @@
+    Dim lessonText As String
+    Dim lessonCode As String
+
+    dateKey = FPT_DateKey(ws.Cells(rowNum, cLessonDate).Value)
+    timeKey = FPT_TimeKey(ws.Cells(rowNum, cTime).Value)
+
+    subjectText = FPT_Norm(ws.Cells(rowNum, cSubject).Value2)
+    tutorText = FPT_Norm(ws.Cells(rowNum, cTutor).Value2)
+    lessonText = Trim$(CStr(ws.Cells(rowNum, cLesson).Value2))
+
+    'IMPORTANT: use the EXACT lesson code written in the Live Lesson cell.
+    'Do NOT use FPT_LessonCode here. That helper is useful elsewhere for
+    'catalogue/canonical lesson resolution, but Completed/TBC need to
+    'distinguish consecutive Live lessons such as L3T1M01, L3T1M02 and
+    'L3T1M03 within the SAME physical teaching session.
+    lessonCode = ExactLiveLessonCode(lessonText)
+
+    'Fallback for an old/manual row that has lesson text but no separated
+    'leading code: use the whole normalised lesson text. This remains exact
+    'enough to prevent one different lesson in the same session being changed.
+    If lessonCode = "" And Len(lessonText) > 0 Then
+        lessonCode = FPT_Norm(lessonText)
+    End If
+
+    If dateKey < 0 Then Exit Function
+    If timeKey < 0 Then Exit Function
+    If subjectText = "" Then Exit Function
+    If tutorText = "" Then Exit Function
+    If lessonCode = "" Then Exit Function
+
+    CompletedPhysicalClassKey = _
+        Format$(dateKey, "0") & "|" & _
+        subjectText & "|" & _
+        tutorText & "|" & _
+        Format$(timeKey, "0.0000000000") & "|" & _
+        lessonCode
+
+End Function
+
+
+Private Function ExactLiveLessonCode(ByVal lessonText As String) As String
+
+    Dim s As String
+    Dim p As Long
+
+    s = Trim$(lessonText)
+    If s = "" Then Exit Function
+
+    'The Live sheet lesson convention is:
+    '   <LessonCode><space><Lesson Title>
+    'Examples: L3T1M01 Number and Place Value I, Y6T1E02 Hyphens.
+    'Taking the first token preserves the exact lesson instance and prevents
+    'a later TBC operation from changing earlier/later lessons in the same
+    'date/time session.
+    p = InStr(1, s, " ", vbBinaryCompare)
+
+    If p > 1 Then
+        ExactLiveLessonCode = FPT_Norm(Left$(s, p - 1))
+    Else
+        ExactLiveLessonCode = FPT_Norm(s)
+    End If
+
+End Function
+
+
+'=========================================================
+' TBC / CONTINUING FROM A SLIDE
+'
+' IMPORTANT BUSINESS RULE:
+' - A physical session may contain several lessons in sequence.
+' - Earlier lessons may already be Completed.
+' - TBC must affect ONLY the exact lesson selected, not every
+'   lesson sharing Subject + Date + Tutor + Time.
+' - A row already marked Completed must never be reopened as
+'   Slide X.
+'
+' Match key:
+'   Lesson Date + Subject + Tutor + Time + EXACT Live lesson code
+'
+' This deliberately matches the Completed routine.
+'=========================================================
+Public Sub TBC(Optional ByVal control As IRibbonControl)
+
+    Dim ws As Worksheet
+    Dim anchor As Long
+    Dim slideNo As Variant
+    Dim r As Long
+    Dim lastRow As Long
+    Dim nextR As Long
+
+    Dim cName As Long
+    Dim cSub As Long
+    Dim cLesson As Long
+    Dim colLessonDate As Long
+    Dim cTutor As Long
+    Dim cTime As Long
+    Dim cRemarks As Long
+    Dim cStatus As Long
+    Dim cPLS As Long
+    Dim cHW As Long
+
+    Dim anchorKey As String
+    Dim rowKey As String
+    Dim rowStatus As String
+    Dim changedRows As Long
+
+    Set ws = ThisWorkbook.Worksheets("Live")
+
+    If ActiveSheet.Name <> ws.Name Or ActiveCell.Row < 5 Then
+        MsgBox "Select a Live lesson row first.", vbExclamation
+        Exit Sub
+    End If
+
+    anchor = ActiveCell.Row
+
+    cName = FPT_HeaderCol(ws, "Name")
+    cSub = FPT_HeaderCol(ws, "Subject")
+    cLesson = FPT_HeaderCol(ws, "Lesson")
+    colLessonDate = FPT_HeaderCol(ws, "Lesson date", "LessonDated")
+    cTutor = FPT_HeaderCol(ws, "Tutor")
+    cTime = FPT_HeaderCol(ws, "Time")
+    cRemarks = FPT_HeaderCol(ws, "Remarks")
+    cStatus = FPT_HeaderCol(ws, "Ready", "Lesson Status", "LessonStatus")
+    cPLS = FPT_HeaderCol(ws, "PLSS Informed")
+    cHW = FPT_HeaderCol(ws, "HW Informed")
+
+    If cName = 0 Or cSub = 0 Or cLesson = 0 Or colLessonDate = 0 _
+       Or cTutor = 0 Or cTime = 0 Or cRemarks = 0 Or cStatus = 0 _
+       Or cPLS = 0 Or cHW = 0 Then
+
+        MsgBox "One or more required Live columns could not be found.", vbCritical
+        Exit Sub
+    End If
+
+    If Len(Trim$(CStr(ws.Cells(anchor, cLesson).Value2))) = 0 Then
+        MsgBox "The selected row does not contain a lesson.", vbExclamation
+        Exit Sub
+    End If
+
+    If StrComp( _
+            Trim$(CStr(ws.Cells(anchor, cStatus).Value2)), _
+            "Completed", _
+            vbTextCompare) = 0 Then
+
+        MsgBox _
+            "The selected lesson is already Completed." & vbCrLf & _
+            "Select the lesson that is currently in progress.", _
+            vbExclamation
+        Exit Sub
+    End If
+
+    anchorKey = CompletedPhysicalClassKey( _
+                    ws, _
+                    anchor, _
+                    colLessonDate, _
+                    cSub, _
+                    cTutor, _
+                    cTime, _
+                    cLesson)
+
+    If anchorKey = "" Then
+        MsgBox _
+            "The selected row is missing Lesson Date, Subject, Tutor, Time or Lesson.", _
+            vbExclamation
+        Exit Sub
+    End If
+
+    slideNo = InputBox("Enter the slide number reached:", "Continuing lesson")
+
+    If Trim$(CStr(slideNo)) = "" Or Not IsNumeric(slideNo) Then Exit Sub
+
+    lastRow = ws.Cells(ws.Rows.Count, cName).End(xlUp).Row
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    On Error GoTo CleanFail
+
+    For r = 5 To lastRow
+
+        rowKey = CompletedPhysicalClassKey( _
+                    ws, _
+                    r, _
+                    colLessonDate, _
+                    cSub, _
+                    cTutor, _
+                    cTime, _
+                    cLesson)
+
+        If rowKey = anchorKey Then
+
+            rowStatus = Trim$(CStr(ws.Cells(r, cStatus).Value2))
+
+            'Never reopen a lesson that has already been completed.
+            If StrComp(rowStatus, "Completed", vbTextCompare) <> 0 Then
+
+                ws.Cells(r, cRemarks).Value2 = _
+                    "Completed till slide " & CLng(slideNo)
+
+                ws.Cells(r, cStatus).Value2 = _
