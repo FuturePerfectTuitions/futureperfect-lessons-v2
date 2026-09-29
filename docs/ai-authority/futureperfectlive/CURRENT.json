@@ -13,7 +13,7 @@
   ],
   "binary_workbook": {
     "last_uploaded": "FuturePerfectLive 2026-27(20260928-183535).xlsm",
-    "caveat": "The exact binary after all 28-Sep VBA edits was not uploaded. This authority plus the verbatim source chunks below records the confirmed state. If a future task depends on exact live binary state, inspect the then-current workbook before mutation."
+    "caveat": "The exact binary after the 28-Sep and 29-Sep VBA edits was not uploaded. This authority plus the verbatim source files below records the owner-confirmed source state. If a future task depends on exact live binary state, inspect the then-current workbook before mutation."
   },
   "live_sheet": {
     "name": "Live",
@@ -51,6 +51,11 @@
       "It supports Year 6 Maths SATS Y6MS1..Y6MS19 as separate family Y6MS.",
       "It supports legacy non-term-coded Y6M38.",
       "Do not rename Drive Y6MS folders to Y6Mxx to accommodate an outdated parser."
+    ],
+    "Scheduling_date_views": [
+      "Yesterday, Today and Tomorrow remain standalone date-filter views using the existing FilterLessonDate routine.",
+      "Today is the in-class view and must hide Live columns F / Quoted and H / Received after applying the Today filter.",
+      "Yesterday and Tomorrow must explicitly restore columns F and H to visible after applying their respective date filters so the Today hidden state does not persist."
     ]
   },
   "verified_Y6MS_examples": [
@@ -74,7 +79,10 @@
       "docs/ai-authority/futureperfectlive/vba/FPTCore.bas.part1.txt",
       "docs/ai-authority/futureperfectlive/vba/FPTCore.bas.part2.txt"
     ],
-    "assembly_rule": "Concatenate each module's chunks in numeric order with no inserted text. The resulting source must match the recorded SHA-256 below."
+    "Scheduling.bas": [
+      "docs/ai-authority/futureperfectlive/vba/Scheduling.bas"
+    ],
+    "assembly_rule": "For chunked modules, concatenate chunks in numeric order with no inserted text. Single-file module entries are already complete. The resulting source must match the recorded SHA-256 below."
   },
   "source_hashes": {
     "Operations.bas": "161993bc0e4f0401be107854e631c1766e2d6a0d72d6f33eb56d7119d91208a4",
@@ -82,16 +90,16 @@
     "PortalCSV.bas": "bd0b8a6632c6e6e684f4d7d85c299b5d0cacc661d416691714ee8df33058ce02",
     "Day2Day.bas": "94f0fa95102559f4548beba3fe56bd179ace437552342de116a006e2bc0c1979",
     "Daily.bas": "3efdf0475b783fbf632af497fc3dce4137cad1ba0c8f88a4294529c530053192",
-    "Scheduling.bas": "585eeb5f6b0fef076ae7bd13c650543ee494777007f97387cb586532145b7cdd",
+    "Scheduling.bas": "0a9d081b54315f8e9081fda8ca30634741ad30d833c274bf54188180269341bb",
     "NewRecords.bas": "0853c46b866fab2ef87cf8f01bbddccf8d834b1529223cd11c25b8f9c8bc02b9",
     "Invoicing.bas": "55bd498732eb1f83672351e4261e3288515bbaa9ef9c64a7cf970a87f680258d"
   },
   "restart_protocol": [
     "Read this entire CURRENT.json first.",
-    "Then read all verbatim source chunks for any module being changed and concatenate in numeric order if exact source is needed.",
+    "Then read all verbatim source chunks/files for any module being changed and concatenate chunked modules in numeric order if exact source is needed.",
     "Treat owner_invariants and confirmed_rules as binding until explicitly superseded.",
     "For workbook modules not stored verbatim here, use source_hashes to detect drift and inspect the current workbook before editing.",
     "For Portal V2 public/live code, inspect current main HEAD and production; do not assume workbook-side snapshots represent later portal changes.",
-    "After an approved change, update CURRENT.json and any affected verbatim source chunks rather than creating another human-readable master ZIP."
+    "After an approved change, update CURRENT.json and any affected verbatim source file/chunks rather than creating another human-readable master ZIP."
   ]
 }
