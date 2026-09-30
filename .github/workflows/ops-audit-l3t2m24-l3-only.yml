@@ -136,21 +136,21 @@ jobs:
             FROM lesson_entitlements le
             LEFT JOIN batch_definitions b ON b.batch_key=le.source_batch_code
             WHERE le.lesson_id=?
-            GROUP BY stream, school_year, maths_level, source_batch_code
-            ORDER BY stream, school_year, maths_level, source_batch_code`,[CANON]);
+            GROUP BY lower(b.stream), b.school_year, b.maths_level, le.source_batch_code
+            ORDER BY lower(b.stream), b.school_year, b.maths_level, le.source_batch_code`,[CANON]);
           console.log('ENTITLEMENT_GROUPS=' + JSON.stringify(ent));
 
           const pre = await d1(`
             SELECT COALESCE(lower(b.stream),'unresolved') AS stream,
                    COALESCE(b.school_year,-1) AS school_year,
                    COALESCE(b.maths_level,-1) AS maths_level,
-                   COALESCE(ope.batch_key,'') AS batch_key,
+                   COALESCE(ope.batch_key,'') AS source_batch_key,
                    COUNT(*) AS row_count
             FROM online_prelesson_entitlements ope
             LEFT JOIN batch_definitions b ON b.batch_key=ope.batch_key
             WHERE ope.lesson_id=?
-            GROUP BY stream, school_year, maths_level, batch_key
-            ORDER BY stream, school_year, maths_level, batch_key`,[CANON]);
+            GROUP BY lower(b.stream), b.school_year, b.maths_level, ope.batch_key
+            ORDER BY lower(b.stream), b.school_year, b.maths_level, ope.batch_key`,[CANON]);
           console.log('PRELESSON_GROUPS=' + JSON.stringify(pre));
 
           const assignment = await d1(`
@@ -162,8 +162,8 @@ jobs:
             JOIN batch_definitions b ON b.batch_key=a.batch_key
             WHERE lower(b.subject)='maths' AND b.school_year=6
               AND (a.effective_to IS NULL OR date('now')<a.effective_to)
-            GROUP BY stream, school_year, maths_level
-            ORDER BY stream, maths_level`);
+            GROUP BY lower(b.stream), b.school_year, b.maths_level
+            ORDER BY lower(b.stream), b.maths_level`);
           console.log('ACTIVE_Y6_ASSIGNMENT_GROUPS=' + JSON.stringify(assignment));
 
           console.log('AUDIT_L3T2M24_L3_ONLY_PASS');
