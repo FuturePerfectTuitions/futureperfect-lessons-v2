@@ -1,0 +1,198 @@
+name: Ops fix L3T2M24 selected video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-fix-l3t2m24-selected-video.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_NAME: fpt-portal-v2-worker
+
+jobs:
+  apply:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard production, replace the actually selected L3T2M24 ScreenPal source, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          export LESSONS_KV_ID
+
+          node <<'NODE'
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const ns = process.env.LESSONS_KV_ID;
+          const valuesBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/`;
+          const keysBase = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const DISPLAY_ID = 'L3T2M24';
+          const TARGET = 'cOQvDXnxxvX';
+          const TARGET_EMBED = `https://go.screenpal.com/player/${TARGET}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
+          const TARGET_CONTENT = `https://screenpal.com/content/video/${TARGET}`;
+          const TARGET_WATCH = `https://go.screenpal.com/watch/${TARGET}`;
+
+          async function getJson(key) {
+            const r = await fetch(valuesBase + encodeURIComponent(key), { headers: auth });
+            if (!r.ok) throw new Error(`GET ${key} failed HTTP ${r.status}`);
+            return JSON.parse(await r.text());
+          }
+          async function putJson(key, value) {
+            const r = await fetch(valuesBase + encodeURIComponent(key), {
+              method: 'PUT',
+              headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify(value)
+            });
+            if (!r.ok) throw new Error(`PUT ${key} failed HTTP ${r.status}: ${await r.text()}`);
+          }
+          async function listLessonKeys() {
+            const names = [];
+            let cursor = '';
+            do {
+              const u = new URL(keysBase);
+              u.searchParams.set('prefix', 'lesson:');
+              u.searchParams.set('limit', '1000');
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const r = await fetch(u, { headers: auth });
+              if (!r.ok) throw new Error(`LIST failed HTTP ${r.status}`);
+              const body = await r.json();
+              if (!body?.success || !Array.isArray(body.result)) throw new Error('Unexpected LIST payload');
+              for (const item of body.result) if (item?.name) names.push(item.name);
+              cursor = String(body?.result_info?.cursor || '');
+            } while (cursor);
+            return names;
+          }
+          function matches(rec) {
+            return Object.values(rec?.displayIds || {}).includes(DISPLAY_ID);
+          }
+          function guard(rec) {
+            if (rec?.subject !== 'maths' || rec?.active !== true) throw new Error('L3T2M24 state mismatch');
+            if (!matches(rec)) throw new Error('L3T2M24 display ID mismatch');
+            const title = String(rec?.title || '').toLowerCase();
+            if (!(title.includes('linear') && title.includes('sequence'))) throw new Error(`Unexpected title: ${rec?.title}`);
+          }
+          function normalVideoShape(existing = {}) {
+            const next = existing && typeof existing === 'object' ? JSON.parse(JSON.stringify(existing)) : {};
+            next.screenpal = TARGET;
+            next.embedUrl = TARGET_EMBED;
+            next.playerUrl = TARGET_EMBED;
+            next.contentUrl = TARGET_CONTENT;
+            next.watchUrl = TARGET_WATCH;
+            return next;
+          }
+          function removeLegacyQuiz(video) {
+            if (!video || typeof video !== 'object') return video;
+            delete video.quiz;
+            delete video.quizEmbedUrl;
+            delete video.quizShareUrl;
+            delete video.quizDirectUrl;
+            delete video.quizDisplayName;
+            return video;
+          }
+          function selectedEmbed(rec) {
+            const video = rec?.video || rec?.core?.video || null;
+            if (!video || typeof video !== 'object') return null;
+            const quiz = video.quiz && typeof video.quiz === 'object' ? video.quiz : {};
+            const quizEmbed = quiz.embedUrl || video.quizEmbedUrl || null;
+            if (quizEmbed) return { source: 'quiz', url: quizEmbed };
+            return { source: rec?.video ? 'video' : 'core.video', url: video.embedUrl || video.playerUrl || null };
+          }
+
+          (async () => {
+            const keys = await listLessonKeys();
+            const found = [];
+            const batchSize = 25;
+            for (let i = 0; i < keys.length; i += batchSize) {
+              const batch = keys.slice(i, i + batchSize);
+              const rows = await Promise.all(batch.map(async key => ({ key, rec: await getJson(key) })));
+              for (const row of rows) if (matches(row.rec)) found.push(row);
+            }
+            if (found.length !== 1) throw new Error(`Expected exactly one L3T2M24 record; found ${found.length}`);
+
+            const { key, rec: before } = found[0];
+            guard(before);
+            console.log('BEFORE_VIDEO_SELECTION=' + JSON.stringify({
+              key,
+              lessonId: before.lessonId,
+              title: before.title,
+              topLevelVideo: before.video || null,
+              coreVideo: before?.core?.video || null,
+              selected: selectedEmbed(before)
+            }));
+
+            const next = JSON.parse(JSON.stringify(before));
+            next.core = next.core || {};
+            next.core.video = removeLegacyQuiz(normalVideoShape(next.core.video || {}));
+
+            // Maths L3 rendering prefers record.video over record.core.video and then prefers
+            // record.video.quiz over the ordinary video. Keep any unrelated top-level video
+            // metadata, but remove the obsolete quiz variant and repoint the ordinary source.
+            if (next.video && typeof next.video === 'object') {
+              next.video = removeLegacyQuiz(normalVideoShape(next.video));
+            } else {
+              next.video = removeLegacyQuiz(normalVideoShape({}));
+            }
+
+            next.contentStatus = {
+              ...(next.contentStatus || {}),
+              description: 'available',
+              mainVideo: 'available',
+              ownerConfirmedPending: false
+            };
+
+            await putJson(key, next);
+
+            let verified;
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              verified = await getJson(key);
+              const selected = selectedEmbed(verified);
+              const noQuiz = !verified?.video?.quiz && !verified?.video?.quizEmbedUrl && !verified?.core?.video?.quiz && !verified?.core?.video?.quizEmbedUrl;
+              const ok = selected?.url?.includes(TARGET) && selected?.source === 'video' && noQuiz && verified?.core?.video?.screenpal === TARGET && verified?.video?.screenpal === TARGET;
+              if (ok) break;
+              if (attempt < 6) await sleep(2000);
+            }
+
+            guard(verified);
+            const selected = selectedEmbed(verified);
+            if (selected?.source !== 'video' || !selected?.url?.includes(TARGET)) {
+              throw new Error(`L3T2M24 selected-video verification failed: ${JSON.stringify(selected)}`);
+            }
+            if (verified?.video?.quiz || verified?.video?.quizEmbedUrl || verified?.core?.video?.quiz || verified?.core?.video?.quizEmbedUrl) {
+              throw new Error('Obsolete L3T2M24 quiz source is still present');
+            }
+            if (verified?.video?.screenpal !== TARGET || verified?.core?.video?.screenpal !== TARGET) {
+              throw new Error('L3T2M24 main video IDs do not both match replacement');
+            }
+
+            console.log('AFTER_VIDEO_SELECTION=' + JSON.stringify({
+              key,
+              lessonId: verified.lessonId,
+              title: verified.title,
+              topLevelVideo: verified.video,
+              coreVideo: verified.core.video,
+              selected
+            }));
+            console.log('OPS_FIX_L3T2M24_SELECTED_VIDEO_PASS');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
