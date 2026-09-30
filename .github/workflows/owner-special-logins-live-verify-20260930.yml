@@ -33,6 +33,41 @@ jobs:
             curl -fsS -H "$auth" "$api/storage/kv/namespaces/$students_ns/values/user%3A$id" > "/tmp/$id.json"
             jq -c --arg id "$id" '{id:$id,portalUserId:(.portalUserId//null),status:(.status//null),storedPasswordLength:((.p//"")|length),storedPasswordShapeValid:(((.p//"")|length)==4 and ((.p//"")|test("[A-Z]")) and ((.p//"")|test("[a-z]")) and ((.p//"")|test("[0-9]")))}' "/tmp/$id.json"
           done
+      - name: Inspect deployed auth bundle read-only
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$api/workers/scripts/fpt-portal-v2-worker" -o /tmp/live-worker.bin
+          sha256sum /tmp/live-worker.bin | awk '{print "liveWorkerSha256=" $1}'
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path('/tmp/live-worker.bin').read_bytes().decode('utf-8', errors='ignore')
+          needles = [
+              'PROD_LOGIN_ALLOWLIST',
+              'STUDENT_LOGIN_ENABLED',
+              '/api/v1/student/auth/login',
+              'INVALID_LOGIN',
+              'loginPermittedForUser',
+              'developmentAllowlist',
+              'admin0206',
+              'admin0411',
+          ]
+          for needle in needles:
+              print(f'bundleMarker {needle} count={text.count(needle)}')
+          for needle in ['INVALID_LOGIN', '/api/v1/student/auth/login', 'PROD_LOGIN_ALLOWLIST']:
+              pos = 0
+              shown = 0
+              while shown < 8:
+                  idx = text.find(needle, pos)
+                  if idx < 0:
+                      break
+                  lo=max(0,idx-500); hi=min(len(text),idx+len(needle)+500)
+                  snippet=re.sub(r'\s+',' ',text[lo:hi])
+                  print(f'bundleContext[{needle}#{shown+1}]={snippet}')
+                  shown += 1
+                  pos = idx + len(needle)
+          PY
       - name: Verify live Portal accounts read-only
         run: |
           python3 - <<'PY'
