@@ -19,4 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify live Portal accounts read-only
-        run: bash ops/verify_owner_special_logins_live_20260930.sh
+        run: |
+          sed -i 's#fpt-portal-v2-worker.futureperfectlessons.workers.dev#fpt-portal-v2-worker.future-perfect-tuitions.workers.dev#g' ops/verify_owner_special_logins_live_20260930.sh
+          bash ops/verify_owner_special_logins_live_20260930.sh
