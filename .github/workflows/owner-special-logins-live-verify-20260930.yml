@@ -39,12 +39,14 @@ jobs:
           from pathlib import Path
           path = Path('ops/verify_owner_special_logins_live_20260930.sh')
           text = path.read_text()
+          old_secret = '''secret="$(cat "$work/credential.txt")"; echo "::add-mask::$secret"; unset secret'''
+          new_secret = '''secret="$(cat "$work/credential.txt")"; echo "::add-mask::$secret"\n  current_0206="$(jq -r '.p // empty' /tmp/admin0206.json)"\n  current_0411="$(jq -r '.p // empty' /tmp/admin0411.json)"\n  if [[ "$current_0206" == "$secret" ]]; then echo 'credentialMatchesCurrentKv_admin0206=true'; else echo 'credentialMatchesCurrentKv_admin0206=false'; fi\n  if [[ "$current_0411" == "$secret" ]]; then echo 'credentialMatchesCurrentKv_admin0411=true'; else echo 'credentialMatchesCurrentKv_admin0411=false'; fi\n  unset current_0206 current_0411 secret'''
           old_body = '''  jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"'''
           new_body = '''  jq -nc --arg u "$id" --arg p "$(tr -d '\\r\\n' < "$work/credential.txt")" '{username:$u,password:$p}' > "$work/login-body.json"'''
           old_curl = '''  curl -fsS -c "$work/cookies-$id" -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login" > "$work/login-$id.json"'''
           new_curl = '''  local login_status\n  login_status="$(curl -sS -o "$work/login-$id.json" -w '%{http_code}' -c "$work/cookies-$id" -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login")"\n  echo "login_probe id=$id credentialLength=$(jq -r '.password|length' "$work/login-body.json") status=$login_status error=$(jq -r '.error // \"none\"' "$work/login-$id.json")"\n  [[ "$login_status" == "200" ]] || return 1'''
-          if old_body not in text or old_curl not in text:
+          if old_secret not in text or old_body not in text or old_curl not in text:
               raise SystemExit('expected verifier lines not found')
-          path.write_text(text.replace(old_body, new_body).replace(old_curl, new_curl))
+          path.write_text(text.replace(old_secret, new_secret).replace(old_body, new_body).replace(old_curl, new_curl))
           PY
           bash ops/verify_owner_special_logins_live_20260930.sh
