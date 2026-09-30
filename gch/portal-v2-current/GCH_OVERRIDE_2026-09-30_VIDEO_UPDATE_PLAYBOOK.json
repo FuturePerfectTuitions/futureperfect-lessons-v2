@@ -1,0 +1,138 @@
+{
+  "schema": "fpt.portal.gch.override.v1",
+  "documentType": "VIDEO_UPDATE_EXECUTION_PLAYBOOK",
+  "status": "AUTHORITATIVE_CURRENT",
+  "effectiveDate": "2026-09-30",
+  "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
+  "scope": "Portal V2 lesson-video additions and replacements, including lesson-description updates and stream-specific prepared lesson projections",
+  "ownerGoal": "A future video change must be executed through the full live data path in one controlled pass, rather than repeatedly patching canonical KV, prepared state and catalogue/access state after browser failures.",
+  "precedence": {
+    "rule": "For lesson-video changes, this playbook is the current general execution authority. More specific lesson-scope overrides, including GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json, take precedence within their declared lesson scope.",
+    "doesNotSupersede": [
+      "Replace Resource semantics for PDFs/worksheets/Answer Packs",
+      "quiz bridge/shared Worker composition invariants",
+      "existing student-access/business rules except when a lesson's stream/catalogue classification itself is explicitly changed by the owner"
+    ]
+  },
+  "criticalArchitectureFact": {
+    "statement": "The browser can consume the current prepared lesson read model rather than the canonical LESSONS_KV record directly. Therefore a successful canonical video write does not prove that the live browser will serve the new video.",
+    "requiredConsequence": "Every video update must verify and, when necessary, republish the current prepared lesson scope in the same operation. Do not stop at lesson:<canonicalLessonId> readback."
+  },
+  "inputContract": {
+    "required": [
+      "owner-supplied display lesson code or unambiguous lesson identity",
+      "owner-supplied full ScreenPal content URL pasted as text",
+      "replacement/addition intent",
+      "stream classification when not already unambiguous from current authority: normal, 11plus-only, or genuinely shared"
+    ],
+    "screenPalIdRule": "Extract the ID from the exact pasted URL and preserve character case exactly. Do not rely on screenshot OCR or visual inference for ambiguous I/l/1/O/0 characters.",
+    "descriptionRule": "If a script/source is supplied, derive the lesson description from that source only. Do not silently invent lesson content not supported by the supplied script."
+  },
+  "mandatoryPreflight": [
+    "Read AGENTS.md, GCH_CURRENT.json and this playbook before any video mutation.",
+    "Read any scope-specific override for the lesson before mutation.",
+    "Prove current main and production Worker/bindings; production recovery remains forward-only.",
+    "Resolve the canonical lessonId from current canonical/prepared catalogue evidence. Do not infer stream eligibility from an internal canonical ID such as Y6M1.4.",
+    "Read canonical lesson:<id>, current prepared global scope, and current prepared lesson:<id> scope.",
+    "Determine exact live catalogue memberships and display IDs before mutation.",
+    "Determine whether this is a pure video/description change or also a stream/catalogue classification change.",
+    "Capture the old ScreenPal ID(s) so final verification can prove they are absent from the active prepared target when replacement is intended."
+  ],
+  "executionMatrix": {
+    "A_sameClassification_videoOnlyOrVideoPlusDescription": {
+      "examples": "Normal Year lesson replacement, L1/L2/L3 lesson replacement where catalogue membership is not changing.",
+      "mutate": [
+        "canonical lesson video fields used by current schema, including video and core.video when both exist",
+        "canonical description when requested",
+        "contentStatus fields for mainVideo/description as appropriate",
+        "current prepared lesson scope/video variant used by the existing stream classification"
+      ],
+      "mustNotMutate": [
+        "prepared global catalogue membership",
+        "curriculum membership",
+        "student access snapshots"
+      ],
+      "completion": "Canonical and prepared lesson readbacks both point to the exact new ScreenPal ID; obsolete replacement ID is absent from the active prepared variant; description readback matches the approved source-derived text."
+    },
+    "B_firstVideoAddition_sameClassification": {
+      "mutate": [
+        "canonical video/core.video fields",
+        "contentStatus mainVideo=available",
+        "prepared lesson stream variant"
+      ],
+      "completion": "The current prepared lesson contains the expected targetUrl/embed and the public/browser lesson renders the new video."
+    },
+    "C_streamOrCatalogueClassificationChange": {
+      "trigger": "Owner says the lesson must move between streams, become 11plus-only, become normal-only, or stop being genuinely shared.",
+      "mutate": [
+        "canonical displayIds/stream-specific metadata",
+        "curriculum membership if required by current canonical model",
+        "prepared global catalogues and lessonToViews",
+        "only the student access snapshots actually affected by the removed/added catalogue source",
+        "prepared lesson videoVariants so only legitimate stream variants remain",
+        "canonical video and description fields"
+      ],
+      "requiredVerification": [
+        "forbidden catalogue/display alias absent from canonical and prepared global state",
+        "required catalogue/display alias preserved",
+        "affected access snapshots rebuilt from current canonical state only",
+        "unrelated access snapshots not rebuilt",
+        "prepared lesson has only legitimate stream video variants",
+        "new ScreenPal ID present and obsolete replacement ID absent"
+      ]
+    }
+  },
+  "streamVariantRules": {
+    "normalOnly": "Prepared lesson must not acquire an elevenPlus variant merely because the canonical ID is shared with historical/other material.",
+    "elevenPlusOnly": "Prepared lesson must not retain/create a normal variant. Catalogue membership must not be inferred from Year-like canonical IDs.",
+    "genuinelyShared": "Update each legitimate prepared video variant deliberately; verify all intended variants and no extras.",
+    "specialLessonOverride": "If a scope-specific GCH says a lesson is L3/11+-only, that rule overrides generic Year 6/L3 equivalence for that lesson."
+  },
+  "atomicCompletionChecklist": [
+    "Exact ScreenPal ID parsed from pasted URL and echoed in prewrite guard.",
+    "Canonical lesson identity/title/subject/display mapping guarded before write.",
+    "Canonical write read back successfully.",
+    "Current prepared lesson scope republished or explicitly proven already equivalent to the new canonical target.",
+    "Prepared lesson read back from current pointer, not merely from a newly written version key.",
+    "Correct stream video variant targetUrl contains the exact new ScreenPal ID.",
+    "Old ScreenPal ID is absent from the active prepared variant when this is a replacement.",
+    "If description changed, canonical and prepared/public description are consistent where projected.",
+    "If classification changed, prepared global catalogue and lessonToViews are updated and verified.",
+    "If classification changed, only affected student access scopes are refreshed and verified.",
+    "Public/API/browser path is smoke-checked when authenticated access is available; otherwise state explicitly that browser render remains owner-verification pending.",
+    "No rollback/revert/older Worker deployment is used."
+  ],
+  "knownFailureModesAndEvidence": [
+    {
+      "incident": "Y6T1E01 Autumn",
+      "failure": "ScreenPal ID was transcribed with uppercase I instead of lowercase l.",
+      "lesson": "Never infer an ambiguous ScreenPal character from a screenshot when the owner can paste the exact URL; IDs are case-sensitive."
+    },
+    {
+      "incident": "L3T2M24 Linear Sequences replacement",
+      "failure": "Canonical lesson video had already been changed to cOQvDXnxxvX, but the current prepared lesson still contained old ScreenPal cOVTQxn3IMa, so the live browser continued serving the old recording.",
+      "lesson": "Canonical KV-only video updates are incomplete. The current prepared lesson projection must be updated/read back in the same operation."
+    },
+    {
+      "incident": "L3T2M24 stream classification",
+      "failure": "The canonical record still exposed a normal Year 6 alias Y6T2M8 and prepared global state materialised the lesson into both maths-year6 and maths-level3 even though the owner classified it as L3/11+-only.",
+      "lesson": "When stream classification changes, the fix is not a video-only write: remove forbidden canonical/global mappings, refresh affected access snapshots, and publish the correct stream-only prepared lesson variant."
+    }
+  ],
+  "l3t2m24IncidentReference": {
+    "scopeAuthority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json",
+    "canonicalLessonId": "Y6M1.4",
+    "displayLessonId": "L3T2M24",
+    "newScreenPalId": "cOQvDXnxxvX",
+    "oldScreenPalId": "cOVTQxn3IMa",
+    "productionRepairWorkflowRun": 36750024969,
+    "repairResult": "PASS",
+    "browserFollowUp": "After the backend/prepared repair, the owner still reported seeing a 'Lessons' card on the Maths landing page. Treat that as a separate navigation/presentation investigation; do not use it as evidence that the prepared video replacement itself reverted."
+  },
+  "futureOperatorRule": "For a normal future video replacement, do not invent a one-off workflow first. Follow case A/B above: resolve lesson -> guard canonical/prepared identity -> update canonical video/description -> republish current prepared lesson variant -> read back exact ID -> smoke-check. Escalate to case C only when owner intent actually changes stream/catalogue membership.",
+  "completionLanguage": {
+    "allowedWhenAllBackendChecksPass": "Canonical and current prepared lesson state both verified against the exact ScreenPal ID.",
+    "browserCaveat": "If no authenticated browser smoke-check was executed, say browser rendering is not yet independently confirmed.",
+    "prohibited": "Do not say a video is live merely because LESSONS_KV changed or a GitHub workflow succeeded without prepared readback."
+  }
+}
