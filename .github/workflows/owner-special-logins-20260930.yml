@@ -1,0 +1,35 @@
+name: Owner special logins production provision
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/owner-special-logins-20260930.yml'
+      - 'ops/provision_owner_special_logins_20260930.mjs'
+      - 'ops/run_owner_special_logins_20260930.sh'
+      - '.github/secure-transfer/owner-special-logins-20260930/credential.rsa.b64'
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify provisioner
+        run: |
+          set -euo pipefail
+          node --check ops/provision_owner_special_logins_20260930.mjs
+          bash -n ops/run_owner_special_logins_20260930.sh
+          grep -Fq 'Forward-only production writes' ops/provision_owner_special_logins_20260930.mjs
+      - name: Provision and verify
+        run: bash ops/run_owner_special_logins_20260930.sh

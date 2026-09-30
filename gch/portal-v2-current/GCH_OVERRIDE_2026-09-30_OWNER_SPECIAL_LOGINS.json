@@ -1,0 +1,49 @@
+{
+  "schema":"fpt.portal.gch.override.owner-special-logins.v1",
+  "documentType":"CURRENT_SCOPE_OVERRIDE",
+  "status":"OWNER_AUTHORISED_PROVISIONING",
+  "effectiveDate":"2026-09-30",
+  "scope":"PUBLIC_STUDENT_V2.OwnerSpecialContentAccessProfiles",
+  "baseAuthority":"gch/portal-v2-current/GCH_STATE.json",
+  "ownerRequirement":{
+    "admin0206":{
+      "programme":"normal",
+      "maths":["Year 3","Year 4","Year 5","Year 6"],
+      "english":["Year 3","Year 4","Year 5","Year 6"],
+      "sats":"full",
+      "elevenPlus":false,
+      "vr":false,
+      "quiz":false
+    },
+    "admin0411":{
+      "programme":"11plus",
+      "maths":["L1","L2","L3"],
+      "english":["Year 4 11+","Year 5 11+"],
+      "vr":"full",
+      "vrHowTo":true,
+      "sats":"full",
+      "quiz":"11+ Practice full access"
+    },
+    "credentialRule":"Both special profiles use the same owner-selected four-character value for Portal login and Answer Pack authentication. Credential values are secrets and must never be stored in this authority file or Git history in plaintext."
+  },
+  "implementation":{
+    "classification":"privileged content-access profiles, not generic Admin superusers",
+    "reason":"Generic ADMIN_SUPERUSER_IDS would overgrant 11+/VR to admin0206 and bypass Answer Pack password protection.",
+    "canonicalStore":"STUDENTS_KV",
+    "preparedStore":"READ_MODELS_KV",
+    "sats":"Y6M51..Y6M69 granted lesson-by-lesson via manual core access",
+    "vrHowTo":"VR_HOWTO special bucket on admin0411 only",
+    "quiz":"MATHS_11PLUS_QUIZ_L3_COMPLETED specialAccess marker on admin0411 only",
+    "credentialTransport":"RSA ciphertext committed; plaintext decrypted and masked only inside the authorised GitHub Actions runner",
+    "d1Mutation":false,
+    "workerDeployment":false,
+    "parentEmail":false
+  },
+  "preservation":[
+    "Forward-only production mutation; never rollback, revert, restore an older Worker or delete pre-existing student state as compensation.",
+    "Fail before the first write if either requested Portal User ID already exists.",
+    "Do not add either account to ADMIN_SUPERUSER_IDS.",
+    "Do not change ordinary students, batches, D1 entitlements, lesson catalogues, quiz scoring/history, Trial semantics, protected-answer infrastructure, Replace Resource or parent-email state.",
+    "Answer Packs remain password-protected for these profiles."
+  ]
+}
