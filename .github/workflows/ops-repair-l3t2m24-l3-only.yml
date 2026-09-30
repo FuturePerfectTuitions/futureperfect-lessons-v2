@@ -1,0 +1,322 @@
+name: Ops repair L3T2M24 L3-only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ops-repair-l3t2m24-l3-only.yml
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v6
+      - name: Guard, remove normal-Y6 mapping, refresh prepared state, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          READ_MODELS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          STUDENTS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id)' /tmp/settings.json)"
+          for value in "$LESSONS_KV_ID" "$READ_MODELS_KV_ID" "$STUDENTS_KV_ID" "$DB_ID"; do test -n "$value"; test "$value" != null; done
+          export LESSONS_KV_ID READ_MODELS_KV_ID STUDENTS_KV_ID DB_ID
+
+          cp worker/src/access-read-model-sync.js /tmp/access-read-model-sync.mjs
+
+          node --input-type=module <<'NODE'
+          import {
+            publishScopeAtomic,
+            resolveCurrentScope,
+            refreshStudentAccessReadModel
+          } from 'file:///tmp/access-read-model-sync.mjs';
+
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const lessonsNs = process.env.LESSONS_KV_ID;
+          const readNs = process.env.READ_MODELS_KV_ID;
+          const studentsNs = process.env.STUDENTS_KV_ID;
+          const dbId = process.env.DB_ID;
+          const auth = { Authorization: `Bearer ${token}` };
+
+          const CANON = 'Y6M1.4';
+          const L3_DISPLAY = 'L3T2M24';
+          const Y6_DISPLAY = 'Y6T2M8';
+          const L3_VIEW = 'maths-level3';
+          const Y6_VIEW = 'maths-year6';
+          const TARGET_VIDEO = 'cOQvDXnxxvX';
+          const OLD_VIDEO = 'cOVTQxn3IMa';
+
+          const clone = value => JSON.parse(JSON.stringify(value));
+          const text = value => JSON.stringify(value ?? null);
+          const norm = value => String(value ?? '').trim().toLowerCase();
+          const upper = value => String(value ?? '').trim().toUpperCase();
+
+          function kvUrl(ns, key) {
+            return `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`;
+          }
+          async function kvGet(ns, key, options = {}) {
+            const r = await fetch(kvUrl(ns, key), { headers: auth });
+            if (r.status === 404) return null;
+            if (!r.ok) throw new Error(`KV_GET_FAILED:${r.status}`);
+            const raw = await r.text();
+            if (options?.type === 'json') {
+              try { return JSON.parse(raw); } catch { throw new Error('KV_JSON_INVALID'); }
+            }
+            return raw;
+          }
+          async function kvPut(ns, key, value, contentType = 'text/plain; charset=utf-8') {
+            const body = typeof value === 'string' ? value : JSON.stringify(value);
+            const r = await fetch(kvUrl(ns, key), {
+              method: 'PUT', headers: { ...auth, 'Content-Type': contentType }, body
+            });
+            if (!r.ok) throw new Error(`KV_PUT_FAILED:${r.status}`);
+          }
+          async function kvList(ns, prefix = '') {
+            const out = []; let cursor = '';
+            do {
+              const u = new URL(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`);
+              u.searchParams.set('limit', '1000');
+              if (prefix) u.searchParams.set('prefix', prefix);
+              if (cursor) u.searchParams.set('cursor', cursor);
+              const r = await fetch(u, { headers: auth });
+              if (!r.ok) throw new Error(`KV_LIST_FAILED:${r.status}`);
+              const body = await r.json();
+              if (!body?.success) throw new Error('KV_LIST_INVALID');
+              out.push(...(body.result || []).map(row => row.name).filter(Boolean));
+              cursor = String(body?.result_info?.cursor || '');
+            } while (cursor);
+            return out;
+          }
+          async function d1(sql, params = []) {
+            const u = `https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${dbId}/query`;
+            const r = await fetch(u, {
+              method: 'POST',
+              headers: { ...auth, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sql, params })
+            });
+            if (!r.ok) throw new Error(`D1_HTTP_${r.status}`);
+            const body = await r.json();
+            if (!body?.success) throw new Error('D1_QUERY_FAILED');
+            return body.result?.[0]?.results || [];
+          }
+
+          const readBinding = {
+            async get(key, options = {}) {
+              const raw = await kvGet(readNs, key);
+              if (raw == null) return null;
+              if (options?.type === 'json') {
+                try { return JSON.parse(raw); } catch { return null; }
+              }
+              return raw;
+            },
+            async put(key, value) { return kvPut(readNs, key, value); }
+          };
+          const studentsBinding = {
+            async get(key, options = {}) { return kvGet(studentsNs, key, options); }
+          };
+          const dbBinding = {
+            prepare(sql) {
+              let params = [];
+              const statement = {
+                bind(...values) { params = values; return statement; },
+                async all() { return { results: await d1(sql, params) }; }
+              };
+              return statement;
+            }
+          };
+          const env = { READ_MODELS_KV: readBinding, STUDENTS_KV: studentsBinding, DB: dbBinding };
+          const store = { get: key => readBinding.get(key), put: (key, value) => readBinding.put(key, value) };
+
+          function lessonIdOf(row) { return String(row?.lessonId ?? row?.lesson_id ?? row?.id ?? '').trim(); }
+          function displayIdOf(row) { return String(row?.displayLessonId ?? row?.displayId ?? row?.displayLessonCode ?? '').trim(); }
+          function hasForbiddenNormalAlias(value) {
+            const s = text(value);
+            return s.includes(`\"${Y6_VIEW}\"`) || s.includes(Y6_DISPLAY);
+          }
+          function hasOldVideo(value) { return text(value).includes(OLD_VIDEO); }
+          function require(condition, message) { if (!condition) throw new Error(message); }
+
+          // ---------- READ-ONLY PREFLIGHT: fail closed before any write ----------
+          const canonicalRaw = await kvGet(lessonsNs, `lesson:${CANON}`);
+          require(canonicalRaw, 'CANONICAL_LESSON_MISSING');
+          const canonical = JSON.parse(canonicalRaw);
+          require(canonical.subject === 'maths' && canonical.active === true, 'CANONICAL_LESSON_STATE_UNEXPECTED');
+          require(norm(canonical.title).includes('linear') && norm(canonical.title).includes('sequence'), 'CANONICAL_TITLE_UNEXPECTED');
+          require(canonical?.displayIds?.[L3_VIEW] === L3_DISPLAY, 'L3_DISPLAY_MAPPING_UNEXPECTED');
+          require(canonical?.displayIds?.[Y6_VIEW] === Y6_DISPLAY, 'Y6_DISPLAY_MAPPING_UNEXPECTED');
+          require(canonical?.video?.screenpal === TARGET_VIDEO && canonical?.core?.video?.screenpal === TARGET_VIDEO, 'CANONICAL_VIDEO_NOT_TARGET');
+
+          const globalCurrent = await resolveCurrentScope(store, 'global');
+          const global = globalCurrent.payload;
+          require(global?.kind === 'prepared-global-read-model', 'GLOBAL_MODEL_UNEXPECTED');
+          require(Array.isArray(global?.catalogues?.[Y6_VIEW]?.lessons), 'Y6_CATALOGUE_MISSING');
+          require(Array.isArray(global?.catalogues?.[L3_VIEW]?.lessons), 'L3_CATALOGUE_MISSING');
+          const beforeY6Rows = global.catalogues[Y6_VIEW].lessons.filter(row => lessonIdOf(row) === CANON || displayIdOf(row) === Y6_DISPLAY);
+          const beforeL3Rows = global.catalogues[L3_VIEW].lessons.filter(row => lessonIdOf(row) === CANON || displayIdOf(row) === L3_DISPLAY);
+          require(beforeY6Rows.length === 1, 'Y6_CATALOGUE_MATCH_COUNT_UNEXPECTED');
+          require(beforeL3Rows.length === 1 && lessonIdOf(beforeL3Rows[0]) === CANON, 'L3_CATALOGUE_MATCH_COUNT_UNEXPECTED');
+          const mappedViews = Array.isArray(global?.lessonToViews?.[CANON]) ? global.lessonToViews[CANON] : [];
+          require(mappedViews.includes(Y6_VIEW) && mappedViews.includes(L3_VIEW), 'GLOBAL_VIEW_MAPPING_UNEXPECTED');
+
+          const lessonCurrent = await resolveCurrentScope(store, `lesson:${CANON}`);
+          const lessonPrepared = lessonCurrent.payload;
+          require(lessonPrepared && typeof lessonPrepared === 'object', 'PREPARED_LESSON_MISSING');
+          require(text(lessonPrepared).includes(L3_DISPLAY), 'PREPARED_LESSON_L3_ID_MISSING');
+          require(hasOldVideo(lessonPrepared) || text(lessonPrepared).includes(TARGET_VIDEO), 'PREPARED_LESSON_VIDEO_STATE_UNEXPECTED');
+
+          const directEntitlements = await d1('SELECT portal_user_id_norm FROM lesson_entitlements WHERE lesson_id=? LIMIT 1', [CANON]);
+          const preLessonEntitlements = await d1('SELECT portal_user_id_norm FROM online_prelesson_entitlements WHERE lesson_id=? LIMIT 1', [CANON]);
+          require(directEntitlements.length === 0, 'DIRECT_ENTITLEMENTS_APPEARED_SINCE_AUDIT');
+          require(preLessonEntitlements.length === 0, 'PRELESSON_ENTITLEMENTS_APPEARED_SINCE_AUDIT');
+
+          // Prepare all next values in memory and validate them BEFORE the first write.
+          const nextCanonical = clone(canonical);
+          delete nextCanonical.displayIds[Y6_VIEW];
+          require(nextCanonical.displayIds[L3_VIEW] === L3_DISPLAY, 'NEXT_CANONICAL_LOST_L3');
+          require(!hasForbiddenNormalAlias(nextCanonical), 'NEXT_CANONICAL_STILL_HAS_Y6_ALIAS');
+          require(nextCanonical?.video?.screenpal === TARGET_VIDEO && nextCanonical?.core?.video?.screenpal === TARGET_VIDEO, 'NEXT_CANONICAL_VIDEO_CHANGED');
+
+          const nextGlobal = clone(global);
+          const y6Catalogue = nextGlobal.catalogues[Y6_VIEW];
+          const y6BeforeCount = y6Catalogue.lessons.length;
+          y6Catalogue.lessons = y6Catalogue.lessons.filter(row => lessonIdOf(row) !== CANON && displayIdOf(row) !== Y6_DISPLAY);
+          require(y6Catalogue.lessons.length === y6BeforeCount - 1, 'NEXT_GLOBAL_Y6_REMOVE_COUNT_BAD');
+          if (Object.prototype.hasOwnProperty.call(y6Catalogue, 'lessonCount')) y6Catalogue.lessonCount = y6Catalogue.lessons.length;
+          if (Object.prototype.hasOwnProperty.call(y6Catalogue, 'count') && Number(y6Catalogue.count) === y6BeforeCount) y6Catalogue.count = y6Catalogue.lessons.length;
+          nextGlobal.lessonToViews[CANON] = (nextGlobal.lessonToViews[CANON] || []).filter(viewId => viewId !== Y6_VIEW);
+          nextGlobal.lessonToViews[CANON] = [...new Set(nextGlobal.lessonToViews[CANON])];
+          require(nextGlobal.lessonToViews[CANON].length === 1 && nextGlobal.lessonToViews[CANON][0] === L3_VIEW, 'NEXT_GLOBAL_NOT_L3_ONLY');
+          const nextL3Rows = nextGlobal.catalogues[L3_VIEW].lessons.filter(row => lessonIdOf(row) === CANON || displayIdOf(row) === L3_DISPLAY);
+          require(nextL3Rows.length === 1 && lessonIdOf(nextL3Rows[0]) === CANON, 'NEXT_GLOBAL_L3_DAMAGED');
+          require(!nextGlobal.catalogues[Y6_VIEW].lessons.some(row => lessonIdOf(row) === CANON || displayIdOf(row) === Y6_DISPLAY), 'NEXT_GLOBAL_Y6_ROW_REMAINS');
+          require(!text(nextGlobal).includes(Y6_DISPLAY), 'NEXT_GLOBAL_Y6_DISPLAY_REMAINS_ELSEWHERE');
+
+          const nextLesson = clone(lessonPrepared);
+          if (nextLesson.displayIds && typeof nextLesson.displayIds === 'object') delete nextLesson.displayIds[Y6_VIEW];
+          if (Array.isArray(nextLesson.viewIds)) nextLesson.viewIds = nextLesson.viewIds.filter(value => value !== Y6_VIEW);
+          if (Array.isArray(nextLesson.views)) nextLesson.views = nextLesson.views.filter(value => value !== Y6_VIEW);
+          require(nextLesson.videoVariants && typeof nextLesson.videoVariants === 'object', 'PREPARED_VIDEO_VARIANTS_MISSING');
+          delete nextLesson.videoVariants.normal;
+          require(nextLesson.videoVariants.elevenPlus && typeof nextLesson.videoVariants.elevenPlus === 'object', 'PREPARED_11PLUS_VIDEO_MISSING');
+          nextLesson.videoVariants.elevenPlus.targetUrl = canonical.video.embedUrl;
+          require(String(nextLesson.videoVariants.elevenPlus.targetUrl || '').includes(TARGET_VIDEO), 'NEXT_PREPARED_11PLUS_VIDEO_NOT_TARGET');
+          require(!hasForbiddenNormalAlias(nextLesson), 'NEXT_PREPARED_LESSON_STILL_HAS_Y6_ALIAS');
+          require(!hasOldVideo(nextLesson), 'NEXT_PREPARED_LESSON_STILL_HAS_OLD_VIDEO');
+
+          // Discover only users whose access snapshot can be affected by normal Year 6.
+          // Do not refresh unrelated students.
+          const affected = new Set();
+          const y6AssignmentUsers = await d1(`
+            SELECT DISTINCT a.portal_user_id_norm
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key=a.batch_key
+            WHERE lower(b.subject)='maths' AND lower(b.stream)='normal' AND b.school_year=6
+          `);
+          for (const row of y6AssignmentUsers) if (row?.portal_user_id_norm) affected.add(norm(row.portal_user_id_norm));
+
+          const userKeys = await kvList(studentsNs, 'user:');
+          for (const key of userKeys) {
+            const profile = await kvGet(studentsNs, key, { type:'json' });
+            if (!profile || typeof profile !== 'object') continue;
+            const full = new Set((Array.isArray(profile.fullLibraries) ? profile.fullLibraries : []).map(upper));
+            const years = new Set((Array.isArray(profile.mathsYears) ? profile.mathsYears : []).map(value => Number(value)));
+            const historical = new Set((Array.isArray(profile.historicalViews) ? profile.historicalViews : []).map(norm));
+            const upsell = new Set((Array.isArray(profile.upsellViews) ? profile.upsellViews : []).map(norm));
+            if (full.has('MATHS_Y6_FULL') || years.has(6) || historical.has(Y6_VIEW) || upsell.has(Y6_VIEW)) {
+              affected.add(norm(key.slice('user:'.length)));
+            }
+          }
+          affected.delete('');
+          console.log(`PREWRITE_GUARDS_PASS affected_access_scopes=${affected.size}`);
+
+          // ---------- MUTATION 1: canonical definition becomes L3-only ----------
+          await kvPut(lessonsNs, `lesson:${CANON}`, JSON.stringify(nextCanonical), 'application/json; charset=utf-8');
+          const canonicalVerify = JSON.parse(await kvGet(lessonsNs, `lesson:${CANON}`));
+          require(canonicalVerify?.displayIds?.[L3_VIEW] === L3_DISPLAY, 'CANONICAL_VERIFY_L3_FAILED');
+          require(!canonicalVerify?.displayIds?.[Y6_VIEW], 'CANONICAL_VERIFY_Y6_STILL_PRESENT');
+          console.log('CANONICAL_L3_ONLY_PASS');
+
+          // ---------- MUTATION 2: prepared global removes the normal-Y6 catalogue row ----------
+          const stamp = Date.now();
+          const globalPublish = await publishScopeAtomic(store, {
+            scope: 'global',
+            version: `l3t2m24-l3-only-${stamp}`,
+            payload: nextGlobal,
+            updatedAt: new Date().toISOString()
+          });
+          require(!globalPublish.reused, 'GLOBAL_PUBLISH_UNEXPECTEDLY_REUSED');
+          const globalVerify = (await resolveCurrentScope(store, 'global')).payload;
+          require(Array.isArray(globalVerify?.lessonToViews?.[CANON]) && globalVerify.lessonToViews[CANON].length === 1 && globalVerify.lessonToViews[CANON][0] === L3_VIEW, 'GLOBAL_VERIFY_MAPPING_FAILED');
+          require(!globalVerify.catalogues[Y6_VIEW].lessons.some(row => lessonIdOf(row) === CANON || displayIdOf(row) === Y6_DISPLAY), 'GLOBAL_VERIFY_Y6_ROW_FAILED');
+          require(globalVerify.catalogues[L3_VIEW].lessons.some(row => lessonIdOf(row) === CANON && (displayIdOf(row) === L3_DISPLAY || text(row).includes(L3_DISPLAY))), 'GLOBAL_VERIFY_L3_ROW_FAILED');
+          console.log('GLOBAL_L3_ONLY_PASS');
+
+          // ---------- MUTATION 3: rebuild only normal-Y6-affected student access snapshots ----------
+          let refreshed = 0;
+          let retainedForLegitimateOtherSource = 0;
+          for (const userId of [...affected].sort()) {
+            let result;
+            try {
+              result = await refreshStudentAccessReadModel(env, userId);
+            } catch (error) {
+              // Never print the user ID into the public Actions log.
+              throw new Error(`ACCESS_REFRESH_FAILED_AT_INDEX_${refreshed}:${String(error?.message || error)}`);
+            }
+            const accessCurrent = await resolveCurrentScope(store, `access:${result.scopeId}`);
+            const snapshot = accessCurrent?.payload?.snapshot;
+            require(snapshot?.kind === 'prepared-access-snapshot', `ACCESS_VERIFY_PAYLOAD_BAD_AT_INDEX_${refreshed}`);
+            const state = snapshot?.lessonAccess?.[CANON];
+            if (state?.sources?.includes('full-library')) {
+              require((snapshot.fullViewIds || []).includes(L3_VIEW), `Y6_FULL_LIBRARY_STILL_GRANTS_LESSON_AT_INDEX_${refreshed}`);
+              retainedForLegitimateOtherSource += 1;
+            }
+            refreshed += 1;
+          }
+          console.log(`ACCESS_REFRESH_PASS refreshed=${refreshed} retained_via_l3_or_explicit=${retainedForLegitimateOtherSource}`);
+
+          // ---------- MUTATION 4: prepared lesson becomes L3-only and uses the new ScreenPal ----------
+          const lessonPublish = await publishScopeAtomic(store, {
+            scope: `lesson:${CANON}`,
+            version: `l3t2m24-l3-only-video-${stamp}`,
+            payload: nextLesson,
+            updatedAt: new Date().toISOString()
+          });
+          require(!lessonPublish.reused, 'LESSON_PUBLISH_UNEXPECTEDLY_REUSED');
+
+          // ---------- FINAL READBACK ----------
+          const finalCanonical = JSON.parse(await kvGet(lessonsNs, `lesson:${CANON}`));
+          const finalGlobal = (await resolveCurrentScope(store, 'global')).payload;
+          const finalLesson = (await resolveCurrentScope(store, `lesson:${CANON}`)).payload;
+          require(finalCanonical?.displayIds?.[L3_VIEW] === L3_DISPLAY && !finalCanonical?.displayIds?.[Y6_VIEW], 'FINAL_CANONICAL_NOT_L3_ONLY');
+          require(finalCanonical?.video?.screenpal === TARGET_VIDEO && finalCanonical?.core?.video?.screenpal === TARGET_VIDEO, 'FINAL_CANONICAL_VIDEO_BAD');
+          require(finalGlobal.lessonToViews[CANON].length === 1 && finalGlobal.lessonToViews[CANON][0] === L3_VIEW, 'FINAL_GLOBAL_NOT_L3_ONLY');
+          require(!finalGlobal.catalogues[Y6_VIEW].lessons.some(row => lessonIdOf(row) === CANON || displayIdOf(row) === Y6_DISPLAY), 'FINAL_Y6_CATALOGUE_STILL_HAS_LESSON');
+          require(finalGlobal.catalogues[L3_VIEW].lessons.some(row => lessonIdOf(row) === CANON), 'FINAL_L3_CATALOGUE_LOST_LESSON');
+          require(finalLesson?.videoVariants?.elevenPlus?.targetUrl?.includes(TARGET_VIDEO), 'FINAL_L3_VIDEO_NOT_TARGET');
+          require(!finalLesson?.videoVariants?.normal, 'FINAL_NORMAL_VIDEO_VARIANT_REMAINS');
+          require(!hasForbiddenNormalAlias(finalLesson), 'FINAL_PREPARED_LESSON_HAS_Y6_ALIAS');
+          require(!hasOldVideo(finalLesson), 'FINAL_PREPARED_LESSON_HAS_OLD_VIDEO');
+          require((await d1('SELECT COUNT(*) AS n FROM lesson_entitlements WHERE lesson_id=?', [CANON]))?.[0]?.n === 0, 'FINAL_DIRECT_ENTITLEMENTS_NONZERO');
+          require((await d1('SELECT COUNT(*) AS n FROM online_prelesson_entitlements WHERE lesson_id=?', [CANON]))?.[0]?.n === 0, 'FINAL_PRELESSON_ENTITLEMENTS_NONZERO');
+
+          console.log('OPS_REPAIR_L3T2M24_L3_ONLY_PASS');
+          NODE
