@@ -1,0 +1,135 @@
+name: Record video update playbook in current GCH
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-record-video-update-playbook.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Update current GCH and L3T2M24 browser follow-up evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+
+          const currentPath = 'gch/portal-v2-current/GCH_CURRENT.json';
+          const l3Path = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json';
+          const playbookPath = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json';
+
+          const current = JSON.parse(fs.readFileSync(currentPath, 'utf8'));
+          const l3 = JSON.parse(fs.readFileSync(l3Path, 'utf8'));
+          const playbook = JSON.parse(fs.readFileSync(playbookPath, 'utf8'));
+
+          if (current?.documentType !== 'CURRENT_GCH_AUTHORITY_MANIFEST') throw new Error('Unexpected GCH_CURRENT document type');
+          if (playbook?.documentType !== 'VIDEO_UPDATE_EXECUTION_PLAYBOOK') throw new Error('Video playbook missing or invalid');
+          if (l3?.scope?.displayLessonId !== 'L3T2M24') throw new Error('Unexpected L3 override scope');
+
+          current.effectiveDate = '2026-09-30';
+          current.authorityVersion = '6.6-video-update-playbook-authoritative';
+          if (!String(current.purpose || '').includes('lesson-video')) {
+            current.purpose = `${String(current.purpose || '').replace(/\.$/, '')}, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling.`;
+          }
+
+          current.readOrder = Array.isArray(current.readOrder) ? current.readOrder : [];
+          const playbookIndex = current.readOrder.indexOf(playbookPath);
+          if (playbookIndex < 0) {
+            const l3Index = current.readOrder.indexOf(l3Path);
+            current.readOrder.splice(l3Index >= 0 ? l3Index : current.readOrder.length, 0, playbookPath);
+          }
+
+          current.authorityComposition = current.authorityComposition || {};
+          current.authorityComposition.videoUpdatePlaybook = {
+            path: playbookPath,
+            role: 'general execution authority for Portal V2 lesson-video additions/replacements: exact pasted ScreenPal URL, canonical plus current prepared lesson parity, description-source grounding, and stream/catalogue/access changes only when owner classification changes'
+          };
+
+          current.latestDocumentationChange = {
+            name: 'Authoritative Portal lesson-video update playbook',
+            date: '2026-09-30',
+            status: 'AUTHORITATIVE_CURRENT',
+            authority: playbookPath,
+            reason: 'Repeated video updates exposed two avoidable failure classes: case-sensitive ScreenPal ID transcription error and canonical-only writes that left the live prepared lesson serving an obsolete video.',
+            permanentExecutionRule: 'For an unchanged lesson classification, update and verify canonical lesson state plus the current prepared lesson stream variant in one pass. Do not touch global catalogue/access state. Escalate to catalogue/access rebuild only when the owner changes the lesson stream classification.',
+            regressionEvidence: [
+              'Y6T1E01: uppercase I was initially used where the pasted URL contained lowercase l; exact pasted URL is now mandatory.',
+              'L3T2M24: canonical cOQvDXnxxvX coexisted with stale prepared cOVTQxn3IMa, so the browser served the old video until the prepared lesson scope was republished.',
+              'L3T2M24: owner classified lesson as L3/11+-only, requiring removal of normal Year 6 alias/catalogue access as a separate classification repair.'
+            ]
+          };
+
+          current.latestVideoUpdateOperationalRule = {
+            pureVideoOrDescriptionReplacement: [
+              'resolve canonical lesson and existing stream membership',
+              'take exact ScreenPal ID from owner-pasted URL',
+              'write/read back canonical video/core.video and approved description/status',
+              'publish/read back current prepared lesson stream variant',
+              'prove old replacement ID absent from active prepared variant',
+              'browser/public smoke-check when authenticated access is available'
+            ],
+            classificationChangeOnly: [
+              'change canonical display/catalogue membership deliberately',
+              'update prepared global catalogue and lessonToViews',
+              'refresh only affected access snapshots',
+              'publish only legitimate prepared stream video variants'
+            ],
+            prohibited: [
+              'canonical-KV-only success claim',
+              'screenshot OCR for ambiguous ScreenPal IDs when pasted URL is available',
+              'global catalogue/access mutation for an ordinary same-classification video replacement',
+              'rollback/revert recovery'
+            ]
+          };
+
+          current.websiteWorkflowCoverage = Array.isArray(current.websiteWorkflowCoverage) ? current.websiteWorkflowCoverage : [];
+          const coverage = 'lesson-video additions/replacements with canonical + current prepared lesson parity, exact ScreenPal-ID verification, and stream-aware escalation';
+          if (!current.websiteWorkflowCoverage.includes(coverage)) current.websiteWorkflowCoverage.push(coverage);
+
+          const completion = String(current.nonNegotiableCompletionRule || '');
+          const videoRule = 'A lesson-video mutation is not complete until the current prepared lesson stream variant also read-backs the exact new ScreenPal ID; a canonical LESSONS_KV write alone is insufficient.';
+          if (!completion.includes(videoRule)) current.nonNegotiableCompletionRule = `${completion}${completion.endsWith(' ') || !completion ? '' : ' '}${videoRule}`;
+
+          current.nextChangeProtocol = Array.isArray(current.nextChangeProtocol) ? current.nextChangeProtocol : [];
+          const protocolStep = 'for lesson-video changes, classify as same-stream replacement versus stream/catalogue change and follow GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json';
+          if (!current.nextChangeProtocol.includes(protocolStep)) current.nextChangeProtocol.splice(Math.min(4, current.nextChangeProtocol.length), 0, protocolStep);
+
+          // Record the browser evidence without changing the already-PASS backend/prepared repair.
+          l3.verification = l3.verification || {};
+          l3.verification.backendAndPreparedState = 'PASS';
+          l3.verification.ownerBrowserVerification = 'VIDEO_BACKEND_PREPARED_PASS; MATHS_HOME_STILL_SHOWS_LESSONS_CARD; NAVIGATION_PRESENTATION_FOLLOW_UP_REQUIRED';
+          l3.postRepairBrowserEvidence = {
+            date: '2026-09-30',
+            ownerObservation: 'After the L3-only canonical/prepared repair, the owner still sees a Lessons card on the Maths landing page.',
+            classification: 'SEPARATE_NAVIGATION_PRESENTATION_OPEN_ITEM',
+            doNotConflateWith: [
+              'the prepared L3T2M24 video replacement',
+              'the L3-only lesson classification',
+              'permission to restore normal Year 6 membership for Y6M1.4'
+            ],
+            nextInvestigationBoundary: 'Trace the authenticated Maths home response and frontend equivalent-card normalisation for the specific account/session showing Lessons; do not mutate L3T2M24 video/catalogue state unless new evidence directly implicates it.'
+          };
+
+          fs.writeFileSync(currentPath, JSON.stringify(current, null, 2) + '\n');
+          fs.writeFileSync(l3Path, JSON.stringify(l3, null, 2) + '\n');
+          NODE
+
+          git config user.name "FuturePerfectTuitions"
+          git config user.email "futureperfectlessons@gmail.com"
+          git add gch/portal-v2-current/GCH_CURRENT.json gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json
+          git diff --cached --check
+          git commit -m "Record authoritative video update procedure"
+          git push origin HEAD:main
