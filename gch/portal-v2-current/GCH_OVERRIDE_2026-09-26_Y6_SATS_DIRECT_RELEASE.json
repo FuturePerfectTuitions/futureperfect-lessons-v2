@@ -1,8 +1,8 @@
 {
-  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v7",
+  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v8",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
-  "effectiveDate": "2026-09-27",
+  "effectiveDate": "2026-09-30",
   "scope": "PUBLIC_STUDENT_V2.Year6SatsReleaseSemanticsAndMathsEquivalentNavigation",
   "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
   "precedence": "This override is higher authority for Year 6 SAT lesson access/release semantics, SAT CSV/display-code resolution, canonical batch-definition classification of Maths equivalent-view entitlements, and navigation presentation for Year 4/L1, Year 5/L2 and Year 6/L3. All non-conflicting Portal V2 authority remains binding.",
@@ -16,10 +16,10 @@
     "navigationPresentation": {
       "globalEquivalentRule": "A Maths student must never be shown both members of an equivalent curriculum pair: Year 4/L1, Year 5/L2, or Year 6/L3. If the L-level exists, the L-level is the teaching-curriculum presentation.",
       "l3Student": "Show L3 as the teaching curriculum. Do not show a duplicate Year 6 card. Show a separate SATS card only when that L3 student has at least one genuine released or PreLesson-available SATS lesson. An L3 student with no SATS access must not receive a SATS card merely because L3 and Year 6 share canonical content.",
-      "ordinaryYear6Student": "Show Lessons and SATS. Lessons contains the normal Year 6 teaching curriculum; SATS contains the SAT lesson subset.",
+      "ordinaryYear6Student": "Show Year 6 as the normal teaching-curriculum card. Show SATS as the separate SAT lesson card according to the existing SATS presentation/access rules. Never rename the Year 6 teaching card to Lessons.",
       "year4Level1": "If current Year 4 and L1 are both present for the same Maths curriculum, present L1 only.",
       "year5Level2": "If current Year 5 and L2 are both present for the same Maths curriculum, present L2 only.",
-      "accessBoundary": "Equivalent-card collapsing and the Lessons/SATS split are presentation/navigation transformations only. They must not broaden lesson entitlements, change batch membership, or convert SAT direct-release access into full Year 6 access."
+      "accessBoundary": "Equivalent-card collapsing and the Year 6/SATS presentation are navigation transformations only. They must not broaden lesson entitlements, change batch membership, or convert SAT direct-release access into full Year 6 access."
     },
     "entitlementClassification": {
       "authoritativeSource": "batch_definitions.subject, batch_definitions.stream, batch_definitions.school_year and batch_definitions.maths_level",
@@ -35,32 +35,43 @@
     "mapping": "Y6SM1..Y6SM19 -> internal compatibility Y6MS1..Y6MS19 -> canonical Y6M51..Y6M69",
     "lowerNavigationSource": "worker/src/index-phase20-change15.js",
     "finalNavigationSource": "worker/src/index-maths-equivalent-navigation-final.js",
-    "finalNavigationMarker": "maths-equivalent-navigation-final-v3",
-    "finalL3SatsGuard": "suppressUnreleasedL3Sats",
+    "finalNavigationMarker": "maths-equivalent-navigation-final-v6-year6-label",
+    "finalL3SatsGuard": "native prepared maths-sats view authority",
     "finalCompositionSource": "worker/src/index-admin-tools.js",
-    "finalCompositionRule": "index-admin-tools.js delegates ordinary requests to index-maths-equivalent-navigation-final.js; that wrapper delegates to the complete current index-phase24-trial-vr.js chain, refreshes L3 counts from the batch-definition-aware live list, normalises the final home response, then suppresses SATS for L3 when the live SATS subset has no released/PreLesson-available row.",
+    "finalCompositionRule": "index-admin-tools.js delegates ordinary requests to index-maths-equivalent-navigation-final.js; that wrapper uses the native prepared Year 6/L3/SATS views as the final current-curriculum authority, preserves equivalent-pair de-duplication, labels the ordinary canonical Year 6 teaching card Year 6, and preserves the separate entitlement-driven SATS card.",
     "syntheticPresentationViews": {
-      "maths-year6-lessons": "delegates authorization to canonical maths-year6 and filters out Y6 SAT lessons",
-      "maths-sats": "delegates authorization to canonical maths-year6 and filters to Y6 SAT lessons"
+      "maths-year6-lessons": "legacy compatibility alias only; delegates authorization to canonical maths-year6 and must display the teaching label Year 6 if reached",
+      "maths-sats": "separate SATS presentation backed by the authoritative SAT lesson subset"
     },
     "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
     "frontendPrimaryNormalizer": "assets/maths-equivalent-home-normalizer.js",
-    "frontendPrimaryNormalizerRule": "Normalize the /api/v1/student/home JSON response before phase10-history records groups and before phase7 renders cards. Current Year 4/L1 and Year 5/L2 pairs collapse to L1/L2. A current L3 + Year 6 alias collapses to L3, with SATS added only when the synthetic SATS list has real access. This is authoritative browser-side protection against stale or lower-layer duplicate aliases.",
+    "frontendPrimaryNormalizerRule": "Normalize the /api/v1/student/home JSON response before phase10-history records groups and before phase7 renders cards. Current Year 4/L1 and Year 5/L2 pairs collapse to L1/L2. A current L3 + Year 6 alias collapses to L3, with SATS added only under the existing genuine-access rule. An ordinary Year 6 card remains the canonical maths-year6 card and is labelled Year 6; it must never be relabelled Lessons.",
     "frontendPrimaryNormalizerCommit": "a80e08ef865c9b5b8205351608bcbb3c658466e5",
     "frontendLoaderCommit": "122a229db6914676c682ca61baceeb99ae96a4c3",
     "frontendPagesRun": 36313574498,
-    "frontendPagesResult": "PASS",
+    "frontendPagesResult": "PASS_PRE_2026_09_30_LABEL_CHANGE",
     "frontendLegacyDomGuard": "assets/year6-display-sequence-fix.js",
-    "frontendLegacyDomGuardRole": "Compatibility fallback only; it is not the primary equivalent-card authority because phase10-history reparents rendered cards into grouped nested grids.",
+    "frontendLegacyDomGuardRole": "Compatibility fallback only; it must preserve the Year 6 display label and must not change Year 6/L3 or SATS authorization semantics.",
     "backendConditionalSatsCommit": "0e5abb6c267f549a6a75a641a1690bff65f196f3",
     "backendConditionalSatsVerificationCommit": "e0c071bf37540152d43512f0a18c91d6c8da7ac4",
     "backendDeploymentCommit": "5994c5df1fed5324c6927f364b0f4ef6781da3ed",
     "productionWorkflowRun": 36313764780,
-    "productionWorkflowResult": "PASS",
+    "productionWorkflowResult": "PASS_PRE_2026_09_30_LABEL_CHANGE",
     "workerVersion": "176996e8-ca8a-43d6-8a5a-da5684a464d6",
     "productionDeploymentVerified": true,
-    "productionPreservationVerification": "PASS: live entitlement-classification, equivalent-navigation, conditional-L3-SATS, Y6 SAT mapping/direct-release, shared Worker composition, forward-only deploy, live Worker markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
-    "ownerBrowserVerification": "PENDING_POST_PRIMARY_FRONTEND_NORMALIZER_RETEST"
+    "productionPreservationVerification": "PASS for the pre-2026-09-30 navigation deployment: live entitlement-classification, equivalent-navigation, conditional-L3-SATS, Y6 SAT mapping/direct-release, shared Worker composition, forward-only deploy, live Worker markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
+    "ownerBrowserVerification": "PENDING_POST_2026_09_30_YEAR6_LABEL_CHANGE"
+  },
+  "year6LabelChange20260930": {
+    "status": "SOURCE_CHANGE_PENDING_MERGE_DEPLOYMENT_AND_OWNER_BROWSER_VERIFICATION",
+    "ownerRule": "The ordinary Year 6 teaching card is labelled Year 6, never Lessons. Existing SATS access/presentation and Year 6/L3 equivalence semantics remain unchanged.",
+    "backendSource": "worker/src/index-maths-equivalent-navigation-final.js",
+    "backendMarker": "maths-equivalent-navigation-final-v6-year6-label",
+    "frontendSources": [
+      "assets/maths-equivalent-home-normalizer.js",
+      "assets/year6-display-sequence-fix.js"
+    ],
+    "preservationBoundary": "Display-label/navigation-shape correction only. Do not mutate D1, STUDENTS_KV, READ_MODELS_KV entitlements, batch membership, SAT release state, L3T2M24 L3-only semantics, student history, Trial/session semantics, protected answers, quiz bridge, Replace Resource or parent-email behaviour."
   },
   "productionAudit20260927": {
     "evidence": "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
@@ -82,8 +93,8 @@
     ],
     "rootCauseClassification": "MULTI_LAYER_EQUIVALENT_ALIAS_PRESENTATION_DEFECT",
     "rootCause": "The underlying entitlement data legitimately contains shared canonical lesson IDs and prepared aliases. Server-side normalisation was not sufficient as the sole browser guard, and the earlier post-render DOM fallback depended on cards being direct children of #view-grid. phase10-history reparents cards into grouped nested grids, so the fallback was not a reliable primary boundary.",
-    "forwardOnlyRepair": "Keep canonical batch-definition entitlement classification and final Worker normalisation, add the v3 L3 SATS conditional guard, and normalize home JSON in the live frontend before history grouping/rendering. No rollback, revert or older Worker/frontend deployment was used.",
-    "remainingGate": "Owner browser retest of Kiaan and Devansh. Kiaan must show L1, L2, L3 and 11+ Practice only. Devansh must never show Year 6 + L3; SATS appears separately only if he has genuine SATS access."
+    "forwardOnlyRepair": "Keep canonical batch-definition entitlement classification and final Worker normalisation, retain the native prepared-view authority and normalize home JSON in the live frontend before history grouping/rendering. No rollback, revert or older Worker/frontend deployment is permitted.",
+    "remainingGate": "Owner browser retest of representative ordinary Year 6 and L3 accounts. Ordinary Year 6 must show Year 6, never Lessons. An L3 account must not show Year 6 + L3 together, and SATS appears separately only under the existing genuine-access rule."
   },
   "verificationMatrix": [
     "Y6SM1 resolves to canonical Y6M51 and Y6SM19 resolves to canonical Y6M69.",
@@ -92,7 +103,7 @@
     "Current Year 6 plus L3 never appears as two teaching cards; L3 is retained.",
     "An L3 student with no released/PreLesson-available SATS has no SATS card.",
     "An L3 student with genuine SATS access receives L3 + SATS.",
-    "An ordinary Year 6 student is presented with Lessons + SATS.",
+    "An ordinary Year 6 student is presented with Year 6 plus the separate SATS card under the existing SATS presentation rule; the teaching card is never labelled Lessons.",
     "Canonical Y6 lesson entitlements from an L3 batch definition are recognised as L3/equivalent curriculum access even when the batch-code text does not contain '11'.",
     "English normal-vs-11plus classification remains distinct and is not widened by the Maths equivalence rule.",
     "The live frontend normalises home JSON before phase10-history grouping and phase7 card rendering.",
@@ -100,12 +111,13 @@
   ],
   "preservationInvariants": [
     "Production recovery is forward-only; do not revert, roll back, restore an older Worker or deploy an older entrypoint.",
+    "The ordinary Year 6 teaching-curriculum card must be labelled Year 6 and must never be relabelled Lessons.",
     "Do not alter normal Year 6 lesson access or renumber canonical Y6 SAT lesson IDs.",
     "Do not expose Y6MSn as the owner-facing code; Y6SMn is authoritative for CSV/display use.",
     "Do not use Year 4, Year 5 or Year 6 duplicate cards when their L1, L2 or L3 equivalent is already present as current Maths teaching curriculum.",
-    "Do not give L3 students a SATS card unless at least one SATS lesson is genuinely released or PreLesson-available.",
+    "Do not give L3 students a SATS card unless the existing authoritative SATS access rule permits it.",
     "Do not classify an entitlement's programme stream primarily from batch-code naming when a canonical batch definition exists.",
     "Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR, resource replacement, parent-email routing or quiz bridge behaviour.",
-    "A green deployment and runtime markers are not substitutes for owner browser verification; do not declare this repair CLOSED PASS until representative live browser evidence confirms it."
+    "A green deployment and runtime markers are not substitutes for owner browser verification; do not declare the 2026-09-30 label change CLOSED PASS until representative live browser evidence confirms it."
   ]
 }

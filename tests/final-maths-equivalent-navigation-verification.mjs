@@ -79,18 +79,18 @@ assert.equal(suppressUnpairedL3Sats(mathsBody([]), true, false), false);
 }
 
 // Ordinary Year 6 without SATS must be one native curriculum card labelled
-// Lessons. The old synthetic maths-year6-lessons + SATS shape is removed.
+// Year 6. The old synthetic maths-year6-lessons + SATS shape is removed.
 {
   const body = mathsBody([
     current('maths-year6-lessons','Lessons'),
     current('maths-sats','SATS')
   ]);
   const native = mathsBody([
-    current('maths-year6','Lessons',{visibleLessonCount:50,openLessonCount:3,lockedLessonCount:47})
+    current('maths-year6','Year 6',{visibleLessonCount:50,openLessonCount:3,lockedLessonCount:47})
   ]);
   assert.equal(reconcileNativeMathsHome(body, native), true);
   assert.deepEqual(body.subjects[0].views.map(v => [v.viewId,v.label]), [
-    ['maths-year6','Lessons']
+    ['maths-year6','Year 6']
   ]);
 }
 
@@ -101,12 +101,12 @@ assert.equal(suppressUnpairedL3Sats(mathsBody([]), true, false), false);
     current('maths-sats','SATS')
   ]);
   const native = mathsBody([
-    current('maths-year6','Lessons',{visibleLessonCount:50,openLessonCount:3,lockedLessonCount:47}),
+    current('maths-year6','Year 6',{visibleLessonCount:50,openLessonCount:3,lockedLessonCount:47}),
     current('maths-sats','SATS',{visibleLessonCount:19,openLessonCount:1,lockedLessonCount:18})
   ]);
   assert.equal(reconcileNativeMathsHome(body, native), true);
   assert.deepEqual(body.subjects[0].views.map(v => [v.viewId,v.label]), [
-    ['maths-year6','Lessons'],
+    ['maths-year6','Year 6'],
     ['maths-sats','SATS']
   ]);
 }
@@ -125,7 +125,7 @@ assert.equal(suppressUnpairedL3Sats(mathsBody([]), true, false), false);
 // A contradictory raw prepared model is not guessed around at the response
 // boundary. Production publication must fix it first.
 {
-  const native = mathsBody([current('maths-year6','Lessons'),current('maths-level3','L3')]);
+  const native = mathsBody([current('maths-year6','Year 6'),current('maths-level3','L3')]);
   const authority = nativeCurrentMathsAuthority(native);
   assert.equal(authority.valid, false);
   assert.equal(authority.collision, true);
