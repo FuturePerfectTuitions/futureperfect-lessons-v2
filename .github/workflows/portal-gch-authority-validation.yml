@@ -51,7 +51,9 @@ jobs:
               '5.8-admin-reset-show-credentials',
               '5.9-admin-reset-ui-asset-path-repair',
               '6.5-l3t2m24-l3-only-prepared-state-production-pass',
-              '6.6-year6-label-year6'
+              '6.6-video-update-playbook-authoritative',
+              '6.6-year6-label-year6',
+              '6.7-video-playbook-plus-year6-label'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
