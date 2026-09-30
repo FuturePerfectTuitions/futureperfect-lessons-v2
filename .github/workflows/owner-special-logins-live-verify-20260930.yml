@@ -16,74 +16,22 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect current production auth state read-only
-        run: |
-          set -euo pipefail
-          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          curl -fsS -H "$auth" "$api/workers/scripts/fpt-portal-v2-worker/settings" > /tmp/worker-settings.json
-          echo "environment=$(jq -r '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text") | .text' /tmp/worker-settings.json)"
-          echo "studentLoginEnabled=$(jq -r '.result.bindings[] | select(.name=="STUDENT_LOGIN_ENABLED" and .type=="plain_text") | .text' /tmp/worker-settings.json)"
-          students_ns="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/worker-settings.json)"
-          test -n "$students_ns"
-          for id in admin0206 admin0411; do
-            curl -fsS -H "$auth" "$api/storage/kv/namespaces/$students_ns/values/user%3A$id" > "/tmp/$id.json"
-            jq -c --arg id "$id" '{id:$id,portalUserId:(.portalUserId//null),status:(.status//null),storedPasswordLength:((.p//"")|length),storedPasswordShapeValid:(((.p//"")|length)==4 and ((.p//"")|test("[A-Z]")) and ((.p//"")|test("[a-z]")) and ((.p//"")|test("[0-9]")))}' "/tmp/$id.json"
-          done
-      - name: Inspect deployed auth bundle read-only
-        run: |
-          set -euo pipefail
-          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$api/workers/scripts/fpt-portal-v2-worker" -o /tmp/live-worker.bin
-          sha256sum /tmp/live-worker.bin | awk '{print "liveWorkerSha256=" $1}'
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          text = Path('/tmp/live-worker.bin').read_bytes().decode('utf-8', errors='ignore')
-          needles = [
-              'PROD_LOGIN_ALLOWLIST',
-              'STUDENT_LOGIN_ENABLED',
-              '/api/v1/student/auth/login',
-              'INVALID_LOGIN',
-              'loginPermittedForUser',
-              'developmentAllowlist',
-              'admin0206',
-              'admin0411',
-          ]
-          for needle in needles:
-              print(f'bundleMarker {needle} count={text.count(needle)}')
-          for needle in ['INVALID_LOGIN', '/api/v1/student/auth/login', 'PROD_LOGIN_ALLOWLIST']:
-              pos = 0
-              shown = 0
-              while shown < 8:
-                  idx = text.find(needle, pos)
-                  if idx < 0:
-                      break
-                  lo=max(0,idx-500); hi=min(len(text),idx+len(needle)+500)
-                  snippet=re.sub(r'\s+',' ',text[lo:hi])
-                  print(f'bundleContext[{needle}#{shown+1}]={snippet}')
-                  shown += 1
-                  pos = idx + len(needle)
-          PY
-      - name: Verify live Portal accounts read-only
+      - name: Inspect all live owner Portal views read-only
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('ops/verify_owner_special_logins_live_20260930.sh')
           text = path.read_text()
-          old_secret = '''secret="$(cat "$work/credential.txt")"; echo "::add-mask::$secret"; unset secret'''
-          new_secret = '''secret="$(cat "$work/credential.txt")"; echo "::add-mask::$secret"\n  current_0206="$(jq -r '.p // empty' /tmp/admin0206.json)"\n  current_0411="$(jq -r '.p // empty' /tmp/admin0411.json)"\n  if [[ "$current_0206" == "$secret" ]]; then echo 'credentialMatchesCurrentKv_admin0206=true'; else echo 'credentialMatchesCurrentKv_admin0206=false'; fi\n  if [[ "$current_0411" == "$secret" ]]; then echo 'credentialMatchesCurrentKv_admin0411=true'; else echo 'credentialMatchesCurrentKv_admin0411=false'; fi\n  unset current_0206 current_0411 secret'''
           old_body = '''  jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"'''
           new_body = '''  jq -nc --arg u "$id" --arg p "$(tr -d '\\r\\n' < "$work/credential.txt")" '{username:$u,password:$p}' > "$work/login-body.json"'''
           old_curl = '''  curl -fsS -c "$work/cookies-$id" -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login" > "$work/login-$id.json"'''
           new_curl = '''  local login_status\n  login_status="$(curl -sS -o "$work/login-$id.json" -w '%{http_code}' -c "$work/cookies-$id" -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login")"\n  echo "login_probe id=$id credentialLength=$(jq -r '.password|length' "$work/login-body.json") status=$login_status error=$(jq -r '.error // \"none\"' "$work/login-$id.json")"\n  [[ "$login_status" == "200" ]] || return 1'''
-          label_marker = '''english_labels "$work/home-admin0411.json" > "$work/english-11.txt"'''
-          label_diagnostics = '''english_labels "$work/home-admin0411.json" > "$work/english-11.txt"\necho "labels_admin0206_maths=$(paste -sd '|' "$work/maths-normal.txt")"\necho "labels_admin0206_english=$(paste -sd '|' "$work/english-normal.txt")"\necho "labels_admin0411_maths=$(paste -sd '|' "$work/maths-11.txt")"\necho "labels_admin0411_english=$(paste -sd '|' "$work/english-11.txt")"\necho 'views_admin0206='\njq -c '[.subjects[] | {subject,views:[.views[] | select(.current==true or .group=="current") | {viewId,label,current,group,openLessonCount,visibleLessonCount,lockedPreview}]}]' "$work/home-admin0206.json"\necho 'views_admin0411='\njq -c '[.subjects[] | {subject,views:[.views[] | select(.current==true or .group=="current") | {viewId,label,current,group,openLessonCount,visibleLessonCount,lockedPreview}]}]' "$work/home-admin0411.json"\ncurl -fsS -b "$work/cookies-admin0206" "$BASE/api/v1/student/quiz/eligibility" > "$work/quiz-normal-diagnostic.json"\ncurl -fsS -b "$work/cookies-admin0411" "$BASE/api/v1/student/quiz/eligibility" > "$work/quiz-11-diagnostic.json"\necho -n 'quiz_admin0206='; jq -c '{ok,eligible,currentLevel,error}' "$work/quiz-normal-diagnostic.json"\necho -n 'quiz_admin0411='; jq -c '{ok,eligible,currentLevel,error}' "$work/quiz-11-diagnostic.json"'''
-          if old_secret not in text or old_body not in text or old_curl not in text or label_marker not in text:
+          marker = '''english_labels "$work/home-admin0411.json" > "$work/english-11.txt"'''
+          diagnostics = '''english_labels "$work/home-admin0411.json" > "$work/english-11.txt"\necho 'all_views_admin0206='\njq -c '[.subjects[] | {subject,views:[.views[] | {viewId,label,current,group,previous,historical,lockedPreview,fullLibrary,fullLibraryAccess,accessSource}]}]' "$work/home-admin0206.json"\necho 'all_views_admin0411='\njq -c '[.subjects[] | {subject,views:[.views[] | {viewId,label,current,group,previous,historical,lockedPreview,fullLibrary,fullLibraryAccess,accessSource}]}]' "$work/home-admin0411.json"\ncurl -fsS -b "$work/cookies-admin0206" "$BASE/api/v1/student/quiz/eligibility" > "$work/quiz-normal-diagnostic.json"\ncurl -fsS -b "$work/cookies-admin0411" "$BASE/api/v1/student/quiz/eligibility" > "$work/quiz-11-diagnostic.json"\necho -n 'quiz_admin0206='; jq -c '{ok,eligible,currentLevel,error}' "$work/quiz-normal-diagnostic.json"\necho -n 'quiz_admin0411='; jq -c '{ok,eligible,currentLevel,error}' "$work/quiz-11-diagnostic.json"'''
+          if old_body not in text or old_curl not in text or marker not in text:
               raise SystemExit('expected verifier lines not found')
-          path.write_text(text.replace(old_secret, new_secret).replace(old_body, new_body).replace(old_curl, new_curl).replace(label_marker, label_diagnostics))
+          path.write_text(text.replace(old_body,new_body).replace(old_curl,new_curl).replace(marker,diagnostics))
           PY
           bash ops/verify_owner_special_logins_live_20260930.sh
