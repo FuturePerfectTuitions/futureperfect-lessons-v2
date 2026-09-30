@@ -24,10 +24,14 @@ jobs:
           from pathlib import Path
           path = Path('ops/verify_owner_special_logins_live_20260930.sh')
           text = path.read_text()
-          old = '''  jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"'''
-          new = '''  jq -nc --arg u "$id" --arg p "$(tr -d '\\r\\n' < "$work/credential.txt")" '{username:$u,password:$p}' > "$work/login-body.json"'''
-          if old not in text:
+          old_body = '''  jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"'''
+          new_body = '''  jq -nc --arg u "$id" --arg p "$(tr -d '\\r\\n' < "$work/credential.txt")" '{username:$u,password:$p}' > "$work/login-body.json"'''
+          old_curl = '''  curl -fsS -c "$work/cookies-$id" -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login" > "$work/login-$id.json"'''
+          new_curl = '''  local login_status\n  login_status="$(curl -sS -o "$work/login-$id.json" -w '%{http_code}' -c "$work/cookies-$id" -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login")"\n  echo "login_probe id=$id credentialLength=$(jq -r '.password|length' "$work/login-body.json") status=$login_status error=$(jq -r '.error // \"none\"' "$work/login-$id.json")"\n  [[ "$login_status" == "200" ]] || return 1'''
+          if old_body not in text:
               raise SystemExit('expected verifier credential line not found')
-          path.write_text(text.replace(old, new))
+          if old_curl not in text:
+              raise SystemExit('expected verifier login curl not found')
+          path.write_text(text.replace(old_body, new_body).replace(old_curl, new_curl))
           PY
           bash ops/verify_owner_special_logins_live_20260930.sh
