@@ -1,0 +1,22 @@
+name: Owner special logins live verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/owner-special-logins-live-verify-20260930.yml'
+      - 'ops/verify_owner_special_logins_live_20260930.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify live Portal accounts read-only
+        run: bash ops/verify_owner_special_logins_live_20260930.sh
