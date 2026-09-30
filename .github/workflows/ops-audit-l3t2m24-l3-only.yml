@@ -1,0 +1,170 @@
+name: Ops audit L3T2M24 L3-only scope
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ops-audit-l3t2m24-l3-only.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-worker
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read-only production audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          SETTINGS="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/settings"
+          curl --fail --silent --show-error "$SETTINGS" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/settings.json
+          jq -e '.success == true' /tmp/settings.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/settings.json >/dev/null
+
+          LESSONS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          READ_MODELS_KV_ID="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB" and (.type=="d1" or .type=="d1_database")) | (.id // .database_id)' /tmp/settings.json)"
+          test -n "$LESSONS_KV_ID"; test "$LESSONS_KV_ID" != null
+          test -n "$READ_MODELS_KV_ID"; test "$READ_MODELS_KV_ID" != null
+          test -n "$DB_ID"; test "$DB_ID" != null
+          export LESSONS_KV_ID READ_MODELS_KV_ID DB_ID
+
+          node <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const lessonsNs = process.env.LESSONS_KV_ID;
+          const readNs = process.env.READ_MODELS_KV_ID;
+          const dbId = process.env.DB_ID;
+          const auth = { Authorization: `Bearer ${token}` };
+          const DISPLAY = 'L3T2M24';
+          const CANON = 'Y6M1.4';
+
+          async function kvGet(ns, key, required=true) {
+            const u = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`;
+            const r = await fetch(u, {headers: auth});
+            if (r.status === 404 && !required) return null;
+            if (!r.ok) throw new Error(`KV GET ${key} ${r.status}`);
+            const t = await r.text();
+            try { return JSON.parse(t); } catch { return t; }
+          }
+          async function kvList(ns, prefix='') {
+            const out=[]; let cursor='';
+            do {
+              const u = new URL(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/keys`);
+              u.searchParams.set('limit','1000'); if (prefix) u.searchParams.set('prefix',prefix); if (cursor) u.searchParams.set('cursor',cursor);
+              const r = await fetch(u,{headers:auth}); if(!r.ok) throw new Error(`KV LIST ${r.status}`);
+              const b=await r.json(); if(!b.success) throw new Error('KV LIST failed');
+              out.push(...(b.result||[]).map(x=>x.name)); cursor=String(b.result_info?.cursor||'');
+            } while(cursor);
+            return out;
+          }
+          async function d1(sql, params=[]) {
+            const u=`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${dbId}/query`;
+            const r=await fetch(u,{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify({sql,params})});
+            if(!r.ok) throw new Error(`D1 HTTP ${r.status}: ${await r.text()}`);
+            const b=await r.json(); if(!b.success) throw new Error(`D1 query failed ${JSON.stringify(b.errors||[])}`);
+            return b.result?.[0]?.results||[];
+          }
+          function lessonIdsFromView(view) {
+            return (view?.lessons||[]).map(x=>x?.lessonId||x?.lesson_id||x?.id).filter(Boolean);
+          }
+          function summarizeLesson(rec) {
+            if (!rec || typeof rec!=='object') return rec;
+            return {
+              lessonId:rec.lessonId, subject:rec.subject, title:rec.title, active:rec.active,
+              displayIds:rec.displayIds||null,
+              views:rec.views||rec.viewIds||rec.catalogueViews||null,
+              video:rec.video||null, coreVideo:rec.core?.video||null,
+              contentStatus:rec.contentStatus||null
+            };
+          }
+
+          const canonical = await kvGet(lessonsNs, `lesson:${CANON}`);
+          console.log('CANONICAL_LESSON=' + JSON.stringify(summarizeLesson(canonical)));
+
+          const curriculumKeys = await kvList(lessonsNs, 'curriculum:');
+          const curriculumHits=[];
+          for (const key of curriculumKeys) {
+            const value=await kvGet(lessonsNs,key,false);
+            const text=JSON.stringify(value||'');
+            if(text.includes(CANON)||text.includes(DISPLAY)||text.includes('Linear Sequences')) {
+              curriculumHits.push({key,value});
+            }
+          }
+          console.log('CURRICULUM_HITS=' + JSON.stringify(curriculumHits));
+
+          const globalPtr = await kvGet(readNs,'rm:v1:scope:global:current');
+          const globalVersion=globalPtr?.current?.version;
+          if(!globalVersion) throw new Error('global prepared pointer unavailable');
+          const globalKey=`rm:v1:scope:global:version:${encodeURIComponent(globalVersion).replace(/%/g,'_')}`;
+          const globalEnv=await kvGet(readNs,globalKey);
+          const global=globalEnv?.payload;
+          const y6=global?.catalogues?.['maths-year6'];
+          const l3=global?.catalogues?.['maths-level3'];
+          console.log('GLOBAL_LESSON_TO_VIEWS=' + JSON.stringify(global?.lessonToViews?.[CANON]||null));
+          console.log('GLOBAL_Y6_HAS_CANON=' + JSON.stringify({has:lessonIdsFromView(y6).includes(CANON),lesson: (y6?.lessons||[]).find(x=>(x?.lessonId||x?.id)===CANON)||null}));
+          console.log('GLOBAL_L3_HAS_CANON=' + JSON.stringify({has:lessonIdsFromView(l3).includes(CANON),lesson: (l3?.lessons||[]).find(x=>(x?.lessonId||x?.id)===CANON)||null}));
+
+          const lessonScope='lesson_3AY6M1.4';
+          const lessonPtrKey=`rm:v1:scope:${lessonScope}:current`;
+          const lessonPtr=await kvGet(readNs,lessonPtrKey,false);
+          let lessonPrepared=null;
+          if(lessonPtr?.current?.version){
+            const k=`rm:v1:scope:${lessonScope}:version:${encodeURIComponent(lessonPtr.current.version).replace(/%/g,'_')}`;
+            lessonPrepared=await kvGet(readNs,k,false);
+          }
+          console.log('PREPARED_LESSON_SCOPE=' + JSON.stringify({pointer:lessonPtr,payload:lessonPrepared?.payload||null}));
+
+          const ent = await d1(`
+            SELECT COALESCE(lower(b.stream),'unresolved') AS stream,
+                   COALESCE(b.school_year,-1) AS school_year,
+                   COALESCE(b.maths_level,-1) AS maths_level,
+                   COALESCE(le.source_batch_code,'') AS source_batch_code,
+                   COUNT(*) AS row_count
+            FROM lesson_entitlements le
+            LEFT JOIN batch_definitions b ON b.batch_key=le.source_batch_code
+            WHERE le.lesson_id=?
+            GROUP BY stream, school_year, maths_level, source_batch_code
+            ORDER BY stream, school_year, maths_level, source_batch_code`,[CANON]);
+          console.log('ENTITLEMENT_GROUPS=' + JSON.stringify(ent));
+
+          const pre = await d1(`
+            SELECT COALESCE(lower(b.stream),'unresolved') AS stream,
+                   COALESCE(b.school_year,-1) AS school_year,
+                   COALESCE(b.maths_level,-1) AS maths_level,
+                   COALESCE(ope.batch_key,'') AS batch_key,
+                   COUNT(*) AS row_count
+            FROM online_prelesson_entitlements ope
+            LEFT JOIN batch_definitions b ON b.batch_key=ope.batch_key
+            WHERE ope.lesson_id=?
+            GROUP BY stream, school_year, maths_level, batch_key
+            ORDER BY stream, school_year, maths_level, batch_key`,[CANON]);
+          console.log('PRELESSON_GROUPS=' + JSON.stringify(pre));
+
+          const assignment = await d1(`
+            SELECT COALESCE(lower(b.stream),'unresolved') AS stream,
+                   COALESCE(b.school_year,-1) AS school_year,
+                   COALESCE(b.maths_level,-1) AS maths_level,
+                   COUNT(*) AS active_assignment_count
+            FROM student_batch_assignments a
+            JOIN batch_definitions b ON b.batch_key=a.batch_key
+            WHERE lower(b.subject)='maths' AND b.school_year=6
+              AND (a.effective_to IS NULL OR date('now')<a.effective_to)
+            GROUP BY stream, school_year, maths_level
+            ORDER BY stream, maths_level`);
+          console.log('ACTIVE_Y6_ASSIGNMENT_GROUPS=' + JSON.stringify(assignment));
+
+          console.log('AUDIT_L3T2M24_L3_ONLY_PASS');
+          NODE
