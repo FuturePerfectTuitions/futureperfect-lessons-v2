@@ -20,5 +20,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify live Portal accounts read-only
         run: |
-          sed -i 's#fpt-portal-v2-worker.futureperfectlessons.workers.dev#fpt-portal-v2-worker.future-perfect-tuitions.workers.dev#g' ops/verify_owner_special_logins_live_20260930.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('ops/verify_owner_special_logins_live_20260930.sh')
+          text = path.read_text()
+          old = '''  jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"'''
+          new = '''  jq -nc --arg u "$id" --arg p "$(tr -d '\\r\\n' < "$work/credential.txt")" '{username:$u,password:$p}' > "$work/login-body.json"'''
+          if old not in text:
+              raise SystemExit('expected verifier credential line not found')
+          path.write_text(text.replace(old, new))
+          PY
           bash ops/verify_owner_special_logins_live_20260930.sh
