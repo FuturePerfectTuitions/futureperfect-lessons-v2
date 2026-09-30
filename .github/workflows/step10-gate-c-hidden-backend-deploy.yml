@@ -1,16 +1,17 @@
 name: Step 10 Gate C bridge compatibility verification
 
 # Historical Gate C originally deployed the shared production Worker directly.
-# As of 2026-09-23 the canonical production deployment owner is
-# admin-superuser-production-deploy.yml, which deploys the composed
-# Quiz Bridge -> Admin Tools -> current Portal chain with rollback and live
-# compatibility checks. This workflow is intentionally verification-only so
-# a change to the Step 10 bridge cannot race a second production deployment.
+# As of 2026-09-23 the canonical production deployment owner is the current
+# capability-preserving forward-only deployment path, which deploys the composed
+# Quiz Bridge -> Admin Tools -> final Maths navigation -> current Portal chain
+# with live compatibility checks. This workflow is intentionally verification-only
+# so a change to the Step 10 bridge cannot race a second production deployment.
 on:
   pull_request:
     paths:
       - 'worker/src/index-step10-quiz-bridge.js'
       - 'worker/src/index-admin-tools.js'
+      - 'worker/src/index-maths-equivalent-navigation-final.js'
       - 'worker/src/index-phase24-trial-vr.js'
       - 'worker/wrangler.toml'
       - 'worker/migrations/0011_quiz_launch_codes.sql'
@@ -36,13 +37,15 @@ jobs:
           set -euo pipefail
           node --check worker/src/index-step10-quiz-bridge.js
           node --check worker/src/index-admin-tools.js
+          node --check worker/src/index-maths-equivalent-navigation-final.js
           node --check worker/src/index-phase24-trial-vr.js
           node tests/step10-quiz-bridge-static-verification.mjs
           node tests/cp12-quiz-redeem-v2.mjs
           node tests/shared-worker-entrypoint-preservation.mjs
           grep -Fq 'main = "src/index-step10-quiz-bridge.js"' worker/wrangler.toml
           grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
-          grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-admin-tools.js
+          grep -Fq "import currentWorker from './index-maths-equivalent-navigation-final.js';" worker/src/index-admin-tools.js
+          grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-maths-equivalent-navigation-final.js
       - name: Re-run established Portal regressions
         run: |
           set -euo pipefail
