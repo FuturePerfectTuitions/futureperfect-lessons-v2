@@ -35,7 +35,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-worker
       WRANGLER_VERSION: 4.125.0
-      DEPLOY_MESSAGE: Forward-only native prepared-model Maths programme and SATS presentation fix
+      DEPLOY_MESSAGE: Forward-only Year 6 label and Maths/SATS presentation fix
 
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +69,8 @@ jobs:
           grep -Fq "import currentWorker from './index-phase24-trial-vr.js';" worker/src/index-maths-equivalent-navigation-final.js
           grep -Fq "import nativePreparedWorker from './index-phase20-change14.js';" worker/src/index-maths-equivalent-navigation-final.js
           grep -Fq "from './access-read-model-sync-v2.js';" worker/src/admin-lesson-release-import-reconciled.js
-          grep -Fq 'maths-equivalent-navigation-final-v5-native-authority' worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq 'maths-equivalent-navigation-final-v6-year6-label' worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq "label:'Year 6'" worker/src/index-maths-equivalent-navigation-final.js
           grep -Fq 'd1-authoritative-sats-presentation-v2' worker/src/access-read-model-sync-v2.js
           grep -Fq 'LIVE_ENTITLEMENT_BATCH_DEFINITION_V1' worker/src/live-student-catalogue-overlay.js
           echo 'MATHS_EQUIVALENT_NAV_FINAL_PREFLIGHT_PASS'
@@ -99,7 +100,8 @@ jobs:
           grep -aFq 'Y6SM' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-year6-lessons' /tmp/y6-sats-worker.bin
           grep -aFq 'maths-sats' /tmp/y6-sats-worker.bin
-          grep -aFq 'maths-equivalent-navigation-final-v5-native-authority' /tmp/y6-sats-worker.bin
+          grep -aFq 'maths-equivalent-navigation-final-v6-year6-label' /tmp/y6-sats-worker.bin
+          grep -aFq 'Year 6' /tmp/y6-sats-worker.bin
           grep -aFq 'nativeCurrentMathsAuthority' /tmp/y6-sats-worker.bin
           grep -aFq 'reconcileNativeMathsHome' /tmp/y6-sats-worker.bin
           grep -aFq 'd1-authoritative-sats-presentation-v2' /tmp/y6-sats-worker.bin
