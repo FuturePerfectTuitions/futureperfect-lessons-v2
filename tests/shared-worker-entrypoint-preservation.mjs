@@ -1,4 +1,4 @@
-// deploy-trigger: maths-equivalent-navigation-final-v5-native-authority
+// deploy-trigger: maths-equivalent-navigation-final-v6-year6-label
 import fs from 'node:fs';
 
 const wrangler = fs.readFileSync('worker/wrangler.toml', 'utf8');
@@ -24,7 +24,7 @@ must(bridge, "const RELEASE_SOURCE='portal-live-maths11plus-release-v2'", 'L2/L3
 must(admin, "import currentWorker from './index-maths-equivalent-navigation-final.js';", 'final Maths navigation composition');
 must(finalMathsNavigation, "import currentWorker from './index-phase24-trial-vr.js';", 'final Maths navigation preserves current student chain');
 must(finalMathsNavigation, "import nativePreparedWorker from './index-phase20-change14.js';", 'final Maths navigation reads raw prepared authority');
-must(finalMathsNavigation, 'maths-equivalent-navigation-final-v5-native-authority', 'final Maths navigation live marker');
+must(finalMathsNavigation, 'maths-equivalent-navigation-final-v6-year6-label', 'final Maths navigation live marker');
 must(finalMathsNavigation, "url.pathname === '/api/v1/student/home'", 'final Maths home interception');
 must(finalMathsNavigation, 'nativeCurrentMathsAuthority', 'prepared programme authority');
 must(finalMathsNavigation, 'reconcileNativeMathsHome', 'native prepared-model reconciliation');
