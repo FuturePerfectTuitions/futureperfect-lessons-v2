@@ -97,6 +97,17 @@
   ],
   "verification": {
     "backendAndPreparedState": "PASS",
-    "ownerBrowserVerification": "PENDING_POST_REPAIR_REFRESH"
+    "ownerBrowserVerification": "VIDEO_BACKEND_PREPARED_PASS; MATHS_HOME_STILL_SHOWS_LESSONS_CARD; NAVIGATION_PRESENTATION_FOLLOW_UP_REQUIRED"
+  },
+  "postRepairBrowserEvidence": {
+    "date": "2026-09-30",
+    "ownerObservation": "After the L3-only canonical/prepared repair, the owner still sees a Lessons card on the Maths landing page.",
+    "classification": "SEPARATE_NAVIGATION_PRESENTATION_OPEN_ITEM",
+    "doNotConflateWith": [
+      "the prepared L3T2M24 video replacement",
+      "the L3-only lesson classification",
+      "permission to restore normal Year 6 membership for Y6M1.4"
+    ],
+    "nextInvestigationBoundary": "Trace the authenticated Maths home response and frontend equivalent-card normalisation for the specific account/session showing Lessons; do not mutate L3T2M24 video/catalogue state unless new evidence directly implicates it."
   }
 }

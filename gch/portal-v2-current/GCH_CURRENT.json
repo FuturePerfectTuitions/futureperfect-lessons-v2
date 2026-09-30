@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-30",
-  "authorityVersion": "6.5-l3t2m24-l3-only-prepared-state-production-pass",
+  "authorityVersion": "6.6-video-update-playbook-authoritative",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -17,6 +17,7 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-25_ADMIN_PORTAL_LOOKUP.json",
     "gch/portal-v2-current/WEBSITE_WORKFLOW_2026-09-23.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json",
     "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json"
@@ -61,6 +62,10 @@
     "l3t2m24L3OnlyOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json",
       "role": "highest scope-specific authority for Y6M1.4 / L3T2M24: L3 (11+) only, forbidden from normal Year 6 catalogue/access, with prepared lesson video cOQvDXnxxvX"
+    },
+    "videoUpdatePlaybook": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json",
+      "role": "general execution authority for Portal V2 lesson-video additions/replacements: exact pasted ScreenPal URL, canonical plus current prepared lesson parity, description-source grounding, and stream/catalogue/access changes only when owner classification changes"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
@@ -218,14 +223,16 @@
     "quiz bridge/path-scoped compatibility preservation",
     "shared Worker deployment preservation and regression verification",
     "forward-only production recovery",
-    "scope-specific L3T2M24 rule: Y6M1.4 is L3-only, excluded from normal Year 6 catalogue/access, and uses ScreenPal cOQvDXnxxvX"
+    "scope-specific L3T2M24 rule: Y6M1.4 is L3-only, excluded from normal Year 6 catalogue/access, and uses ScreenPal cOQvDXnxxvX",
+    "lesson-video additions/replacements with canonical + current prepared lesson parity, exact ScreenPal-ID verification, and stream-aware escalation"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes. A lesson-video mutation is not complete until the current prepared lesson stream variant also read-backs the exact new ScreenPal ID; a canonical LESSONS_KV write alone is insufficient.",
   "nextChangeProtocol": [
     "classify surface",
     "prove current main and live owner/version/bindings",
     "identify canonical and prepared authorities",
     "trace read/write workflow",
+    "for lesson-video changes, classify as same-stream replacement versus stream/catalogue change and follow GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json",
     "define forward-only recovery and preservation gates",
     "mutate only after gates pass",
     "verify canonical readback",
@@ -277,5 +284,40 @@
     "frontendPagesResult": "PASS",
     "preservationVerification": "PASS: classification, equivalent-navigation and conditional-L3-SATS tests, exact shared Worker composition, forward-only deployment, live runtime markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
     "ownerBrowserVerification": "PENDING_KIAAN_AND_DEVANSH_RETEST"
+  },
+  "latestDocumentationChange": {
+    "name": "Authoritative Portal lesson-video update playbook",
+    "date": "2026-09-30",
+    "status": "AUTHORITATIVE_CURRENT",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json",
+    "reason": "Repeated video updates exposed two avoidable failure classes: case-sensitive ScreenPal ID transcription error and canonical-only writes that left the live prepared lesson serving an obsolete video.",
+    "permanentExecutionRule": "For an unchanged lesson classification, update and verify canonical lesson state plus the current prepared lesson stream variant in one pass. Do not touch global catalogue/access state. Escalate to catalogue/access rebuild only when the owner changes the lesson stream classification.",
+    "regressionEvidence": [
+      "Y6T1E01: uppercase I was initially used where the pasted URL contained lowercase l; exact pasted URL is now mandatory.",
+      "L3T2M24: canonical cOQvDXnxxvX coexisted with stale prepared cOVTQxn3IMa, so the browser served the old video until the prepared lesson scope was republished.",
+      "L3T2M24: owner classified lesson as L3/11+-only, requiring removal of normal Year 6 alias/catalogue access as a separate classification repair."
+    ]
+  },
+  "latestVideoUpdateOperationalRule": {
+    "pureVideoOrDescriptionReplacement": [
+      "resolve canonical lesson and existing stream membership",
+      "take exact ScreenPal ID from owner-pasted URL",
+      "write/read back canonical video/core.video and approved description/status",
+      "publish/read back current prepared lesson stream variant",
+      "prove old replacement ID absent from active prepared variant",
+      "browser/public smoke-check when authenticated access is available"
+    ],
+    "classificationChangeOnly": [
+      "change canonical display/catalogue membership deliberately",
+      "update prepared global catalogue and lessonToViews",
+      "refresh only affected access snapshots",
+      "publish only legitimate prepared stream video variants"
+    ],
+    "prohibited": [
+      "canonical-KV-only success claim",
+      "screenshot OCR for ambiguous ScreenPal IDs when pasted URL is available",
+      "global catalogue/access mutation for an ordinary same-classification video replacement",
+      "rollback/revert recovery"
+    ]
   }
 }
