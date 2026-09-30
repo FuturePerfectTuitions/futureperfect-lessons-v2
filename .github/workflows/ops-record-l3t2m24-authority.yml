@@ -1,0 +1,175 @@
+name: Record L3T2M24 L3-only authority
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ops-record-l3t2m24-authority.yml
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Write scope-specific authority and update current manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const dir = path.join('gch','portal-v2-current');
+          const overridePath = path.join(dir,'GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json');
+          const manifestPath = path.join(dir,'GCH_CURRENT.json');
+
+          const override = {
+            schema: 'fpt.portal.gch.override.v1',
+            documentType: 'SCOPE_SPECIFIC_OWNER_AUTHORITY_OVERRIDE',
+            status: 'AUTHORITATIVE_CURRENT',
+            effectiveDate: '2026-09-30',
+            repository: 'FuturePerfectTuitions/futureperfect-lessons-v2',
+            scope: {
+              canonicalLessonId: 'Y6M1.4',
+              displayLessonId: 'L3T2M24',
+              title: 'Linear Sequences',
+              subject: 'maths'
+            },
+            precedence: {
+              rule: 'Within the Y6M1.4 / L3T2M24 lesson scope, this override supersedes any generic Year 6/L3 equivalent-curriculum alias rule that would present, catalogue or grant this lesson through the normal Year 6 stream.',
+              doesNotChange: [
+                'The internal canonical lessonId remains Y6M1.4.',
+                'Generic Year 6/L3 equivalence remains valid for other lessons unless separately overridden.',
+                'L3/11+ resources and legitimate L3 access remain preserved.'
+              ]
+            },
+            ownerRequirement: {
+              classification: 'L3_11PLUS_ONLY',
+              statement: 'L3T2M24 Linear Sequences is an L3 (11+) lesson only. It must not appear anywhere in the normal Year 6 stream and must not be granted merely because a student is a normal Year 6 Maths student.',
+              forbiddenNormalYear6DisplayId: 'Y6T2M8'
+            },
+            authoritativeState: {
+              canonicalLessonsKv: {
+                key: 'lesson:Y6M1.4',
+                displayIds: { 'maths-level3': 'L3T2M24' },
+                forbiddenDisplayIdKey: 'maths-year6',
+                targetScreenPalId: 'cOQvDXnxxvX'
+              },
+              curriculum: {
+                requiredMembership: ['curriculum:MATHS_L3'],
+                forbiddenMembership: ['curriculum:MATHS_Y6']
+              },
+              preparedGlobal: {
+                lessonToViews: { 'Y6M1.4': ['maths-level3'] },
+                requiredCatalogue: 'maths-level3',
+                forbiddenCatalogue: 'maths-year6'
+              },
+              preparedLesson: {
+                scope: 'lesson:Y6M1.4',
+                requiredVideoVariant: 'elevenPlus',
+                forbiddenVideoVariant: 'normal',
+                targetScreenPalId: 'cOQvDXnxxvX',
+                forbiddenOldScreenPalId: 'cOVTQxn3IMa'
+              },
+              directEntitlementsAtRepairBoundary: 0,
+              onlinePreLessonEntitlementsAtRepairBoundary: 0
+            },
+            incidentDiagnosis: {
+              rootCauseClassification: 'CANONICAL_ALIAS_PLUS_STALE_PREPARED_LESSON',
+              findings: [
+                'Canonical lesson:Y6M1.4 still exposed displayIds.maths-year6=Y6T2M8 even though curriculum:MATHS_L3 was the only curriculum list containing the lesson.',
+                'Prepared global state materialised Y6M1.4 into both maths-year6 and maths-level3.',
+                'Prepared lesson scope lesson:Y6M1.4 still contained the old ScreenPal cOVTQxn3IMa after the canonical record had already been changed to cOQvDXnxxvX.',
+                'A canonical-only video write was therefore insufficient because the live browser consumes prepared read models.'
+              ]
+            },
+            productionRepair: {
+              mode: 'FORWARD_ONLY',
+              repositoryCommitTrigger: 'eb29de5cdda1eee1625b7a2196c9f80e0d8ae2af',
+              workflow: '.github/workflows/ops-repair-l3t2m24-l3-only.yml',
+              workflowRun: 36750024969,
+              result: 'PASS',
+              actions: [
+                'Removed displayIds.maths-year6 from canonical lesson:Y6M1.4 while preserving maths-level3=L3T2M24.',
+                'Published a new immutable prepared global version with Y6M1.4 removed from maths-year6 and retained only in maths-level3.',
+                'Refreshed only access snapshots potentially affected by normal Year 6 membership/full-library/history/upsell state.',
+                'Published a new immutable prepared lesson version with the normal video variant removed and the elevenPlus video pointed to cOQvDXnxxvX.',
+                'Read-back verified that the old ScreenPal ID cOVTQxn3IMa and the normal Year 6 alias are absent from current prepared lesson state.'
+              ],
+              affectedAccessScopesRefreshed: 8,
+              accessScopesRetainingLessonViaLegitimateL3OrExplicitSource: 1,
+              unrelatedStudentAccessScopesRefreshed: 0,
+              directLessonEntitlementsAfterRepair: 0,
+              onlinePreLessonEntitlementsAfterRepair: 0
+            },
+            permanentInvariants: [
+              'Never infer normal-Year-6 eligibility for Y6M1.4 from the internal canonical lessonId alone.',
+              'Any catalogue/global read-model rebuild must keep Y6M1.4 out of maths-year6 and keep L3T2M24 in maths-level3.',
+              'Any lesson-detail rebuild must publish only the elevenPlus video variant for this lesson and must not recreate a normal variant.',
+              'The active L3T2M24 lesson video is ScreenPal cOQvDXnxxvX; cOVTQxn3IMa is obsolete for this lesson.',
+              'Do not remove or downgrade legitimate L3/11+ access while enforcing the normal-Year-6 exclusion.',
+              'Production recovery remains forward-only; never rollback or revert later valid Portal changes to enforce this rule.'
+            ],
+            verification: {
+              backendAndPreparedState: 'PASS',
+              ownerBrowserVerification: 'PENDING_POST_REPAIR_REFRESH'
+            }
+          };
+
+          fs.writeFileSync(overridePath, JSON.stringify(override, null, 2) + '\n');
+
+          const current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          const overrideRel = 'gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json';
+          current.effectiveDate = '2026-09-30';
+          current.authorityVersion = '6.5-l3t2m24-l3-only-prepared-state-production-pass';
+          if (!String(current.purpose || '').includes('L3T2M24')) {
+            current.purpose = String(current.purpose || '').replace(/\.$/, '') + ', plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement.';
+          }
+          if (!Array.isArray(current.readOrder)) current.readOrder = [];
+          if (!current.readOrder.includes(overrideRel)) {
+            const y6Index = current.readOrder.indexOf('gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json');
+            current.readOrder.splice(y6Index >= 0 ? y6Index + 1 : current.readOrder.length, 0, overrideRel);
+          }
+          current.authorityComposition = current.authorityComposition || {};
+          current.authorityComposition.l3t2m24L3OnlyOverride = {
+            path: overrideRel,
+            role: 'highest scope-specific authority for Y6M1.4 / L3T2M24: L3 (11+) only, forbidden from normal Year 6 catalogue/access, with prepared lesson video cOQvDXnxxvX'
+          };
+          if (current.latestRepositoryChange && current.latestRepositoryChange.name !== 'L3T2M24 L3-only canonical/prepared-state repair') {
+            current.previousMathsEquivalentNavigationChange = current.latestRepositoryChange;
+          }
+          current.latestRepositoryChange = {
+            name: 'L3T2M24 L3-only canonical/prepared-state repair',
+            date: '2026-09-30',
+            status: 'PRODUCTION_PASS_PENDING_OWNER_BROWSER_REFRESH_VERIFICATION',
+            authority: overrideRel,
+            canonicalLessonId: 'Y6M1.4',
+            displayLessonId: 'L3T2M24',
+            ownerRule: 'This lesson is L3/11+ only and must never appear through normal Year 6.',
+            removedNormalYear6DisplayId: 'Y6T2M8',
+            activeScreenPalId: 'cOQvDXnxxvX',
+            obsoleteScreenPalId: 'cOVTQxn3IMa',
+            productionWorkflowRun: 36750024969,
+            productionWorkflowResult: 'PASS',
+            affectedAccessScopesRefreshed: 8,
+            preservationVerification: 'PASS: L3 catalogue/resources preserved; only normal-Year-6 mapping plus stale prepared normal video state removed; no rollback/revert and no unrelated access-scope rebuild.',
+            ownerBrowserVerification: 'PENDING_POST_REPAIR_REFRESH'
+          };
+          if (!Array.isArray(current.websiteWorkflowCoverage)) current.websiteWorkflowCoverage = [];
+          const coverage = 'scope-specific L3T2M24 rule: Y6M1.4 is L3-only, excluded from normal Year 6 catalogue/access, and uses ScreenPal cOQvDXnxxvX';
+          if (!current.websiteWorkflowCoverage.includes(coverage)) current.websiteWorkflowCoverage.push(coverage);
+
+          fs.writeFileSync(manifestPath, JSON.stringify(current, null, 2) + '\n');
+          JSON.parse(fs.readFileSync(overridePath, 'utf8'));
+          JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          NODE
+
+          git config user.name "FuturePerfectTuitions"
+          git config user.email "futureperfectlessons@gmail.com"
+          git add gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json gch/portal-v2-current/GCH_CURRENT.json
+          git diff --cached --check
+          git commit -m "Record L3T2M24 L3-only production authority"
+          git push origin HEAD:main
