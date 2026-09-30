@@ -6,7 +6,7 @@ import {
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v5-native-authority';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v6-year6-label';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
@@ -94,7 +94,7 @@ function presentationView(rawView) {
   if (!rawView) return null;
   const id = norm(rawView.viewId);
   if (id === YEAR6_CANONICAL_VIEW) {
-    return { ...rawView, viewId:YEAR6_CANONICAL_VIEW, label:'Lessons' };
+    return { ...rawView, viewId:YEAR6_CANONICAL_VIEW, label:'Year 6' };
   }
   if (id === L3_VIEW) {
     return { ...rawView, viewId:L3_VIEW, label:'L3' };
@@ -114,7 +114,7 @@ function reconcileRecentShares(body, authority) {
     const id = norm(item?.viewId);
     if (id === YEAR6_LESSONS_VIEW) {
       if (programmeId === YEAR6_CANONICAL_VIEW) {
-        next.push({ ...item, viewId:YEAR6_CANONICAL_VIEW, viewLabel:'Lessons' });
+        next.push({ ...item, viewId:YEAR6_CANONICAL_VIEW, viewLabel:'Year 6' });
       }
       continue;
     }
@@ -123,7 +123,7 @@ function reconcileRecentShares(body, authority) {
       continue;
     }
     if (id === YEAR6_CANONICAL_VIEW && programmeId === YEAR6_CANONICAL_VIEW) {
-      next.push({ ...item, viewLabel:'Lessons' });
+      next.push({ ...item, viewLabel:'Year 6' });
       continue;
     }
     if (id === L3_VIEW && programmeId === L3_VIEW) {
@@ -177,7 +177,7 @@ function hasReleasedSats(year6Split) {
   return Array.isArray(year6Split?.sats) && year6Split.sats.some(row => row?.locked === false);
 }
 
-// Compatibility exports retained for older verification/importers. v5 does not
+// Compatibility exports retained for older verification/importers. v6 does not
 // use either function to infer SATS or programme identity. Native prepared views
 // are the sole authority for Year 6/L3/SATS presentation.
 function suppressUnreleasedL3Sats() { return false; }
@@ -221,8 +221,9 @@ async function finalLegacyLessonsAlias(request, env, ctx) {
 }
 
 // Retained name for compatibility with existing tests/importers. The only
-// synthetic route still supported is the historical Lessons alias; SATS is
-// always fetched from the native prepared `maths-sats` view.
+// synthetic route still supported is the historical Lessons alias; its displayed
+// teaching label is Year 6. SATS is always fetched from the native prepared
+// `maths-sats` view.
 async function finalSyntheticList(request, env, ctx, kind) {
   return kind === 'sats'
     ? finalNativeSatsList(request, env, ctx)

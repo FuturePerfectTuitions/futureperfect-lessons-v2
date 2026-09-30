@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-09-30",
-  "authorityVersion": "6.6-video-update-playbook-authoritative",
+  "authorityVersion": "6.7-video-playbook-plus-year6-label",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, the owner-authoritative ordinary Year 6 teaching-card label Year 6 rather than Lessons, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -49,7 +49,7 @@
     },
     "y6SatsAndMathsEquivalentOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
-      "role": "higher authority for Year 6 SAT lesson-by-lesson access, authoritative Y6SM1..Y6SM19 mapping, canonical batch-definition classification of Maths equivalent-view entitlements, conditional L3 SATS presentation, and final/browser-boundary navigation for Year 4/L1, Year 5/L2 and Year 6/L3"
+      "role": "higher authority for Year 6 SAT lesson-by-lesson access, authoritative Y6SM1..Y6SM19 mapping, canonical batch-definition classification of Maths equivalent-view entitlements, conditional L3 SATS presentation, the ordinary Year 6 teaching label Year 6, and final/browser-boundary navigation for Year 4/L1, Year 5/L2 and Year 6/L3"
     },
     "y6EquivalentRosterEvidence": {
       "path": "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
@@ -85,6 +85,21 @@
     "affectedAccessScopesRefreshed": 8,
     "preservationVerification": "PASS: L3 catalogue/resources preserved; only normal-Year-6 mapping plus stale prepared normal video state removed; no rollback/revert and no unrelated access-scope rebuild.",
     "ownerBrowserVerification": "PENDING_POST_REPAIR_REFRESH"
+  },
+  "latestYear6LabelChange": {
+    "name": "Ordinary Year 6 teaching-card label",
+    "date": "2026-09-30",
+    "status": "SOURCE_CHANGE_PENDING_MERGE_DEPLOYMENT_AND_OWNER_BROWSER_VERIFICATION",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_Y6_SATS_DIRECT_RELEASE.json",
+    "ownerRule": "Ordinary Year 6 students and catalogue presentation must show Year 6, never Lessons, while retaining the existing separate SATS presentation and all Year 6/L3 equivalence/access semantics.",
+    "backendSource": "worker/src/index-maths-equivalent-navigation-final.js",
+    "backendMarker": "maths-equivalent-navigation-final-v6-year6-label",
+    "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
+    "frontendSources": [
+      "assets/maths-equivalent-home-normalizer.js",
+      "assets/year6-display-sequence-fix.js"
+    ],
+    "preservation": "Display/navigation correction only; no D1/KV entitlement, batch, release, history, Trial/session, protected-answer, quiz-bridge, Replace Resource, parent-email, video-playbook or L3T2M24 L3-only mutation."
   },
   "latestProductionIncidentRecovery": {
     "name": "Parent-email test-routing/idempotency recovery",
@@ -203,7 +218,7 @@
     "primary frontend home-response normalization before history grouping/rendering",
     "final-boundary Maths equivalent Year/L-level navigation: Year 4/L1, Year 5/L2 and Year 6/L3",
     "conditional L3 SATS presentation based on actual released/PreLesson-available SATS access",
-    "Year 6 Lessons/SATS synthetic navigation backed by canonical Year 6 authorization",
+    "ordinary Year 6 teaching card labelled Year 6 plus separate SATS navigation backed by canonical Year 6 authorization",
     "lesson release import and prepared access publication",
     "Year 6 SAT direct release and Y6SM CSV/display resolution",
     "ordinary student login provisioning",
@@ -226,7 +241,7 @@
     "scope-specific L3T2M24 rule: Y6M1.4 is L3-only, excluded from normal Year 6 catalogue/access, and uses ScreenPal cOQvDXnxxvX",
     "lesson-video additions/replacements with canonical + current prepared lesson parity, exact ScreenPal-ID verification, and stream-aware escalation"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes. A lesson-video mutation is not complete until the current prepared lesson stream variant also read-backs the exact new ScreenPal ID; a canonical LESSONS_KV write alone is insufficient.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. The ordinary Year 6 teaching card must be labelled Year 6, never Lessons, while SATS remains a separate presentation under the existing access rules. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes. A lesson-video mutation is not complete until the current prepared lesson stream variant also read-backs the exact new ScreenPal ID; a canonical LESSONS_KV write alone is insufficient.",
   "nextChangeProtocol": [
     "classify surface",
     "prove current main and live owner/version/bindings",
@@ -265,25 +280,26 @@
       "Year 6/L3"
     ],
     "l3Presentation": "L3 only unless at least one SATS lesson is genuinely released or PreLesson-available; then L3 + SATS",
-    "ordinaryYear6Presentation": "Lessons + SATS",
+    "ordinaryYear6PresentationAtThatTime": "Lessons + SATS",
+    "currentOrdinaryYear6Presentation": "Year 6 + SATS under the existing SATS presentation/access rule",
     "liveCatalogueSource": "worker/src/live-student-catalogue-overlay.js",
     "liveEntitlementMarker": "LIVE_ENTITLEMENT_BATCH_DEFINITION_V1",
     "finalNavigationSource": "worker/src/index-maths-equivalent-navigation-final.js",
-    "finalNavigationMarker": "maths-equivalent-navigation-final-v3",
+    "finalNavigationMarker": "maths-equivalent-navigation-final-v6-year6-label",
     "backendConditionalSatsCommit": "0e5abb6c267f549a6a75a641a1690bff65f196f3",
     "backendConditionalSatsVerificationCommit": "e0c071bf37540152d43512f0a18c91d6c8da7ac4",
     "backendDeploymentCommit": "5994c5df1fed5324c6927f364b0f4ef6781da3ed",
     "productionWorkflowRun": 36313764780,
-    "productionWorkflowResult": "PASS",
+    "productionWorkflowResult": "PASS_PRE_2026_09_30_LABEL_CHANGE",
     "workerVersion": "176996e8-ca8a-43d6-8a5a-da5684a464d6",
     "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
     "frontendPrimaryNormalizer": "assets/maths-equivalent-home-normalizer.js",
     "frontendPrimaryNormalizerCommit": "a80e08ef865c9b5b8205351608bcbb3c658466e5",
     "frontendLoaderCommit": "122a229db6914676c682ca61baceeb99ae96a4c3",
     "frontendPagesRun": 36313574498,
-    "frontendPagesResult": "PASS",
-    "preservationVerification": "PASS: classification, equivalent-navigation and conditional-L3-SATS tests, exact shared Worker composition, forward-only deployment, live runtime markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
-    "ownerBrowserVerification": "PENDING_KIAAN_AND_DEVANSH_RETEST"
+    "frontendPagesResult": "PASS_PRE_2026_09_30_LABEL_CHANGE",
+    "preservationVerification": "PASS for the pre-2026-09-30 equivalent-navigation deployment: classification, equivalent-navigation and conditional-L3-SATS tests, exact shared Worker composition, forward-only deployment, live runtime markers, bindings, quiz bridge, Replace Resource, lesson-release import, Trial runtime and live parent-email routing all passed.",
+    "ownerBrowserVerification": "PENDING_POST_2026_09_30_YEAR6_LABEL_CHANGE"
   },
   "latestDocumentationChange": {
     "name": "Authoritative Portal lesson-video update playbook",
