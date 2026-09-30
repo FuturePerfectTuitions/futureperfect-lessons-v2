@@ -40,12 +40,12 @@
     "finalCompositionSource": "worker/src/index-admin-tools.js",
     "finalCompositionRule": "index-admin-tools.js delegates ordinary requests to index-maths-equivalent-navigation-final.js; that wrapper uses the native prepared Year 6/L3/SATS views as the final current-curriculum authority, preserves equivalent-pair de-duplication, labels the ordinary canonical Year 6 teaching card Year 6, and preserves the separate entitlement-driven SATS card.",
     "syntheticPresentationViews": {
-      "maths-year6-lessons": "legacy compatibility alias only; delegates authorization to canonical maths-year6 and must display the teaching label Year 6 if reached",
+      "maths-year6-lessons": "normal-curriculum presentation/compatibility route; delegates authorization to canonical maths-year6, preserves the existing non-SATS teaching-list split, and displays the teaching label Year 6",
       "maths-sats": "separate SATS presentation backed by the authoritative SAT lesson subset"
     },
     "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
     "frontendPrimaryNormalizer": "assets/maths-equivalent-home-normalizer.js",
-    "frontendPrimaryNormalizerRule": "Normalize the /api/v1/student/home JSON response before phase10-history records groups and before phase7 renders cards. Current Year 4/L1 and Year 5/L2 pairs collapse to L1/L2. A current L3 + Year 6 alias collapses to L3, with SATS added only under the existing genuine-access rule. An ordinary Year 6 card remains the canonical maths-year6 card and is labelled Year 6; it must never be relabelled Lessons.",
+    "frontendPrimaryNormalizerRule": "Normalize the /api/v1/student/home JSON response before phase10-history records groups and before phase7 renders cards. Current Year 4/L1 and Year 5/L2 pairs collapse to L1/L2. A current L3 + Year 6 alias collapses to L3, with SATS added only under the existing genuine-access rule. An ordinary Year 6 teaching card preserves the existing normal-curriculum route/split and is labelled Year 6; it must never be relabelled Lessons.",
     "frontendPrimaryNormalizerCommit": "a80e08ef865c9b5b8205351608bcbb3c658466e5",
     "frontendLoaderCommit": "122a229db6914676c682ca61baceeb99ae96a4c3",
     "frontendPagesRun": 36313574498,
