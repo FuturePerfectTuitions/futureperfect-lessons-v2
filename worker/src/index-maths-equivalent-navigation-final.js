@@ -1,6 +1,6 @@
 import currentWorker from './index-phase24-trial-vr.js';
 import nativePreparedWorker from './index-phase20-change14.js';
-import {
+import mathsSyntheticWorker, {
   splitYear6Lessons,
   mathsPresentationRole
 } from './index-phase20-change15.js';
@@ -262,7 +262,7 @@ async function reconcileOwnerSpecialHome(request, env, ctx, body) {
   const english = namedSubject(body, 'english');
   changed = markExistingViewsCurrent(english, rule.englishCurrent) || changed;
 
-  const sats = await loadViewList(nativePreparedWorker, request, env, ctx, YEAR6_SATS_VIEW);
+  const sats = await loadViewList(mathsSyntheticWorker, request, env, ctx, YEAR6_SATS_VIEW);
   if (sats.response.ok && sats.body?.ok && Array.isArray(sats.rows)) {
     changed = upsertOwnerSatsView(maths, sats) || changed;
   }
@@ -288,7 +288,7 @@ function hasReleasedSats(year6Split) {
 // presentation correction does not infer SATS or programme identity. Native
 // prepared views remain the authority for ordinary Year 6/L3/SATS presentation;
 // the two owner logins have an exact-ID final presentation rule backed by their
-// existing views and authenticated native SATS list access.
+// existing views and authenticated SATS list access.
 function suppressUnreleasedL3Sats() { return false; }
 function suppressUnpairedL3Sats() { return false; }
 
@@ -323,7 +323,7 @@ async function finalHome(request, env, ctx) {
 }
 
 async function finalNativeSatsList(request, env, ctx) {
-  const loaded = await loadViewList(nativePreparedWorker, request, env, ctx, YEAR6_SATS_VIEW);
+  const loaded = await loadViewList(mathsSyntheticWorker, request, env, ctx, YEAR6_SATS_VIEW);
   if (!loaded.response.ok || !loaded.body?.ok || !Array.isArray(loaded.rows)) return loaded.response;
   if (loaded.body.view) loaded.body.view = presentationView(loaded.body.view);
   return responseLike(loaded.response, loaded.body);
@@ -336,10 +336,9 @@ async function finalLegacyLessonsAlias(request, env, ctx) {
   return responseLike(loaded.response, loaded.body);
 }
 
-// Retained name for compatibility with existing tests/importers. The only
-// synthetic route still supported is the historical Lessons alias; its displayed
-// teaching label is Year 6. SATS is always fetched from the native prepared
-// `maths-sats` view.
+// Retained name for compatibility with existing tests/importers. The historical
+// Lessons alias still displays as Year 6; SATS delegates to the established
+// change15 synthetic split over the canonical Year 6 catalogue.
 async function finalSyntheticList(request, env, ctx, kind) {
   return kind === 'sats'
     ? finalNativeSatsList(request, env, ctx)
