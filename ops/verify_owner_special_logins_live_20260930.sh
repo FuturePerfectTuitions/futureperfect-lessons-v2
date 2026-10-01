@@ -37,11 +37,20 @@ for label in 'L1' 'L2' 'L3' 'SATS'; do grep -Fxq "$label" "$work/maths-11.txt"; 
 for bad in 'Year 4' 'Year 5' 'Year 6'; do ! grep -Fxq "$bad" "$work/maths-11.txt"; done
 for label in 'Year 4 11+' 'Year 5 11+'; do grep -Fxq "$label" "$work/english-11.txt"; done
 
+curl -fsS -b "$work/cookies-admin0206" "$BASE/api/v1/student/views/maths-year6/lessons" > "$work/year6-admin0206.json"
+jq -e '.ok==true and (.lessons|type)=="array"' "$work/year6-admin0206.json" >/dev/null
+for bad in 'MATHS_L3_11P_T2M25_2026' 'MATHS_L3_11P_T3M43_2026'; do
+  ! jq -e --arg bad "$bad" '.lessons[] | select(((.lessonId // .lesson_id // "")|ascii_downcase)==($bad|ascii_downcase) or ((.displayLessonId // .display_lesson_id // "")|ascii_downcase)==($bad|ascii_downcase))' "$work/year6-admin0206.json" >/dev/null
+ done
+
+curl -fsS -b "$work/cookies-admin0206" "$BASE/api/v1/student/views/maths-sats/lessons" > "$work/sats-admin0206.json"
+jq -e '.ok==true and (.lessons|type)=="array" and (.view.label=="SATS")' "$work/sats-admin0206.json" >/dev/null
+
 curl -fsS -b "$work/cookies-admin0206" "$BASE/api/v1/student/quiz/eligibility" > "$work/quiz-normal.json"
 jq -e '.eligible==false' "$work/quiz-normal.json" >/dev/null
 curl -fsS -b "$work/cookies-admin0411" "$BASE/api/v1/student/quiz/eligibility" > "$work/quiz-11.json"
 jq -e '.ok==true and .eligible==true and .currentLevel=="L3"' "$work/quiz-11.json" >/dev/null
 
-echo 'OWNER_SPECIAL_LOGINS_LIVE_AUTH_AND_HOME_PASS'
-echo 'admin0206 maths: Year 3 | Year 4 | Year 5 | Year 6 | SATS; quiz=false'
+echo 'OWNER_SPECIAL_LOGINS_LIVE_AUTH_HOME_AND_YEAR6_BOUNDARY_PASS'
+echo 'admin0206 maths: Year 3 | Year 4 | Year 5 | Year 6 | SATS; Year 6 excludes 11+-only rows; quiz=false'
 echo 'admin0411 maths: L1 | L2 | L3 | SATS; quiz=true'
