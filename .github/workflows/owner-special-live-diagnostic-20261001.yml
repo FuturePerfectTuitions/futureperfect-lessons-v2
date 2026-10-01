@@ -1,0 +1,66 @@
+name: Owner special live diagnostic 2026-10-01
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/owner-special-live-diagnostic-20261001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect Admin0206 and Admin0411 live responses read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=/tmp/fpt-owner-diagnostic
+          rm -rf "$work"; mkdir -p "$work"
+          trap 'rm -rf "$work"' EXIT
+          openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in .github/secure-transfer/l3t1m02/private.pem.enc \
+            -out "$work/private.pem" -pass env:CLOUDFLARE_API_TOKEN
+          base64 -d .github/secure-transfer/owner-special-logins-20260930/credential.rsa.b64 > "$work/credential.rsa"
+          openssl pkeyutl -decrypt -inkey "$work/private.pem" -in "$work/credential.rsa" -out "$work/credential.txt"
+          secret="$(cat "$work/credential.txt")"; echo "::add-mask::$secret"; unset secret
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+
+          login(){
+            local id="$1"
+            jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"
+            local code
+            code="$(curl --max-time 20 -sS -c "$work/cookies-$id" -o "$work/login-$id.json" -w '%{http_code}' -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login")"
+            echo "$id login_http=$code ok=$(jq -r '.ok // false' "$work/login-$id.json")"
+            test "$code" = '200'
+            jq -e '.ok==true' "$work/login-$id.json" >/dev/null
+
+            code="$(curl --max-time 20 -sS -b "$work/cookies-$id" -o "$work/home-$id.json" -w '%{http_code}' "$BASE/api/v1/student/home")"
+            echo "$id home_http=$code ok=$(jq -r '.ok // false' "$work/home-$id.json")"
+            test "$code" = '200'
+            jq -e '.ok==true' "$work/home-$id.json" >/dev/null
+            echo "$id maths_labels=$(jq -r '[.subjects[]|select((.subject|ascii_downcase)=="maths")|.views[]|select(.current==true or .group=="current")|.label]|join("|")' "$work/home-$id.json")"
+          }
+
+          login admin0206
+          login admin0411
+
+          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0206" -o "$work/year6.json" -w '%{http_code}' "$BASE/api/v1/student/views/maths-year6/lessons")"
+          echo "admin0206 year6_http=$code ok=$(jq -r '.ok // false' "$work/year6.json") count=$(jq -r '(.lessons // [])|length' "$work/year6.json")"
+          echo "admin0206 year6_has_mean_median_mode=$(jq -r '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t2m25_2026") != null' "$work/year6.json")"
+          echo "admin0206 year6_has_advanced_statistics=$(jq -r '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t3m43_2026") != null' "$work/year6.json")"
+
+          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0206" -o "$work/sats.json" -w '%{http_code}' "$BASE/api/v1/student/views/maths-sats/lessons")"
+          echo "admin0206 sats_http=$code ok=$(jq -r '.ok // false' "$work/sats.json") label=$(jq -r '.view.label // ""' "$work/sats.json") count=$(jq -r '(.lessons // [])|length' "$work/sats.json")"
+
+          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0206" -o "$work/quiz-normal.json" -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
+          echo "admin0206 quiz_http=$code eligible=$(jq -r '.eligible // false' "$work/quiz-normal.json")"
+          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0411" -o "$work/quiz-11.json" -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
+          echo "admin0411 quiz_http=$code eligible=$(jq -r '.eligible // false' "$work/quiz-11.json") level=$(jq -r '.currentLevel // ""' "$work/quiz-11.json")"
