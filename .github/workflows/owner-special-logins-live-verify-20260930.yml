@@ -16,8 +16,60 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
+      - name: Inspect published prepared access snapshots read-only
+        run: |
+          node --input-type=module <<'NODE'
+          import {
+            SCOPE_SALT_KEY,
+            opaqueAccessScopeId,
+            resolveCurrentScope
+          } from './worker/src/access-read-model-sync.js';
+
+          const token = String(process.env.CLOUDFLARE_API_TOKEN || '').trim();
+          const account = String(process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+          if (!token || !account) throw new Error('CLOUDFLARE_DIAGNOSTIC_INPUT_REQUIRED');
+          const auth = { Authorization: `Bearer ${token}` };
+          const api = `https://api.cloudflare.com/client/v4/accounts/${account}`;
+          const settingsResponse = await fetch(`${api}/workers/scripts/fpt-portal-v2-worker/settings`, { headers: auth });
+          if (!settingsResponse.ok) throw new Error(`WORKER_SETTINGS_FAILED:${settingsResponse.status}`);
+          const settings = await settingsResponse.json();
+          const bindings = Array.isArray(settings?.result?.bindings) ? settings.result.bindings : [];
+          const readModelsNs = bindings.find(binding => binding?.name === 'READ_MODELS_KV' && binding?.type === 'kv_namespace')?.namespace_id || '';
+          if (!readModelsNs) throw new Error('READ_MODELS_KV_BINDING_MISSING');
+          const valueUrl = key => `${api}/storage/kv/namespaces/${readModelsNs}/values/${encodeURIComponent(key)}`;
+          const store = {
+            async get(key) {
+              const response = await fetch(valueUrl(key), { headers: auth });
+              if (response.status === 404) return null;
+              if (!response.ok) throw new Error(`KV_GET_FAILED:${response.status}`);
+              return response.text();
+            }
+          };
+          const scopeSalt = String(await store.get(SCOPE_SALT_KEY) || '').trim();
+          if (!/^[0-9a-f]{64}$/i.test(scopeSalt)) throw new Error('READ_MODEL_SCOPE_SALT_INVALID');
+          for (const id of ['admin0206', 'admin0411']) {
+            const scopeId = await opaqueAccessScopeId(id, scopeSalt);
+            const current = await resolveCurrentScope(store, `access:${scopeId}`);
+            const snapshot = current?.payload?.snapshot || {};
+            console.log(JSON.stringify({
+              id,
+              version: current.version,
+              views: (snapshot.views || []).map(view => ({
+                viewId: view.viewId,
+                label: view.label,
+                current: view.current,
+                group: view.group,
+                lockedPreview: view.lockedPreview,
+                openLessonCount: view.openLessonCount
+              })),
+              fullViewIds: snapshot.fullViewIds || [],
+              specialAreas: snapshot.specialAreas || []
+            }));
+          }
+          NODE
       - name: Inspect all live owner Portal views read-only
         run: |
           python3 - <<'PY'
