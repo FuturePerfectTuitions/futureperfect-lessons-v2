@@ -6,7 +6,7 @@ import {
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v7-owner-sats-fast';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v8-owner-fast-home';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
@@ -322,10 +322,10 @@ function suppressUnreleasedL3Sats() { return false; }
 function suppressUnpairedL3Sats() { return false; }
 
 async function finalHome(request, env, ctx) {
-  const [response, nativeResponse] = await Promise.all([
-    currentWorker.fetch(request, env, ctx),
-    nativePreparedWorker.fetch(request, env, ctx)
-  ]);
+  // Resolve the composed home first. Exact owner test logins have their own
+  // explicit presentation rule, so they must not wait for the separate prepared
+  // home computation that is only needed to reconcile ordinary student views.
+  const response = await currentWorker.fetch(request, env, ctx);
   if (!response.ok) return response;
   const body = await response.clone().json().catch(() => null);
   if (!body?.ok) return response;
@@ -335,6 +335,7 @@ async function finalHome(request, env, ctx) {
     return reconciled ? responseLike(response, body) : response;
   }
 
+  const nativeResponse = await nativePreparedWorker.fetch(request, env, ctx);
   if (!nativeResponse.ok) return response;
   const nativeBody = await nativeResponse.clone().json().catch(() => null);
   if (!nativeBody?.ok) return response;
