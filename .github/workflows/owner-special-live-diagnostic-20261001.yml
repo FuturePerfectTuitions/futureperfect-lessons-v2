@@ -1,4 +1,5 @@
 name: Owner special live diagnostic 2026-10-01
+# Verification rerun after Admin0206 Year 6/SATS list fast-path deployment.
 
 on:
   push:
