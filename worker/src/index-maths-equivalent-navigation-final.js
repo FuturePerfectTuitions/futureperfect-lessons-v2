@@ -1,12 +1,12 @@
 import currentWorker from './index-phase24-trial-vr.js';
 import nativePreparedWorker from './index-phase20-change14.js';
-import mathsSyntheticWorker, {
+import {
   splitYear6Lessons,
   mathsPresentationRole
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v6-year6-label';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v7-owner-sats-fast';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
@@ -233,6 +233,36 @@ function upsertOwnerSatsView(maths, loaded) {
   return true;
 }
 
+function upsertOwnerSatsSummary(maths) {
+  if (!maths || !Array.isArray(maths.views)) return false;
+  const existingIndex = maths.views.findIndex(view => norm(view?.viewId) === YEAR6_SATS_VIEW);
+  const existing = existingIndex >= 0 ? maths.views[existingIndex] : null;
+  const teaching = maths.views.find(view => {
+    const id = norm(view?.viewId);
+    return id === YEAR6_CANONICAL_VIEW || id === L3_VIEW;
+  }) || null;
+  const visible = Math.max(19, Number(existing?.visibleLessonCount || 0));
+  const inferredOpen = Math.min(visible, Math.max(0, Number(teaching?.openLessonCount || 0)));
+  const open = Number.isFinite(Number(existing?.openLessonCount))
+    ? Math.min(visible, Math.max(0, Number(existing.openLessonCount)))
+    : inferredOpen;
+  const next = presentationView({
+    ...(existing || {}),
+    viewId:YEAR6_SATS_VIEW,
+    subject:'maths',
+    current:true,
+    group:'current',
+    catalogueAvailable:true,
+    visibleLessonCount:visible,
+    openLessonCount:open,
+    lockedLessonCount:Math.max(0, visible - open),
+    lockedPreview:false
+  });
+  if (existingIndex >= 0) maths.views[existingIndex] = next;
+  else maths.views.push(next);
+  return true;
+}
+
 function orderSubjectViews(subject, preferredOrder) {
   if (!subject || !Array.isArray(subject.views)) return false;
   const rank = new Map(preferredOrder.map((id, index) => [norm(id), index]));
@@ -262,10 +292,10 @@ async function reconcileOwnerSpecialHome(request, env, ctx, body) {
   const english = namedSubject(body, 'english');
   changed = markExistingViewsCurrent(english, rule.englishCurrent) || changed;
 
-  const sats = await loadViewList(mathsSyntheticWorker, request, env, ctx, YEAR6_SATS_VIEW);
-  if (sats.response.ok && sats.body?.ok && Array.isArray(sats.rows)) {
-    changed = upsertOwnerSatsView(maths, sats) || changed;
-  }
+  // Owner home presentation must not synchronously render the entire canonical
+  // Year 6 catalogue merely to show the SATS card. The exact owner rule is the
+  // authority for card presence; the SATS list is resolved only when opened.
+  changed = upsertOwnerSatsSummary(maths) || changed;
 
   changed = orderSubjectViews(maths, rule.mathsOrder) || changed;
   return changed;
@@ -287,8 +317,7 @@ function hasReleasedSats(year6Split) {
 // Compatibility exports retained for older verification/importers. The owner
 // presentation correction does not infer SATS or programme identity. Native
 // prepared views remain the authority for ordinary Year 6/L3/SATS presentation;
-// the two owner logins have an exact-ID final presentation rule backed by their
-// existing views and authenticated SATS list access.
+// the two owner logins have an exact-ID final presentation rule.
 function suppressUnreleasedL3Sats() { return false; }
 function suppressUnpairedL3Sats() { return false; }
 
@@ -323,9 +352,19 @@ async function finalHome(request, env, ctx) {
 }
 
 async function finalNativeSatsList(request, env, ctx) {
-  const loaded = await loadViewList(mathsSyntheticWorker, request, env, ctx, YEAR6_SATS_VIEW);
+  const loaded = await loadViewList(currentWorker, request, env, ctx, YEAR6_CANONICAL_VIEW);
   if (!loaded.response.ok || !loaded.body?.ok || !Array.isArray(loaded.rows)) return loaded.response;
-  if (loaded.body.view) loaded.body.view = presentationView(loaded.body.view);
+  const rows = splitYear6Lessons(loaded.rows).sats;
+  loaded.body.lessons = rows;
+  loaded.body.view = presentationView({
+    ...(loaded.body.view || {}),
+    viewId:YEAR6_SATS_VIEW,
+    subject:'maths',
+    current:true,
+    group:'current',
+    catalogueAvailable:true,
+    ...countSummary(rows)
+  });
   return responseLike(loaded.response, loaded.body);
 }
 
@@ -337,8 +376,8 @@ async function finalLegacyLessonsAlias(request, env, ctx) {
 }
 
 // Retained name for compatibility with existing tests/importers. The historical
-// Lessons alias still displays as Year 6; SATS delegates to the established
-// change15 synthetic split over the canonical Year 6 catalogue.
+// Lessons alias still displays as Year 6; SATS is split from the current composed
+// canonical Year 6 list without forcing a prepared catalogue render during home.
 async function finalSyntheticList(request, env, ctx, kind) {
   return kind === 'sats'
     ? finalNativeSatsList(request, env, ctx)
@@ -373,6 +412,7 @@ export {
   nativeCurrentMathsAuthority,
   reconcileNativeMathsHome,
   reconcileOwnerSpecialHome,
+  upsertOwnerSatsSummary,
   refreshHomeViewSummary,
   hasReleasedSats,
   suppressUnreleasedL3Sats,
