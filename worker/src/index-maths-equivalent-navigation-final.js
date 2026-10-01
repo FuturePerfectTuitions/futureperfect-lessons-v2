@@ -6,11 +6,26 @@ import {
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v6-year6-label';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v7-owner-special-presentation';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
 const L3_VIEW = 'maths-level3';
+
+const OWNER_PRESENTATION_RULES = Object.freeze({
+  admin0206:Object.freeze({
+    mathsCurrent:Object.freeze(['maths-year3', 'maths-year4', 'maths-year5', YEAR6_CANONICAL_VIEW]),
+    englishCurrent:Object.freeze(['english-year3', 'english-year4', 'english-year5', 'english-year6']),
+    suppressMaths:Object.freeze(['maths-level1', 'maths-level2', L3_VIEW, YEAR6_LESSONS_VIEW]),
+    mathsOrder:Object.freeze(['maths-year3', 'maths-year4', 'maths-year5', YEAR6_CANONICAL_VIEW, YEAR6_SATS_VIEW])
+  }),
+  admin0411:Object.freeze({
+    mathsCurrent:Object.freeze(['maths-level1', 'maths-level2', L3_VIEW]),
+    englishCurrent:Object.freeze(['english-year4-11plus', 'english-year5-11plus']),
+    suppressMaths:Object.freeze([YEAR6_CANONICAL_VIEW, YEAR6_LESSONS_VIEW]),
+    mathsOrder:Object.freeze(['maths-level1', 'maths-level2', L3_VIEW, YEAR6_SATS_VIEW])
+  })
+});
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).toLowerCase();
@@ -61,10 +76,15 @@ function countSummary(rows = []) {
   };
 }
 
-function mathsSubject(body) {
+function namedSubject(body, subjectName) {
+  const wanted = norm(subjectName);
   return Array.isArray(body?.subjects)
-    ? body.subjects.find(subject => norm(subject?.subject) === 'maths') || null
+    ? body.subjects.find(subject => norm(subject?.subject) === wanted) || null
     : null;
+}
+
+function mathsSubject(body) {
+  return namedSubject(body, 'maths');
 }
 
 function mathsViews(body) {
@@ -74,6 +94,14 @@ function mathsViews(body) {
 
 function isCurrent(view) {
   return view?.group === 'current' || view?.current === true || (view?.group !== 'previous' && view?.current !== false);
+}
+
+function ownerPortalUserId(body) {
+  return norm(body?.student?.portalUserId || body?.student?.portal_user_id || body?.student?.username);
+}
+
+function ownerPresentationRule(body) {
+  return OWNER_PRESENTATION_RULES[ownerPortalUserId(body)] || null;
 }
 
 function nativeCurrentMathsAuthority(body) {
@@ -164,6 +192,85 @@ async function loadViewList(worker, request, env, ctx, viewId) {
   return { response, body, rows:body.lessons };
 }
 
+function markExistingViewsCurrent(subject, viewIds) {
+  if (!subject || !Array.isArray(subject.views)) return false;
+  const wanted = new Set(viewIds.map(norm));
+  let changed = false;
+  for (const view of subject.views) {
+    if (!wanted.has(norm(view?.viewId))) continue;
+    if (view?.current !== true || view?.group !== 'current') changed = true;
+    view.current = true;
+    view.group = 'current';
+  }
+  return changed;
+}
+
+function suppressExistingViews(subject, viewIds) {
+  if (!subject || !Array.isArray(subject.views)) return false;
+  const blocked = new Set(viewIds.map(norm));
+  const next = subject.views.filter(view => !blocked.has(norm(view?.viewId)));
+  if (next.length === subject.views.length) return false;
+  subject.views = next;
+  return true;
+}
+
+function upsertOwnerSatsView(maths, loaded) {
+  if (!maths || !Array.isArray(maths.views) || !Array.isArray(loaded?.rows)) return false;
+  if (norm(loaded?.body?.view?.viewId) !== YEAR6_SATS_VIEW) return false;
+  const existingIndex = maths.views.findIndex(view => norm(view?.viewId) === YEAR6_SATS_VIEW);
+  const existing = existingIndex >= 0 ? maths.views[existingIndex] : null;
+  const next = presentationView({
+    ...(existing || {}),
+    ...loaded.body.view,
+    viewId:YEAR6_SATS_VIEW,
+    current:true,
+    group:'current',
+    ...countSummary(loaded.rows),
+    catalogueAvailable:true
+  });
+  if (existingIndex >= 0) maths.views[existingIndex] = next;
+  else maths.views.push(next);
+  return true;
+}
+
+function orderSubjectViews(subject, preferredOrder) {
+  if (!subject || !Array.isArray(subject.views)) return false;
+  const rank = new Map(preferredOrder.map((id, index) => [norm(id), index]));
+  const before = subject.views.map(view => norm(view?.viewId)).join('|');
+  subject.views = subject.views
+    .map((view, index) => ({ view, index }))
+    .sort((a, b) => {
+      const ar = rank.has(norm(a.view?.viewId)) ? rank.get(norm(a.view?.viewId)) : preferredOrder.length + a.index;
+      const br = rank.has(norm(b.view?.viewId)) ? rank.get(norm(b.view?.viewId)) : preferredOrder.length + b.index;
+      return ar - br;
+    })
+    .map(item => item.view);
+  return before !== subject.views.map(view => norm(view?.viewId)).join('|');
+}
+
+async function reconcileOwnerSpecialHome(request, env, ctx, body) {
+  const rule = ownerPresentationRule(body);
+  if (!rule) return false;
+
+  const maths = mathsSubject(body);
+  if (!maths || !Array.isArray(maths.views)) return false;
+
+  let changed = false;
+  changed = markExistingViewsCurrent(maths, rule.mathsCurrent) || changed;
+  changed = suppressExistingViews(maths, rule.suppressMaths) || changed;
+
+  const english = namedSubject(body, 'english');
+  changed = markExistingViewsCurrent(english, rule.englishCurrent) || changed;
+
+  const sats = await loadViewList(nativePreparedWorker, request, env, ctx, YEAR6_SATS_VIEW);
+  if (sats.response.ok && sats.body?.ok && Array.isArray(sats.rows)) {
+    changed = upsertOwnerSatsView(maths, sats) || changed;
+  }
+
+  changed = orderSubjectViews(maths, rule.mathsOrder) || changed;
+  return changed;
+}
+
 function refreshHomeViewSummary(body, viewId, rows) {
   if (!Array.isArray(rows)) return false;
   const wanted = norm(viewId);
@@ -177,9 +284,11 @@ function hasReleasedSats(year6Split) {
   return Array.isArray(year6Split?.sats) && year6Split.sats.some(row => row?.locked === false);
 }
 
-// Compatibility exports retained for older verification/importers. v6 does not
+// Compatibility exports retained for older verification/importers. v7 does not
 // use either function to infer SATS or programme identity. Native prepared views
-// are the sole authority for Year 6/L3/SATS presentation.
+// are the sole authority for ordinary Year 6/L3/SATS presentation; the two owner
+// logins have an exact-ID final presentation rule backed by their existing views
+// and authenticated native SATS list access.
 function suppressUnreleasedL3Sats() { return false; }
 function suppressUnpairedL3Sats() { return false; }
 
@@ -190,7 +299,14 @@ async function finalHome(request, env, ctx) {
   ]);
   if (!response.ok) return response;
   const body = await response.clone().json().catch(() => null);
-  if (!body?.ok || !nativeResponse.ok) return response;
+  if (!body?.ok) return response;
+
+  if (ownerPresentationRule(body)) {
+    const reconciled = await reconcileOwnerSpecialHome(request, env, ctx, body);
+    return reconciled ? responseLike(response, body) : response;
+  }
+
+  if (!nativeResponse.ok) return response;
   const nativeBody = await nativeResponse.clone().json().catch(() => null);
   if (!nativeBody?.ok) return response;
 
@@ -250,10 +366,14 @@ export default {
 
 export {
   FINAL_MATHS_EQUIVALENT_NAV_MARKER,
+  OWNER_PRESENTATION_RULES,
   syntheticKind,
   countSummary,
+  ownerPortalUserId,
+  ownerPresentationRule,
   nativeCurrentMathsAuthority,
   reconcileNativeMathsHome,
+  reconcileOwnerSpecialHome,
   refreshHomeViewSummary,
   hasReleasedSats,
   suppressUnreleasedL3Sats,
