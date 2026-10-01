@@ -6,7 +6,7 @@ import {
 } from './index-phase20-change15.js';
 import { LIVE_ENTITLEMENT_BATCH_DEFINITION_MARKER } from './live-student-catalogue-overlay.js';
 
-const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v7-owner-special-presentation';
+const FINAL_MATHS_EQUIVALENT_NAV_MARKER = 'maths-equivalent-navigation-final-v6-year6-label';
 const YEAR6_CANONICAL_VIEW = 'maths-year6';
 const YEAR6_LESSONS_VIEW = 'maths-year6-lessons';
 const YEAR6_SATS_VIEW = 'maths-sats';
@@ -284,11 +284,11 @@ function hasReleasedSats(year6Split) {
   return Array.isArray(year6Split?.sats) && year6Split.sats.some(row => row?.locked === false);
 }
 
-// Compatibility exports retained for older verification/importers. v7 does not
-// use either function to infer SATS or programme identity. Native prepared views
-// are the sole authority for ordinary Year 6/L3/SATS presentation; the two owner
-// logins have an exact-ID final presentation rule backed by their existing views
-// and authenticated native SATS list access.
+// Compatibility exports retained for older verification/importers. The owner
+// presentation correction does not infer SATS or programme identity. Native
+// prepared views remain the authority for ordinary Year 6/L3/SATS presentation;
+// the two owner logins have an exact-ID final presentation rule backed by their
+// existing views and authenticated native SATS list access.
 function suppressUnreleasedL3Sats() { return false; }
 function suppressUnpairedL3Sats() { return false; }
 
