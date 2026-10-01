@@ -12,13 +12,13 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inspect Admin0206 and Admin0411 live responses read-only
+      - name: Diagnose Admin0206 SATS and Year 6 live read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -33,34 +33,48 @@ jobs:
           secret="$(cat "$work/credential.txt")"; echo "::add-mask::$secret"; unset secret
           BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
 
-          login(){
-            local id="$1"
-            jq -nc --arg u "$id" --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"
-            local code
-            code="$(curl --max-time 20 -sS -c "$work/cookies-$id" -o "$work/login-$id.json" -w '%{http_code}' -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login")"
-            echo "$id login_http=$code ok=$(jq -r '.ok // false' "$work/login-$id.json")"
-            test "$code" = '200'
-            jq -e '.ok==true' "$work/login-$id.json" >/dev/null
+          jq -nc --arg u 'admin0206' --rawfile p "$work/credential.txt" '{username:$u,password:$p}' > "$work/login-body.json"
+          set +e
+          login_meta="$(curl --connect-timeout 5 --max-time 25 -sS -c "$work/cookies" -o "$work/login.json" -w 'http=%{http_code} total=%{time_total}' -H 'Content-Type: application/json' --data @"$work/login-body.json" "$BASE/api/v1/student/auth/login")"
+          login_rc=$?
+          set -e
+          echo "ADMIN0206_LOGIN rc=$login_rc $login_meta ok=$(jq -r '.ok // false' "$work/login.json" 2>/dev/null || echo unreadable)"
+          test "$login_rc" = '0'
+          jq -e '.ok==true' "$work/login.json" >/dev/null
 
-            code="$(curl --max-time 20 -sS -b "$work/cookies-$id" -o "$work/home-$id.json" -w '%{http_code}' "$BASE/api/v1/student/home")"
-            echo "$id home_http=$code ok=$(jq -r '.ok // false' "$work/home-$id.json")"
-            test "$code" = '200'
-            jq -e '.ok==true' "$work/home-$id.json" >/dev/null
-            echo "$id maths_labels=$(jq -r '[.subjects[]|select((.subject|ascii_downcase)=="maths")|.views[]|select(.current==true or .group=="current")|.label]|join("|")' "$work/home-$id.json")"
-          }
+          set +e
+          home_meta="$(curl --connect-timeout 5 --max-time 25 -sS -b "$work/cookies" -o "$work/home.json" -w 'http=%{http_code} total=%{time_total}' "$BASE/api/v1/student/home")"
+          home_rc=$?
+          set -e
+          echo "ADMIN0206_HOME rc=$home_rc $home_meta ok=$(jq -r '.ok // false' "$work/home.json" 2>/dev/null || echo unreadable)"
+          if test "$home_rc" = '0' && jq -e '.ok==true' "$work/home.json" >/dev/null 2>&1; then
+            labels="$(jq -r '[.subjects[]|select((.subject|ascii_downcase)=="maths")|.views[]|select(.current==true or .group=="current")|.label]|join("|")' "$work/home.json")"
+            echo "ADMIN0206_MATHS_LABELS=$labels"
+            echo "ADMIN0206_SATS_CARD=$(jq -r '[.subjects[]|select((.subject|ascii_downcase)=="maths")|.views[]|select((.current==true or .group=="current") and .label=="SATS")]|length == 1' "$work/home.json")"
+          fi
 
-          login admin0206
-          login admin0411
+          set +e
+          y6_meta="$(curl --connect-timeout 5 --max-time 25 -sS -b "$work/cookies" -o "$work/year6.json" -w 'http=%{http_code} total=%{time_total}' "$BASE/api/v1/student/views/maths-year6/lessons")"
+          y6_rc=$?
+          set -e
+          echo "ADMIN0206_YEAR6 rc=$y6_rc $y6_meta ok=$(jq -r '.ok // false' "$work/year6.json" 2>/dev/null || echo unreadable) count=$(jq -r '(.lessons // [])|length' "$work/year6.json" 2>/dev/null || echo unreadable)"
+          if test "$y6_rc" = '0' && jq -e '.ok==true and (.lessons|type)=="array"' "$work/year6.json" >/dev/null 2>&1; then
+            echo "ADMIN0206_YEAR6_HAS_MEAN_MEDIAN_MODE=$(jq -r '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t2m25_2026") != null' "$work/year6.json")"
+            echo "ADMIN0206_YEAR6_HAS_ADVANCED_STATISTICS=$(jq -r '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t3m43_2026") != null' "$work/year6.json")"
+          fi
 
-          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0206" -o "$work/year6.json" -w '%{http_code}' "$BASE/api/v1/student/views/maths-year6/lessons")"
-          echo "admin0206 year6_http=$code ok=$(jq -r '.ok // false' "$work/year6.json") count=$(jq -r '(.lessons // [])|length' "$work/year6.json")"
-          echo "admin0206 year6_has_mean_median_mode=$(jq -r '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t2m25_2026") != null' "$work/year6.json")"
-          echo "admin0206 year6_has_advanced_statistics=$(jq -r '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t3m43_2026") != null' "$work/year6.json")"
+          set +e
+          sats_meta="$(curl --connect-timeout 5 --max-time 25 -sS -b "$work/cookies" -o "$work/sats.json" -w 'http=%{http_code} total=%{time_total}' "$BASE/api/v1/student/views/maths-sats/lessons")"
+          sats_rc=$?
+          set -e
+          echo "ADMIN0206_SATS_ROUTE rc=$sats_rc $sats_meta ok=$(jq -r '.ok // false' "$work/sats.json" 2>/dev/null || echo unreadable) label=$(jq -r '.view.label // ""' "$work/sats.json" 2>/dev/null || echo unreadable) count=$(jq -r '(.lessons // [])|length' "$work/sats.json" 2>/dev/null || echo unreadable)"
 
-          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0206" -o "$work/sats.json" -w '%{http_code}' "$BASE/api/v1/student/views/maths-sats/lessons")"
-          echo "admin0206 sats_http=$code ok=$(jq -r '.ok // false' "$work/sats.json") label=$(jq -r '.view.label // ""' "$work/sats.json") count=$(jq -r '(.lessons // [])|length' "$work/sats.json")"
-
-          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0206" -o "$work/quiz-normal.json" -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
-          echo "admin0206 quiz_http=$code eligible=$(jq -r '.eligible // false' "$work/quiz-normal.json")"
-          code="$(curl --max-time 20 -sS -b "$work/cookies-admin0411" -o "$work/quiz-11.json" -w '%{http_code}' "$BASE/api/v1/student/quiz/eligibility")"
-          echo "admin0411 quiz_http=$code eligible=$(jq -r '.eligible // false' "$work/quiz-11.json") level=$(jq -r '.currentLevel // ""' "$work/quiz-11.json")"
+          test "$home_rc" = '0'
+          jq -e '.ok==true' "$work/home.json" >/dev/null
+          jq -e '[.subjects[]|select((.subject|ascii_downcase)=="maths")|.views[]|select((.current==true or .group=="current") and .label=="SATS")]|length == 1' "$work/home.json" >/dev/null
+          test "$y6_rc" = '0'
+          jq -e '.ok==true and (.lessons|type)=="array"' "$work/year6.json" >/dev/null
+          jq -e '[.lessons[]? | (.lessonId // .lesson_id // .displayLessonId // .display_lesson_id // "") | ascii_downcase] | index("maths_l3_11p_t2m25_2026") == null and index("maths_l3_11p_t3m43_2026") == null' "$work/year6.json" >/dev/null
+          test "$sats_rc" = '0'
+          jq -e '.ok==true and .view.label=="SATS" and (.lessons|type)=="array"' "$work/sats.json" >/dev/null
+          echo 'ADMIN0206_EXACT_LIVE_REQUIREMENTS_PASS'
