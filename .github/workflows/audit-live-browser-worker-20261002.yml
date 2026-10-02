@@ -1,0 +1,95 @@
+name: Audit live browser Worker package
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/audit-live-browser-worker-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-browser-prod
+    steps:
+      - name: Download and inspect deployed browser Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+
+          echo '=== SETTINGS ==='
+          curl --fail --silent --show-error             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings"             "${AUTH[@]}" -o /tmp/settings.json
+          jq '{
+            success,
+            result:{
+              compatibility_date:.result.compatibility_date,
+              compatibility_flags:.result.compatibility_flags,
+              usage_model:.result.usage_model,
+              placement:.result.placement,
+              bindings:[.result.bindings[] | {
+                name,type,
+                namespace_id,
+                bucket_name,
+                database_name,
+                id,
+                service,
+                environment,
+                text:(if (.type=="plain_text") then .text else null end)
+              }]
+            }
+          }' /tmp/settings.json
+
+          echo '=== PACKAGE ==='
+          curl --fail --silent --show-error             --dump-header /tmp/package.headers             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"             "${AUTH[@]}" -o /tmp/package.bin
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib, re, pathlib, json
+          headers=pathlib.Path('/tmp/package.headers').read_text('latin-1',errors='replace')
+          body=pathlib.Path('/tmp/package.bin').read_bytes()
+          print('PACKAGE_SHA256', hashlib.sha256(body).hexdigest())
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)', headers)
+          ct=m.group(1).strip() if m else ''
+          print('CONTENT_TYPE',ct)
+          out=[]
+          if ct.lower().startswith('multipart/'):
+              msg=BytesParser(policy=default).parsebytes(
+                  ('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body
+              )
+              for i,p in enumerate(msg.iter_parts()):
+                  name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or f'part-{i}'
+                  data=p.get_payload(decode=True) or b''
+                  path=pathlib.Path('/tmp/worker-parts')/name
+                  path.parent.mkdir(parents=True,exist_ok=True)
+                  path.write_bytes(data)
+                  out.append((name,len(data),hashlib.sha256(data).hexdigest()))
+          else:
+              pathlib.Path('/tmp/worker-parts').mkdir(parents=True,exist_ok=True)
+              pathlib.Path('/tmp/worker-parts/single-script').write_bytes(body)
+              out=[('single-script',len(body),hashlib.sha256(body).hexdigest())]
+          print('PARTS',json.dumps(out))
+          markers=[
+              b'portal-oe75FQBP.js',
+              b'portal-D_COVybH.js',
+              b'lessons.futureperfect.education',
+              b'futureperfecttuitions.github.io',
+              b'fetch(',
+              b'ASSETS'
+          ]
+          for marker in markers:
+              print(marker.decode(errors='replace'), marker in body)
+          PY
+
+          echo '=== TEXT MARKERS ==='
+          grep -RInaE 'portal-|github.io|lessons.futureperfect.education|ASSETS|fetch\(' /tmp/worker-parts | head -n 200 || true
+          echo 'BROWSER_WORKER_AUDIT_COMPLETE'
