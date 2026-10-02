@@ -19,7 +19,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: fpt-portal-v2-rebuild-student-prod
     steps:
-      - name: Inspect READ_MODELS_KV global scope read-only
+      - name: Inspect exact prepared global read model read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -30,62 +30,66 @@ jobs:
 
           NS="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
           test -n "$NS"; test "$NS" != null
-          echo 'READ_MODELS_KV binding located.'
 
-          curl --fail --silent --show-error --get             "$API/storage/kv/namespaces/$NS/keys"             "${AUTH[@]}"             --data-urlencode 'prefix=global'             --data-urlencode 'limit=1000'             -o /tmp/keys.json
-          jq -e '.success == true' /tmp/keys.json >/dev/null
-          echo 'GLOBAL_KEYS='
-          jq -c '[.result[] | .name]' /tmp/keys.json
+          pointer_key='rm:v1:scope:global:current'
+          pointer_enc="$(python3 -c 'import urllib.parse; print(urllib.parse.quote("rm:v1:scope:global:current", safe=""))')"
+          curl --fail --silent --show-error             "$API/storage/kv/namespaces/$NS/values/$pointer_enc"             "${AUTH[@]}" -o /tmp/pointer.json
+
+          echo 'GLOBAL_POINTER_SUMMARY='
+          jq -c '{kind,scope,current:{version:.current.version,sha256:.current.sha256},previous:{version:.previous.version,sha256:.previous.sha256}}' /tmp/pointer.json
+
+          version="$(jq -r '.current.version' /tmp/pointer.json)"
+          test -n "$version"; test "$version" != null
+          version_key="rm:v1:scope:global:version:$version"
+          version_enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe="").replace("%","_"))' "$version_key")"
+
+          # Resolver encodes only the scope/version components, not the whole key separators.
+          encoded_version="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe="").replace("%","_"))' "$version")"
+          envelope_key="rm:v1:scope:global:version:$encoded_version"
+          envelope_enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$envelope_key")"
+
+          curl --fail --silent --show-error             "$API/storage/kv/namespaces/$NS/values/$envelope_enc"             "${AUTH[@]}" -o /tmp/envelope.json
+
+          jq -e '.kind=="prepared-read-model-envelope" and .scope=="global"' /tmp/envelope.json >/dev/null
 
           python3 - <<'PY'
-          import json, pathlib
-          keys=json.loads(pathlib.Path('/tmp/keys.json').read_text())['result']
-          for item in keys:
-              print(item['name'])
-          PY
+          import json,re,pathlib
+          obj=json.loads(pathlib.Path('/tmp/envelope.json').read_text())
+          payload=obj.get('payload') or {}
+          print('PAYLOAD_KEYS=',sorted(payload.keys()))
+          nav=payload.get('navigation') or payload.get('views') or []
+          print('NAVIGATION=',[(v.get('viewId'),v.get('label'),v.get('lessonCount'),v.get('visibleLessonCount')) for v in nav if isinstance(v,dict)])
 
-          # Fetch every small global pointer/version object returned by the prefix listing.
-          mkdir -p /tmp/global-values
-          while IFS= read -r key; do
-            enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
-            curl --fail --silent --show-error               "$API/storage/kv/namespaces/$NS/values/$enc"               "${AUTH[@]}"               -o "/tmp/global-values/$(echo "$key" | tr '/:' '__').json" || true
-          done < <(jq -r '.result[].name' /tmp/keys.json)
+          def walk(node,path='payload'):
+              if isinstance(node,dict):
+                  for k,v in node.items():
+                      yield from walk(v,f'{path}.{k}')
+              elif isinstance(node,list):
+                  # If this looks like a lesson-row list, inspect it as a unit.
+                  rows=[x for x in node if isinstance(x,dict)]
+                  if rows:
+                      sats=[]
+                      for row in rows:
+                          ids=[str(row.get(x) or '') for x in ('lessonId','displayLessonId','canonicalLessonId')]
+                          hit=False
+                          for value in ids:
+                              if re.match(r'^Y6(?:SM|MS)\d+$',value,re.I):
+                                  hit=True
+                              m=re.match(r'^Y6M(\d+)$',value,re.I)
+                              if m and 51 <= int(m.group(1)) <= 69:
+                                  hit=True
+                          if hit:
+                              sats.append({
+                                  'lessonId':row.get('lessonId'),
+                                  'displayLessonId':row.get('displayLessonId'),
+                                  'canonicalLessonId':row.get('canonicalLessonId'),
+                                  'title':row.get('title')
+                              })
+                      if sats:
+                          print('SATS_ROWS_AT',path,'COUNT',len(sats),'SAMPLE',sats[:8])
+                  for i,v in enumerate(node):
+                      yield from walk(v,f'{path}[{i}]')
 
-          echo '=== GLOBAL VALUE SUMMARIES ==='
-          python3 - <<'PY'
-          import json, pathlib, re
-          for path in sorted(pathlib.Path('/tmp/global-values').glob('*.json')):
-              try:
-                  obj=json.loads(path.read_text())
-              except Exception:
-                  continue
-              print('FILE',path.name)
-              if isinstance(obj,dict):
-                  print(' keys=',sorted(obj.keys()))
-                  payload=obj.get('payload',obj)
-                  if isinstance(payload,dict):
-                      nav=payload.get('navigation') or payload.get('views') or []
-                      if isinstance(nav,list):
-                          print(' navigation=',[(v.get('viewId'),v.get('label'),v.get('lessonCount'),v.get('visibleLessonCount')) for v in nav if isinstance(v,dict)])
-                      cats=payload.get('catalogues') or payload.get('catalogs') or payload.get('viewsById') or {}
-                      if isinstance(cats,dict):
-                          print(' catalogue_keys=',sorted(cats.keys()))
-                          for k,v in cats.items():
-                              if not isinstance(v,dict): continue
-                              rows=v.get('lessons') or []
-                              sats=[]
-                              for row in rows if isinstance(rows,list) else []:
-                                  if not isinstance(row,dict): continue
-                                  ids=[str(row.get(x) or '') for x in ('lessonId','displayLessonId','canonicalLessonId')]
-                                  if any(re.match(r'^Y6(?:SM|MS)\d+$',x,re.I) for x in ids):
-                                      sats.append(ids)
-                                  for x in ids:
-                                      m=re.match(r'^Y6M(\d+)$',x,re.I)
-                                      if m and 51 <= int(m.group(1)) <= 69:
-                                          sats.append(ids)
-                                          break
-                              if sats:
-                                  print(' SATS_IN',k,'count=',len(sats),'sample=',sats[:5])
-              print()
+          list(walk(payload))
           PY
           echo 'PREPARED_GLOBAL_SATS_AUDIT_COMPLETE'
