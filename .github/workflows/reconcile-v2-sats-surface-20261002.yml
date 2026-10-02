@@ -1,0 +1,122 @@
+name: Reconcile V2 SATS access surface
+
+on:
+  push:
+    branches:
+      - ops/reconcile-v2-sats-surface-20261002
+    paths:
+      - '.github/workflows/reconcile-v2-sats-surface-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-current-student-access-reconciliation
+  cancel-in-progress: false
+
+env:
+  WORKER_NAME: fpt-portal-v2-worker
+  EXPECTED_STUDENTS_KV_ID: c9723c8806334e4ea54d1b456d31b794
+  EXPECTED_READ_MODELS_KV_ID: 77b35165c8694087bc1b0515c35a7e89
+  EXPECTED_PROD_D1_ID: 97250a54-fa91-45ad-a002-3c4566b1fc38
+  RECONCILIATION_CONCURRENCY: '3'
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check out exact merged compiler
+        uses: actions/checkout@v4
+        with:
+          ref: 0d35e54be5fcdd593d52c1b14f5662f20c1d4093
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Re-run SATS compiler gates
+        run: |
+          set -euo pipefail
+          node --check worker/src/access-read-model-sync.js
+          node tests/y6-sats-direct-release-verification.mjs
+          node tests/access-read-model-reconciliation-verification.mjs
+
+      - name: Reconcile every current student from canonical access state
+        run: |
+          set -euo pipefail
+          node scripts/reconcile-current-student-access-read-models.mjs
+          jq -e '
+            .marker == "CURRENT_STUDENT_ACCESS_RECONCILIATION_PASS" and
+            .status == "PASS" and
+            .eligibleCurrentStudents > 0 and
+            .reconciled == .eligibleCurrentStudents and
+            .failures == 0 and
+            .canonicalSourcesMutated == false and
+            .writeTarget == "READ_MODELS_KV_ONLY" and
+            .atomicPerStudentPointers == true and
+            .safeToRerun == true
+          ' /tmp/current-student-access-reconciliation.json >/dev/null
+
+      - name: Verify Admin0206 now has SATS surface read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {
+            SCOPE_SALT_KEY,
+            opaqueAccessScopeId,
+            resolveCurrentScope
+          } from './worker/src/access-read-model-sync.js';
+
+          const token = String(process.env.CLOUDFLARE_API_TOKEN || '').trim();
+          const account = String(process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+          const auth = { Authorization: `Bearer ${token}` };
+          const api = `https://api.cloudflare.com/client/v4/accounts/${account}`;
+
+          const settingsResponse = await fetch(`${api}/workers/scripts/fpt-portal-v2-worker/settings`, { headers: auth });
+          if (!settingsResponse.ok) throw new Error(`WORKER_SETTINGS_FAILED:${settingsResponse.status}`);
+          const settings = await settingsResponse.json();
+          const bindings = Array.isArray(settings?.result?.bindings) ? settings.result.bindings : [];
+          const ns = bindings.find(binding => binding?.name === 'READ_MODELS_KV' && binding?.type === 'kv_namespace')?.namespace_id || '';
+          if (!ns) throw new Error('READ_MODELS_KV_BINDING_MISSING');
+
+          const valueUrl = key => `${api}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`;
+          const store = {
+            async get(key) {
+              const response = await fetch(valueUrl(key), { headers: auth });
+              if (response.status === 404) return null;
+              if (!response.ok) throw new Error(`KV_GET_FAILED:${response.status}`);
+              return response.text();
+            }
+          };
+
+          const salt = String(await store.get(SCOPE_SALT_KEY) || '').trim();
+          const scopeId = await opaqueAccessScopeId('admin0206', salt);
+          const current = await resolveCurrentScope(store, `access:${scopeId}`);
+          const snapshot = current?.payload?.snapshot || {};
+          const sats = (snapshot.views || []).find(view => view.viewId === 'maths-sats');
+          const year6 = (snapshot.views || []).find(view => view.viewId === 'maths-year6');
+          console.log(JSON.stringify({
+            version: current.version,
+            year6: year6 ? {current:year6.current,openLessonCount:year6.openLessonCount,lockedLessonCount:year6.lockedLessonCount} : null,
+            sats: sats ? {current:sats.current,openLessonCount:sats.openLessonCount,lockedLessonCount:sats.lockedLessonCount,visibleLessonCount:sats.visibleLessonCount} : null
+          }));
+          if (!sats || sats.current !== true || sats.visibleLessonCount !== 19 || sats.openLessonCount !== 19 || sats.lockedLessonCount !== 0) {
+            throw new Error('ADMIN0206_SATS_SURFACE_NOT_READY');
+          }
+          console.log('ADMIN0206_SATS_SURFACE_READY_PASS');
+          NODE
+
+      - name: Upload identity-free reconciliation summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-sats-access-reconciliation-summary
+          retention-days: 30
+          if-no-files-found: ignore
+          path: /tmp/current-student-access-reconciliation.json
