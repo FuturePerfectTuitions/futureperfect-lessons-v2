@@ -1,0 +1,91 @@
+name: Audit prepared global SATS catalogue
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/audit-prepared-global-sats-20261002.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-student-prod
+    steps:
+      - name: Inspect READ_MODELS_KV global scope read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+
+          curl --fail --silent --show-error             "$API/workers/scripts/$WORKER_NAME/settings"             "${AUTH[@]}" -o /tmp/settings.json
+
+          NS="$(jq -r '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          test -n "$NS"; test "$NS" != null
+          echo 'READ_MODELS_KV binding located.'
+
+          curl --fail --silent --show-error --get             "$API/storage/kv/namespaces/$NS/keys"             "${AUTH[@]}"             --data-urlencode 'prefix=global'             --data-urlencode 'limit=1000'             -o /tmp/keys.json
+          jq -e '.success == true' /tmp/keys.json >/dev/null
+          echo 'GLOBAL_KEYS='
+          jq -c '[.result[] | .name]' /tmp/keys.json
+
+          python3 - <<'PY'
+          import json, pathlib
+          keys=json.loads(pathlib.Path('/tmp/keys.json').read_text())['result']
+          for item in keys:
+              print(item['name'])
+          PY
+
+          # Fetch every small global pointer/version object returned by the prefix listing.
+          mkdir -p /tmp/global-values
+          while IFS= read -r key; do
+            enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$key")"
+            curl --fail --silent --show-error               "$API/storage/kv/namespaces/$NS/values/$enc"               "${AUTH[@]}"               -o "/tmp/global-values/$(echo "$key" | tr '/:' '__').json" || true
+          done < <(jq -r '.result[].name' /tmp/keys.json)
+
+          echo '=== GLOBAL VALUE SUMMARIES ==='
+          python3 - <<'PY'
+          import json, pathlib, re
+          for path in sorted(pathlib.Path('/tmp/global-values').glob('*.json')):
+              try:
+                  obj=json.loads(path.read_text())
+              except Exception:
+                  continue
+              print('FILE',path.name)
+              if isinstance(obj,dict):
+                  print(' keys=',sorted(obj.keys()))
+                  payload=obj.get('payload',obj)
+                  if isinstance(payload,dict):
+                      nav=payload.get('navigation') or payload.get('views') or []
+                      if isinstance(nav,list):
+                          print(' navigation=',[(v.get('viewId'),v.get('label'),v.get('lessonCount'),v.get('visibleLessonCount')) for v in nav if isinstance(v,dict)])
+                      cats=payload.get('catalogues') or payload.get('catalogs') or payload.get('viewsById') or {}
+                      if isinstance(cats,dict):
+                          print(' catalogue_keys=',sorted(cats.keys()))
+                          for k,v in cats.items():
+                              if not isinstance(v,dict): continue
+                              rows=v.get('lessons') or []
+                              sats=[]
+                              for row in rows if isinstance(rows,list) else []:
+                                  if not isinstance(row,dict): continue
+                                  ids=[str(row.get(x) or '') for x in ('lessonId','displayLessonId','canonicalLessonId')]
+                                  if any(re.match(r'^Y6(?:SM|MS)\d+$',x,re.I) for x in ids):
+                                      sats.append(ids)
+                                  for x in ids:
+                                      m=re.match(r'^Y6M(\d+)$',x,re.I)
+                                      if m and 51 <= int(m.group(1)) <= 69:
+                                          sats.append(ids)
+                                          break
+                              if sats:
+                                  print(' SATS_IN',k,'count=',len(sats),'sample=',sats[:5])
+              print()
+          PY
+          echo 'PREPARED_GLOBAL_SATS_AUDIT_COMPLETE'
