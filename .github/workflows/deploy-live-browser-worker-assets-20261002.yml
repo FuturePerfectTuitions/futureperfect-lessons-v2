@@ -21,7 +21,7 @@ jobs:
       WORKER_NAME: fpt-portal-v2-rebuild-browser-prod
       EXPECTED_INDEX_SHA256: 2257d56c5cd930dacfefa00f310eb5f9bc2db6cd18e3ebf16fb7d8c4ad4c3cbd
       FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
-      FRONTEND_REF: 06721f3362d120e86333d3baa4a3d83f7c31e0fa
+      FRONTEND_REF: e5e833a9b956a6985bb5a76e7dd056b897b7d76e
     steps:
       - name: Check out ops source
         uses: actions/checkout@v4
