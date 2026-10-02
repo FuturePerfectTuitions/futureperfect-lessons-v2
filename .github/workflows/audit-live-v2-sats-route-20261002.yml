@@ -71,4 +71,13 @@ jobs:
           echo '=== SATS TEXT MARKERS ==='
           grep -RIna -C 8 --binary-files=text 'SATS' /tmp/student-worker | head -n 400 || true
 
+          echo '=== VIEW / CATALOGUE COMPILER MARKERS ==='
+          grep -RIna -C 18 --binary-files=text 'VIEW_DEFINITIONS\|VIEW_CONFIG\|handleView\|resolveView\|compileView\|curricula' /tmp/student-worker | head -n 1200 || true
+
+          echo '=== YEAR6 EXTRA / CURRICULUM MARKERS ==='
+          grep -RIna -C 16 --binary-files=text 'MATHS_Y6_EXTRA\|MATHS_L3\|lessonIds\|curriculum:' /tmp/student-worker | head -n 1600 || true
+
+          echo '=== SOURCE MODULE COMMENTS ==='
+          grep -RIna --binary-files=text '^// src/' /tmp/student-worker | head -n 400 || true
+
           echo 'LIVE_V2_SATS_ROUTE_AUDIT_COMPLETE'
