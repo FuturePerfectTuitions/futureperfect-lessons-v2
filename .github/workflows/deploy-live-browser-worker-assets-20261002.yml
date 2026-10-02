@@ -1,0 +1,169 @@
+name: Deploy repaired live browser Worker assets
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/deploy-live-browser-worker-assets-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-browser-prod
+      EXPECTED_INDEX_SHA256: 2257d56c5cd930dacfefa00f310eb5f9bc2db6cd18e3ebf16fb7d8c4ad4c3cbd
+      FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+      FRONTEND_REF: 06721f3362d120e86333d3baa4a3d83f7c31e0fa
+    steps:
+      - name: Check out ops source
+        uses: actions/checkout@v4
+        with:
+          ref: ops/purge-lessons-cache-20261002
+          path: portal
+          fetch-depth: 0
+
+      - name: Check out exact tested frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_REF }}
+          path: frontend
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build exact tested frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          node --check src/app.js
+          grep -q 'YEAR6_NESTED_NAVIGATION_V2_20261001' src/app.js
+          npm run build
+          grep -R -q 'Choose Lessons or SATS.' dist/assets/portal-*.js
+
+      - name: Prepare static asset payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf portal/ops/live-browser-worker-prod/site
+          mkdir -p portal/ops/live-browser-worker-prod/site
+          cp -a frontend/dist/. portal/ops/live-browser-worker-prod/site/
+          test -f portal/ops/live-browser-worker-prod/site/index.html
+          core="$(find portal/ops/live-browser-worker-prod/site/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name 'portal-protected-viewer-*' ! -name '*.map' -print -quit)"
+          test -n "$core"
+          grep -Fq 'Choose Lessons or SATS.' "$core"
+          echo "CORE_BUNDLE=$(basename "$core")" >> "$GITHUB_ENV"
+          echo "Prepared core bundle: $(basename "$core")"
+
+      - name: Guard exact current production browser Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+
+          curl --fail --silent --show-error             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings"             "${AUTH[@]}" -o /tmp/settings-before.json
+
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ASSETS" and .type=="assets")' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="STAGING_API" and .type=="service" and .service=="fpt-portal-v2-rebuild-student-prod" and .environment=="production")' /tmp/settings-before.json >/dev/null
+
+          curl --fail --silent --show-error             --dump-header /tmp/package-before.headers             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"             "${AUTH[@]}" -o /tmp/package-before.bin
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib,re,pathlib,os
+          headers=pathlib.Path('/tmp/package-before.headers').read_text('latin-1',errors='replace')
+          body=pathlib.Path('/tmp/package-before.bin').read_bytes()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          if not m:
+              raise SystemExit('missing content-type')
+          ct=m.group(1).strip()
+          msg=BytesParser(policy=default).parsebytes(
+            ('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body
+          )
+          data=None
+          for p in msg.iter_parts():
+              name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name')
+              if name=='index.js':
+                  data=p.get_payload(decode=True) or b''
+                  break
+          if data is None:
+              raise SystemExit('index.js missing from deployed package')
+          digest=hashlib.sha256(data).hexdigest()
+          print('Current deployed index.js SHA256:',digest)
+          if digest != os.environ['EXPECTED_INDEX_SHA256']:
+              raise SystemExit('production browser Worker code changed; refusing deployment')
+          PY
+
+          test "$(sha256sum portal/ops/live-browser-worker-prod/index.js | awk '{print $1}')" = "$EXPECTED_INDEX_SHA256"
+          echo 'Production Worker code and bindings match guarded baseline.'
+
+      - name: Dry-run exact Worker plus repaired assets
+        working-directory: portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.125.0 deploy             --config ops/live-browser-worker-prod/wrangler.toml             --dry-run             --outdir /tmp/browser-worker-dryrun
+          echo 'Browser Worker dry run: PASS'
+
+      - name: Deploy repaired assets to production browser Worker
+        working-directory: portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.125.0 deploy             --config ops/live-browser-worker-prod/wrangler.toml             --keep-vars             --message 'Year 6 nested Lessons/SATS frontend asset repair'
+
+      - name: Verify production bindings after deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          curl --fail --silent --show-error             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings"             "${AUTH[@]}" -o /tmp/settings-after.json
+          jq -e '.success == true' /tmp/settings-after.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="ASSETS" and .type=="assets")' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="STAGING_API" and .type=="service" and .service=="fpt-portal-v2-rebuild-student-prod")' /tmp/settings-after.json >/dev/null
+          echo 'Production bindings preserved.'
+
+      - name: Verify public site serves repaired Vite build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          for attempt in $(seq 1 40); do
+            curl --silent --show-error --location "$BASE/" -o /tmp/root.html
+            if grep -Fq "$CORE_BUNDLE" /tmp/root.html; then
+              curl --fail --silent --show-error "$BASE/assets/$CORE_BUNDLE" -o /tmp/live-core.js
+              grep -Fq 'Choose Lessons or SATS.' /tmp/live-core.js
+              echo "LIVE_BROWSER_ASSET_PASS attempt=$attempt bundle=$CORE_BUNDLE"
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              echo 'Live root did not move to repaired bundle in time.' >&2
+              cat /tmp/root.html >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          status="$(curl --silent --show-error             --dump-header /tmp/api.headers             --output /tmp/api.body             --write-out '%{http_code}'             "$BASE/api/v2/student/home")"
+          echo "Unauthenticated API status: $status"
+          grep -iFq 'x-fpt-cp9-browser-facade: service-binding' /tmp/api.headers
+          echo 'API service-binding proxy preserved.'
+
+      - name: Deployment complete
+        run: echo 'LIVE_BROWSER_YEAR6_ASSET_REPAIR_DEPLOYED'
