@@ -1,0 +1,87 @@
+name: Purge stale lessons frontend cache
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/purge-lessons-frontend-cache-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Confirm Cloudflare credentials are available
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'Cloudflare CI credentials are present. Values are not printed.'
+
+      - name: Resolve Future Perfect zone
+        id: zone
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --get \
+            'https://api.cloudflare.com/client/v4/zones' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --data-urlencode 'name=futureperfect.education' \
+            --data-urlencode "account.id=$CLOUDFLARE_ACCOUNT_ID" \
+            --output /tmp/zones.json
+          jq -e '.success == true and (.result | length) == 1' /tmp/zones.json >/dev/null
+          ZONE_ID="$(jq -r '.result[0].id' /tmp/zones.json)"
+          test -n "$ZONE_ID"
+          test "$ZONE_ID" != null
+          echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
+          echo 'Resolved exactly one Future Perfect Cloudflare zone.'
+
+      - name: Purge lessons root HTML only
+        shell: bash
+        env:
+          ZONE_ID: ${{ steps.zone.outputs.zone_id }}
+        run: |
+          set -euo pipefail
+          jq -nc '{files:[
+            "https://lessons.futureperfect.education/",
+            "https://lessons.futureperfect.education/index.html"
+          ]}' > /tmp/purge.json
+          curl --fail --silent --show-error \
+            --request POST \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/purge.json \
+            --output /tmp/purge-result.json
+          jq -e '.success == true' /tmp/purge-result.json >/dev/null
+          echo 'Purged only the lessons root and index HTML cache entries.'
+
+      - name: Verify new Vite build is public
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          EXPECTED='portal-D_COVybH.js'
+          for attempt in $(seq 1 30); do
+            curl --fail --silent --show-error --location "$BASE/" -o /tmp/root.html
+            if grep -Fq "$EXPECTED" /tmp/root.html; then
+              curl --fail --silent --show-error "$BASE/assets/$EXPECTED" -o /tmp/portal.js
+              grep -Fq 'Choose Lessons or SATS.' /tmp/portal.js
+              grep -Fq 'Mean Median Mode' /tmp/portal.js
+              echo "LIVE_V2_YEAR6_FRONTEND_PASS attempt=$attempt"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Public root did not move to the newly deployed Vite bundle after cache purge.' >&2
+          cat /tmp/root.html >&2
+          exit 1
