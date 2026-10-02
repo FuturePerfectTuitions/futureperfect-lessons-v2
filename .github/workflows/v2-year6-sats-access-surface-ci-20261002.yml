@@ -1,0 +1,45 @@
+name: V2 Year 6 SATS access surface CI
+
+on:
+  push:
+    branches:
+      - fix/v2-year6-sats-access-surface-20261002
+    paths:
+      - 'worker/src/access-read-model-sync.js'
+      - 'tests/y6-sats-direct-release-verification.mjs'
+      - '.github/workflows/v2-year6-sats-access-surface-ci-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2-year6-sats-access-surface-20261002
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax
+        run: node --check worker/src/access-read-model-sync.js
+
+      - name: Year 6 SATS direct-release surface
+        run: node tests/y6-sats-direct-release-verification.mjs
+
+      - name: Access read-model reconciliation
+        run: node tests/access-read-model-reconciliation-verification.mjs
+
+      - name: Access read-model sync V2 regression
+        run: node tests/access-read-model-sync-v2-verification.mjs
+
+      - name: Admin SATS release regression
+        run: node tests/admin-lesson-release-y6-sats-verification.mjs
+
+      - name: SATS CSV alias regression
+        run: node tests/y6-sats-csv-alias-verification.mjs

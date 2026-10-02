@@ -36,6 +36,7 @@ const VIEW_DEFINITIONS = Object.freeze({
   'maths-level2': Object.freeze({ viewId:'maths-level2', subject:'maths', label:'L2', rank:51, schoolYear:5, stream:'11plus', mathsLevel:2, fullLibraryIds:Object.freeze(['MATHS_L2_FULL']) }),
   'maths-year6': Object.freeze({ viewId:'maths-year6', subject:'maths', label:'Year 6', rank:60, schoolYear:6, stream:'normal', fullLibraryIds:Object.freeze(['MATHS_Y6_FULL']) }),
   'maths-level3': Object.freeze({ viewId:'maths-level3', subject:'maths', label:'L3', rank:61, schoolYear:6, stream:'11plus', mathsLevel:3, fullLibraryIds:Object.freeze(['MATHS_L3_FULL']) }),
+  'maths-sats': Object.freeze({ viewId:'maths-sats', subject:'maths', label:'SATS', rank:62, schoolYear:6, stream:'normal', fullLibraryIds:Object.freeze([]) }),
   'english-year2': Object.freeze({ viewId:'english-year2', subject:'english', label:'Year 2', rank:20, schoolYear:2, stream:'normal', fullLibraryIds:Object.freeze(['ENGLISH_Y2_FULL']) }),
   'english-year3': Object.freeze({ viewId:'english-year3', subject:'english', label:'Year 3', rank:30, schoolYear:3, stream:'normal', fullLibraryIds:Object.freeze(['ENGLISH_Y3_FULL']) }),
   'english-year4': Object.freeze({ viewId:'english-year4', subject:'english', label:'Year 4', rank:40, schoolYear:4, stream:'normal', fullLibraryIds:Object.freeze(['ENGLISH_Y4_FULL']) }),
@@ -521,8 +522,8 @@ function compileAccessSnapshot(input, catalogue, options = {}) {
 
   const user = input?.user && typeof input.user === 'object' ? input.user : {};
   const currentRows = activeAssignments(input?.batchAssignments, asOfDate);
-  const currentViews = sortedViewIds(currentRows.map(viewIdForBatch).filter(Boolean));
-  const historyViews = historicalAssignmentViewIds(input?.batchAssignments, asOfDate);
+  const teachingCurrentViews = sortedViewIds(currentRows.map(viewIdForBatch).filter(Boolean));
+  const teachingHistoryViews = historicalAssignmentViewIds(input?.batchAssignments, asOfDate);
   const fullViews = fullLibraryViewIds(Array.isArray(user.fullLibraries) ? user.fullLibraries : []);
   const entitlementIds = entitlementLessonIds(input?.entitlements);
   const vrEntitlementIds = vrEntitlementLessonIds(input?.entitlements);
@@ -534,12 +535,31 @@ function compileAccessSnapshot(input, catalogue, options = {}) {
   const previewViews = configuredPreviewViewIds(user, currentRows);
 
   const accessDerivedViews = accessDerivedViewIds(input, catalogue);
-  const visibleActualViews = sortedViewIds([...currentViews, ...historyViews, ...fullViews, ...accessDerivedViews]);
 
   const access = lessonAccessMap({
     catalogue, fullViews, entitlementIds, vrEntitlementIds, manualCoreIds, manualVrIds,
     preLessonIds, preLessonVrIds, temporaryLessonAccess:input?.temporaryLessonAccess, blockedIds
   });
+
+  const hasOpenSatsAccess = Object.entries(access).some(([lessonId, state]) =>
+    isYear6SatsLessonId(lessonId) &&
+    state?.blocked !== true &&
+    (state?.core === true || state?.preLessonOnly === true)
+  );
+  const currentViews = sortedViewIds([
+    ...teachingCurrentViews,
+    ...(teachingCurrentViews.includes('maths-year6') ? ['maths-sats'] : []),
+    ...(teachingCurrentViews.includes('maths-level3') && hasOpenSatsAccess ? ['maths-sats'] : [])
+  ]);
+  const historyViews = sortedViewIds([
+    ...teachingHistoryViews,
+    ...(teachingHistoryViews.includes('maths-year6') ? ['maths-sats'] : [])
+  ]);
+  const visibleActualBase = sortedViewIds([...currentViews, ...historyViews, ...fullViews, ...accessDerivedViews]);
+  const visibleActualViews = sortedViewIds([
+    ...visibleActualBase,
+    ...(visibleActualBase.includes('maths-year6') ? ['maths-sats'] : [])
+  ]);
 
   const currentSet = new Set(currentViews);
   const actualSet = new Set(visibleActualViews);
