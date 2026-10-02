@@ -1,0 +1,50 @@
+name: Audit live V2 SATS runtime compatibility
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/audit-live-v2-sats-runtime-compat-20261002.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-student-prod
+    steps:
+      - name: Inspect deployed generic view authorization path
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          curl --fail --silent --show-error             --dump-header /tmp/package.headers             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"             "${AUTH[@]}" -o /tmp/package.bin
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import re,pathlib
+          headers=pathlib.Path('/tmp/package.headers').read_text('latin-1',errors='replace')
+          body=pathlib.Path('/tmp/package.bin').read_bytes()
+          ct=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers).group(1).strip()
+          msg=BytesParser(policy=default).parsebytes(
+            ('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body
+          )
+          for p in msg.iter_parts():
+              name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name')
+              if name=='index.js':
+                  pathlib.Path('/tmp/index.js').write_bytes(p.get_payload(decode=True) or b'')
+                  break
+          PY
+
+          for fn in 'visibleView' 'viewCatalogue' 'presentationState' 'authorisedLesson' 'selectResource' 'resourceVisibleForView'; do
+            echo "=== $fn ==="
+            grep -n -A 55 -B 15 "function $fn" /tmp/index.js | head -n 160 || true
+          done
+          echo 'LIVE_V2_SATS_RUNTIME_COMPAT_AUDIT_COMPLETE'
