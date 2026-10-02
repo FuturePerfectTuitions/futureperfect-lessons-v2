@@ -1,0 +1,75 @@
+name: Audit lessons Cloudflare routing
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/audit-lessons-routing-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Resolve zone and inspect routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+
+          curl --fail --silent --show-error --get             'https://api.cloudflare.com/client/v4/zones'             "${AUTH[@]}"             --data-urlencode 'name=futureperfect.education'             --data-urlencode "account.id=$CLOUDFLARE_ACCOUNT_ID"             -o /tmp/zones.json
+          jq -e '.success == true and (.result|length)==1' /tmp/zones.json >/dev/null
+          ZONE_ID="$(jq -r '.result[0].id' /tmp/zones.json)"
+
+          echo '=== DNS RECORD lessons.futureperfect.education ==='
+          curl --fail --silent --show-error --get             "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records"             "${AUTH[@]}"             --data-urlencode 'name=lessons.futureperfect.education'             -o /tmp/dns.json
+          jq '{success, result: [.result[] | {id,type,name,content,proxied,ttl,comment,tags}]}' /tmp/dns.json
+
+          echo '=== WORKER ROUTES FOR ZONE ==='
+          status="$(curl --silent --show-error             "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes"             "${AUTH[@]}"             -o /tmp/routes.json -w '%{http_code}')"
+          echo "HTTP $status"
+          if [ "$status" = 200 ]; then
+            jq '{success, result: [.result[] | {id,pattern,script,environment} ]}' /tmp/routes.json
+          else
+            cat /tmp/routes.json
+          fi
+
+          echo '=== ACCOUNT WORKERS SCRIPTS ==='
+          status="$(curl --silent --show-error             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"             "${AUTH[@]}"             -o /tmp/scripts.json -w '%{http_code}')"
+          echo "HTTP $status"
+          if [ "$status" = 200 ]; then
+            jq '{success, result: [.result[] | {id,created_on,modified_on,etag,handlers}]}' /tmp/scripts.json
+          else
+            cat /tmp/scripts.json
+          fi
+
+          echo '=== PAGES PROJECTS ==='
+          status="$(curl --silent --show-error             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects"             "${AUTH[@]}"             -o /tmp/pages.json -w '%{http_code}')"
+          echo "HTTP $status"
+          if [ "$status" = 200 ]; then
+            jq '{success, result: [.result[] | {name,subdomain,domains,production_branch,created_on,latest_deployment:{id:.latest_deployment.id,url:.latest_deployment.url,environment:.latest_deployment.environment,created_on:.latest_deployment.created_on}}]}' /tmp/pages.json
+          else
+            cat /tmp/pages.json
+          fi
+
+          echo '=== ZONE RULESETS PHASE http_request_cache_settings ==='
+          status="$(curl --silent --show-error             "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/rulesets/phases/http_request_cache_settings/entrypoint"             "${AUTH[@]}"             -o /tmp/cache-rules.json -w '%{http_code}')"
+          echo "HTTP $status"
+          if [ "$status" = 200 ]; then
+            jq '{success, result:{id:.result.id,name:.result.name,rules:[.result.rules[]|{id,description,expression,action,action_parameters}]}}' /tmp/cache-rules.json
+          else
+            cat /tmp/cache-rules.json
+          fi
+
+          echo 'LESSONS_ROUTING_AUDIT_COMPLETE'
