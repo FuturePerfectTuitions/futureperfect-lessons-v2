@@ -1,0 +1,52 @@
+name: Extract live V2 view runtime sections
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/extract-live-v2-view-runtime-20261002.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-student-prod
+    steps:
+      - name: Download and print relevant deployed runtime sections
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          curl --fail --silent --show-error             --dump-header /tmp/package.headers             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"             "${AUTH[@]}"             -o /tmp/package.bin
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import re,pathlib
+          headers=pathlib.Path('/tmp/package.headers').read_text('latin-1',errors='replace')
+          body=pathlib.Path('/tmp/package.bin').read_bytes()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          ct=m.group(1).strip()
+          msg=BytesParser(policy=default).parsebytes(
+            ('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body
+          )
+          for p in msg.iter_parts():
+              name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name')
+              if name=='index.js':
+                  pathlib.Path('/tmp/index.js').write_bytes(p.get_payload(decode=True) or b'')
+                  break
+          PY
+
+          echo '=== VIEW REGISTRY 710-891 ==='
+          sed -n '710,891p' /tmp/index.js
+          echo '=== CORE RUNTIME 892-1422 ==='
+          sed -n '892,1422p' /tmp/index.js
+          echo '=== ENTRYPOINT 2453-END ==='
+          sed -n '2453,2700p' /tmp/index.js
