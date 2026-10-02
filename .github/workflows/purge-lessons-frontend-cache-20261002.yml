@@ -18,16 +18,28 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_GLOBAL_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_API_KEY }}
+      CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+      CF_EMAIL: ${{ secrets.CF_EMAIL }}
     steps:
-      - name: Confirm Cloudflare credentials are available
+      - name: Confirm Cloudflare credential availability without revealing values
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          echo 'Cloudflare CI credentials are present. Values are not printed.'
+          for name in CF_API_TOKEN CLOUDFLARE_GLOBAL_API_KEY CLOUDFLARE_API_KEY CF_API_KEY CLOUDFLARE_EMAIL CF_EMAIL; do
+            if [ -n "${!name:-}" ]; then
+              echo "$name: present"
+            else
+              echo "$name: absent"
+            fi
+          done
 
-      - name: Resolve Future Perfect zone
+      - name: Resolve Future Perfect zone with existing read credential
         id: zone
         shell: bash
         run: |
@@ -45,7 +57,7 @@ jobs:
           echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
           echo 'Resolved exactly one Future Perfect Cloudflare zone.'
 
-      - name: Purge lessons root HTML only
+      - name: Try available cache-purge credentials
         shell: bash
         env:
           ZONE_ID: ${{ steps.zone.outputs.zone_id }}
@@ -55,14 +67,54 @@ jobs:
             "https://lessons.futureperfect.education/",
             "https://lessons.futureperfect.education/index.html"
           ]}' > /tmp/purge.json
-          curl --fail --silent --show-error \
-            --request POST \
-            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
-            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            --header 'Content-Type: application/json' \
-            --data @/tmp/purge.json \
-            --output /tmp/purge-result.json
-          jq -e '.success == true' /tmp/purge-result.json >/dev/null
+
+          try_bearer () {
+            local label="$1" token="$2"
+            [ -n "$token" ] || return 1
+            local status
+            status="$(curl --silent --show-error \
+              --request POST \
+              "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+              --header "Authorization: Bearer $token" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/purge.json \
+              --output "/tmp/${label}.json" \
+              --write-out '%{http_code}')"
+            echo "$label purge HTTP status: $status"
+            [ "$status" = "200" ] && jq -e '.success == true' "/tmp/${label}.json" >/dev/null
+          }
+
+          try_global_key () {
+            local label="$1" key="$2" email="$3"
+            [ -n "$key" ] && [ -n "$email" ] || return 1
+            local status
+            status="$(curl --silent --show-error \
+              --request POST \
+              "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+              --header "X-Auth-Email: $email" \
+              --header "X-Auth-Key: $key" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/purge.json \
+              --output "/tmp/${label}.json" \
+              --write-out '%{http_code}')"
+            echo "$label purge HTTP status: $status"
+            [ "$status" = "200" ] && jq -e '.success == true' "/tmp/${label}.json" >/dev/null
+          }
+
+          if try_bearer primary "$CLOUDFLARE_API_TOKEN"; then
+            echo 'CACHE_PURGE_AUTH=primary'
+          elif try_bearer alternate "$CF_API_TOKEN"; then
+            echo 'CACHE_PURGE_AUTH=alternate'
+          elif try_global_key global "$CLOUDFLARE_GLOBAL_API_KEY" "${CLOUDFLARE_EMAIL:-$CF_EMAIL}"; then
+            echo 'CACHE_PURGE_AUTH=global'
+          elif try_global_key api_key "$CLOUDFLARE_API_KEY" "${CLOUDFLARE_EMAIL:-$CF_EMAIL}"; then
+            echo 'CACHE_PURGE_AUTH=api_key'
+          elif try_global_key cf_key "$CF_API_KEY" "${CF_EMAIL:-$CLOUDFLARE_EMAIL}"; then
+            echo 'CACHE_PURGE_AUTH=cf_key'
+          else
+            echo 'NO_CACHE_PURGE_CREDENTIAL_SUCCEEDED' >&2
+            exit 1
+          fi
           echo 'Purged only the lessons root and index HTML cache entries.'
 
       - name: Verify new Vite build is public
@@ -83,5 +135,4 @@ jobs:
             sleep 2
           done
           echo 'Public root did not move to the newly deployed Vite bundle after cache purge.' >&2
-          cat /tmp/root.html >&2
           exit 1
