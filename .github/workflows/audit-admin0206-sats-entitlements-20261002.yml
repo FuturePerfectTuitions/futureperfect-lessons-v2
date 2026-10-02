@@ -1,0 +1,46 @@
+name: Audit Admin0206 SATS entitlement state
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/audit-admin0206-sats-entitlements-20261002.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-student-prod
+    steps:
+      - name: Inspect Admin0206 non-secret profile and SATS entitlements read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+
+          curl --fail --silent --show-error             "$API/workers/scripts/$WORKER_NAME/settings"             "${AUTH[@]}" -o /tmp/settings.json
+
+          STUDENTS_NS="$(jq -r '.result.bindings[] | select(.name=="STUDENTS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/settings.json)"
+          DB_ID="$(jq -r '.result.bindings[] | select(.name=="DB" and .type=="d1") | .id' /tmp/settings.json)"
+          test -n "$STUDENTS_NS"; test "$STUDENTS_NS" != null
+          test -n "$DB_ID"; test "$DB_ID" != null
+
+          user_key="$(python3 -c 'import urllib.parse; print(urllib.parse.quote("user:admin0206", safe=""))')"
+          curl --fail --silent --show-error             "$API/storage/kv/namespaces/$STUDENTS_NS/values/$user_key"             "${AUTH[@]}" -o /tmp/user.json
+
+          echo 'ADMIN0206_PROFILE_NON_SECRET='
+          jq -c 'del(.p,.password,.loginPassword,.answerPassword,.email,.parentEmail,.token,.cookie,.session)' /tmp/user.json
+
+          echo 'ADMIN0206_SATS_D1_COUNTS='
+          curl --fail --silent --show-error             --request POST             "$API/d1/database/$DB_ID/query"             "${AUTH[@]}"             --header 'Content-Type: application/json'             --data '{"sql":"SELECT COUNT(*) AS total, SUM(CASE WHEN core_access=1 THEN 1 ELSE 0 END) AS core_open, SUM(CASE WHEN vr_access=1 THEN 1 ELSE 0 END) AS vr_open FROM lesson_entitlements WHERE portal_user_id_norm=? AND lesson_id GLOB '\''Y6M5[1-9]'\'' OR portal_user_id_norm=? AND lesson_id GLOB '\''Y6M6[0-9]'\'';","params":["admin0206","admin0206"]}'             -o /tmp/query.json
+
+          jq -c '{success,results:(.result[0].results // [])}' /tmp/query.json
+          echo 'ADMIN0206_SATS_ENTITLEMENT_AUDIT_COMPLETE'
