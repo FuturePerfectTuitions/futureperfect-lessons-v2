@@ -1,0 +1,74 @@
+name: Audit live V2 SATS route source
+
+on:
+  push:
+    branches:
+      - ops/purge-lessons-cache-20261002
+    paths:
+      - '.github/workflows/audit-live-v2-sats-route-20261002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fpt-portal-v2-rebuild-student-prod
+    steps:
+      - name: Download deployed student Worker and inspect SATS routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+
+          curl --fail --silent --show-error             --dump-header /tmp/package.headers             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"             "${AUTH[@]}"             -o /tmp/package.bin
+
+          rm -rf /tmp/student-worker
+          mkdir -p /tmp/student-worker
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib,re,pathlib,json
+          headers=pathlib.Path('/tmp/package.headers').read_text('latin-1',errors='replace')
+          body=pathlib.Path('/tmp/package.bin').read_bytes()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          if not m:
+              raise SystemExit('missing package content-type')
+          ct=m.group(1).strip()
+          print('PACKAGE_SHA256',hashlib.sha256(body).hexdigest())
+          if ct.lower().startswith('multipart/'):
+              msg=BytesParser(policy=default).parsebytes(
+                ('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body
+              )
+              out=[]
+              for i,p in enumerate(msg.iter_parts()):
+                  name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or f'part-{i}'
+                  data=p.get_payload(decode=True) or b''
+                  path=pathlib.Path('/tmp/student-worker')/name
+                  path.parent.mkdir(parents=True,exist_ok=True)
+                  path.write_bytes(data)
+                  out.append((name,len(data),hashlib.sha256(data).hexdigest()))
+              print('PARTS',json.dumps(out))
+          else:
+              pathlib.Path('/tmp/student-worker/single-script').write_bytes(body)
+          PY
+
+          echo '=== MATHS-SATS MARKERS ==='
+          grep -RIna -C 12 --binary-files=text 'maths-sats' /tmp/student-worker | head -n 300 || true
+
+          echo '=== MATHS-YEAR6 MARKERS ==='
+          grep -RIna -C 10 --binary-files=text 'maths-year6' /tmp/student-worker | head -n 300 || true
+
+          echo '=== V2 STUDENT VIEW ROUTE MARKERS ==='
+          grep -RIna -C 14 --binary-files=text '/api/v2/student/views' /tmp/student-worker | head -n 400 || true
+
+          echo '=== SATS TEXT MARKERS ==='
+          grep -RIna -C 8 --binary-files=text 'SATS' /tmp/student-worker | head -n 400 || true
+
+          echo 'LIVE_V2_SATS_ROUTE_AUDIT_COMPLETE'
