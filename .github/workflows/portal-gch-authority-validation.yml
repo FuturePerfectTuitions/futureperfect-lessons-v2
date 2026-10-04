@@ -53,7 +53,8 @@ jobs:
               '6.5-l3t2m24-l3-only-prepared-state-production-pass',
               '6.6-video-update-playbook-authoritative',
               '6.6-year6-label-year6',
-              '6.7-video-playbook-plus-year6-label'
+              '6.7-video-playbook-plus-year6-label',
+              '6.11-v2-year6-live-browser-worker-ordering'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
@@ -108,6 +109,19 @@ jobs:
           assert 'Never rename' in ordinary_y6
           assert y6_override['implementation']['finalNavigationMarker'] == 'maths-equivalent-navigation-final-v6-year6-label'
           assert 'Year 6' in current['latestYear6LabelChange']['ownerRule']
+
+          y6_order_evidence_path = 'gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json'
+          assert current['authorityComposition']['y6ChronologicalLiveRepairEvidence']['path'] == y6_order_evidence_path
+          assert y6_order_evidence_path in current['readOrder']
+          y6_order_evidence = json.loads(Path(y6_order_evidence_path).read_text())
+          assert y6_order_evidence['status'] == 'LIVE_DEPLOYED_PUBLIC_ASSETS_VERIFIED_PENDING_OWNER_BROWSER_ACCEPTANCE'
+          assert y6_order_evidence['preservedLaterFrontend']['exactAcceptedBaseRef'] == 'e5e833a9b956a6985bb5a76e7dd056b897b7d76e'
+          assert y6_order_evidence['liveTopology']['browserWorker'] == 'fpt-portal-v2-rebuild-browser-prod'
+          assert y6_order_evidence['productionDeployment']['run'] == 37187274911
+          assert y6_order_evidence['productionDeployment']['result'] == 'PASS'
+          assert y6_override['implementation']['frontendV2Current']['exactAcceptedApplicationRef'] == 'e5e833a9b956a6985bb5a76e7dd056b897b7d76e'
+          assert y6_override['implementation']['frontendV2Current']['standaloneGuardMarker'] == 'YEAR6_STANDALONE_VISIBLE_ORDER_GUARD_V2_20261004'
+          assert 'fpt-portal-v2-rebuild-browser-prod' in y6_override['implementation']['frontendV2Current']['liveServingPath']
 
           for rel in current['readOrder'][1:]:
               assert Path(rel).exists(), rel
