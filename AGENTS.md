@@ -16,6 +16,7 @@ Before changing or diagnosing **any** FPT Portal V2, Admin Console, Trial, stude
 10. `gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json`
 11. `gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json`
 12. `gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json`
+13. `gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json`
 
 `GCH_CURRENT.json` is the machine-oriented restart entrypoint for the current authority set. The base GCH reconciles the historical v4.2 Master with current repository topology and the 22 September 2026 Admin/Trial work. The 23 September Replace Resource override is higher authority only for the scope it explicitly supersedes. The 23 September Quiz Bridge Composition override is higher authority only for the shared `fpt-portal-v2-worker` top-level composition and the associated bridge-preservation incident/repair state. The 25 September Admin Batch Creation override is higher authority only for creating a distinct new batch definition from an existing batch inside Student Login Manager before ordinary student provisioning. The 25 September Admin Portal Lookup override is higher authority only for the read-only Portal Login Details lookup and its non-mutation/credential-exposure boundary. The 30 September Video Update Playbook is the current general authority for lesson-video additions/replacements: canonical lesson state and current prepared lesson projection must be handled together, exact ScreenPal IDs must come from the pasted URL, and stream/catalogue/access state must only be changed when owner intent actually changes lesson classification. The 30 September L3T2M24 override is higher authority within `Y6M1.4` / `L3T2M24`: that lesson is L3/11+-only and must never be reintroduced into normal Year 6. All non-conflicting base GCH content remains binding. The full-site workflow file is the current end-to-end execution map for the entire Portal/Admin website and ties each major workflow to its canonical state, prepared projection, public API/browser verification and preservation obligations. Together, these files form the current Portal V2 GCH authority set unless the owner explicitly changes them.
 
@@ -39,15 +40,21 @@ For the shared production Worker, do not deploy Admin Tools as a mutually exclus
 
 This repository, `FuturePerfectTuitions/futureperfect-lessons-v2`, is **not the canonical live student-facing Portal V2 frontend repository**.
 
-The live frontend served at `https://lessons.futureperfect.education` is:
+The canonical live frontend source is:
 
-`FuturePerfectTuitions/futureperfect-lessons-test`
+`FuturePerfectTuitions/futureperfect-lessons-test` branch `source/live-v2-current`.
+
+The actual production serving path is **not GitHub Pages while the current Cloudflare route is active**. The live hostname is intercepted by:
+
+`lessons.futureperfect.education/* -> fpt-portal-v2-rebuild-browser-prod`
+
+The Browser Worker serves static frontend files through its `ASSETS` binding and proxies `/api/v2/*` through `STAGING_API` to `fpt-portal-v2-rebuild-student-prod`.
 
 ## Mandatory targeting rule
 
 If the user asks for a live Portal V2 HTML, CSS, JavaScript, layout, styling, navigation, button or other student-facing frontend change, do **not** edit the frontend copies in this repository unless the user explicitly says to work on the development copy.
 
-For live frontend work, switch to `FuturePerfectTuitions/futureperfect-lessons-test`, verify its root `CNAME` contains `lessons.futureperfect.education`, and inspect its `index.html` for the currently loaded assets.
+For live frontend work, use `FuturePerfectTuitions/futureperfect-lessons-test` branch `source/live-v2-current`, read `V2_SOURCE_STATE.json`, and preserve the exact accepted base source unless the requested change explicitly supersedes it. Production deployment must update the `ASSETS` payload of `fpt-portal-v2-rebuild-browser-prod` using the preserved runtime source/config in `ops/live-browser-worker-prod/`, then prove the live hostname serves the exact rebuilt assets and that the API service binding is unchanged. A GitHub Pages deployment alone is not evidence of a live Portal deployment.
 
 ## What remains here
 
