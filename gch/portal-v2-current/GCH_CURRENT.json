@@ -3,10 +3,10 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-10-04",
-  "authorityVersion": "6.10-v2-year6-exact-september-guard",
+  "authorityVersion": "6.11-v2-year6-live-browser-worker-ordering",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
-  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, the owner-authoritative ordinary Year 6 teaching-card label Year 6 rather than Lessons, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling. Current live V2 frontend also enforces Year 6 chronological lesson presentation numerically by display code (term first, then lesson; SATS numerically) so API/source-array order cannot scramble the student list.",
+  "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, the owner-authoritative ordinary Year 6 teaching-card label Year 6 rather than Lessons, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling. Current live V2 frontend preserves the exact accepted 2026-10-02 V2 application source and restores the owner-proven September ordering architecture as a separate cache-busted browser guard: visible Y6TnMm rows are ordered by term then lesson, Y6SMn/Y6MSn numerically, and MutationObserver reapplies the invariant after DOM changes. The live frontend serving path is the ASSETS binding of fpt-portal-v2-rebuild-browser-prod, not GitHub Pages while the lessons.futureperfect.education/* Worker route is active.",
   "readOrder": [
     "AGENTS.md",
     "gch/portal-v2-current/GCH_CURRENT.json",
@@ -21,7 +21,7 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_L3T2M24_L3_ONLY.json",
     "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
-    "gch/portal-v2-current/evidence/2026-10-04_Y6_VISIBLE_ORDER_GUARD_REPAIR.json"
+    "gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json"
   ],
   "authorityComposition": {
     "base": {
@@ -68,15 +68,16 @@
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-09-30_VIDEO_UPDATE_PLAYBOOK.json",
       "role": "general execution authority for Portal V2 lesson-video additions/replacements: exact pasted ScreenPal URL, canonical plus current prepared lesson parity, description-source grounding, and stream/catalogue/access changes only when owner classification changes"
     },
-    "y6VisibleOrderRepairEvidence": {
-      "path": "gch/portal-v2-current/evidence/2026-10-04_Y6_VISIBLE_ORDER_GUARD_REPAIR.json",
-      "role": "owner-browser failure evidence for the first V2 array-sort attempt plus the historically proven rendered-DOM ordering guard, exact regression fixture, forward-only redeployment and pending owner verification"
-    },
     "liveV2FrontendSource": {
       "repo": "FuturePerfectTuitions/futureperfect-lessons-test",
       "branch": "source/live-v2-current",
       "stateFile": "V2_SOURCE_STATE.json",
-      "role": "authoritative rebuild source for the deployed V2 frontend; future rebuilds must preserve the recorded Year 6 visible-order guard and regression"
+      "liveServingPath": "fpt-portal-v2-rebuild-browser-prod ASSETS via lessons.futureperfect.education/*",
+      "role": "authoritative rebuild source for the live V2 frontend. src/app.js remains byte-for-byte the exact accepted 2026-10-02 application source; Year 6 ordering is supplied only by the standalone cache-busted visible-code DOM guard"
+    },
+    "y6ChronologicalLiveRepairEvidence": {
+      "path": "gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json",
+      "role": "authoritative production evidence for the Year 6 chronological-order incident: historical September working mechanism, exact Oct 2 V2 source preservation, Cloudflare Browser Worker topology, forward-only live ASSETS deployment, regressions and pending owner browser acceptance"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
@@ -251,9 +252,9 @@
     "forward-only production recovery",
     "scope-specific L3T2M24 rule: Y6M1.4 is L3-only, excluded from normal Year 6 catalogue/access, and uses ScreenPal cOQvDXnxxvX",
     "lesson-video additions/replacements with canonical + current prepared lesson parity, exact ScreenPal-ID verification, and stream-aware escalation",
-    "live V2 Year 6 chronological lesson ordering with numeric pre-render sorting plus a last-mile visible-code DOM guard that re-applies after mutations"
+    "live V2 Year 6 chronological lesson ordering through the standalone cache-busted visible-code DOM guard served by the production Browser Worker ASSETS path; the exact accepted 2026-10-02 V2 application source remains unchanged"
   ],
-  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. The ordinary Year 6 teaching card must be labelled Year 6, never Lessons, while SATS remains a separate presentation under the existing access rules. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes. A lesson-video mutation is not complete until the current prepared lesson stream variant also read-backs the exact new ScreenPal ID; a canonical LESSONS_KV write alone is insufficient. The live V2 Year 6 lesson list must not trust upstream array order or a single pre-render sort: the final rendered rows must be ordered from the visible lesson code at the browser boundary, with Y6TnMm term-first then lesson-number and Y6SMn/Y6MSn numerically; a DOM mutation must not be able to leave the list out of order. Owner browser evidence is required before CLOSED PASS. For this Year 6 ordering incident specifically, the last known working September mechanism is authoritative: a standalone, index-loaded, cache-busted visible-code DOM guard with MutationObserver. Do not replace it with an in-bundle-only implementation without owner browser proof.",
+  "nonNegotiableCompletionRule": "No student-visible Admin/source mutation is complete merely because its canonical source write succeeded. Creating a batch is distinct from creating a student login. A generic SQL constraint failure must never be presented as a duplicate batch. Portal Login Details Find remains read-only. Reset & Show New Credentials is a separate deliberate action that may replace only the normal student's Login and Answer Pack credential fields and must preserve batches, entitlements, sessions and account state. Frontend module paths must be verified in browser-relative context. Parent-email test routing must never consume live-parent idempotency. Equivalent Maths Year/L-level cards must not be duplicated in the final student home response or after browser rendering. The ordinary Year 6 teaching card must be labelled Year 6, never Lessons, while SATS remains a separate presentation under the existing access rules. L3 SATS must be driven by genuine SATS access, not shared canonical Year 6 content. Where canonical batch definitions exist, access classification must use them rather than batch-code naming heuristics. A deployed marker is not a substitute for owner browser verification. Production recovery must never roll back later valid changes. A lesson-video mutation is not complete until the current prepared lesson stream variant also read-backs the exact new ScreenPal ID; a canonical LESSONS_KV write alone is insufficient. The live V2 Year 6 lesson list must be corrected at the final browser boundary by the standalone cache-busted visible-code DOM guard: Y6TnMm term-first then lesson-number and Y6SMn/Y6MSn numerically; a DOM mutation must not be able to leave the list out of order. Owner browser evidence is required before CLOSED PASS. For this Year 6 ordering incident specifically, the last known working September mechanism is authoritative: a standalone, index-loaded, cache-busted visible-code DOM guard with MutationObserver. Do not replace it with an in-bundle-only implementation. Production frontend deployment must target the active Browser Worker ASSETS path and must verify the live hostname serves the exact guard asset.",
   "nextChangeProtocol": [
     "classify surface",
     "prove current main and live owner/version/bindings",
@@ -349,36 +350,41 @@
     ]
   },
   "latestYear6ChronologicalFrontendFix": {
-    "name": "Live V2 Year 6 chronological ordering — exact September-style standalone guard",
+    "name": "Live V2 Year 6 chronological ordering — exact September architecture on the real Browser Worker serving path",
     "date": "2026-10-04",
-    "status": "DEPLOYED_PENDING_OWNER_BROWSER_VERIFICATION",
-    "ownerEvidence": [
-      "Initial incident: Year 6 list rendered out of order.",
-      "First V2 pre-render sort attempt failed owner browser verification.",
-      "Second V2 in-bundle DOM guard attempt also failed owner browser verification."
-    ],
-    "exactLastKnownWorkingHistory": {
+    "status": "LIVE_DEPLOYED_PUBLIC_ASSETS_VERIFIED_PENDING_OWNER_BROWSER_ACCEPTANCE",
+    "rootCause": "The live hostname is intercepted by Cloudflare route lessons.futureperfect.education/* -> fpt-portal-v2-rebuild-browser-prod. Earlier GitHub Pages-only changes were therefore not live production deployments.",
+    "historicalWorkingMechanism": {
       "commits": [
         "10ff278ccadac9914df6f0e35277edb84292e4fd",
         "84b111249bc75b0aaafa959bd0f0e59efaa7234b",
         "c701cad019674c3288f6171dd828a2a8073833d2",
         "a306562bb6890da0bd471fb17c7e5b3cc4b5c650"
       ],
-      "mechanism": "Standalone script explicitly loaded by index.html, visible-code DOM sorting, MutationObserver reapplication, and cache-busting of the corrected guard."
+      "rule": "Standalone index-loaded visible-code DOM sorter, term-first then lesson-number, MutationObserver reapplication, explicit cache-busting."
+    },
+    "preservedApplication": {
+      "exactAcceptedRef": "e5e833a9b956a6985bb5a76e7dd056b897b7d76e",
+      "proof": "source/live-v2-current src/app.js is byte-for-byte identical to the exact application source used by the successful 2026-10-02 live Browser Worker asset deployment.",
+      "preservation": "Nested Year 6 Lessons/SATS navigation, dedicated maths-sats route, 11+-only Year 6 exclusions, Maths Practice and all other accepted V2 application behavior remain unchanged."
     },
     "currentRepair": {
       "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
       "canonicalSourceBranch": "source/live-v2-current",
       "sourceState": "V2_SOURCE_STATE.json",
       "standaloneSource": "public/assets/year6-display-sequence-fix-v2.js",
-      "deployedPath": "assets/year6-display-sequence-fix-v2.js",
-      "indexReference": "/assets/year6-display-sequence-fix-v2.js?v=20261004-september-port-1",
-      "productionFrontendCommit": "72865bec6ff1cd7ce60e3a19e800463a54697c23",
-      "regressionRun": 37185547020,
-      "deploymentRun": 37185634182,
-      "pagesRun": 37185679093
+      "indexReference": "/assets/year6-display-sequence-fix-v2.js?v=20261004-september-port-2",
+      "regressionRun": 37187033848,
+      "regressionResult": "PASS_DESKTOP_MOBILE_YEAR6_AND_MATHS_PRACTICE",
+      "liveDeploymentWorkflow": "Deploy canonical live V2 Browser assets",
+      "liveDeploymentRun": 37187274911,
+      "liveDeploymentResult": "PASS",
+      "browserWorker": "fpt-portal-v2-rebuild-browser-prod",
+      "browserWorkerVersion": "e2fe39d0-fd44-41e6-82be-1ff730ccc6b1",
+      "coreBundle": "portal-CUeGMgxq.js",
+      "liveAssetVerification": "PASS_EXACT_CORE_SHA_GUARD_MARKER_API_FACADE_AND_STABLE_RECHECK"
     },
-    "completionRule": "Do not claim CLOSED PASS until the owner browser shows the correct order.",
-    "evidence": "gch/portal-v2-current/evidence/2026-10-04_Y6_VISIBLE_ORDER_GUARD_REPAIR.json"
+    "completionRule": "Do not claim CLOSED PASS until the owner browser shows the correct visible order after this actual Browser Worker ASSETS deployment.",
+    "evidence": "gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json"
   }
 }
