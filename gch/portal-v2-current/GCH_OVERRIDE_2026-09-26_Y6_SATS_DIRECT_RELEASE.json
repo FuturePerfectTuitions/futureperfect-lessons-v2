@@ -69,7 +69,7 @@
     "ownerBrowserVerification": "PENDING_HARD_REFRESH_RETEST",
     "frontendV2Current": {
       "repository": "FuturePerfectTuitions/futureperfect-lessons-test",
-      "sourceBranch": "fix/year6-visible-order-guard-v2-20261004",
+      "sourceBranch": "source/live-v2-current",
       "sourceFile": "src/app.js",
       "dataSortMarker": "YEAR6_CHRONOLOGICAL_ORDER_V2_20261004",
       "visibleOrderMarker": "YEAR6_VISIBLE_ORDER_GUARD_V2_20261004",
@@ -86,7 +86,8 @@
       "deploymentRun": 37184495901,
       "pagesRun": 37184545729,
       "ownerBrowserVerification": "PENDING",
-      "preservation": "Current V2 navigation and all backend state preserved; no rollback or revert."
+      "preservation": "Current V2 navigation and all backend state preserved; no rollback or revert.",
+      "sourceStateFile": "V2_SOURCE_STATE.json"
     }
   },
   "year6LabelChange20260930": {
