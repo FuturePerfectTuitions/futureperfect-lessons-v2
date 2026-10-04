@@ -1,5 +1,5 @@
 {
-  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v10",
+  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v11",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
   "effectiveDate": "2026-10-04",
@@ -70,24 +70,17 @@
     "frontendV2Current": {
       "repository": "FuturePerfectTuitions/futureperfect-lessons-test",
       "sourceBranch": "source/live-v2-current",
-      "sourceFile": "src/app.js",
-      "dataSortMarker": "YEAR6_CHRONOLOGICAL_ORDER_V2_20261004",
-      "visibleOrderMarker": "YEAR6_VISIBLE_ORDER_GUARD_V2_20261004",
-      "productionCommit": "101a232f77a3002069e4d87633997140326d642d",
-      "implementationRule": "The V2 frontend keeps the numeric pre-render sort as defense in depth and also ports the proven September last-mile guard: read the visible .lesson-code from rendered .lesson-row elements, reorder by term/lesson or SATS number, and use MutationObserver plus an explicit post-render microtask to reapply after DOM changes.",
-      "historicalProvenCommits": [
-        "10ff278ccadac9914df6f0e35277edb84292e4fd",
-        "84b111249bc75b0aaafa959bd0f0e59efaa7234b",
-        "c701cad019674c3288f6171dd828a2a8073833d2",
-        "a306562bb6890da0bd471fb17c7e5b3cc4b5c650"
-      ],
-      "regressionTest": "tests/year6-nested-v2.spec.mjs",
-      "regressionRun": 37184415526,
-      "deploymentRun": 37184495901,
-      "pagesRun": 37184545729,
-      "ownerBrowserVerification": "PENDING",
-      "preservation": "Current V2 navigation and all backend state preserved; no rollback or revert.",
-      "sourceStateFile": "V2_SOURCE_STATE.json"
+      "sourceStateFile": "V2_SOURCE_STATE.json",
+      "preRenderSortMarker": "YEAR6_CHRONOLOGICAL_ORDER_V2_20261004",
+      "standaloneGuardSource": "public/assets/year6-display-sequence-fix-v2.js",
+      "standaloneGuardMarker": "YEAR6_STANDALONE_VISIBLE_ORDER_GUARD_V2_20261004",
+      "indexReference": "/assets/year6-display-sequence-fix-v2.js?v=20261004-september-port-1",
+      "productionCommit": "72865bec6ff1cd7ce60e3a19e800463a54697c23",
+      "historicalWorkingPattern": "Standalone index-loaded visible-code sorter + MutationObserver + cache-bust.",
+      "regressionRun": 37185547020,
+      "deploymentRun": 37185634182,
+      "pagesRun": 37185679093,
+      "ownerBrowserVerification": "PENDING"
     }
   },
   "year6LabelChange20260930": {
@@ -169,31 +162,23 @@
     "Do not remove or bypass the V2 last-mile Year 6 visible-order guard during frontend rebuilds; a pre-render array sort alone is not sufficient authority for CLOSED PASS."
   ],
   "year6ChronologicalOrderingFix20261004": {
-    "status": "SECOND_FORWARD_ONLY_REPAIR_DEPLOYED_PENDING_OWNER_BROWSER_VERIFICATION",
-    "firstIncident": "Y6T1M05 -> Y6T1M21 -> Y6T1M06.",
-    "failedFirstRepairEvidence": "After the first V2 array-sort deployment, owner browser still showed Y6T1M01 -> Y6T1M17 -> Y6T1M02.",
-    "confirmedCorrectionGap": "The first V2 repair did not port the historically proven rendered-DOM ordering guard.",
-    "unconfirmedRuntimeDetail": "It is not confirmed whether the failed owner render additionally involved a cached bundle, alternate presentation path, or later DOM mutation.",
-    "currentCorrection": "Port the proven visible-code DOM guard into V2 while retaining the pre-render comparator as defense in depth.",
-    "exactRegression": {
-      "input": [
-        "Y6T1M01",
-        "Y6T1M17",
-        "Y6T1M02",
-        "Y6T2M20"
-      ],
-      "expected": [
-        "Y6T1M01",
-        "Y6T1M02",
-        "Y6T1M17",
-        "Y6T2M20"
-      ],
-      "mutationProof": "The test deliberately moves Y6T1M17 before Y6T1M02 after render and expects MutationObserver to restore the correct order."
-    },
-    "regressionRun": 37184415526,
-    "deploymentRun": 37184495901,
-    "productionFrontendCommit": "101a232f77a3002069e4d87633997140326d642d",
-    "pagesRun": 37184545729,
+    "status": "EXACT_SEPTEMBER_STYLE_GUARD_DEPLOYED_PENDING_OWNER_BROWSER_VERIFICATION",
+    "failedAttempts": [
+      {
+        "type": "pre-render-array-sort",
+        "ownerBrowserResult": "FAIL"
+      },
+      {
+        "type": "V2-bundle-visible-order-guard",
+        "ownerBrowserResult": "FAIL"
+      }
+    ],
+    "lastKnownWorkingHistoricalMechanism": "Standalone browser script explicitly loaded from index.html, sorting the visible rendered lesson rows by display code, watched by MutationObserver, with the corrected script cache-busted.",
+    "currentPort": "Same architectural pattern ported to V2 as /assets/year6-display-sequence-fix-v2.js?v=20261004-september-port-1, loaded before the V2 module.",
+    "productionFrontendCommit": "72865bec6ff1cd7ce60e3a19e800463a54697c23",
+    "regressionRun": 37185547020,
+    "deploymentRun": 37185634182,
+    "pagesRun": 37185679093,
     "evidence": "gch/portal-v2-current/evidence/2026-10-04_Y6_VISIBLE_ORDER_GUARD_REPAIR.json",
     "ownerBrowserVerification": "PENDING"
   }
