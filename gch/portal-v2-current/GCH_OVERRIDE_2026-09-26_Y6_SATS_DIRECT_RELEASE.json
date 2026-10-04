@@ -1,8 +1,8 @@
 {
-  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v8",
+  "schema": "fpt.portal.gch.override.y6-sats-direct-release.v9",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
-  "effectiveDate": "2026-09-30",
+  "effectiveDate": "2026-10-04",
   "scope": "PUBLIC_STUDENT_V2.Year6SatsReleaseSemanticsAndMathsEquivalentNavigation",
   "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
   "precedence": "This override is higher authority for Year 6 SAT lesson access/release semantics, SAT CSV/display-code resolution, canonical batch-definition classification of Maths equivalent-view entitlements, and navigation presentation for Year 4/L1, Year 5/L2 and Year 6/L3. All non-conflicting Portal V2 authority remains binding.",
@@ -25,6 +25,12 @@
       "authoritativeSource": "batch_definitions.subject, batch_definitions.stream, batch_definitions.school_year and batch_definitions.maths_level",
       "prohibitedPrimaryHeuristic": "Do not classify normal-vs-11plus from whether a batch-code string contains '11'.",
       "equivalenceRule": "For Maths only, Year 4/L1, Year 5/L2 and Year 6/L3 are equivalent curriculum presentations. A canonical entitlement from either member may be honoured through the student's selected equivalent teaching card while the home screen still exposes only one member of the pair."
+    },
+    "year6ChronologicalOrdering": {
+      "rule": "The live V2 Year 6 nested lesson surfaces must render recognised Year 6 display codes chronologically regardless of API/source-array order.",
+      "lessons": "Y6TnMm sorts numerically by term n first, then lesson m. Example: Y6T1M05, Y6T1M06, Y6T1M21, then Y6T2M01.",
+      "sats": "Y6SMn and legacy-compatible Y6MSn sort numerically by n.",
+      "boundary": "Ordering is a presentation transformation only. It must not change lesson membership, access, entitlement, release, stream classification, L3-only exclusions, SATS separation or quiz behaviour."
     }
   },
   "implementation": {
@@ -59,7 +65,21 @@
     "productionWorkflowResult": "PASS",
     "productionDeploymentVerified": true,
     "productionPreservationVerification": "PASS: current forward-only Worker deployment completed successfully and live verification passed for composed Worker markers, entitlement/navigation reconciliation, live parent routing, quiz bridge, Replace Resource, Trial runtime, Admin-route protection and protected viewer. The separate Admin production preservation run 36755325757 also passed and its rollback step was skipped.",
-    "ownerBrowserVerification": "PENDING_HARD_REFRESH_RETEST"
+    "ownerBrowserVerification": "PENDING_HARD_REFRESH_RETEST",
+    "frontendV2Current": {
+      "repository": "FuturePerfectTuitions/futureperfect-lessons-test",
+      "sourceBranch": "fix/year6-chronological-v2-20261004",
+      "sourceFile": "src/app.js",
+      "sourceMarker": "YEAR6_CHRONOLOGICAL_ORDER_V2_20261004",
+      "functionalCommit": "1f8be9e5319c2497ee5282fef9c27b84d7a6c42f",
+      "currentProductionCommit": "930c15ddb5332652a012787e24b78d02e7461e9b",
+      "implementationRule": "year6RowsForSection filters the appropriate Year 6/SATS rows, then sorts a copy using numeric display-code keys before state.lessons is rendered.",
+      "regressionTest": "tests/year6-nested-v2.spec.mjs",
+      "regressionRun": 37183736365,
+      "deploymentRun": 37183819470,
+      "pagesRun": 37183854685,
+      "preservation": "Preserves the current V2 nested Year 6 Lessons/SATS flow and does not restore the removed legacy DOM sorter."
+    }
   },
   "year6LabelChange20260930": {
     "status": "PRODUCTION_AND_FRONTEND_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
@@ -122,7 +142,9 @@
     "Canonical Y6 lesson entitlements from an L3 batch definition are recognised as L3/equivalent curriculum access even when the batch-code text does not contain '11'.",
     "English normal-vs-11plus classification remains distinct and is not widened by the Maths equivalence rule.",
     "The live frontend normalises home JSON before phase10-history grouping and phase7 card rendering.",
-    "Shared production Worker retains quiz bridge, Admin tools, Trial runtime, resource replacement, lesson release import, protected-answer behaviour and parent email capabilities."
+    "Shared production Worker retains quiz bridge, Admin tools, Trial runtime, resource replacement, lesson release import, protected-answer behaviour and parent email capabilities.",
+    "Year 6 nested Lessons renders recognised Y6TnMm rows numerically by term then lesson, independent of API/source-array order.",
+    "Year 6 nested SATS renders Y6SMn/Y6MSn numerically and remains a separate SATS surface."
   ],
   "preservationInvariants": [
     "Production recovery is forward-only; do not revert, roll back, restore an older Worker or deploy an older entrypoint.",
@@ -134,5 +156,49 @@
     "Do not classify an entitlement's programme stream primarily from batch-code naming when a canonical batch definition exists.",
     "Do not alter Trial session semantics, normal student sessions, protected Answer Packs, online 11+ English PreLesson VR, resource replacement, parent-email routing or quiz bridge behaviour.",
     "A green deployment and runtime markers are not substitutes for owner browser verification; do not declare the 2026-09-30 label change CLOSED PASS until representative live browser evidence confirms it."
-  ]
+  ],
+  "year6ChronologicalOrderingFix20261004": {
+    "status": "PRODUCTION_PASS_PENDING_OWNER_BROWSER_VERIFICATION",
+    "incident": "Live Year 6 Lessons showed Y6T1M05 -> Y6T1M21 -> Y6T1M06.",
+    "rootCause": "The 2 October V2 frontend rebuild removed the previous browser ordering guard; the new source filtered rows but rendered the API array unchanged.",
+    "correction": "Added a first-class numeric Year 6 comparator to current V2 source and applied it inside year6RowsForSection for both Lessons and SATS.",
+    "regressionEvidence": {
+      "run": 37183736365,
+      "result": "PASS",
+      "desktop": "PASS",
+      "mobile": "PASS",
+      "mathsPracticeNonRegression": "PASS",
+      "fixtureLessons": [
+        "Y6T1M05",
+        "Y6T1M21",
+        "Y6T1M06",
+        "Y6T2M20"
+      ],
+      "expectedRenderedLessons": [
+        "Y6T1M05",
+        "Y6T1M06",
+        "Y6T1M21",
+        "Y6T2M20"
+      ],
+      "fixtureSats": [
+        "Y6SM10",
+        "Y6SM1",
+        "Y6SM2"
+      ],
+      "expectedRenderedSats": [
+        "Y6SM1",
+        "Y6SM2",
+        "Y6SM10"
+      ]
+    },
+    "deploymentEvidence": {
+      "run": 37183819470,
+      "result": "PASS",
+      "forwardOnlyGuardBase": "3621bff2acb1caccb04515e99cc4c3327e3edaa4",
+      "productionCommit": "930c15ddb5332652a012787e24b78d02e7461e9b",
+      "pagesRun": 37183854685,
+      "pagesResult": "PASS"
+    },
+    "ownerBrowserVerification": "PENDING_REFRESH_RETEST"
+  }
 }
