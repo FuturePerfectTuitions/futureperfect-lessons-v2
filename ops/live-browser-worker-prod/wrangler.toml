@@ -1,0 +1,12 @@
+name = "fpt-portal-v2-rebuild-browser-prod"
+main = "./index.js"
+compatibility_date = "2026-08-20"
+workers_dev = false
+
+[assets]
+directory = "./site"
+binding = "ASSETS"
+
+[[services]]
+binding = "STAGING_API"
+service = "fpt-portal-v2-rebuild-student-prod"
