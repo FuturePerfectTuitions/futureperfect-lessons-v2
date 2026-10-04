@@ -1,0 +1,213 @@
+name: Deploy canonical live V2 Browser assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-canonical-live-v2-browser-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-live-v2-browser-assets
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_HOST: lessons.futureperfect.education
+  BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
+  FRONTEND_REF: 0018a098b4fcfd523c49106fdca836ff4d9c2198
+  EXACT_OCT2_APP_REF: e5e833a9b956a6985bb5a76e7dd056b897b7d76e
+  EXPECTED_SOURCE_INDEX_SHA256: 2257d56c5cd930dacfefa00f310eb5f9bc2db6cd18e3ebf16fb7d8c4ad4c3cbd
+  EXPECTED_DEPLOYED_INDEX_SHA256: 975d5193073d52663b8dbbee5ccf0387d589fe00cb42c836c58354848c39b2d8
+  GUARD_ASSET: year6-display-sequence-fix-v2.js
+  GUARD_MARKER: YEAR6_STANDALONE_VISIBLE_ORDER_GUARD_V2_20261004
+  GUARD_QUERY: v=20261004-september-port-2
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out canonical Portal repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: portal
+          fetch-depth: 0
+
+      - name: Check out exact verified frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_REF }}
+          path: frontend
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove all Oct 2 frontend changes are preserved
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_REF"
+          git -C frontend show "$EXACT_OCT2_APP_REF:src/app.js" > /tmp/exact-oct2-app.js
+          cmp -s /tmp/exact-oct2-app.js frontend/src/app.js
+          ! grep -q 'YEAR6_CHRONOLOGICAL_ORDER_V2_20261004' frontend/src/app.js
+          ! grep -q 'YEAR6_VISIBLE_ORDER_GUARD_V2_20261004' frontend/src/app.js
+          grep -q "$GUARD_MARKER" frontend/public/assets/"$GUARD_ASSET"
+          grep -q 'MutationObserver' frontend/public/assets/"$GUARD_ASSET"
+          grep -q 'ra.term - rb.term' frontend/public/assets/"$GUARD_ASSET"
+          grep -q 'ra.lesson - rb.lesson' frontend/public/assets/"$GUARD_ASSET"
+          grep -q "$GUARD_ASSET?$GUARD_QUERY" frontend/index.html
+          echo EXACT_OCT2_V2_SOURCE_PLUS_STANDALONE_GUARD_PASS
+
+      - name: Build and run browser regressions
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          grep -q "$GUARD_ASSET?$GUARD_QUERY" dist/index.html
+          grep -q "$GUARD_MARKER" dist/assets/"$GUARD_ASSET"
+          npx playwright install --with-deps chromium
+          npx playwright test tests/year6-nested-v2.spec.mjs --project=desktop-chromium
+          npx playwright test tests/year6-nested-v2.spec.mjs --project=mobile-chromium
+          npx playwright test tests/step10-v2-maths-practice.spec.mjs --project=desktop-chromium
+
+      - name: Prepare exact Browser Worker asset payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum portal/ops/live-browser-worker-prod/index.js | awk '{print $1}')" = "$EXPECTED_SOURCE_INDEX_SHA256"
+          grep -Fq 'env.STAGING_API.fetch' portal/ops/live-browser-worker-prod/index.js
+          grep -Fq 'env.ASSETS.fetch' portal/ops/live-browser-worker-prod/index.js
+          rm -rf portal/ops/live-browser-worker-prod/site
+          mkdir -p portal/ops/live-browser-worker-prod/site
+          cp -a frontend/dist/. portal/ops/live-browser-worker-prod/site/
+          test -f portal/ops/live-browser-worker-prod/site/index.html
+          test -f portal/ops/live-browser-worker-prod/site/assets/"$GUARD_ASSET"
+          core="$(find portal/ops/live-browser-worker-prod/site/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name 'portal-protected-viewer-*' ! -name '*.map' -print -quit)"
+          test -n "$core"
+          CORE_BUNDLE="$(basename "$core")"
+          CORE_SHA="$(sha256sum "$core" | awk '{print $1}')"
+          echo "CORE_BUNDLE=$CORE_BUNDLE" >> "$GITHUB_ENV"
+          echo "CORE_SHA=$CORE_SHA" >> "$GITHUB_ENV"
+          echo "Prepared core bundle: $CORE_BUNDLE $CORE_SHA"
+
+      - name: Guard exact current live Browser Worker topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://api.cloudflare.com/client/v4'
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BROWSER_WORKER/settings" -H "$AUTH" -o /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings|length==2' /tmp/settings-before.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ASSETS" and .type=="assets")' /tmp/settings-before.json >/dev/null
+          jq -e --arg student "$STUDENT_WORKER" '.result.bindings[]|select(.name=="STAGING_API" and .type=="service" and .service==$student and .environment=="production")' /tmp/settings-before.json >/dev/null
+
+          curl -fsS -D /tmp/package-before.headers "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BROWSER_WORKER" -H "$AUTH" -o /tmp/package-before.bin
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          import hashlib, os, pathlib, re
+          headers=pathlib.Path('/tmp/package-before.headers').read_text('latin-1',errors='replace')
+          body=pathlib.Path('/tmp/package-before.bin').read_bytes()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          if not m: raise SystemExit('missing deployed package content-type')
+          msg=BytesParser(policy=default).parsebytes(('Content-Type: '+m.group(1).strip()+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body)
+          data=None
+          for p in msg.iter_parts():
+              name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name')
+              if name=='index.js':
+                  data=p.get_payload(decode=True) or b''
+                  break
+          if data is None: raise SystemExit('deployed index.js missing')
+          digest=hashlib.sha256(data).hexdigest()
+          print('DEPLOYED_INDEX_SHA256='+digest)
+          if digest != os.environ['EXPECTED_DEPLOYED_INDEX_SHA256']:
+              raise SystemExit('Live Browser Worker runtime moved; refusing asset deployment')
+          PY
+          echo LIVE_BROWSER_TOPOLOGY_GUARD_PASS
+
+      - name: Dry-run preserved Worker plus canonical assets
+        working-directory: portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config ops/live-browser-worker-prod/wrangler.toml --dry-run --outdir /tmp/browser-dryrun
+          echo LIVE_BROWSER_DRY_RUN_PASS
+
+      - name: Deploy canonical assets forward-only
+        working-directory: portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy             --config ops/live-browser-worker-prod/wrangler.toml             --keep-vars             --message 'Forward-only: restore proven standalone Year 6 chronological-order guard'
+          echo LIVE_BROWSER_ASSET_DEPLOY_COMPLETE
+
+      - name: Verify topology and runtime were preserved
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://api.cloudflare.com/client/v4'
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BROWSER_WORKER/settings" -H "$AUTH" -o /tmp/settings-after.json
+          jq -e '.success == true' /tmp/settings-after.json >/dev/null
+          jq -e '.result.compatibility_date == "2026-08-20"' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings|length==2' /tmp/settings-after.json >/dev/null
+          jq -e '.result.bindings[]|select(.name=="ASSETS" and .type=="assets")' /tmp/settings-after.json >/dev/null
+          jq -e --arg student "$STUDENT_WORKER" '.result.bindings[]|select(.name=="STAGING_API" and .type=="service" and .service==$student and .environment=="production")' /tmp/settings-after.json >/dev/null
+          echo LIVE_BROWSER_BINDINGS_PRESERVED_PASS
+
+      - name: Verify live hostname serves the exact new assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://$PROD_HOST"
+          LIVE=0
+          for attempt in $(seq 1 60); do
+            stamp="${GITHUB_RUN_ID}-${attempt}"
+            curl -fsS -H 'Cache-Control: no-cache' "$BASE/?deploy=$stamp" -o /tmp/live-index.html || true
+            if grep -Fq "$CORE_BUNDLE" /tmp/live-index.html && grep -Fq "$GUARD_ASSET?$GUARD_QUERY" /tmp/live-index.html; then
+              guard_status="$(curl -sS -H 'Cache-Control: no-cache' -o /tmp/live-guard.js -w '%{http_code}' "$BASE/assets/$GUARD_ASSET?$GUARD_QUERY&deploy=$stamp")"
+              core_status="$(curl -sS -H 'Cache-Control: no-cache' -o /tmp/live-core.js -w '%{http_code}' "$BASE/assets/$CORE_BUNDLE?deploy=$stamp")"
+              if [ "$guard_status" = 200 ] && [ "$core_status" = 200 ] && grep -Fq "$GUARD_MARKER" /tmp/live-guard.js && [ "$(sha256sum /tmp/live-core.js | awk '{print $1}')" = "$CORE_SHA" ]; then
+                LIVE=1
+                echo "LIVE_ASSETS_MATCH attempt=$attempt core=$CORE_BUNDLE sha=$CORE_SHA"
+                break
+              fi
+            fi
+            sleep 2
+          done
+          test "$LIVE" = 1
+
+          API_STATUS="$(curl -sS -D /tmp/live-api.headers -o /tmp/live-api.body -w '%{http_code}' "$BASE/api/v2/student/home")"
+          test "$API_STATUS" = 401
+          grep -qi '^x-fpt-cp9-browser-facade: service-binding' /tmp/live-api.headers
+          echo LIVE_BROWSER_PUBLIC_ASSET_AND_API_PASS
+
+      - name: Stable public recheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 5
+          BASE="https://$PROD_HOST"
+          stamp="${GITHUB_RUN_ID}-stable"
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE/?deploy=$stamp" -o /tmp/stable-index.html
+          grep -Fq "$CORE_BUNDLE" /tmp/stable-index.html
+          grep -Fq "$GUARD_ASSET?$GUARD_QUERY" /tmp/stable-index.html
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE/assets/$GUARD_ASSET?$GUARD_QUERY&deploy=$stamp" -o /tmp/stable-guard.js
+          grep -Fq "$GUARD_MARKER" /tmp/stable-guard.js
+          echo LIVE_BROWSER_STABLE_RECHECK_PASS
