@@ -71,6 +71,12 @@
     "y6VisibleOrderRepairEvidence": {
       "path": "gch/portal-v2-current/evidence/2026-10-04_Y6_VISIBLE_ORDER_GUARD_REPAIR.json",
       "role": "owner-browser failure evidence for the first V2 array-sort attempt plus the historically proven rendered-DOM ordering guard, exact regression fixture, forward-only redeployment and pending owner verification"
+    },
+    "liveV2FrontendSource": {
+      "repo": "FuturePerfectTuitions/futureperfect-lessons-test",
+      "branch": "source/live-v2-current",
+      "stateFile": "V2_SOURCE_STATE.json",
+      "role": "authoritative rebuild source for the deployed V2 frontend; future rebuilds must preserve the recorded Year 6 visible-order guard and regression"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes.",
@@ -367,7 +373,7 @@
     },
     "currentRepair": {
       "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
-      "sourceBranch": "fix/year6-visible-order-guard-v2-20261004",
+      "sourceBranch": "source/live-v2-current",
       "sourceMarker": "YEAR6_VISIBLE_ORDER_GUARD_V2_20261004",
       "productionFrontendCommit": "101a232f77a3002069e4d87633997140326d642d",
       "implementation": "Retain numeric pre-render sorting and add the proven last-mile rendered-DOM ordering guard based on visible .lesson-code, with MutationObserver reapplication.",
