@@ -1,0 +1,89 @@
+{
+  "schema": "fpt.portal.evidence.y6-chronological-live-browser-worker.v1",
+  "documentType": "PRODUCTION_REPAIR_EVIDENCE",
+  "status": "LIVE_DEPLOYED_PUBLIC_ASSETS_VERIFIED_PENDING_OWNER_BROWSER_ACCEPTANCE",
+  "date": "2026-10-04",
+  "scope": "PUBLIC_STUDENT_V2.Year6ChronologicalPresentation",
+  "incident": {
+    "ownerObservedSequence": [
+      "Y6T1M01",
+      "Y6T1M17",
+      "Y6T1M02"
+    ],
+    "requiredRule": "Y6TnMm must render term-first then lesson-number; Y6SMn/Y6MSn must render numerically.",
+    "rootCauseChain": [
+      "The September standalone visible-code DOM sorter was the last owner-proven working mechanism.",
+      "The 2026-10-01 nested Year 6 Lessons/SATS change created a Lessons path that bypassed the old sorter.",
+      "The 2026-10-02 V2 rebuild removed the old standalone sorter from the rebuilt frontend.",
+      "Initial 2026-10-04 repairs were deployed only to GitHub Pages, but the live hostname is intercepted by a Cloudflare Browser Worker route, so those Pages assets were not the live production surface."
+    ]
+  },
+  "historicalWorkingMechanism": {
+    "repository": "FuturePerfectTuitions/futureperfect-lessons-test",
+    "commits": [
+      "10ff278ccadac9914df6f0e35277edb84292e4fd",
+      "84b111249bc75b0aaafa959bd0f0e59efaa7234b",
+      "c701cad019674c3288f6171dd828a2a8073833d2",
+      "a306562bb6890da0bd471fb17c7e5b3cc4b5c650"
+    ],
+    "contract": "Standalone script explicitly loaded by index.html, sorting browser-visible lesson rows by visible display code, reapplying with MutationObserver, and cache-busting the corrected script."
+  },
+  "preservedLaterFrontend": {
+    "exactAcceptedBaseRef": "e5e833a9b956a6985bb5a76e7dd056b897b7d76e",
+    "proof": "Canonical source/live-v2-current src/app.js is byte-for-byte identical to the exact source used by the successful 2026-10-02 live Browser Worker asset deployment.",
+    "preservation": "Nested Year 6 Lessons/SATS navigation, dedicated maths-sats route, 11+-only Year 6 exclusions, Maths Practice and all other accepted V2 application behavior remain in the unchanged base app source."
+  },
+  "canonicalSource": {
+    "repository": "FuturePerfectTuitions/futureperfect-lessons-test",
+    "branch": "source/live-v2-current",
+    "stateFile": "V2_SOURCE_STATE.json",
+    "applicationSource": "src/app.js",
+    "standaloneGuardSource": "public/assets/year6-display-sequence-fix-v2.js",
+    "standaloneGuardMarker": "YEAR6_STANDALONE_VISIBLE_ORDER_GUARD_V2_20261004",
+    "indexReference": "/assets/year6-display-sequence-fix-v2.js?v=20261004-september-port-2"
+  },
+  "regressionEvidence": {
+    "run": 37187033848,
+    "result": "PASS",
+    "checks": [
+      "Exact Oct 2 V2 application source identity",
+      "Standalone guard source and cache-busted loader",
+      "Desktop Year 6 nested Lessons/SATS contract",
+      "Mobile Year 6 nested Lessons/SATS contract",
+      "Exact owner failure shape Y6T1M01 -> Y6T1M17 -> Y6T1M02 corrected to Y6T1M01 -> Y6T1M02 -> Y6T1M17",
+      "Post-render DOM scramble automatically repaired by MutationObserver",
+      "SATS numeric order Y6SM1 -> Y6SM2 -> Y6SM10",
+      "Maths Practice non-regression"
+    ]
+  },
+  "liveTopology": {
+    "hostname": "lessons.futureperfect.education",
+    "route": "lessons.futureperfect.education/*",
+    "browserWorker": "fpt-portal-v2-rebuild-browser-prod",
+    "assetsBinding": "ASSETS",
+    "apiServiceBinding": "STAGING_API -> fpt-portal-v2-rebuild-student-prod (production)",
+    "authoritativeServingRule": "Cloudflare Browser Worker ASSETS is the live frontend serving path while this route is active; GitHub Pages alone is not a live deployment."
+  },
+  "productionDeployment": {
+    "workflow": "Deploy canonical live V2 Browser assets",
+    "run": 37187274911,
+    "result": "PASS",
+    "forwardOnly": true,
+    "browserWorkerVersion": "e2fe39d0-fd44-41e6-82be-1ff730ccc6b1",
+    "coreBundle": "portal-CUeGMgxq.js",
+    "coreBundleSha256": "ad9231271fa8970455583d35914d681534653c890aeca69a5cd19b7ba9dfde28",
+    "liveChecks": [
+      "Production Browser Worker runtime/topology matched guarded baseline before mutation.",
+      "ASSETS and STAGING_API bindings were preserved after deployment.",
+      "Live hostname served the exact locally-built core bundle.",
+      "Live hostname served the standalone Year 6 guard and its marker.",
+      "Unauthenticated /api/v2/student/home remained 401 with x-fpt-cp9-browser-facade: service-binding.",
+      "Stable public recheck passed after propagation."
+    ]
+  },
+  "repositoryCleanup": {
+    "rule": "Superseded Pages-only/pre-render/in-bundle Year 6 fix workflows and branches are not authority and are removed from the canonical source path; the exact Oct 2 app plus standalone guard is the only current frontend repair.",
+    "pagesFallback": "GitHub Pages fallback is synchronized from the same canonical source, but is not the live serving path while the Browser Worker route remains active."
+  },
+  "completionGate": "Do not mark CLOSED PASS until the owner refreshes the authenticated live portal and confirms the visible Year 6 order is correct."
+}
