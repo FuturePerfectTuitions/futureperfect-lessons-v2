@@ -1,0 +1,93 @@
+{
+  "schema": "fpt.portal.gch.override.public-marketing-video-226.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
+  "effectiveDate": "2026-10-06",
+  "scope": "PORTAL_V2.PublicMarketingVideo226",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "precedence": "This override is authoritative only for the standalone public 226.futureperfect.education marketing-video surface. It does not alter authenticated Portal V2, Admin, Quiz, Trial, student access, lesson release, protected resources, parent email, catalogue, or read-model semantics.",
+  "ownerRequirement": {
+    "purpose": "A public URL that can be sent directly to prospective parents and presents the marketing video in the same visual language and 16:9 player frame as Portal V2 lesson videos.",
+    "publicHost": "226.futureperfect.education",
+    "access": "PUBLIC_NO_LOGIN",
+    "playback": "USER_INITIATED_PLAY_ONLY",
+    "autoplay": false,
+    "currentVideoShareUrl": "https://screenpal.com/content/video/cO61ifnxHQI",
+    "currentScreenPalId": "cO61ifnxHQI",
+    "currentEmbedUrl": "https://go.screenpal.com/player/cO61ifnxHQI?ff=1&ahc=1&dcc=1&tl=1&bg=transparent"
+  },
+  "hostingDecision": {
+    "pageHosting": "Cloudflare Worker custom domain",
+    "worker": "fpt-marketing-video-226",
+    "videoHosting": "ScreenPal",
+    "r2VideoHosting": false,
+    "rationale": "Keep ScreenPal for its existing player/streaming behavior while the parent-facing URL and presentation remain FPT-controlled. The page can switch video backend later without changing the parent URL."
+  },
+  "implementation": {
+    "workerSource": "ops/marketing-video-226/index.js",
+    "wranglerConfig": "ops/marketing-video-226/wrangler.toml",
+    "deploymentWorkflow": ".github/workflows/deploy-marketing-video-226.yml",
+    "customDomainConfig": {
+      "pattern": "226.futureperfect.education",
+      "custom_domain": true
+    },
+    "sourceMarker": "FPT_MARKETING_VIDEO_226_V1",
+    "portalStyleReference": {
+      "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
+      "branch": "source/live-v2-current",
+      "styleSource": "src/styles.css",
+      "presentationElementsCopied": [
+        "red/white/navy airmail border",
+        "white branded topbar",
+        "1120px responsive main width",
+        "white rounded portal card with navy top border",
+        "Portal typography/colors",
+        "16:9 rounded dark player frame"
+      ]
+    }
+  },
+  "isolationInvariant": {
+    "portalBindings": [],
+    "studentApiBinding": false,
+    "d1": false,
+    "kv": false,
+    "r2": false,
+    "authentication": false,
+    "sessions": false,
+    "lessonEntitlements": false,
+    "adminSurface": false,
+    "quizBridge": false,
+    "parentEmail": false,
+    "rule": "Changes to this marketing page must not deploy, replace, bind to, or mutate Portal V2/Quiz Workers or Portal data stores."
+  },
+  "browserAndEmbedContract": {
+    "iframeAllow": "fullscreen; picture-in-picture",
+    "autoplayPermission": false,
+    "autoplayQueryParameter": false,
+    "fullscreen": true,
+    "responsiveAspectRatio": "16/9",
+    "screenPalHost": "go.screenpal.com"
+  },
+  "publicVerification": {
+    "date": "2026-10-06",
+    "hostReachable": true,
+    "httpPageTitle": "Future Perfect Tuitions",
+    "robots": "noindex,nofollow",
+    "themeColor": "#012169",
+    "liveIframeVerified": true,
+    "liveIframeSrc": "https://go.screenpal.com/player/cO61ifnxHQI?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+    "liveIframeAllow": "fullscreen; picture-in-picture",
+    "liveAutoplayAbsent": true
+  },
+  "updateRule": {
+    "sameVideoProviderReplacement": "Replace only the ScreenPal ID/embed URL on this isolated Worker, preserve the public hostname and Portal-style presentation, verify live iframe source and absence of autoplay.",
+    "providerMigration": "The parent-facing hostname remains 226.futureperfect.education. A future move to R2/Cloudflare Stream/another provider must change only the isolated marketing surface unless separately authorised.",
+    "prohibited": [
+      "adding autoplay without a new owner instruction",
+      "routing the public marketing page through authenticated Portal APIs",
+      "adding Portal/Quiz data bindings to the marketing Worker",
+      "changing lessons.futureperfect.education or quiz.futureperfect.education to deploy this page",
+      "rollback/revert of Portal production state"
+    ]
+  }
+}
