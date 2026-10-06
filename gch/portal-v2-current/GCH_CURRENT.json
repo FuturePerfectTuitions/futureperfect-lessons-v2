@@ -410,6 +410,20 @@
       "ops/marketing-video-226/index.js",
       "ops/marketing-video-226/wrangler.toml",
       ".github/workflows/deploy-marketing-video-226.yml"
-    ]
+    ],
+    "latestRevision": {
+      "sourceCommit": "d609960ff1eb4028633401b490eb491347db9372",
+      "visibleCopy": {
+        "title": "Welcome",
+        "eyebrow": "Inside Future Perfect Tuitions",
+        "description": "Discover how we teach, check understanding and help every child move forward with confidence."
+      },
+      "localBrandAssets": {
+        "logo": "/assets/fpt-logo.png",
+        "favicon": "/favicon.ico"
+      },
+      "visualBrowserVerification": "PASS",
+      "autoplay": false
+    }
   }
 }
