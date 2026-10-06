@@ -14,7 +14,13 @@
     "autoplay": false,
     "currentVideoShareUrl": "https://screenpal.com/content/video/cO61ifnxHQI",
     "currentScreenPalId": "cO61ifnxHQI",
-    "currentEmbedUrl": "https://go.screenpal.com/player/cO61ifnxHQI?ff=1&ahc=1&dcc=1&tl=1&bg=transparent"
+    "currentEmbedUrl": "https://go.screenpal.com/player/cO61ifnxHQI?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+    "visibleCopy": {
+      "title": "Welcome",
+      "eyebrow": "Inside Future Perfect Tuitions",
+      "description": "Discover how we teach, check understanding and help every child move forward with confidence.",
+      "removedDuplicateEyebrow": "Future Perfect Tuitions"
+    }
   },
   "hostingDecision": {
     "pageHosting": "Cloudflare Worker custom domain",
@@ -44,6 +50,13 @@
         "Portal typography/colors",
         "16:9 rounded dark player frame"
       ]
+    },
+    "brandAssets": {
+      "logoSourceAuthority": "FuturePerfectTuitions/futureperfect-lessons-test source/live-v2-current assets/fpt-logo.png",
+      "faviconSourceAuthority": "FuturePerfectTuitions/futureperfect-lessons-test source/live-v2-current favicon.ico",
+      "liveLogoRoute": "/assets/fpt-logo.png",
+      "liveFaviconRoute": "/favicon.ico",
+      "hosting": "served directly by isolated fpt-marketing-video-226 Worker"
     }
   },
   "isolationInvariant": {
@@ -77,7 +90,17 @@
     "liveIframeVerified": true,
     "liveIframeSrc": "https://go.screenpal.com/player/cO61ifnxHQI?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
     "liveIframeAllow": "fullscreen; picture-in-picture",
-    "liveAutoplayAbsent": true
+    "liveAutoplayAbsent": true,
+    "latestRevision": {
+      "date": "2026-10-06",
+      "sourceCommit": "d609960ff1eb4028633401b490eb491347db9372",
+      "liveCopyVerified": true,
+      "liveFaviconReferenceVerified": true,
+      "liveLocalLogoReferenceVerified": true,
+      "visualBrowserLogoRender": "PASS",
+      "playButtonVisible": true,
+      "autoplayAbsent": true
+    }
   },
   "updateRule": {
     "sameVideoProviderReplacement": "Replace only the ScreenPal ID/embed URL on this isolated Worker, preserve the public hostname and Portal-style presentation, verify live iframe source and absence of autoplay.",
