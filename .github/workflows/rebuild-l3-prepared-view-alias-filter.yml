@@ -1,0 +1,22 @@
+name: Rebuild L3 prepared view alias filter
+
+on:
+  push:
+    branches: [rebuild/portal-v2-production-source-2026-10-07]
+    paths:
+      - 'rebuild/shared/read-models/catalogue.mjs'
+      - 'tests/rebuild-l3-prepared-view-alias-filter.mjs'
+      - '.github/workflows/rebuild-l3-prepared-view-alias-filter.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/rebuild-l3-prepared-view-alias-filter.mjs
