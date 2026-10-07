@@ -5,6 +5,10 @@ on:
     branches: [diag/l3-order-detail-20261007]
     paths:
       - '.github/workflows/l3-order-detail-readonly-20261007.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/l3-order-detail-readonly-20261007.yml'
 
 permissions:
   contents: read
