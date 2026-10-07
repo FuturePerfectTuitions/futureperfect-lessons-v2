@@ -2,8 +2,8 @@
   "schema": "fpt.portal.gch.current-manifest.v1",
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
-  "effectiveDate": "2026-10-06",
-  "authorityVersion": "6.12-public-marketing-video-226",
+  "effectiveDate": "2026-10-07",
+  "authorityVersion": "6.13-l3-prepared-consistency",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
   "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, the owner-authoritative ordinary Year 6 teaching-card label Year 6 rather than Lessons, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling. Current live V2 frontend preserves the exact accepted 2026-10-02 V2 application source and restores the owner-proven September ordering architecture as a separate cache-busted browser guard: visible Y6TnMm rows are ordered by term then lesson, Y6SMn/Y6MSn numerically, and MutationObserver reapplies the invariant after DOM changes. The live frontend serving path is the ASSETS binding of fpt-portal-v2-rebuild-browser-prod, not GitHub Pages while the lessons.futureperfect.education/* Worker route is active. The repository also owns an explicitly isolated public parent-facing marketing-video surface at 226.futureperfect.education: Cloudflare Worker fpt-marketing-video-226, ScreenPal cO61ifnxHQI, Portal-style 16:9 presentation, public/no-login access, and user-initiated playback only. This surface has no Portal/Quiz data or service bindings and must remain operationally isolated from authenticated Portal V2.",
@@ -22,7 +22,8 @@
     "gch/portal-v2-current/evidence/2026-09-27_Y6_EQUIVALENT_ROSTER_AUDIT.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-09-26_FORWARD_ONLY_ADMIN_EMAIL_RECOVERY.json",
     "gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json",
-    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-06_PUBLIC_MARKETING_VIDEO_226.json"
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-06_PUBLIC_MARKETING_VIDEO_226.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json"
   ],
   "authorityComposition": {
     "base": {
@@ -83,9 +84,13 @@
     "publicMarketingVideo226Override": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-06_PUBLIC_MARKETING_VIDEO_226.json",
       "role": "scope-specific authority for the isolated public 226.futureperfect.education parent marketing-video page: FPT-owned URL/presentation, ScreenPal-hosted video cO61ifnxHQI, user-initiated playback only, and zero Portal/Quiz data/service bindings"
+    },
+    "l3PreparedConsistencyOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json",
+      "role": "highest scope-specific authority for the recurring L3 stream-split prepared-model defect: explicit view-alias filtering, finite L3 order, prepared lesson-detail publication, repaired L3T2M25/L3T3M43 production state and daily integrity audit"
     }
   },
-  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes. Treat 226.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them.",
+  "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes. Treat 226.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them. For L3/Year6 stream-specific lesson incidents, also read the 2026-10-07 L3 prepared-consistency override before any mutation.",
   "latestRepositoryChange": {
     "name": "L3T2M24 L3-only canonical/prepared-state repair",
     "date": "2026-09-30",
@@ -425,5 +430,25 @@
       "visualBrowserVerification": "PASS",
       "autoplay": false
     }
+  },
+  "latestL3PreparedConsistencyRepair": {
+    "name": "L3 stream-specific prepared catalogue/detail consistency repair",
+    "date": "2026-10-07",
+    "status": "LIVE_DATA_REPAIRED_PENDING_OWNER_BROWSER_ACCEPTANCE",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json",
+    "rootCause": "The 2026-09-24 stream split was completed in canonical/legacy catalogue state but not fully projected into rebuilt V2: dedicated L3 records had null order, the prepared global catalogue admitted Year6-only rows by curriculum membership, and the two dedicated lesson-detail scopes were absent.",
+    "productionRepairRun": 37603228395,
+    "postRepairAuditRun": 37603544422,
+    "postRepairAudit": "PASS_43_CANONICAL_EQ_43_PREPARED_ZERO_MISSING_ORDER_ZERO_EXTRA_ZERO_ABSENT_ZERO_MISSING_DETAILS",
+    "durableSourceBranch": "rebuild/portal-v2-production-source-2026-10-07",
+    "durableSourceCommit": "8138ff4e1296547435e8809fc77cb1570252977a",
+    "durableSourceRegressionRun": 37603673635,
+    "permanentRules": [
+      "prepared view membership requires explicit canonical display alias",
+      "visible maths-level3 lesson order must be finite and compilation fails closed otherwise",
+      "catalogue membership/order change publishes prepared global + lessonToViews",
+      "new/openable lesson publishes prepared lesson detail in the same coherent change",
+      "frontend sorting is not a substitute for prepared-data correctness"
+    ]
   }
 }

@@ -1,0 +1,107 @@
+{
+  "schema": "fpt.portal.gch.override.v1",
+  "documentType": "SCOPE_SPECIFIC_AUTHORITY_OVERRIDE",
+  "status": "LIVE_DATA_REPAIRED_PENDING_OWNER_BROWSER_ACCEPTANCE",
+  "effectiveDate": "2026-10-07",
+  "scope": "L3 prepared catalogue ordering, Year6/L3 stream-specific catalogue projection, and prepared lesson-detail availability for dedicated L3 lessons",
+  "incident": {
+    "ownerReport": [
+      "L3 lessons displayed out of sequence",
+      "L3T3M43 Advanced Statistics failed to load"
+    ],
+    "recurringHistory": [
+      "2026-09-24 PR #219 split L3T2M25 and L3T3M43 into dedicated 11+-only canonical lessons and correctly added alias-aware filtering to the legacy live-student catalogue overlay.",
+      "That change mutated canonical LESSONS_KV/R2 and the legacy Worker path but did not publish the equivalent rebuilt V2 global/read-model and lesson-detail projections consumed by /api/v2.",
+      "2026-10-04 Year 6 ordering work restored the proven browser DOM ordering guard for Year 6 only; it did not and must not be used as a substitute for correcting malformed L3 prepared data."
+    ],
+    "productionProofBeforeRepair": {
+      "diagnosticRun": 37602005263,
+      "canonical": {
+        "L3T2M25": {
+          "lessonId": "MATHS_L3_11P_T2M25_2026",
+          "order": null,
+          "title": "Mean Median Mode"
+        },
+        "L3T3M43": {
+          "lessonId": "MATHS_L3_11P_T3M43_2026",
+          "order": null,
+          "title": "Advanced Statistics"
+        }
+      },
+      "preparedGlobal": {
+        "L3T2M25Order": 9007199254740991,
+        "L3T3M43Order": 9007199254740991,
+        "leakedYear6OnlyRows": [
+          "Y6M25",
+          "Y6M45"
+        ]
+      },
+      "preparedLessonScopesMissing": [
+        "MATHS_L3_11P_T2M25_2026",
+        "MATHS_L3_11P_T3M43_2026"
+      ],
+      "advancedStatisticsR2ObjectsVerifiedPresent": true
+    },
+    "rootCause": [
+      "The rebuilt prepared catalogue compiler accepted curriculum membership without requiring an explicit alias for the requested view, so Year6-only split targets could remain in the L3 prepared catalogue.",
+      "The two dedicated L3 records were created without numeric order fields. The prepared compiler converted missing order to Number.MAX_SAFE_INTEGER, placing both at the tail.",
+      "The dedicated canonical lessons were never given prepared lesson-detail scopes, so an authorised Open request reached /api/v2 but could not resolve prepared lesson detail."
+    ]
+  },
+  "repair": {
+    "productionWorkflow": ".github/workflows/l3-prepared-consistency-repair-20261007.yml",
+    "productionRun": 37603228395,
+    "result": "PASS",
+    "canonicalMutations": [
+      "MATHS_L3_11P_T2M25_2026 order set to 25; all other canonical fields preserved by hash comparison excluding order.",
+      "MATHS_L3_11P_T3M43_2026 order set to 43; all other canonical fields preserved by hash comparison excluding order."
+    ],
+    "r2Verification": "All 5 target PDF objects verified present before prepared publication.",
+    "preparedPublication": {
+      "lesson25Version": "l3-detail-20261007-25-62d4b60d5ba51bbb3c",
+      "lesson43Version": "l3-detail-20261007-43-e63b1d3c812cf18dda",
+      "globalVersion": "l3-consistency-20261007-58725db18b034e4bf5",
+      "l3Count": 43,
+      "year6Count": 66
+    },
+    "postRepairAudit": {
+      "workflow": ".github/workflows/l3-prepared-integrity-audit.yml",
+      "run": 37603544422,
+      "canonicalCount": 43,
+      "preparedCount": 43,
+      "missingOrders": 0,
+      "absentFromPrepared": 0,
+      "extraInPrepared": 0,
+      "orderMismatch": false,
+      "missingPreparedLessonDetails": 0,
+      "result": "PASS"
+    }
+  },
+  "durableSource": {
+    "branch": "rebuild/portal-v2-production-source-2026-10-07",
+    "base": "rebuild/checkpoint13-legacy-retirement-2026-09-15",
+    "catalogueSource": "rebuild/shared/read-models/catalogue.mjs",
+    "finalSourceCommit": "8138ff4e1296547435e8809fc77cb1570252977a",
+    "regressionWorkflow": ".github/workflows/rebuild-l3-prepared-view-alias-filter.yml",
+    "regressionRun": 37603673635,
+    "regressionResult": "PASS",
+    "rules": [
+      "A prepared catalogue row is eligible for a view only when the canonical lesson has an explicit display alias for that view.",
+      "A visible maths-level3 row with null, blank or non-numeric order fails compilation instead of silently sorting to the end."
+    ]
+  },
+  "permanentExecutionRules": [
+    "For any new canonical lesson or stream split, canonical success is not completion. Publish and verify the prepared global catalogue if view membership/order changes, and publish the prepared lesson-detail scope before the lesson can be opened.",
+    "Do not rely on curriculum membership alone to project a lesson into a view. Explicit display alias is the view-membership authority.",
+    "Do not allow missing order to degrade to Number.MAX_SAFE_INTEGER for maths-level3. Fail closed before publication.",
+    "When a Year6/L3 stream split removes an alias from the old canonical target, the prepared global catalogue and lessonToViews must remove that view association in the same coherent change.",
+    "Verify R2 objects before publishing prepared detail; R2 presence alone does not prove the lesson is openable.",
+    "Keep the daily read-only L3 canonical-to-prepared integrity audit enabled. A failure is an incident signal and must not be papered over with a frontend sorter.",
+    "Production recovery remains forward-only: no rollback/revert."
+  ],
+  "verificationBoundary": {
+    "canonicalPreparedAndPublicSecurity": "PASS",
+    "authenticatedOwnerBrowser": "PENDING",
+    "closureRule": "Do not mark CLOSED PASS until the owner browser confirms chronological L3 presentation and L3T3M43 opens successfully."
+  }
+}
