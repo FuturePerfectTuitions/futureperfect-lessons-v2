@@ -1,0 +1,161 @@
+name: L3 order and lesson detail readonly diagnostic
+
+on:
+  push:
+    branches: [main, diag/l3-order-detail-20261007]
+    paths:
+      - '.github/workflows/l3-order-detail-readonly-20261007.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/l3-order-detail-readonly-20261007.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: 4.125.0
+      LEGACY_WORKER: fpt-portal-v2-worker
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+      TARGET25: MATHS_L3_11P_T2M25_2026
+      TARGET43: MATHS_L3_11P_T3M43_2026
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove production bindings
+        id: bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          curl -fsS "${auth[@]}" "${API}/workers/scripts/${LEGACY_WORKER}/settings" > /tmp/legacy-settings.json
+          curl -fsS "${auth[@]}" "${API}/workers/scripts/${STUDENT_WORKER}/settings" > /tmp/student-settings.json
+          jq -e '.success==true' /tmp/legacy-settings.json >/dev/null
+          jq -e '.success==true' /tmp/student-settings.json >/dev/null
+          LESSONS_NS="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy-settings.json)"
+          READ_NS_LEGACY="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy-settings.json)"
+          READ_NS_STUDENT="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/student-settings.json)"
+          BUCKET="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' /tmp/legacy-settings.json)"
+          test -n "$LESSONS_NS"; test "$LESSONS_NS" != null
+          test -n "$READ_NS_STUDENT"; test "$READ_NS_STUDENT" != null
+          test -n "$BUCKET"; test "$BUCKET" != null
+          if [ -n "$READ_NS_LEGACY" ] && [ "$READ_NS_LEGACY" != null ]; then
+            test "$READ_NS_LEGACY" = "$READ_NS_STUDENT"
+          fi
+          echo "lessons_ns=$LESSONS_NS" >> "$GITHUB_OUTPUT"
+          echo "read_ns=$READ_NS_STUDENT" >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+          echo "PRODUCTION_BINDINGS_PASS"
+          jq -c '[.result.bindings[]? | {name,type}]' /tmp/student-settings.json
+
+      - name: Inspect canonical L3 catalogue records
+        shell: bash
+        env:
+          LESSONS_NS: ${{ steps.bindings.outputs.lessons_ns }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W kv key get 'curriculum:MATHS_L3' --namespace-id "$LESSONS_NS" --remote > /tmp/l3-curriculum.json
+          jq -e '.lessonIds|type=="array" and length>0' /tmp/l3-curriculum.json >/dev/null
+          for target in "$TARGET25" "$TARGET43"; do
+            idx="$(jq --arg id "$target" '.lessonIds|index($id)' /tmp/l3-curriculum.json)"
+            test "$idx" != null
+            echo "TARGET_INDEX $target $idx"
+            for off in -1 0 1; do
+              pos=$((idx+off))
+              [ "$pos" -ge 0 ] || continue
+              id="$(jq -r --argjson p "$pos" '.lessonIds[$p] // empty' /tmp/l3-curriculum.json)"
+              [ -n "$id" ] || continue
+              $W kv key get "lesson:${id}" --namespace-id "$LESSONS_NS" --remote > "/tmp/lesson-${pos}.json"
+              jq -c '{lessonId,title,order,displayIds,active}' "/tmp/lesson-${pos}.json"
+            done
+          done
+          for id in "$TARGET25" "$TARGET43"; do
+            $W kv key get "lesson:${id}" --namespace-id "$LESSONS_NS" --remote > "/tmp/${id}.json"
+            jq -e --arg id "$id" '.lessonId==$id' "/tmp/${id}.json" >/dev/null
+            echo "TARGET_CANONICAL $id"
+            jq -c '{lessonId,title,description,order,displayIds,active,phase11Resources}' "/tmp/${id}.json"
+          done
+          echo "CANONICAL_L3_READONLY_PASS"
+
+      - name: Inspect prepared global catalogue and lesson scopes
+        shell: bash
+        env:
+          READ_NS: ${{ steps.bindings.outputs.read_ns }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          GLOBAL_POINTER='rm:v1:scope:global:current'
+          $W kv key get "$GLOBAL_POINTER" --namespace-id "$READ_NS" --remote > /tmp/global-pointer.json
+          jq -e '.kind=="prepared-read-model-pointer" and .current.version' /tmp/global-pointer.json >/dev/null
+          GVER="$(jq -r '.current.version' /tmp/global-pointer.json)"
+          GKEY="rm:v1:scope:global:version:${GVER}"
+          $W kv key get "$GKEY" --namespace-id "$READ_NS" --remote > /tmp/global-envelope.json
+          jq -e '.kind=="prepared-read-model-envelope" and .payload.kind=="prepared-global-read-model"' /tmp/global-envelope.json >/dev/null
+          echo "GLOBAL_L3_TARGET_ROWS"
+          jq -c --arg a "$TARGET25" --arg b "$TARGET43" '.payload.catalogues["maths-level3"].lessons | to_entries | map(select(.value.lessonId==$a or .value.lessonId==$b or .value.displayLessonId=="Y6M45")) | .[] | {index:.key,lessonId:.value.lessonId,displayLessonId:.value.displayLessonId,title:.value.title,order:.value.order}' /tmp/global-envelope.json
+          echo "GLOBAL_L3_TAIL"
+          jq -c '.payload.catalogues["maths-level3"].lessons | to_entries | .[-12:] | .[] | {index:.key,lessonId:.value.lessonId,displayLessonId:.value.displayLessonId,title:.value.title,order:.value.order}' /tmp/global-envelope.json
+          for id in "$TARGET25" "$TARGET43"; do
+            encoded="lesson_3A${id}"
+            pkey="rm:v1:scope:${encoded}:current"
+            if $W kv key get "$pkey" --namespace-id "$READ_NS" --remote > "/tmp/pointer-${id}.json" 2>/dev/null && test -s "/tmp/pointer-${id}.json"; then
+              if jq -e '.current.version' "/tmp/pointer-${id}.json" >/dev/null 2>&1; then
+                ver="$(jq -r '.current.version' "/tmp/pointer-${id}.json")"
+                vkey="rm:v1:scope:${encoded}:version:${ver}"
+                $W kv key get "$vkey" --namespace-id "$READ_NS" --remote > "/tmp/envelope-${id}.json"
+                echo "LESSON_SCOPE_PRESENT $id"
+                jq -c '{scope,version,payloadKind:.payload.kind,lessonId:.payload.lessonId,resourceCount:.payload.resourceCount,resources:.payload.resources,videoVariants:.payload.videoVariants}' "/tmp/envelope-${id}.json"
+              else
+                echo "LESSON_SCOPE_INVALID_POINTER $id"
+                cat "/tmp/pointer-${id}.json"
+              fi
+            else
+              echo "LESSON_SCOPE_MISSING $id"
+            fi
+          done
+          echo "PREPARED_READONLY_PASS"
+
+      - name: Verify Advanced Statistics R2 objects still exist
+        shell: bash
+        env:
+          BUCKET: ${{ steps.bindings.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          npm install -g wrangler@${WRANGLER_VERSION} >/dev/null
+          keys=(
+            'maths/level3-11plus/MATHS_L3_11P_T3M43_2026/homework/L3T3M43 Homework Advanced Statistics.pdf'
+            'maths/level3-11plus/MATHS_L3_11P_T3M43_2026/answers/L3T3M43 Answer Pack Homework Advanced Statistics.pdf'
+          )
+          i=0
+          for key in "${keys[@]}"; do
+            i=$((i+1))
+            wrangler r2 object get "${BUCKET}/${key}" --file="/tmp/r2-${i}.pdf" --remote >/dev/null
+            test "$(head -c 4 "/tmp/r2-${i}.pdf")" = '%PDF'
+            echo "R2_PRESENT $key bytes=$(stat -c%s "/tmp/r2-${i}.pdf") sha256=$(sha256sum "/tmp/r2-${i}.pdf"|awk '{print $1}')"
+          done
+          echo "R2_READONLY_PASS"
+
+      - name: Verify public V2 remains protected
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://lessons.futureperfect.education'
+          code="$(curl -sS -o /tmp/public.json -w '%{http_code}' "$BASE/api/v2/student/lessons/$TARGET43?viewId=maths-level3")"
+          echo "UNAUTHENTICATED_DETAIL_HTTP=$code"
+          cat /tmp/public.json || true
+          test "$code" = 401
+          echo "PUBLIC_V2_SECURITY_PASS"
