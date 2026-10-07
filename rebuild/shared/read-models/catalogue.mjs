@@ -15,6 +15,18 @@ function lessonIdsFromCurriculum(raw) {
     .filter(Boolean);
 }
 
+function displayMap(record) {
+  for (const source of [record?.displayIds, record?.displayLessonIds, record?.presentation?.displayIds]) {
+    if (source && typeof source === 'object' && !Array.isArray(source)) return source;
+  }
+  return {};
+}
+
+function hasView(record, viewId) {
+  const target = norm(viewId);
+  return Object.keys(displayMap(record)).some(key => norm(key) === target);
+}
+
 function displayLessonId(record, viewId) {
   const target = norm(viewId);
   const sources = [record?.displayIds, record?.displayLessonIds, record?.presentation?.displayIds];
@@ -78,6 +90,7 @@ function compileViewCatalogue(input, viewId) {
 
   const rows = lessonIds
     .map(lessonId => lessons[lessonId] ?? lessons[`lesson:${lessonId}`])
+    .filter(record => hasView(record, definition.viewId))
     .map(record => safeLessonMetadata(record, definition.viewId))
     .filter(Boolean)
     .sort((left, right) => left.order - right.order || left.lessonId.localeCompare(right.lessonId));
