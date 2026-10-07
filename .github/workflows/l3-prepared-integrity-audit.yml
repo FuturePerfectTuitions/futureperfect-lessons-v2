@@ -1,0 +1,144 @@
+name: L3 prepared integrity audit
+
+on:
+  push:
+    branches: [audit/l3-prepared-integrity-20261007]
+    paths:
+      - '.github/workflows/l3-prepared-integrity-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LEGACY_WORKER: fpt-portal-v2-worker
+      STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Audit canonical to prepared L3 integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/l3-integrity-audit.mjs <<'NODE'
+          import crypto from 'node:crypto';
+
+          const clean=v=>String(v??'').trim();
+          const norm=v=>clean(v).toLowerCase();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          if(!token||!account) throw new Error('Cloudflare credentials unavailable.');
+          const cf='https://api.cloudflare.com/client/v4';
+
+          async function json(url){
+            const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
+            const text=await r.text(); let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok||body?.success!==true) throw new Error(`Cloudflare read failed ${r.status}: ${url}: ${text}`);
+            return body;
+          }
+          const legacy=(await json(`${cf}/accounts/${account}/workers/scripts/${process.env.LEGACY_WORKER}/settings`)).result;
+          const student=(await json(`${cf}/accounts/${account}/workers/scripts/${process.env.STUDENT_WORKER}/settings`)).result;
+          const binding=(settings,name,type)=>settings.bindings.find(x=>x.name===name&&x.type===type);
+          const lessonsNs=clean(binding(legacy,'LESSONS_KV','kv_namespace')?.namespace_id);
+          const readNs=clean(binding(student,'READ_MODELS_KV','kv_namespace')?.namespace_id);
+          if(!lessonsNs||!readNs) throw new Error('Production KV bindings unavailable.');
+
+          async function kv(ns,key){
+            const r=await fetch(`${cf}/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV read failed ${r.status}: ${key}`);
+            return r.text();
+          }
+          async function kvj(ns,key){
+            const raw=await kv(ns,key); if(raw==null) return null;
+            try{return JSON.parse(raw);}catch{throw new Error(`Invalid JSON: ${key}`);}
+          }
+          async function mapLimit(values,limit,fn){
+            const out=new Array(values.length); let next=0;
+            async function worker(){ while(true){const i=next++; if(i>=values.length) return; out[i]=await fn(values[i],i);} }
+            await Promise.all(Array.from({length:Math.min(limit,values.length)},worker)); return out;
+          }
+          const stableValue=value=>{
+            if(Array.isArray(value)) return value.map(stableValue);
+            if(!value||typeof value!=='object') return value;
+            const out={}; for(const key of Object.keys(value).sort()) out[key]=stableValue(value[key]); return out;
+          };
+          const stableStringify=value=>JSON.stringify(stableValue(value));
+          const sha=value=>crypto.createHash('sha256').update(String(value)).digest('hex');
+          const encScope=scope=>encodeURIComponent(clean(scope)).replace(/%/g,'_');
+          const pkey=scope=>`rm:v1:scope:${encScope(scope)}:current`;
+          const vkey=(scope,version)=>`rm:v1:scope:${encScope(scope)}:version:${encodeURIComponent(clean(version)).replace(/%/g,'_')}`;
+
+          async function resolve(scope){
+            const pointer=await kvj(readNs,pkey(scope));
+            if(!pointer||pointer.kind!=='prepared-read-model-pointer') return null;
+            for(const candidate of [pointer.current,pointer.previous]){
+              if(!candidate?.version||!candidate?.sha256) continue;
+              const raw=await kv(readNs,vkey(scope,candidate.version)); if(raw==null) continue;
+              let env; try{env=JSON.parse(raw);}catch{continue;}
+              if(env?.kind!=='prepared-read-model-envelope'||clean(env.scope)!==clean(scope)||clean(env.version)!==clean(candidate.version)) continue;
+              const payloadSha=sha(stableStringify(env.payload));
+              if(payloadSha!==clean(env.sha256)||payloadSha!==clean(candidate.sha256)) continue;
+              if(candidate.envelopeSha256&&sha(raw)!==candidate.envelopeSha256) continue;
+              return env.payload;
+            }
+            return null;
+          }
+
+          const curriculum=await kvj(lessonsNs,'curriculum:MATHS_L3');
+          const ids=Array.isArray(curriculum?.lessonIds)?curriculum.lessonIds:[];
+          if(!ids.length) throw new Error('MATHS_L3 curriculum missing.');
+          const records=await mapLimit(ids,24,async id=>await kvj(lessonsNs,`lesson:${id}`));
+          const canonical=[];
+          for(let i=0;i<ids.length;i++){
+            const r=records[i]; if(!r||r.active===false) continue;
+            const map=r.displayIds||r.displayLessonIds||r.presentation?.displayIds||{};
+            const match=Object.entries(map).find(([k])=>norm(k)==='maths-level3');
+            const display=clean(match?.[1]); if(!display) continue;
+            const order=Number(r.order);
+            canonical.push({lessonId:clean(r.lessonId),displayLessonId:display,order:Number.isFinite(order)?order:null,title:clean(r.title)});
+          }
+          const missingOrders=canonical.filter(x=>x.order==null);
+          canonical.sort((a,b)=>(a.order??Number.MAX_SAFE_INTEGER)-(b.order??Number.MAX_SAFE_INTEGER)||a.lessonId.localeCompare(b.lessonId));
+
+          const global=await resolve('global');
+          if(global?.kind!=='prepared-global-read-model') throw new Error('Prepared global model unavailable.');
+          const prepared=global.catalogues?.['maths-level3']?.lessons||[];
+          const canonicalIds=canonical.map(x=>x.lessonId);
+          const preparedIds=prepared.map(x=>clean(x.lessonId));
+          const absentFromPrepared=canonicalIds.filter(id=>!preparedIds.includes(id));
+          const extraInPrepared=preparedIds.filter(id=>!canonicalIds.includes(id));
+          const orderMismatch=canonicalIds.length!==preparedIds.length||canonicalIds.some((id,i)=>preparedIds[i]!==id);
+
+          const detailChecks=await mapLimit(canonicalIds,24,async id=>{
+            const detail=await resolve(`lesson:${id}`);
+            return {id,present:Boolean(detail&&detail.kind==='prepared-lesson-detail'&&clean(detail.lessonId)===id)};
+          });
+          const missingDetails=detailChecks.filter(x=>!x.present).map(x=>x.id);
+
+          const result={
+            marker:'L3_PREPARED_INTEGRITY_AUDIT',
+            canonicalCount:canonical.length,
+            preparedCount:prepared.length,
+            missingOrders,
+            absentFromPrepared,
+            extraInPrepared,
+            orderMismatch,
+            missingDetails,
+            pass:missingOrders.length===0&&absentFromPrepared.length===0&&extraInPrepared.length===0&&!orderMismatch&&missingDetails.length===0,
+            tail:prepared.slice(-8).map(x=>({lessonId:x.lessonId,displayLessonId:x.displayLessonId,order:x.order,title:x.title}))
+          };
+          console.log(JSON.stringify(result,null,2));
+          if(!result.pass) process.exitCode=1;
+          NODE
+          node /tmp/l3-integrity-audit.mjs
