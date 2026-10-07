@@ -34,3 +34,11 @@ assert.equal(model.lessonToViews.Y6ONLY25.includes('maths-year6'), true);
 assert.equal(model.lessonToViews.Y6ONLY25.includes('maths-level3'), false);
 
 console.log('L3_PREPARED_VIEW_ALIAS_FILTER_PASS');
+
+const bad = structuredClone(input);
+bad.lessons.L3M25.order = null;
+assert.throws(
+  () => compileCatalogueReadModel(bad, { sourceType:'test', sourceRevision:'bad-order' }),
+  /MATHS_LEVEL3_ORDER_REQUIRED:L3M25:L3T2M25/
+);
+console.log('L3_PREPARED_ORDER_FAIL_CLOSED_PASS');
