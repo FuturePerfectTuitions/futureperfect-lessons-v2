@@ -74,7 +74,18 @@
       "extraInPrepared": 0,
       "orderMismatch": false,
       "missingPreparedLessonDetails": 0,
-      "result": "PASS"
+      "result": "PASS",
+      "permanentMainAuditRun": 37604009521,
+      "permanentMainAuditResult": "PASS",
+      "permanentMainAuditEvidence": {
+        "canonicalCount": 43,
+        "preparedCount": 43,
+        "missingOrders": 0,
+        "absentFromPrepared": 0,
+        "extraInPrepared": 0,
+        "orderMismatch": false,
+        "missingPreparedLessonDetails": 0
+      }
     }
   },
   "durableSource": {
