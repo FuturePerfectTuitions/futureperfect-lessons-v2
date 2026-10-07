@@ -1,0 +1,445 @@
+name: Repair L3 prepared catalogue and lesson details
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/l3-prepared-consistency-repair-20261007.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: l3-prepared-consistency-repair-20261007
+  cancel-in-progress: false
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  LEGACY_WORKER: fpt-portal-v2-worker
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+  WRANGLER_VERSION: 4.125.0
+  TARGET25: MATHS_L3_11P_T2M25_2026
+  TARGET43: MATHS_L3_11P_T3M43_2026
+
+jobs:
+  repair:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove live production bindings
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER}/settings" > /tmp/legacy-settings.json
+          curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${STUDENT_WORKER}/settings" > /tmp/student-settings.json
+          jq -e '.success==true' /tmp/legacy-settings.json >/dev/null
+          jq -e '.success==true' /tmp/student-settings.json >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/legacy-settings.json >/dev/null
+
+          LESSONS_NS="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy-settings.json)"
+          READ_NS="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/student-settings.json)"
+          LEGACY_READ_NS="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy-settings.json)"
+          BUCKET="$(jq -r '.result.bindings[]? | select(.name=="MATERIALS_R2" and .type=="r2_bucket") | .bucket_name' /tmp/student-settings.json)"
+          test -n "$LESSONS_NS"; test "$LESSONS_NS" != null
+          test -n "$READ_NS"; test "$READ_NS" != null
+          test -n "$BUCKET"; test "$BUCKET" != null
+          if [ -n "$LEGACY_READ_NS" ] && [ "$LEGACY_READ_NS" != null ]; then test "$LEGACY_READ_NS" = "$READ_NS"; fi
+          test "$LESSONS_NS" = '49619b1a24b244bc8aaa6223fcd24e80'
+          test "$READ_NS" = '77b35165c8694087bc1b0515c35a7e89'
+          test "$BUCKET" = 'fpt-materials-dev'
+
+          echo "lessons_ns=$LESSONS_NS" >> "$GITHUB_OUTPUT"
+          echo "read_ns=$READ_NS" >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+          echo "PRODUCTION_BINDINGS_PROVED"
+
+      - name: Snapshot canonical and prepared state before repair
+        shell: bash
+        env:
+          LESSONS_NS: ${{ steps.guard.outputs.lessons_ns }}
+          READ_NS: ${{ steps.guard.outputs.read_ns }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/l3repair/lessons
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W kv key get 'curriculum:MATHS_L3' --namespace-id "$LESSONS_NS" --remote > /tmp/l3repair/maths-l3.json
+          $W kv key get 'curriculum:MATHS_Y6_EXTRA' --namespace-id "$LESSONS_NS" --remote > /tmp/l3repair/maths-y6-extra.json
+          jq -e '.lessonIds|type=="array" and length>0' /tmp/l3repair/maths-l3.json >/dev/null
+          jq -e '.lessonIds|type=="array"' /tmp/l3repair/maths-y6-extra.json >/dev/null
+
+          jq -r '.lessonIds[]' /tmp/l3repair/maths-l3.json /tmp/l3repair/maths-y6-extra.json | sort -u > /tmp/l3repair/all-ids.txt
+          while IFS= read -r id; do
+            test -n "$id"
+            safe="$(printf '%s' "$id" | sha256sum | cut -c1-24)"
+            $W kv key get "lesson:${id}" --namespace-id "$LESSONS_NS" --remote > "/tmp/l3repair/lessons/${safe}.json"
+            jq -e --arg id "$id" '.lessonId==$id' "/tmp/l3repair/lessons/${safe}.json" >/dev/null
+            printf '%s\t%s\n' "$id" "$safe" >> /tmp/l3repair/index.tsv
+          done < /tmp/l3repair/all-ids.txt
+
+          for pair in "$TARGET25:25:L3T2M25:Mean Median Mode" "$TARGET43:43:L3T3M43:Advanced Statistics"; do
+            IFS=: read -r id expectedOrder display title <<<"$pair"
+            safe="$(awk -F '\t' -v id="$id" '$1==id{print $2}' /tmp/l3repair/index.tsv)"
+            test -n "$safe"
+            jq -e --arg id "$id" --arg code "$display" --arg title "$title" '
+              .lessonId==$id and .active!=false and .displayIds["maths-level3"]==$code and .title==$title
+            ' "/tmp/l3repair/lessons/${safe}.json" >/dev/null
+          done
+
+          $W kv key get 'rm:v1:scope:global:current' --namespace-id "$READ_NS" --remote > /tmp/l3repair/global-pointer-before.json
+          jq -e '.kind=="prepared-read-model-pointer" and .current.version' /tmp/l3repair/global-pointer-before.json >/dev/null
+          gver="$(jq -r '.current.version' /tmp/l3repair/global-pointer-before.json)"
+          $W kv key get "rm:v1:scope:global:version:${gver}" --namespace-id "$READ_NS" --remote > /tmp/l3repair/global-envelope-before.json
+          jq -e '.kind=="prepared-read-model-envelope" and .payload.kind=="prepared-global-read-model"' /tmp/l3repair/global-envelope-before.json >/dev/null
+
+          jq -e --arg a "$TARGET25" --arg b "$TARGET43" '
+            (.payload.catalogues["maths-level3"].lessons | map(select(.lessonId==$a or .lessonId==$b)) | length)==2
+          ' /tmp/l3repair/global-envelope-before.json >/dev/null
+          echo "PRE_REPAIR_SNAPSHOT_PASS"
+
+      - name: Correct canonical order on dedicated L3 lessons only
+        shell: bash
+        env:
+          LESSONS_NS: ${{ steps.guard.outputs.lessons_ns }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          repair_order() {
+            local id="$1" expected="$2"
+            local safe="$(awk -F '\t' -v id="$id" '$1==id{print $2}' /tmp/l3repair/index.tsv)"
+            local src="/tmp/l3repair/lessons/${safe}.json"
+            local out="/tmp/l3repair/lessons/${safe}.ordered.json"
+            jq --argjson n "$expected" '.order=$n' "$src" > "$out"
+            before="$(jq -S 'del(.order)' "$src" | sha256sum | awk '{print $1}')"
+            after="$(jq -S 'del(.order)' "$out" | sha256sum | awk '{print $1}')"
+            test "$before" = "$after"
+            $W kv key put "lesson:${id}" --namespace-id "$LESSONS_NS" --remote --path "$out" >/dev/null
+            $W kv key get "lesson:${id}" --namespace-id "$LESSONS_NS" --remote > "/tmp/l3repair/readback-${safe}.json"
+            jq -e --argjson n "$expected" '.order==$n' "/tmp/l3repair/readback-${safe}.json" >/dev/null
+            test "$(jq -S 'del(.order)' "/tmp/l3repair/readback-${safe}.json" | sha256sum | awk '{print $1}')" = "$before"
+            cp "/tmp/l3repair/readback-${safe}.json" "$src"
+          }
+          repair_order "$TARGET25" 25
+          repair_order "$TARGET43" 43
+          echo "CANONICAL_ORDER_REPAIR_PASS"
+
+      - name: Verify every target R2 object before prepared publication
+        shell: bash
+        env:
+          BUCKET: ${{ steps.guard.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          npm install -g wrangler@${WRANGLER_VERSION} >/dev/null
+          node <<'NODE' > /tmp/l3repair/target-r2-keys.txt
+          const fs=require('fs');
+          const idx=new Map(fs.readFileSync('/tmp/l3repair/index.tsv','utf8').trim().split(/\n/).map(line=>line.split('\t')));
+          for(const id of [process.env.TARGET25,process.env.TARGET43]){
+            const record=JSON.parse(fs.readFileSync('/tmp/l3repair/lessons/'+idx.get(id)+'.json','utf8'));
+            const stack=[record];
+            const keys=new Set();
+            while(stack.length){
+              const value=stack.pop();
+              if(!value||typeof value!=='object') continue;
+              if(Array.isArray(value)){ for(const item of value) stack.push(item); continue; }
+              if(typeof value.r2Key==='string' && value.r2Key.trim()) keys.add(value.r2Key.trim());
+              for(const child of Object.values(value)) stack.push(child);
+            }
+            for(const key of keys) console.log(key);
+          }
+          NODE
+          i=0
+          while IFS= read -r key; do
+            test -n "$key"
+            i=$((i+1))
+            wrangler r2 object get "${BUCKET}/${key}" --file="/tmp/l3repair/r2-${i}.bin" --remote >/dev/null
+            test -s "/tmp/l3repair/r2-${i}.bin"
+            echo "R2_PRESENT $key"
+          done < /tmp/l3repair/target-r2-keys.txt
+          test "$i" -ge 5
+          echo "R2_TARGETS_PASS count=$i"
+
+      - name: Compile and atomically publish target lesson details and corrected global catalogue
+        shell: bash
+        env:
+          READ_NS: ${{ steps.guard.outputs.read_ns }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/l3repair/publish.mjs <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+
+          const clean=v=>String(v??'').trim();
+          const norm=v=>clean(v).toLowerCase();
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const ns=clean(process.env.READ_NS);
+          if(!token||!account||!ns) throw new Error('Cloudflare prepared-model inputs missing.');
+          const api=`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values`;
+
+          function stableValue(value){
+            if(Array.isArray(value)) return value.map(stableValue);
+            if(!value||typeof value!=='object') return value;
+            const out={};
+            for(const key of Object.keys(value).sort()) out[key]=stableValue(value[key]);
+            return out;
+          }
+          const stableStringify=value=>JSON.stringify(stableValue(value));
+          const sha=value=>crypto.createHash('sha256').update(String(value)).digest('hex');
+          const encodedScope=scope=>encodeURIComponent(clean(scope)).replace(/%/g,'_');
+          const pointerKey=scope=>`rm:v1:scope:${encodedScope(scope)}:current`;
+          const versionKey=(scope,version)=>`rm:v1:scope:${encodedScope(scope)}:version:${encodeURIComponent(clean(version)).replace(/%/g,'_')}`;
+
+          async function kvGet(key){
+            const r=await fetch(`${api}/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${token}`}});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV get failed ${r.status} ${key}: ${await r.text()}`);
+            return r.text();
+          }
+          async function kvPut(key,value){
+            const r=await fetch(`${api}/${encodeURIComponent(key)}`,{
+              method:'PUT',
+              headers:{Authorization:`Bearer ${token}`,'Content-Type':'text/plain;charset=UTF-8'},
+              body:String(value)
+            });
+            const text=await r.text();
+            let body=null; try{body=JSON.parse(text);}catch{}
+            if(!r.ok||body?.success!==true) throw new Error(`KV put failed ${r.status} ${key}: ${text}`);
+          }
+          async function readJson(key){
+            const raw=await kvGet(key);
+            if(raw==null) return null;
+            try{return JSON.parse(raw);}catch{throw new Error(`Invalid JSON in ${key}`);}
+          }
+          async function verifyEnvelope(scope,candidate){
+            if(!candidate?.version||!candidate?.sha256) return null;
+            const raw=await kvGet(versionKey(scope,candidate.version));
+            if(raw==null) return null;
+            let env; try{env=JSON.parse(raw);}catch{return null;}
+            if(env?.schemaVersion!==1||env?.kind!=='prepared-read-model-envelope'||clean(env.scope)!==clean(scope)||clean(env.version)!==clean(candidate.version)) return null;
+            const payloadSha=sha(stableStringify(env.payload));
+            if(payloadSha!==clean(env.sha256)||payloadSha!==clean(candidate.sha256)) return null;
+            const envelopeSha=sha(raw);
+            if(candidate.envelopeSha256&&envelopeSha!==candidate.envelopeSha256) return null;
+            return {env,payloadSha,envelopeSha};
+          }
+          async function resolve(scope){
+            const pointer=await readJson(pointerKey(scope));
+            if(!pointer||pointer.kind!=='prepared-read-model-pointer') throw new Error(`READ_MODEL_POINTER_UNAVAILABLE:${scope}`);
+            for(const candidate of [pointer.current,pointer.previous]){
+              const verified=await verifyEnvelope(scope,candidate);
+              if(verified) return {pointer,candidate,...verified};
+            }
+            throw new Error(`READ_MODEL_NO_VERIFIED_VERSION:${scope}`);
+          }
+          async function publish(scope,payload,label){
+            const current=await resolve(scope).catch(()=>null);
+            const payloadText=stableStringify(payload);
+            const payloadSha=sha(payloadText);
+            if(current?.candidate?.sha256===payloadSha){
+              return {scope,version:current.candidate.version,reused:true,sha256:payloadSha};
+            }
+            const version=`${label}-${payloadSha.slice(0,18)}`;
+            const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha,payload};
+            const envelopeText=stableStringify(envelope);
+            const candidate={version,sha256:payloadSha,envelopeSha256:sha(envelopeText)};
+            await kvPut(versionKey(scope,version),envelopeText);
+            if(!(await verifyEnvelope(scope,candidate))) throw new Error(`Candidate verification failed for ${scope}`);
+            const previous=current?.candidate?.version?{
+              version:clean(current.candidate.version),
+              sha256:clean(current.candidate.sha256),
+              envelopeSha256:clean(current.candidate.envelopeSha256)
+            }:null;
+            const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope,current:candidate,previous,updatedAt:new Date().toISOString()};
+            await kvPut(pointerKey(scope),stableStringify(pointer));
+            const confirmed=await resolve(scope);
+            if(confirmed.candidate.version!==version||confirmed.candidate.sha256!==payloadSha) throw new Error(`Pointer verification failed for ${scope}`);
+            return {scope,version,reused:false,sha256:payloadSha};
+          }
+
+          const index=new Map(fs.readFileSync('/tmp/l3repair/index.tsv','utf8').trim().split(/\n/).map(line=>line.split('\t')));
+          const recordFor=id=>JSON.parse(fs.readFileSync(`/tmp/l3repair/lessons/${index.get(id)}.json`,'utf8'));
+          const targets=[process.env.TARGET25,process.env.TARGET43];
+
+          function file(value,fallback){
+            if(!value||typeof value!=='object') return null;
+            const objectKey=clean(value.r2Key||value.r2||value.objectKey||value.storageKey||value.key);
+            if(!objectKey) return null;
+            return {displayName:clean(value.displayName||value.name||value.title||fallback)||fallback,objectKey};
+          }
+          function push(rows,value,{type,fallback,group,protectedResource=false}){
+            const f=file(value,fallback); if(!f) return;
+            rows.push({type,...f,...(protectedResource?{protected:true}:{}),presentationGroup:group,presentationScopes:['elevenPlus']});
+          }
+          function detail(record){
+            const ep=record?.phase11Resources?.elevenPlus||{};
+            const rows=[];
+            for(const pair of Array.isArray(ep.preLessonPairs)?ep.preLessonPairs:[]){
+              push(rows,pair?.sheet||pair?.primary,{type:'prelesson',fallback:'11+ PreLesson Sheet',group:'elevenplus-prelesson'});
+              push(rows,pair?.answerPack||pair?.answerKey||pair?.answer,{type:'answer-pack',fallback:'11+ PreLesson Answer Pack',group:'elevenplus-prelesson',protectedResource:true});
+            }
+            for(const pair of Array.isArray(ep.homeworks)?ep.homeworks:[]){
+              push(rows,pair?.homework||pair?.primary||pair,{type:'homework',fallback:'11+ Homework',group:'elevenplus-homework'});
+              push(rows,pair?.answerPack||pair?.answerKey||pair?.answer,{type:'answer-pack',fallback:'11+ Homework Answer Pack',group:'elevenplus-homework',protectedResource:true});
+            }
+            for(const pair of Array.isArray(ep.cumulativeHomeworks)?ep.cumulativeHomeworks:[]){
+              push(rows,pair?.homework||pair?.primary||pair,{type:'cumulative-homework',fallback:'Cumulative Homework',group:'elevenplus-cumulative'});
+              push(rows,pair?.answerPack||pair?.answerKey||pair?.answer,{type:'answer-pack',fallback:'Cumulative Homework Answer Pack',group:'elevenplus-cumulative',protectedResource:true});
+            }
+            for(const ans of Array.isArray(ep.supplementaryAnswers)?ep.supplementaryAnswers:[]){
+              push(rows,ans,{type:'answer-pack',fallback:'Additional 11+ Answer Pack',group:'elevenplus-answers',protectedResource:true});
+            }
+            const byKey=new Map();
+            for(const row of rows) if(!byKey.has(row.objectKey)) byKey.set(row.objectKey,row);
+            const resources=[...byKey.values()];
+            return {
+              schemaVersion:1,
+              kind:'prepared-lesson-detail',
+              lessonId:clean(record.lessonId),
+              title:clean(record.title),
+              description:String(record.description||record.desc||''),
+              resourceCount:resources.length,
+              resources
+            };
+          }
+
+          const lessonResults=[];
+          for(const id of targets){
+            const record=recordFor(id);
+            if(!Number.isFinite(Number(record.order))) throw new Error(`Target order missing after canonical repair: ${id}`);
+            const payload=detail(record);
+            if(id===process.env.TARGET25 && payload.resources.length<3) throw new Error('Mean Median Mode prepared resources incomplete.');
+            if(id===process.env.TARGET43 && payload.resources.length<2) throw new Error('Advanced Statistics prepared resources incomplete.');
+            lessonResults.push(await publish(`lesson:${id}`,payload,`l3-detail-20261007-${id.endsWith('T2M25_2026')?'25':'43'}`));
+          }
+
+          const currentGlobal=await resolve('global');
+          const global=structuredClone(currentGlobal.env.payload);
+          if(global?.kind!=='prepared-global-read-model') throw new Error('Current global prepared model invalid.');
+
+          const l3Curr=JSON.parse(fs.readFileSync('/tmp/l3repair/maths-l3.json','utf8'));
+          const y6Extra=JSON.parse(fs.readFileSync('/tmp/l3repair/maths-y6-extra.json','utf8'));
+          const ids=[...new Set([...(l3Curr.lessonIds||[]),...(y6Extra.lessonIds||[])])];
+
+          function displayMap(record){
+            for(const source of [record?.displayIds,record?.displayLessonIds,record?.presentation?.displayIds]){
+              if(source&&typeof source==='object'&&!Array.isArray(source)) return source;
+            }
+            return {};
+          }
+          function displayId(record,viewId){
+            const map=displayMap(record), wanted=norm(viewId);
+            const direct=clean(map[viewId]); if(direct) return direct;
+            const match=Object.entries(map).find(([key])=>norm(key)===wanted);
+            return clean(match?.[1]);
+          }
+          function hasView(record,viewId){ return Boolean(displayId(record,viewId)); }
+          function title(record,shown){
+            let t=clean(record?.title), canonical=clean(record?.lessonId);
+            for(const prefix of [canonical,shown]){
+              if(!prefix) continue;
+              const marker=`${prefix} `;
+              if(t.toLowerCase().startsWith(marker.toLowerCase())) t=t.slice(marker.length).trim();
+            }
+            return t||shown||canonical;
+          }
+          function row(record,viewId){
+            const shown=displayId(record,viewId);
+            const order=Number(record.order);
+            if(!Number.isFinite(order)) throw new Error(`Visible lesson has no finite order: ${record.lessonId} in ${viewId}`);
+            return {lessonId:clean(record.lessonId),displayLessonId:shown,title:title(record,shown),description:String(record.description||record.desc||''),order};
+          }
+          function rowsFor(viewId,sourceIds){
+            return sourceIds.map(recordFor).filter(r=>r&&r.active!==false&&hasView(r,viewId)).map(r=>row(r,viewId)).sort((a,b)=>a.order-b.order||a.lessonId.localeCompare(b.lessonId));
+          }
+
+          const l3Rows=rowsFor('maths-level3',l3Curr.lessonIds||[]);
+          const y6Rows=rowsFor('maths-year6',ids);
+          const l3Codes=l3Rows.map(r=>r.displayLessonId);
+          if(!l3Codes.includes('L3T2M25')||!l3Codes.includes('L3T3M43')) throw new Error('Dedicated L3 lessons missing from rebuilt L3 catalogue.');
+          if(l3Rows.some(r=>r.lessonId==='Y6M25'||r.lessonId==='Y6M45')) throw new Error('Year6-only split targets still leak into L3.');
+          if(y6Rows.some(r=>targets.includes(r.lessonId))) throw new Error('11+-only split targets leak into Year6.');
+          const index24=l3Codes.indexOf('L3T2M24'), index25=l3Codes.indexOf('L3T2M25'), index26=l3Codes.indexOf('L3T2M26');
+          if(!(index24>=0&&index25===index24+1&&index26===index25+1)) throw new Error('L3 T2M25 chronology invariant failed.');
+          const index42=l3Codes.indexOf('L3T3M42'), index43=l3Codes.indexOf('L3T3M43');
+          if(!(index42>=0&&index43===index42+1)) throw new Error('L3 T3M43 chronology invariant failed.');
+
+          for(const [viewId,rows] of [['maths-level3',l3Rows],['maths-year6',y6Rows]]){
+            const view=global.catalogues?.[viewId];
+            if(!view) throw new Error(`Prepared catalogue missing ${viewId}`);
+            view.lessons=rows;
+            view.lessonCount=rows.length;
+            if(global.counts) global.counts[viewId]=rows.length;
+            const nav=(Array.isArray(global.navigation)?global.navigation:[]).find(v=>clean(v?.viewId)===viewId);
+            if(nav) nav.lessonCount=rows.length;
+          }
+
+          const lessonToViews={};
+          for(const [viewId,view] of Object.entries(global.catalogues||{})){
+            for(const r of Array.isArray(view?.lessons)?view.lessons:[]){
+              const id=clean(r?.lessonId); if(!id) continue;
+              if(!lessonToViews[id]) lessonToViews[id]=[];
+              if(!lessonToViews[id].includes(viewId)) lessonToViews[id].push(viewId);
+            }
+          }
+          for(const id of Object.keys(lessonToViews)) lessonToViews[id].sort();
+          global.lessonToViews=lessonToViews;
+
+          const globalResult=await publish('global',global,'l3-consistency-20261007');
+          fs.writeFileSync('/tmp/l3repair/publish-result.json',JSON.stringify({
+            marker:'L3_PREPARED_CONSISTENCY_PUBLISH_PASS',
+            lessonResults,
+            globalResult,
+            l3Count:l3Rows.length,
+            y6Count:y6Rows.length,
+            l3Tail:l3Rows.slice(-8)
+          },null,2));
+          console.log(fs.readFileSync('/tmp/l3repair/publish-result.json','utf8'));
+          NODE
+          READ_NS="$READ_NS" node /tmp/l3repair/publish.mjs
+
+      - name: Verify prepared pointers and live security boundary
+        shell: bash
+        env:
+          READ_NS: ${{ steps.guard.outputs.read_ns }}
+        run: |
+          set -euo pipefail
+          W="npx --yes wrangler@${WRANGLER_VERSION}"
+          $W kv key get 'rm:v1:scope:global:current' --namespace-id "$READ_NS" --remote > /tmp/l3repair/global-pointer-after.json
+          gver="$(jq -r '.current.version' /tmp/l3repair/global-pointer-after.json)"
+          $W kv key get "rm:v1:scope:global:version:${gver}" --namespace-id "$READ_NS" --remote > /tmp/l3repair/global-envelope-after.json
+          jq -e --arg a "$TARGET25" --arg b "$TARGET43" '
+            .payload.catalogues["maths-level3"].lessons as $l3 |
+            ($l3|map(.displayLessonId)|index("L3T2M25")) as $i25 |
+            ($l3|map(.displayLessonId)|index("L3T3M43")) as $i43 |
+            ($l3|map(.displayLessonId)|index("L3T3M42")) as $i42 |
+            ($i25!=null and $i43!=null and $i42!=null and $i43==$i42+1) and
+            ([$l3[]|select(.lessonId=="Y6M25" or .lessonId=="Y6M45")]|length)==0 and
+            ([.payload.catalogues["maths-year6"].lessons[]|select(.lessonId==$a or .lessonId==$b)]|length)==0
+          ' /tmp/l3repair/global-envelope-after.json >/dev/null
+
+          for id in "$TARGET25" "$TARGET43"; do
+            encoded="lesson_3A${id}"
+            $W kv key get "rm:v1:scope:${encoded}:current" --namespace-id "$READ_NS" --remote > "/tmp/l3repair/pointer-${id}.json"
+            ver="$(jq -r '.current.version' "/tmp/l3repair/pointer-${id}.json")"
+            test -n "$ver"; test "$ver" != null
+            $W kv key get "rm:v1:scope:${encoded}:version:${ver}" --namespace-id "$READ_NS" --remote > "/tmp/l3repair/envelope-${id}.json"
+            jq -e --arg id "$id" '.payload.kind=="prepared-lesson-detail" and .payload.lessonId==$id and .payload.resourceCount>0' "/tmp/l3repair/envelope-${id}.json" >/dev/null
+          done
+
+          code="$(curl -sS -o /tmp/l3repair/unauth.json -w '%{http_code}' 'https://lessons.futureperfect.education/api/v2/student/views/maths-level3/lessons')"
+          test "$code" = 401
+          jq -e '.error=="AUTH_REQUIRED"' /tmp/l3repair/unauth.json >/dev/null
+          echo "L3_PREPARED_CONSISTENCY_PRODUCTION_PASS"
