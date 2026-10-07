@@ -2,9 +2,11 @@ name: L3 prepared integrity audit
 
 on:
   push:
-    branches: [audit/l3-prepared-integrity-20261007]
+    branches: [main]
     paths:
       - '.github/workflows/l3-prepared-integrity-audit.yml'
+  schedule:
+    - cron: '17 5 * * *'
   workflow_dispatch:
 
 permissions:
