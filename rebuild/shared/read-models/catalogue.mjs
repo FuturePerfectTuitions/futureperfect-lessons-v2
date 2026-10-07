@@ -61,7 +61,8 @@ function safeLessonMetadata(record, viewId) {
   const lessonId = clean(record.lessonId);
   if (!lessonId) return null;
   const shownId = displayLessonId(record, viewId);
-  const numericOrder = Number(record.order);
+  const rawOrder = record.order;
+  const numericOrder = rawOrder == null || clean(rawOrder) === '' ? Number.NaN : Number(rawOrder);
   if (norm(viewId) === 'maths-level3' && !Number.isFinite(numericOrder)) {
     throw new Error(`MATHS_LEVEL3_ORDER_REQUIRED:${lessonId}:${shownId}`);
   }
