@@ -114,13 +114,22 @@
     "layers": [
       {
         "name": "CANONICAL_SOURCE",
-        "examples": ["STUDENTS_KV", "D1 entitlement/prelesson tables", "LESSONS_KV", "MATERIALS_R2"],
+        "examples": [
+          "STUDENTS_KV",
+          "D1 entitlement/prelesson tables",
+          "LESSONS_KV",
+          "MATERIALS_R2"
+        ],
         "rule": "Source correctness does not prove Student visibility."
       },
       {
         "name": "PREPARED_PROJECTION",
         "store": "READ_MODELS_KV",
-        "examples": ["global catalogue", "per-student access scope", "prepared lesson model"],
+        "examples": [
+          "global catalogue",
+          "per-student access scope",
+          "prepared lesson model"
+        ],
         "rule": "Rebuilt Student Portal consumes prepared projections. Student-visible mutations require compile/publish/readback/verification at the correct scope."
       },
       {
@@ -137,7 +146,10 @@
     "identifierRule": "Never conflate canonical lesson ID, display lesson code, view ID, R2 object key/resource ID, or prepared scope ID.",
     "knownHighRiskIdentifierExample": {
       "canonicalLessonId": "Y4E1",
-      "displayCodes": ["Y4T1E01", "Y4T1EE01"]
+      "displayCodes": [
+        "Y4T1E01",
+        "Y4T1EE01"
+      ]
     }
   },
   "nonNegotiableEngineeringProtocol": {
@@ -164,10 +176,33 @@
   },
   "capabilityInventory": {
     "publicStudentV2": [
-      "auth.login", "auth.logout", "home", "subjects", "view.lessons", "lesson.detail", "resource.open", "resource.delivery", "answerpack.protection", "navigation/current/previous/locked-preview semantics", "recent-shares panel behaviour where applicable", "online 11+ English PreLesson VR projection"
+      "auth.login",
+      "auth.logout",
+      "home",
+      "subjects",
+      "view.lessons",
+      "lesson.detail",
+      "resource.open",
+      "resource.delivery",
+      "answerpack.protection",
+      "navigation/current/previous/locked-preview semantics",
+      "recent-shares panel behaviour where applicable",
+      "online 11+ English PreLesson VR projection"
     ],
-    "admin": ["Admin sign-in/session", "Lesson Release Import", "Create Student Login", "Trial Login Manager", "Replace Resource", "manual Parent Email send"],
-    "compatibility": ["hidden quiz eligibility/launch/redeem bridge", "retained Phase chain required by current Admin composition", "English batch-code compatibility", "protected-view stability compatibility"],
+    "admin": [
+      "Admin sign-in/session",
+      "Lesson Release Import",
+      "Create Student Login",
+      "Trial Login Manager",
+      "Replace Resource",
+      "manual Parent Email send"
+    ],
+    "compatibility": [
+      "hidden quiz eligibility/launch/redeem bridge",
+      "retained Phase chain required by current Admin composition",
+      "English batch-code compatibility",
+      "protected-view stability compatibility"
+    ],
     "preserveOnSharedWorkerDeploy": "All currently active capabilities must be checked before and after deployment; a successful target feature deployment is a failure if any preserved capability disappears."
   },
   "studentWorkflows": {
@@ -176,16 +211,33 @@
       "login": "POST /api/v2/auth/login",
       "logout": "POST /api/v2/auth/logout",
       "sessionCookie": "fpt_session",
-      "normalStudentMultiDevice": {"required": true, "status": "CURRENT_APPROVED_BEHAVIOUR", "doNotChangeForTrialFix": true}
+      "normalStudentMultiDevice": {
+        "required": true,
+        "status": "CURRENT_APPROVED_BEHAVIOUR",
+        "doNotChangeForTrialFix": true
+      }
     },
     "homeNavigation": {
-      "paths": ["GET /api/v2/student/home", "GET /api/v2/student/subjects", "GET /api/v2/student/views/:viewId/lessons", "GET /api/v2/student/lessons/:lessonId"],
-      "rules": ["Use prepared access projection.", "Current/previous/full catalogue and locked preview semantics must remain server-authorised.", "UI presentation must not be used as the access-control boundary."]
+      "paths": [
+        "GET /api/v2/student/home",
+        "GET /api/v2/student/subjects",
+        "GET /api/v2/student/views/:viewId/lessons",
+        "GET /api/v2/student/lessons/:lessonId"
+      ],
+      "rules": [
+        "Use prepared access projection.",
+        "Current/previous/full catalogue and locked preview semantics must remain server-authorised.",
+        "UI presentation must not be used as the access-control boundary."
+      ]
     },
     "resources": {
       "open": "POST /api/v2/student/resource/open",
       "delivery": "GET /api/v2/student/resource?cap=...",
-      "protectedAnswers": ["Answer Packs remain password protected.", "Protected viewer sequencing, lease/session checks and rate limiting must be preserved.", "Admin tools cannot bypass protected-answer enforcement."]
+      "protectedAnswers": [
+        "Answer Packs remain password protected.",
+        "Protected viewer sequencing, lease/session checks and rate limiting must be preserved.",
+        "Admin tools cannot bypass protected-answer enforcement."
+      ]
     },
     "online11PlusEnglishPreLessonVr": {
       "status": "IMPLEMENTED_IN_V4_2_SOURCE_AND_DEPLOYMENT_HISTORY",
@@ -216,10 +268,19 @@
       "status": "ADDED_2026_09_22",
       "boundedPurpose": "Create an ordinary student login through Admin without introducing unrestricted student CRUD.",
       "usernameRule": "first name + DDMM; normalized/case-insensitive according to Portal login rules",
-      "passwords": {"login": "separate 4-character password meeting composition rules", "answerPack": "separate 4-character password meeting composition rules", "mustDiffer": true},
+      "passwords": {
+        "login": "separate 4-character password meeting composition rules",
+        "answerPack": "separate 4-character password meeting composition rules",
+        "mustDiffer": true
+      },
       "batchAssignment": "Assign current batch access from the student's join date according to authoritative batch rules.",
       "studentVisibility": "Prepared access must be published/verified as part of successful provisioning.",
-      "preserve": ["normal-student session semantics", "existing entitlements", "VR/PreLesson rules", "protected-answer controls"]
+      "preserve": [
+        "normal-student session semantics",
+        "existing entitlements",
+        "VR/PreLesson rules",
+        "protected-answer controls"
+      ]
     },
     "replaceResource": {
       "sourceMutation": "new unique R2 PDF + SHA-256 readback verification + guarded selected LESSONS_KV resource r2Key update",
@@ -228,23 +289,61 @@
       "currentGeneralLimitation": "Admin source success does not by itself prove automatic prepared lesson publication; fresh current source must be inspected before claiming this limitation is removed.",
       "studentVisibleCompletion": "Prepared lesson compile/publish/readback plus live API/browser verification."
     },
-    "parentEmail": {"manualAfterImport": true, "notAccessRepairMechanism": true, "duplicateSafetyRequired": true}
+    "parentEmail": {
+      "manualAfterImport": true,
+      "notAccessRepairMechanism": true,
+      "duplicateSafetyRequired": true
+    }
   },
   "trialContract": {
     "classification": "BUSINESS_REQUIREMENT_PLUS_PARTIALLY_IMPLEMENTED_RUNTIME",
-    "idRules": {"prefix": "Trial", "adminTrialPrefixRejected": true, "allowedCharacters": "letters,numbers,hyphen,underscore within implementation length", "atLeastOneViewRequired": true},
-    "credentials": {"loginAndAnswerPasswordsSeparate": true, "exactLength": 4, "composition": "at least one uppercase, one lowercase, one digit; fourth character unrestricted by those categories", "adminCredentialReuseForbidden": true, "forbiddenKnownAdminPasswordReuse": true},
+    "idRules": {
+      "prefix": "Trial",
+      "adminTrialPrefixRejected": true,
+      "allowedCharacters": "letters,numbers,hyphen,underscore within implementation length",
+      "atLeastOneViewRequired": true
+    },
+    "credentials": {
+      "loginAndAnswerPasswordsSeparate": true,
+      "exactLength": 4,
+      "composition": "at least one uppercase, one lowercase, one digit; fourth character unrestricted by those categories",
+      "adminCredentialReuseForbidden": true,
+      "forbiddenKnownAdminPasswordReuse": true
+    },
     "canonicalSelectedAccessField": "trialViews",
     "selectableAccess": {
-      "maths": ["Year 2", "Year 3", "Year 4", "Year 5", "Year 6", "L1", "L2", "L3"],
-      "english": ["Year 2", "Year 3", "Year 4", "Year 5", "Year 6", "Year 4 11+ English + all Year 4 VR", "Year 5 11+ English + all Year 5 VR"]
+      "maths": [
+        "Year 2",
+        "Year 3",
+        "Year 4",
+        "Year 5",
+        "Year 6",
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "english": [
+        "Year 2",
+        "Year 3",
+        "Year 4",
+        "Year 5",
+        "Year 6",
+        "Year 4 11+ English + all Year 4 VR",
+        "Year 5 11+ English + all Year 5 VR"
+      ]
     },
     "selectedAccessPublication": {
       "required": true,
       "source": "STUDENTS_KV user.trialViews",
       "publisher": "worker/src/trial-prepared-access-publisher.js",
       "target": "READ_MODELS_KV per-student access scope",
-      "publicationMoments": ["create", "rearm", "disable", "delete", "reset-passwords"],
+      "publicationMoments": [
+        "create",
+        "rearm",
+        "disable",
+        "delete",
+        "reset-passwords"
+      ],
       "deleteOrder": "publish withdrawn prepared model first, then remove Trial STUDENTS_KV profile",
       "corsRule": "Only successful POST mutations trigger prepared publication; OPTIONS passes through unchanged."
     },
@@ -254,8 +353,19 @@
       "normalStudentsUnaffected": "Normal student accounts continue to support multiple concurrent valid devices.",
       "currentImplementationStatus": "OPEN_DEFECT_NOT_ENFORCED_END_TO_END",
       "diagnosis": "The current rebuilt public-v2 Student architecture issues signed approximately 8-hour fpt_session cookies and does not perform a per-request D1 student-session lookup. Trial Manager clears legacy session rows and trial_login_consumptions, but that state alone cannot invalidate an already-issued stateless signed cookie or guarantee a single current Trial session across devices.",
-      "doNotClaim": ["Re-arm currently revokes every already-issued public-v2 Trial cookie.", "trial_login_consumptions alone enforces one-current-session.", "Deleting student_sessions proves public-v2 revocation."],
-      "futureFixConstraints": ["Must be Trial-specific unless owner explicitly changes normal-account session semantics.", "Must provide a server-verifiable way for the rebuilt Student runtime to reject stale/second Trial sessions.", "Must preserve normal-student 8-hour/multi-device behaviour.", "Must cover login, subsequent authenticated requests, re-arm, disable, delete and password reset.", "Must include two-device and stale-cookie live regression tests.", "Do not choose a technical mechanism until the current rebuilt Student source and deployment are freshly traced."]
+      "doNotClaim": [
+        "Re-arm currently revokes every already-issued public-v2 Trial cookie.",
+        "trial_login_consumptions alone enforces one-current-session.",
+        "Deleting student_sessions proves public-v2 revocation."
+      ],
+      "futureFixConstraints": [
+        "Must be Trial-specific unless owner explicitly changes normal-account session semantics.",
+        "Must provide a server-verifiable way for the rebuilt Student runtime to reject stale/second Trial sessions.",
+        "Must preserve normal-student 8-hour/multi-device behaviour.",
+        "Must cover login, subsequent authenticated requests, re-arm, disable, delete and password reset.",
+        "Must include two-device and stale-cookie live regression tests.",
+        "Do not choose a technical mechanism until the current rebuilt Student source and deployment are freshly traced."
+      ]
     },
     "stateMachine": {
       "CREATED_UNUSED": "active + one login available",
@@ -289,31 +399,151 @@
     "regressionFixture": {
       "portalUserId": "TrialEva",
       "containsSecrets": false,
-      "selectedViews": ["maths-level1", "maths-level2", "english-year4-11plus"],
-      "labels": ["L1 Maths", "L2 Maths", "Year 4 11+ English + VR"],
-      "morningPreparedRepairObserved": {"evidence": "OBSERVED_MORNING_RUNTIME", "l1LessonCount": 35, "l2LessonCount": 38, "y4English11PlusLessonCount": 34, "totalLessonAccessCount": 107, "expectedViewCount": 3},
+      "selectedViews": [
+        "maths-level1",
+        "maths-level2",
+        "english-year4-11plus"
+      ],
+      "labels": [
+        "L1 Maths",
+        "L2 Maths",
+        "Year 4 11+ English + VR"
+      ],
+      "morningPreparedRepairObserved": {
+        "evidence": "OBSERVED_MORNING_RUNTIME",
+        "l1LessonCount": 35,
+        "l2LessonCount": 38,
+        "y4English11PlusLessonCount": 34,
+        "totalLessonAccessCount": 107,
+        "expectedViewCount": 3
+      },
       "rule": "Use as regression shape, never store TrialEva passwords or private credentials in repository."
     }
   },
   "morning20260922ChangeLedger": [
-    {"sequence": 1, "change": "Preserve PreLesson VR fix while composing Admin enhancements", "pr": 205, "title": "Combine PreLesson VR fix with Admin console enhancements", "mergeCommit": "911a1083e8c08bd2fc1d2783a4c6f2736f95d7c3", "preservationReason": "Prevent Admin deployment from regressing already-verified online 11+ PreLesson VR behaviour."},
-    {"sequence": 2, "change": "Admin release-first/student creation/Trial deletion enhancements", "pr": 206, "effects": ["Lesson Release Import moved to first operational position.", "Bounded Create Student Login workflow added.", "Existing Trial row deletion added with session/consumption cleanup, withdrawn prepared publication and profile removal.", "Combined regression gates preserve PreLesson VR and CP12 boundaries."]},
-    {"sequence": 3, "change": "Trial selected-view access/projection correction", "pr": 207, "mergeCommit": "b2ba6ddd772481ee48125d097a8cf0a3349f8c45", "rootCause": "Admin trialViews were correct while Student prepared/runtime access was effectively empty, producing 0 years/levels.", "durableFix": ["Trial selected views participate in prepared access publication.", "Live-catalogue membership is used for Trial view lesson resolution.", "Year 4/5 11+ Trial VR projection is covered by regression verification.", "Compatibility runtime has selected-view overlay handling."], "importantBoundary": "The Phase24 /api/v1/student overlay is compatibility code, not proof of public-v2 route ownership."},
-    {"sequence": 4, "change": "Trial Admin CORS preflight correction", "pr": 208, "mergeCommitInMain": "495e1b0c2ed38507e1f8e54e9d10373febe5b29a", "rootCause": "Projected Trial wrapper treated browser OPTIONS as a mutation and attempted publication without a Portal User ID, returning TRIAL_PREPARED_PORTAL_USER_REQUIRED/500.", "durableFix": "Only successful POST mutations publish Trial prepared access; OPTIONS passes through the base CORS path."},
-    {"sequence": 5, "change": "Direct TrialEva prepared-state repair during incident", "evidence": "OBSERVED_MORNING_RUNTIME", "before": "Admin/canonical selected access present; Student prepared access had 0 views/0 lesson access.", "after": "Prepared access republished for 3 selected views and 107 lesson access entries.", "durableSourceDisposition": "The repository publisher/runtime fixes above are the durable correction; direct state repair is incident evidence, not architecture."},
-    {"sequence": 6, "change": "Trial-ended copy restored", "evidence": "OBSERVED_MORNING_RUNTIME", "copy": "Your Future Perfect trial has now ended. To continue accessing lessons and resources, please contact us to discuss the right programme for your child.", "preservation": "Frozen in trialContract.endingExperience and required by regression."},
-    {"sequence": 7, "change": "One-login architecture defect diagnosed", "evidence": "OBSERVED_MORNING_RUNTIME_PLUS_SOURCE_ARCHITECTURE", "status": "OPEN_NOT_FIXED", "finding": "Legacy Trial consumption/session cleanup does not revoke or serialize rebuilt public-v2 stateless signed sessions."}
+    {
+      "sequence": 1,
+      "change": "Preserve PreLesson VR fix while composing Admin enhancements",
+      "pr": 205,
+      "title": "Combine PreLesson VR fix with Admin console enhancements",
+      "mergeCommit": "911a1083e8c08bd2fc1d2783a4c6f2736f95d7c3",
+      "preservationReason": "Prevent Admin deployment from regressing already-verified online 11+ PreLesson VR behaviour."
+    },
+    {
+      "sequence": 2,
+      "change": "Admin release-first/student creation/Trial deletion enhancements",
+      "pr": 206,
+      "effects": [
+        "Lesson Release Import moved to first operational position.",
+        "Bounded Create Student Login workflow added.",
+        "Existing Trial row deletion added with session/consumption cleanup, withdrawn prepared publication and profile removal.",
+        "Combined regression gates preserve PreLesson VR and CP12 boundaries."
+      ]
+    },
+    {
+      "sequence": 3,
+      "change": "Trial selected-view access/projection correction",
+      "pr": 207,
+      "mergeCommit": "b2ba6ddd772481ee48125d097a8cf0a3349f8c45",
+      "rootCause": "Admin trialViews were correct while Student prepared/runtime access was effectively empty, producing 0 years/levels.",
+      "durableFix": [
+        "Trial selected views participate in prepared access publication.",
+        "Live-catalogue membership is used for Trial view lesson resolution.",
+        "Year 4/5 11+ Trial VR projection is covered by regression verification.",
+        "Compatibility runtime has selected-view overlay handling."
+      ],
+      "importantBoundary": "The Phase24 /api/v1/student overlay is compatibility code, not proof of public-v2 route ownership."
+    },
+    {
+      "sequence": 4,
+      "change": "Trial Admin CORS preflight correction",
+      "pr": 208,
+      "mergeCommitInMain": "495e1b0c2ed38507e1f8e54e9d10373febe5b29a",
+      "rootCause": "Projected Trial wrapper treated browser OPTIONS as a mutation and attempted publication without a Portal User ID, returning TRIAL_PREPARED_PORTAL_USER_REQUIRED/500.",
+      "durableFix": "Only successful POST mutations publish Trial prepared access; OPTIONS passes through the base CORS path."
+    },
+    {
+      "sequence": 5,
+      "change": "Direct TrialEva prepared-state repair during incident",
+      "evidence": "OBSERVED_MORNING_RUNTIME",
+      "before": "Admin/canonical selected access present; Student prepared access had 0 views/0 lesson access.",
+      "after": "Prepared access republished for 3 selected views and 107 lesson access entries.",
+      "durableSourceDisposition": "The repository publisher/runtime fixes above are the durable correction; direct state repair is incident evidence, not architecture."
+    },
+    {
+      "sequence": 6,
+      "change": "Trial-ended copy restored",
+      "evidence": "OBSERVED_MORNING_RUNTIME",
+      "copy": "Your Future Perfect trial has now ended. To continue accessing lessons and resources, please contact us to discuss the right programme for your child.",
+      "preservation": "Frozen in trialContract.endingExperience and required by regression."
+    },
+    {
+      "sequence": 7,
+      "change": "One-login architecture defect diagnosed",
+      "evidence": "OBSERVED_MORNING_RUNTIME_PLUS_SOURCE_ARCHITECTURE",
+      "status": "OPEN_NOT_FIXED",
+      "finding": "Legacy Trial consumption/session cleanup does not revoke or serialize rebuilt public-v2 stateless signed sessions."
+    }
   ],
   "failureSignatures": [
-    {"symptom": "Admin Trial row shows selected views but Student home shows 0 years/levels", "likelyLayer": "trialViews -> prepared access projection/public Student access", "firstChecks": ["STUDENTS_KV trialViews", "current per-student READ_MODELS_KV scope", "publisher result/readback", "live /api/v2 home"], "wrongFix": "Repeatedly editing Admin-selected access without proving prepared publication."},
-    {"symptom": "Trial Admin action says Failed to fetch or browser mutation never reaches action", "likelyLayer": "CORS OPTIONS/preflight wrapper", "firstChecks": ["OPTIONS status/headers", "projected wrapper method gate", "allowed origin"], "knownRegression": "Do not treat OPTIONS as create/rearm/disable/delete/reset mutation."},
-    {"symptom": "Re-arm says unused but an old Trial browser/device remains authenticated", "likelyLayer": "rebuilt public-v2 stateless signed-session revocation", "status": "EXPECTED_OPEN_DEFECT_UNTIL_FIXED", "wrongFix": "Deleting only student_sessions or trial_login_consumptions and assuming the signed cookie is revoked."},
-    {"symptom": "Consumed Trial sees generic technical error rather than end-of-trial message", "likelyLayer": "Trial business-state error mapping/copy", "requiredCopy": "Your Future Perfect trial has now ended. To continue accessing lessons and resources, please contact us to discuss the right programme for your child."},
-    {"symptom": "Lesson release/import says FULL but Student still sees Preview/locked", "likelyLayer": "canonical entitlement -> READ_MODELS_KV access reconciliation", "wrongFix": "Rewriting D1 solely to force a refresh."},
-    {"symptom": "Online 11+ English upcoming lesson lacks VR PreLesson", "likelyLayer": "online_prelesson_entitlements.vr_access -> prepared lessonAccess.vr", "wrongFix": "Using legacy profile vrEligible as an extra gate."},
-    {"symptom": "Replace Resource succeeds but old PDF remains visible", "likelyLayer": "prepared lesson publication/live Student model", "wrongFix": "Repeated R2 replacement without checking prepared lesson pointer/model."},
-    {"symptom": "Student frontend code changed but live site unchanged", "likelyLayer": "wrong repository/deployed asset provenance", "firstCheck": "futureperfect-lessons-test CNAME + served asset provenance", "wrongFix": "Editing frontend copies in futureperfect-lessons-v2 by default."},
-    {"symptom": "A shared Admin deploy fixes one feature and breaks Trial/VR/quiz/protected answers", "likelyLayer": "entrypoint composition/capability preservation", "wrongFix": "Deploying a single old Phase wrapper or assuming branch/main completeness."}
+    {
+      "symptom": "Admin Trial row shows selected views but Student home shows 0 years/levels",
+      "likelyLayer": "trialViews -> prepared access projection/public Student access",
+      "firstChecks": [
+        "STUDENTS_KV trialViews",
+        "current per-student READ_MODELS_KV scope",
+        "publisher result/readback",
+        "live /api/v2 home"
+      ],
+      "wrongFix": "Repeatedly editing Admin-selected access without proving prepared publication."
+    },
+    {
+      "symptom": "Trial Admin action says Failed to fetch or browser mutation never reaches action",
+      "likelyLayer": "CORS OPTIONS/preflight wrapper",
+      "firstChecks": [
+        "OPTIONS status/headers",
+        "projected wrapper method gate",
+        "allowed origin"
+      ],
+      "knownRegression": "Do not treat OPTIONS as create/rearm/disable/delete/reset mutation."
+    },
+    {
+      "symptom": "Re-arm says unused but an old Trial browser/device remains authenticated",
+      "likelyLayer": "rebuilt public-v2 stateless signed-session revocation",
+      "status": "EXPECTED_OPEN_DEFECT_UNTIL_FIXED",
+      "wrongFix": "Deleting only student_sessions or trial_login_consumptions and assuming the signed cookie is revoked."
+    },
+    {
+      "symptom": "Consumed Trial sees generic technical error rather than end-of-trial message",
+      "likelyLayer": "Trial business-state error mapping/copy",
+      "requiredCopy": "Your Future Perfect trial has now ended. To continue accessing lessons and resources, please contact us to discuss the right programme for your child."
+    },
+    {
+      "symptom": "Lesson release/import says FULL but Student still sees Preview/locked",
+      "likelyLayer": "canonical entitlement -> READ_MODELS_KV access reconciliation",
+      "wrongFix": "Rewriting D1 solely to force a refresh."
+    },
+    {
+      "symptom": "Online 11+ English upcoming lesson lacks VR PreLesson",
+      "likelyLayer": "online_prelesson_entitlements.vr_access -> prepared lessonAccess.vr",
+      "wrongFix": "Using legacy profile vrEligible as an extra gate."
+    },
+    {
+      "symptom": "Replace Resource succeeds but old PDF remains visible",
+      "likelyLayer": "prepared lesson publication/live Student model",
+      "wrongFix": "Repeated R2 replacement without checking prepared lesson pointer/model."
+    },
+    {
+      "symptom": "Student frontend code changed but live site unchanged",
+      "likelyLayer": "wrong repository/deployed asset provenance",
+      "firstCheck": "futureperfect-lessons-test CNAME + served asset provenance",
+      "wrongFix": "Editing frontend copies in futureperfect-lessons-v2 by default."
+    },
+    {
+      "symptom": "A shared Admin deploy fixes one feature and breaks Trial/VR/quiz/protected answers",
+      "likelyLayer": "entrypoint composition/capability preservation",
+      "wrongFix": "Deploying a single old Phase wrapper or assuming branch/main completeness."
+    }
   ],
   "preservationLedger": {
     "mustNotRegress": [
@@ -333,9 +563,30 @@
       "No secrets/passwords/private credentials in repository authority."
     ],
     "deploymentCouplings": {
-      "adminWorkerChange": ["Trial", "Replace Resource", "Lesson Release Import", "Parent Email", "PreLesson VR", "protected student routes", "compatibility quiz bridge", "bindings/secrets"],
-      "authChange": ["normal multi-device", "account expiry", "Trial-specific state", "protected resources"],
-      "preparedModelChange": ["home/navigation", "lesson access", "VR/prelesson", "trialViews", "locked previews", "resource authorisation"]
+      "adminWorkerChange": [
+        "Trial",
+        "Replace Resource",
+        "Lesson Release Import",
+        "Parent Email",
+        "PreLesson VR",
+        "protected student routes",
+        "compatibility quiz bridge",
+        "bindings/secrets"
+      ],
+      "authChange": [
+        "normal multi-device",
+        "account expiry",
+        "Trial-specific state",
+        "protected resources"
+      ],
+      "preparedModelChange": [
+        "home/navigation",
+        "lesson access",
+        "VR/prelesson",
+        "trialViews",
+        "locked previews",
+        "resource authorisation"
+      ]
     }
   },
   "verificationMatrix": {
@@ -353,52 +604,270 @@
       "Capability-preservation checks for shared Worker composition.",
       "Public Student Quiz withdrawal check when shared deployment touches bridge/runtime."
     ],
-    "liveBeforeClaimingFixed": ["Fresh route/version/provenance proof.", "Admin mutation and resulting canonical state.", "Prepared READ_MODELS_KV state/pointer/readback.", "Live public-v2 API response.", "Representative browser flow."],
+    "liveBeforeClaimingFixed": [
+      "Fresh route/version/provenance proof.",
+      "Admin mutation and resulting canonical state.",
+      "Prepared READ_MODELS_KV state/pointer/readback.",
+      "Live public-v2 API response.",
+      "Representative browser flow."
+    ],
     "trialSpecific": {
-      "requiredPassingNow": ["Create selected Trial views -> prepared scope contains selected views.", "Admin OPTIONS preflight returns allowed non-mutating response.", "Re-arm clears consumption business state.", "Disable/delete remove Student access.", "Trial-ended state renders exact frozen message.", "Normal student can still hold approved concurrent sessions."],
-      "openGateExpectedToFailUntilImplemented": ["A second Trial login/device cannot create/use a second valid public-v2 session after the one-login allowance is consumed.", "Re-arm/disable/delete/reset invalidates every prior Trial public-v2 signed session as required by the business rule."],
+      "requiredPassingNow": [
+        "Create selected Trial views -> prepared scope contains selected views.",
+        "Admin OPTIONS preflight returns allowed non-mutating response.",
+        "Re-arm clears consumption business state.",
+        "Disable/delete remove Student access.",
+        "Trial-ended state renders exact frozen message.",
+        "Normal student can still hold approved concurrent sessions."
+      ],
+      "openGateExpectedToFailUntilImplemented": [
+        "A second Trial login/device cannot create/use a second valid public-v2 session after the one-login allowance is consumed.",
+        "Re-arm/disable/delete/reset invalidates every prior Trial public-v2 signed session as required by the business rule."
+      ],
       "rule": "Do not mark the Trial workflow fully PASS while either open-gate assertion is unimplemented."
     }
   },
   "changeImpactMatrix": {
-    "frontend_ui": {"firstProofs": ["live frontend repo/build/asset provenance", "public API contract"], "mustPreserve": ["navigation", "protected viewer", "Trial-ended copy", "all current UI capabilities"]},
-    "student_worker_api": {"firstProofs": ["public route owner", "Browser service target", "active Student version/source"], "mustPreserve": ["auth", "home", "subjects/views", "lesson detail", "resource open/delivery", "normal multi-device"]},
-    "admin_worker_or_wrapper": {"firstProofs": ["current wrangler entrypoint", "live Admin version/import chain", "bindings", "capability inventory"], "mustPreserve": ["Trial", "Create Student", "Replace Resource", "Release Import", "Parent Email", "PreLesson VR", "protected routes", "quiz compatibility"]},
-    "trial_change": {"firstProofs": ["public-v2 auth path", "Admin Trial path", "STUDENTS_KV trial profile", "prepared access scope", "consumption/session stores actually used by each path"], "mustPreserve": ["selected access", "exact ended copy", "normal student session semantics", "VR", "Answer Packs", "CORS", "delete semantics"], "acceptance": ["two-device live test", "stale-cookie test", "prepared view/access parity", "browser end-state copy"]},
-    "lesson_resource_source": {"firstProofs": ["canonical lesson ID", "prepared lesson", "source resource", "R2 key"], "mustPreserve": ["resource identity", "unrelated resources", "entitlements", "rollback object"]},
-    "lesson_release": {"firstProofs": ["canonical/display mapping", "student identity", "D1 state", "prepared access scope"], "mustPreserve": ["existing access", "blocked rules", "VR/prelesson parity", "parent-email boundary"]},
-    "auth_session": {"firstProofs": ["live login route", "deployed auth source", "cookie contract", "actual request-time revocation stores"], "mustPreserve": ["fpt_session security", "expiry", "normal multi-device", "Trial business rule once implemented"]}
+    "frontend_ui": {
+      "firstProofs": [
+        "live frontend repo/build/asset provenance",
+        "public API contract"
+      ],
+      "mustPreserve": [
+        "navigation",
+        "protected viewer",
+        "Trial-ended copy",
+        "all current UI capabilities"
+      ]
+    },
+    "student_worker_api": {
+      "firstProofs": [
+        "public route owner",
+        "Browser service target",
+        "active Student version/source"
+      ],
+      "mustPreserve": [
+        "auth",
+        "home",
+        "subjects/views",
+        "lesson detail",
+        "resource open/delivery",
+        "normal multi-device"
+      ]
+    },
+    "admin_worker_or_wrapper": {
+      "firstProofs": [
+        "current wrangler entrypoint",
+        "live Admin version/import chain",
+        "bindings",
+        "capability inventory"
+      ],
+      "mustPreserve": [
+        "Trial",
+        "Create Student",
+        "Replace Resource",
+        "Release Import",
+        "Parent Email",
+        "PreLesson VR",
+        "protected routes",
+        "quiz compatibility"
+      ]
+    },
+    "trial_change": {
+      "firstProofs": [
+        "public-v2 auth path",
+        "Admin Trial path",
+        "STUDENTS_KV trial profile",
+        "prepared access scope",
+        "consumption/session stores actually used by each path"
+      ],
+      "mustPreserve": [
+        "selected access",
+        "exact ended copy",
+        "normal student session semantics",
+        "VR",
+        "Answer Packs",
+        "CORS",
+        "delete semantics"
+      ],
+      "acceptance": [
+        "two-device live test",
+        "stale-cookie test",
+        "prepared view/access parity",
+        "browser end-state copy"
+      ]
+    },
+    "lesson_resource_source": {
+      "firstProofs": [
+        "canonical lesson ID",
+        "prepared lesson",
+        "source resource",
+        "R2 key"
+      ],
+      "mustPreserve": [
+        "resource identity",
+        "unrelated resources",
+        "entitlements",
+        "rollback object"
+      ]
+    },
+    "lesson_release": {
+      "firstProofs": [
+        "canonical/display mapping",
+        "student identity",
+        "D1 state",
+        "prepared access scope"
+      ],
+      "mustPreserve": [
+        "existing access",
+        "blocked rules",
+        "VR/prelesson parity",
+        "parent-email boundary"
+      ]
+    },
+    "auth_session": {
+      "firstProofs": [
+        "live login route",
+        "deployed auth source",
+        "cookie contract",
+        "actual request-time revocation stores"
+      ],
+      "mustPreserve": [
+        "fpt_session security",
+        "expiry",
+        "normal multi-device",
+        "Trial business rule once implemented"
+      ]
+    }
   },
   "sourceAnchors": {
     "backendAdminOps": [
-      {"path": "AGENTS.md", "blobShaObserved": "fdf1541a95fd4ca642536e15ba0a939c402c9a77", "role": "cross-repo targeting rule"},
-      {"path": "worker/wrangler.toml", "blobShaObserved": "7c77221331004498e57f3917472a78b9521223d8", "role": "current repository deployment entrypoint/binding declarations; live must still be reverified"},
-      {"path": "worker/src/index-admin-tools.js", "blobShaObserved": "40c62b68ef8bd8d7a94eca2144690fa10ba09c0e", "role": "current source composition anchor"},
-      {"path": "worker/src/admin-trial-manager.js", "blobShaObserved": "a893245038f8d0a54fb68a0e3777c545e2b2a62f", "role": "Trial Admin state/actions/credentials/consumption cleanup"},
-      {"path": "worker/src/admin-trial-manager-projected.js", "blobShaObserved": "e66f0ed62faf9863445e49cce756d5c62416742f", "role": "Trial mutation -> prepared publisher + CORS POST gate"},
-      {"path": "worker/src/trial-prepared-access-publisher.js", "blobShaObserved": "dc36790392bf6f5f2d57cd919f556282bf886060", "role": "Trial selected-view -> READ_MODELS_KV publication"},
-      {"path": "worker/src/index-phase24-trial-vr.js", "blobShaObserved": "6f3020a4212b2299bcf43d737a9cda275600d870", "role": "compatibility Trial selected-view/VR runtime; not default public-v2 proof"},
-      {"path": "worker/src/access-read-model-sync.js", "blobShaObserved": "5957e567e7ade8022eac7d0d74bbf4d0da076792", "role": "prepared access compiler/publisher machinery"}
+      {
+        "path": "AGENTS.md",
+        "blobShaObserved": "fdf1541a95fd4ca642536e15ba0a939c402c9a77",
+        "role": "cross-repo targeting rule"
+      },
+      {
+        "path": "worker/wrangler.toml",
+        "blobShaObserved": "7c77221331004498e57f3917472a78b9521223d8",
+        "role": "current repository deployment entrypoint/binding declarations; live must still be reverified"
+      },
+      {
+        "path": "worker/src/index-admin-tools.js",
+        "blobShaObserved": "40c62b68ef8bd8d7a94eca2144690fa10ba09c0e",
+        "role": "current source composition anchor"
+      },
+      {
+        "path": "worker/src/admin-trial-manager.js",
+        "blobShaObserved": "a893245038f8d0a54fb68a0e3777c545e2b2a62f",
+        "role": "Trial Admin state/actions/credentials/consumption cleanup"
+      },
+      {
+        "path": "worker/src/admin-trial-manager-projected.js",
+        "blobShaObserved": "e66f0ed62faf9863445e49cce756d5c62416742f",
+        "role": "Trial mutation -> prepared publisher + CORS POST gate"
+      },
+      {
+        "path": "worker/src/trial-prepared-access-publisher.js",
+        "blobShaObserved": "dc36790392bf6f5f2d57cd919f556282bf886060",
+        "role": "Trial selected-view -> READ_MODELS_KV publication"
+      },
+      {
+        "path": "worker/src/index-phase24-trial-vr.js",
+        "blobShaObserved": "6f3020a4212b2299bcf43d737a9cda275600d870",
+        "role": "compatibility Trial selected-view/VR runtime; not default public-v2 proof"
+      },
+      {
+        "path": "worker/src/access-read-model-sync.js",
+        "blobShaObserved": "5957e567e7ade8022eac7d0d74bbf4d0da076792",
+        "role": "prepared access compiler/publisher machinery"
+      }
     ],
     "liveFrontend": [
-      {"repo": "FuturePerfectTuitions/futureperfect-lessons-test", "path": "CNAME", "blobShaObserved": "8cbb4720046180ce24fbc7efdfd3b7420f95cf3c", "role": "canonical live hostname binding"},
-      {"repo": "FuturePerfectTuitions/futureperfect-lessons-test", "path": "index.html", "blobShaObserved": "0602634312bbb56460803a5997ce673b56326f31", "role": "observed live-frontend source baseline; prove served build before edits"}
+      {
+        "repo": "FuturePerfectTuitions/futureperfect-lessons-test",
+        "path": "CNAME",
+        "blobShaObserved": "8cbb4720046180ce24fbc7efdfd3b7420f95cf3c",
+        "role": "canonical live hostname binding"
+      },
+      {
+        "repo": "FuturePerfectTuitions/futureperfect-lessons-test",
+        "path": "index.html",
+        "blobShaObserved": "0602634312bbb56460803a5997ce673b56326f31",
+        "role": "observed live-frontend source baseline; prove served build before edits"
+      }
     ]
   },
   "supersededOrCorrectedAssertions": [
-    {"oldAssertion": "Trial one-login rules are enforced server-side by current Trial Manager session/consumption cleanup.", "status": "SUPERSEDED_IMPLEMENTATION_CLAIM", "replacement": "One-login remains the binding business requirement, but end-to-end enforcement is an OPEN_DEFECT under rebuilt public-v2 signed stateless sessions."},
-    {"oldAssertion": "Re-arm/Disable/Reset revokes all active Trial sessions merely by deleting legacy D1 session rows.", "status": "SUPERSEDED_IMPLEMENTATION_CLAIM", "replacement": "Legacy cleanup may affect compatibility state but is not proof that an already-issued public-v2 fpt_session cookie is invalid."},
-    {"oldAssertion": "Phase24 /api/v1/student Trial handling is the default Student Portal runtime.", "status": "FORBIDDEN_ASSUMPTION", "replacement": "Public student work starts at the rebuilt /api/v2 Browser->Student architecture; Phase24 is compatibility unless fresh routing proves otherwise."},
-    {"oldAssertion": "The backend/Admin repository is also the canonical live student frontend repository.", "status": "FORBIDDEN_ASSUMPTION", "replacement": "Live student frontend is futureperfect-lessons-test; backend/Admin/ops is futureperfect-lessons-v2."},
-    {"oldAssertion": "A canonical/Admin access update is sufficient Student acceptance.", "status": "FORBIDDEN_ASSUMPTION", "replacement": "Student-visible acceptance requires prepared publication/readback plus live API/browser proof."}
+    {
+      "oldAssertion": "Trial one-login rules are enforced server-side by current Trial Manager session/consumption cleanup.",
+      "status": "SUPERSEDED_IMPLEMENTATION_CLAIM",
+      "replacement": "One-login remains the binding business requirement, but end-to-end enforcement is an OPEN_DEFECT under rebuilt public-v2 signed stateless sessions."
+    },
+    {
+      "oldAssertion": "Re-arm/Disable/Reset revokes all active Trial sessions merely by deleting legacy D1 session rows.",
+      "status": "SUPERSEDED_IMPLEMENTATION_CLAIM",
+      "replacement": "Legacy cleanup may affect compatibility state but is not proof that an already-issued public-v2 fpt_session cookie is invalid."
+    },
+    {
+      "oldAssertion": "Phase24 /api/v1/student Trial handling is the default Student Portal runtime.",
+      "status": "FORBIDDEN_ASSUMPTION",
+      "replacement": "Public student work starts at the rebuilt /api/v2 Browser->Student architecture; Phase24 is compatibility unless fresh routing proves otherwise."
+    },
+    {
+      "oldAssertion": "The backend/Admin repository is also the canonical live student frontend repository.",
+      "status": "FORBIDDEN_ASSUMPTION",
+      "replacement": "Live student frontend is futureperfect-lessons-test; backend/Admin/ops is futureperfect-lessons-v2."
+    },
+    {
+      "oldAssertion": "A canonical/Admin access update is sufficient Student acceptance.",
+      "status": "FORBIDDEN_ASSUMPTION",
+      "replacement": "Student-visible acceptance requires prepared publication/readback plus live API/browser proof."
+    }
   ],
   "knownOpenControlsAndDefects": [
-    {"id": "trial.one_login.public_v2", "priority": "P0", "status": "OPEN_DEFECT", "description": "Exactly-one-successful-login Trial rule is not currently enforced end-to-end across signed public-v2 sessions/devices."},
-    {"id": "deployment.coordination.lock", "priority": "P0", "status": "NOT_IMPLEMENTED", "description": "Parallel/shared Worker deployment coordination remains an architectural risk."},
-    {"id": "capability.preservation.automation", "priority": "P0", "status": "PARTIAL", "description": "Preservation is required but not fully machine-enforced across every shared deployment."},
-    {"id": "deployed.artifact.provenance", "priority": "P0", "status": "PARTIAL", "description": "Exact Browser/frontend/Worker source mapping must be freshly proved; do not assume repository main."},
-    {"id": "replace_resource.prepared_lesson_publication", "priority": "P1", "status": "PARTIAL_OR_REVERIFY", "description": "v4.2 authority says generic Replace Resource source success needs separate prepared lesson publication; inspect current source before each relevant change."},
-    {"id": "documentation.drift", "priority": "P1", "status": "NOW_REDUCED_BY_GCH_BUT_NOT_CI_ENFORCED", "description": "This GCH must be updated in the same coherent change; automated drift check remains desirable."}
+    {
+      "id": "trial.one_login.public_v2",
+      "priority": "P0",
+      "status": "OPEN_DEFECT",
+      "description": "Exactly-one-successful-login Trial rule is not currently enforced end-to-end across signed public-v2 sessions/devices."
+    },
+    {
+      "id": "deployment.coordination.lock",
+      "priority": "P0",
+      "status": "NOT_IMPLEMENTED",
+      "description": "Parallel/shared Worker deployment coordination remains an architectural risk."
+    },
+    {
+      "id": "capability.preservation.automation",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "description": "Preservation is required but not fully machine-enforced across every shared deployment."
+    },
+    {
+      "id": "deployed.artifact.provenance",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "description": "Exact Browser/frontend/Worker source mapping must be freshly proved; do not assume repository main."
+    },
+    {
+      "id": "replace_resource.prepared_lesson_publication",
+      "priority": "P1",
+      "status": "PARTIAL_OR_REVERIFY",
+      "description": "v4.2 authority says generic Replace Resource source success needs separate prepared lesson publication; inspect current source before each relevant change."
+    },
+    {
+      "id": "documentation.drift",
+      "priority": "P1",
+      "status": "NOW_REDUCED_BY_GCH_BUT_NOT_CI_ENFORCED",
+      "description": "This GCH must be updated in the same coherent change; automated drift check remains desirable."
+    },
+    {
+      "id": "l3.prepared_consistency.owner_browser_acceptance",
+      "priority": "P1",
+      "status": "PENDING_OWNER_BROWSER_ACCEPTANCE",
+      "description": "Canonical/prepared/R2 integrity is PASS after run 37603228395 and audit 37603544422; close only after owner confirms L3 chronology and L3T3M43 detail opens in the live browser."
+    }
   ],
   "futureChangeProcedure": [
     "Read AGENTS.md and this GCH in full.",
@@ -420,5 +889,13 @@
     "Requested mutation would affect a broader scope than authorised.",
     "Rollback/preservation boundary is not established.",
     "A business requirement conflicts with current implementation and no safe coherent change has been defined."
-  ]
+  ],
+  "latestL3PreparedConsistencyRepair": {
+    "date": "2026-10-07",
+    "status": "LIVE_DATA_REPAIRED_PENDING_OWNER_BROWSER_ACCEPTANCE",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json",
+    "productionRepairRun": 37603228395,
+    "postRepairAuditRun": 37603544422,
+    "invariant": "Canonical L3 view alias/order, prepared global catalogue/lessonToViews and prepared lesson detail must be published and verified as one coherent student-visible state. Curriculum membership alone never authorises a row into a view."
+  }
 }
