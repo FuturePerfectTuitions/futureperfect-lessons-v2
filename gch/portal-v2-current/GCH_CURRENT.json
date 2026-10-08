@@ -491,7 +491,7 @@
   },
   "latestAdminImportFailureReporting": {
     "date": "2026-10-08",
-    "status": "SOURCE_FIX_STAGED_PENDING_REGRESSION_DEPLOYMENT_AND_FAILED_STUDENT_IDENTIFICATION",
+    "status": "FRONTEND_GITHUB_PAGES_LIVE_VERIFIED_BACKEND_DEPLOYMENT_BLOCKED_ORIGINAL_STUDENT_UNKNOWN",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
     "incidentSummary": {
       "total": 5,
@@ -502,6 +502,18 @@
     },
     "rootCauseConfirmed": "Frontend displayed preview rows after confirm instead of actual result rows; backend discarded technical sync exception.",
     "notConfirmed": "Failed student identity and exact prepared-access error from original incident; production parity and deployment are not verified.",
-    "productionRecovery": "Forward-only; preserve composed current Worker including step11 -> step10; no email sending; no blind all-student replay."
+    "productionRecovery": "Frontend script independently verified on GitHub Pages after run 37828003650; Worker backend diagnostic remains source-only because push-to-main Worker deployment jobs 37828004687, 37828004729 and 37828004748 failed source-composition prechecks before deploy. Do not roll back or force deployment. Confirm affected account using authenticated actual result or carefully idempotent rerun before per-student recovery. No parent emails.",
+    "frontendDeployment": {
+      "sourceCommit": "c29ca41e863e7c6111fb2f9a221c39347fe9d7ce",
+      "githubPagesRun": 37828003650,
+      "result": "PASS",
+      "servedJsUrl": "https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/admin-import.js",
+      "liveJsMarkersVerified": [
+        "const confirmedResults",
+        "failed-import-row",
+        "failedPortalResults"
+      ],
+      "studentBrowserVerification": "PENDING_AUTHENTICATED_IMPORT_RETRY"
+    }
   }
 }
