@@ -24,6 +24,14 @@ function reconciliationFailure() {
   }, 503);
 }
 
+// Only a machine-style error code is returned to the authenticated Admin UI.
+// Exception text can contain backend internals and stays in server-side logs.
+function safeSyncErrorCode(error) {
+  const raw = clean(error?.message || error);
+  if (/^[A-Z][A-Z0-9_]*(?::[A-Za-z0-9_.-]+)?$/.test(raw) && raw.length <= 120) return raw;
+  return 'READ_MODEL_INTERNAL_ERROR';
+}
+
 function successfulStudents(results) {
   return [...new Set((Array.isArray(results) ? results : [])
     .filter(result => result?.ok === true)
@@ -50,6 +58,7 @@ function applySyncOutcome(body, outcomes) {
       status:'READ_MODEL_SYNC_FAILED',
       legacyApplied:true,
       readModelSynced:false,
+      readModelErrorCode:outcome.errorCode || 'READ_MODEL_INTERNAL_ERROR',
       message:'Lesson access was saved but the student Portal access model did not publish. It is safe to retry this same import.'
     };
   });
@@ -58,7 +67,7 @@ function applySyncOutcome(body, outcomes) {
     portalUserIdNorm,
     ok:outcome.ok,
     status:outcome.ok ? (outcome.reused ? 'READ_MODEL_ALREADY_CURRENT' : 'READ_MODEL_PUBLISHED') : 'READ_MODEL_SYNC_FAILED',
-    ...(outcome.ok ? { version:outcome.version, reused:outcome.reused === true } : {})
+    ...(outcome.ok ? { version:outcome.version, reused:outcome.reused === true } : { errorCode:outcome.errorCode || 'READ_MODEL_INTERNAL_ERROR' })
   }));
 
   return {
@@ -97,8 +106,12 @@ export async function handleAdminLessonReleaseImport(request, env) {
   for (const portalUserIdNorm of successfulStudents(body.results)) {
     try {
       outcomes.set(portalUserIdNorm, await refreshStudentAccessReadModel(env, portalUserIdNorm));
-    } catch {
-      outcomes.set(portalUserIdNorm, { ok:false });
+    } catch (error) {
+      const errorCode = safeSyncErrorCode(error);
+      // Preserve the underlying exception in restricted runtime logs for
+      // investigation; never return its uncontrolled message to the browser.
+      console.error('ADMIN_IMPORT_READ_MODEL_SYNC_FAILED', { portalUserIdNorm, errorCode, error });
+      outcomes.set(portalUserIdNorm, { ok:false, errorCode });
     }
   }
 
@@ -106,6 +119,7 @@ export async function handleAdminLessonReleaseImport(request, env) {
 }
 
 export {
+  safeSyncErrorCode,
   successfulStudents,
   applySyncOutcome
 };
