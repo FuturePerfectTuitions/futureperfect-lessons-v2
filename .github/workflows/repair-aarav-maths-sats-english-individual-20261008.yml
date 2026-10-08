@@ -1,0 +1,68 @@
+name: Aarav Maths SATS and English per-lesson access repair
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/repair-aarav-maths-sats-english-individual-20261008.mjs'
+      - '.github/workflows/repair-aarav-maths-sats-english-individual-20261008.yml'
+      - 'worker/src/access-read-model-sync-v2.js'
+      - 'tests/access-read-model-sync-v2-verification.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-aarav-maths-sats-english-individual-20261008.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-20261008-aarav-english-maths-repair
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Validate parity, SATS direct release and one-account guarded repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker/src/access-read-model-sync-v2.js
+          node --check scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
+          node tests/access-read-model-sync-v2-verification.mjs
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          grep -Fq "approvedScopePrefix='rm:v1:scope:'" scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
+          grep -Fq "publishScopeAtomic(store" scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
+          grep -Fq "english.openLessonCount!==4" scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
+          grep -Fq "sats.openLessonCount!==2" scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
+          ! grep -Eq 'wrangler.*deploy|send_email|sendEmails:true' scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
+          echo 'AARAV_SATS_AND_ENGLISH_RELEASE_REPAIR_STATIC_PASS'
+
+  repair:
+    if: github.event_name == 'push' && github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Change only Aarav English full-library flag and his prepared scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/repair-aarav-maths-sats-english-individual-20261008.mjs
