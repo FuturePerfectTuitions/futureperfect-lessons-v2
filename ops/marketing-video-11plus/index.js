@@ -84,8 +84,8 @@ const HTML = `<!doctype html>
         <h1>Preparing for the 11+</h1>
         <section class="resource-section video-section">
           <div class="resource-section-heading">
-            <p class="eyebrow">See how we prepare</p>
-            <h2>Discover how we strengthen core skills, develop reasoning and exam technique, and help children become confident, capable 11+ candidates.</h2>
+            <p class="eyebrow">Inside our 11+ preparation</p>
+            <h2>See why our approach to the 11+ is different.</h2>\n            <p>Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think when the exam doesn’t look like the practice.</p>
           </div>
           <div class="player-frame">
             <iframe
