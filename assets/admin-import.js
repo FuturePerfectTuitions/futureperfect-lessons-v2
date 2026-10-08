@@ -139,7 +139,7 @@
         r.lessonDateDisplay || r.lessonDate,
         r.lessonStatus,
         r.releaseType,
-        r.action || r.status,
+        r.ok === false ? (r.status || r.action || 'FAILED') : (r.action || r.status),
         emailAction,
         [r.message, r.readModelErrorCode && `Error code: ${r.readModelErrorCode}`].filter(Boolean).join(' — ')
       ];
