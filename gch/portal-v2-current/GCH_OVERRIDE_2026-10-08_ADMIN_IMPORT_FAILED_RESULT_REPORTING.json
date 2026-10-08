@@ -78,6 +78,21 @@
       "limitation": "If the five-row footprint is not unique or timestamp ordering ambiguous, report inability to identify student; never guess."
     },
     "backendDeployment": "NOT_AUTHORISED_BY_THIS_DIAGNOSTIC; source-only worker exception reporting from prior PR has not been deployed",
-    "studentRecovery": "PENDING diagnostic proof; no replay or entitlement writes in this change"
+    "studentRecovery": "PENDING diagnostic proof; no replay or entitlement writes in this change",
+    "firstReadOnlyAudit": {
+      "workflowRun": 37831045234,
+      "result": "PASS",
+      "row5Diagnosis": "COMPILED_YEAR6_L3_PROGRAMME_COLLISION",
+      "otherRowsFull": [
+        2,
+        3,
+        4,
+        6
+      ],
+      "bindingProof": "PASS",
+      "writes": 0,
+      "emails": 0
+    },
+    "secondAudit": "Pending: log only classification flags for failing row, including current D1 programme, Full Library flags and raw compiled current Year6/L3 views."
   }
 }
