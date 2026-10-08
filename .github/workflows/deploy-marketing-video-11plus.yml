@@ -1,0 +1,108 @@
+name: Deploy 11plus marketing video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/marketing-video-11plus/**'
+      - '.github/workflows/deploy-marketing-video-11plus.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-marketing-video-11plus
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_VERSION: 4.125.0
+  PROD_HOST: 11plus.futureperfect.education
+  WORKER_NAME: fpt-marketing-video-11plus
+  MARKER: FPT_MARKETING_VIDEO_11PLUS_V1
+  SCREENPAL_ID: cO6j27nxMMM
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Static safety checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check ops/marketing-video-11plus/index.js
+          grep -Fq "$MARKER" ops/marketing-video-11plus/index.js
+          grep -Fq "https://go.screenpal.com/player/$SCREENPAL_ID?ff=1&ahc=1&dcc=1&tl=1&bg=transparent" ops/marketing-video-11plus/index.js
+          ! grep -Eqi 'autoplay|autoplay=1' ops/marketing-video-11plus/index.js
+          grep -Fq 'allow="fullscreen; picture-in-picture"' ops/marketing-video-11plus/index.js
+          grep -Fq 'pattern = "11plus.futureperfect.education"' ops/marketing-video-11plus/wrangler.toml
+          grep -Fq 'custom_domain = true' ops/marketing-video-11plus/wrangler.toml
+          echo MARKETING_VIDEO_11plus_STATIC_PASS
+
+      - name: Guard against taking over an existing live hostname
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -L -sS --connect-timeout 5 --max-time 10 -o /tmp/existing.html -w '%{http_code}' "https://$PROD_HOST/" || true)"
+          if [ "$code" != "000" ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ]; then
+            if ! grep -Fq "$MARKER" /tmp/existing.html; then
+              echo "Refusing deployment: $PROD_HOST already serves unrelated content (HTTP $code)." >&2
+              exit 1
+            fi
+          fi
+          echo MARKETING_VIDEO_11plus_HOST_GUARD_PASS
+
+      - name: Wrangler dry run
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy \
+            --config ops/marketing-video-11plus/wrangler.toml \
+            --dry-run \
+            --outdir /tmp/marketing-video-11plus
+          echo MARKETING_VIDEO_11plus_DRY_RUN_PASS
+
+      - name: Deploy isolated Worker and custom domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy \
+            --config ops/marketing-video-11plus/wrangler.toml \
+            --message 'Standalone FPT 11+ parent marketing video'
+          echo MARKETING_VIDEO_11plus_DEPLOY_COMPLETE
+
+      - name: Verify public page
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE=0
+          for attempt in $(seq 1 60); do
+            stamp="${GITHUB_RUN_ID}-${attempt}"
+            code="$(curl -L -sS --connect-timeout 5 --max-time 10 -H 'Cache-Control: no-cache' -o /tmp/live.html -w '%{http_code}' "https://$PROD_HOST/?deploy=$stamp" || true)"
+            if [ "$code" = "200" ] &&
+               grep -Fq "$MARKER" /tmp/live.html &&
+               grep -Fq "go.screenpal.com/player/$SCREENPAL_ID" /tmp/live.html &&
+               ! grep -Eqi 'autoplay|autoplay=1' /tmp/live.html; then
+              LIVE=1
+              break
+            fi
+            sleep 2
+          done
+          test "$LIVE" = 1
+          curl -sSI "https://$PROD_HOST/" > /tmp/headers.txt
+          grep -qi '^content-security-policy:.*frame-src https://go.screenpal.com' /tmp/headers.txt
+          echo MARKETING_VIDEO_11plus_PUBLIC_PASS
