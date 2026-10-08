@@ -475,12 +475,13 @@
       "ops/marketing-video-11plus/wrangler.toml",
       ".github/workflows/deploy-marketing-video-11plus.yml"
     ],
-    "deploymentWorkflowRun": 37797569399,
+    "deploymentWorkflowRun": 37822086314,
     "deploymentWorkflowResult": "PASS",
     "visibleCopy": {
       "title": "Preparing for the 11+",
-      "eyebrow": "See how we prepare",
-      "description": "Discover how we strengthen core skills, develop reasoning and exam technique, and help children become confident, capable 11+ candidates."
+      "eyebrow": "Inside our 11+ preparation",
+      "description": "See why our approach to the 11+ is different.",
+      "supportingCopy": "Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think when the exam doesn’t look like the practice."
     }
   }
 }
