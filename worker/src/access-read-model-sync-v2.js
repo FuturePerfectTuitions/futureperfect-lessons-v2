@@ -171,12 +171,26 @@ function hasSatsPresentationAccess(input) {
 }
 
 function demoteDualFullLibraryViews(snapshot, originalInput, asOfDate) {
-  if (!explicitDualFullLibrary(originalInput) || !Array.isArray(snapshot?.views)) return;
-  const currentProgramme = currentEquivalentProgramme(originalInput, asOfDate);
+  if (!Array.isArray(snapshot?.views)) return;
+  // Programme membership is not conferred by Full Library access. A lone
+  // MATHS_L3_FULL may open shared Y6 canonical lesson IDs and cause the legacy
+  // compiler to manufacture *both* Year 6 and L3 as current. That must not
+  // abort unrelated English releases with COMPILED_YEAR6_L3_PROGRAMME_COLLISION.
+  // Prefer actual D1 current assignment; retain the existing D1-defined KV
+  // profile fallback for legacy students with no assignment history.
+  const currentProgramme = currentEquivalentProgramme(originalInput, asOfDate) ||
+    currentEquivalentProgramme(normaliseAuthoritativeInput(originalInput, asOfDate), asOfDate);
+  const fullLibraries = new Set((originalInput?.user?.fullLibraries || []).map(upper));
+  const hasEquivalentFullLibrary =
+    fullLibraries.has('MATHS_Y6_FULL') || fullLibraries.has('MATHS_L3_FULL');
+  if (!currentProgramme && !hasEquivalentFullLibrary) return;
+
   for (const view of snapshot.views) {
     const id = norm(view?.viewId);
     if (id !== 'maths-year6' && id !== 'maths-level3') continue;
     if (currentProgramme && id === currentProgramme) continue;
+    // Never discard lessonAccess, entitlements or the catalogue. Previous is
+    // presentation metadata only and all explicitly granted resources remain.
     view.current = false;
     view.group = 'previous';
   }
