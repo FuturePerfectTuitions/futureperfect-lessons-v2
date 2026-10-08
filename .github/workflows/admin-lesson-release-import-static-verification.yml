@@ -13,6 +13,7 @@ on:
       - worker/src/admin-lesson-release-import-email-reconciled.js
       - worker/src/admin-lesson-release-import-manual-email.js
       - worker/src/admin-lesson-release-import-manual-email-reconciled.js
+      - worker/src/access-read-model-sync-v2.js
       - worker/src/access-read-model-sync.js
       - worker/src/parent-email.js
       - worker/src/parent-email-signature.js
@@ -27,6 +28,7 @@ on:
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/admin-lesson-release-y6-sats-verification.mjs
+      - tests/access-read-model-sync-v2-verification.mjs
       - tests/access-read-model-reconciliation-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
@@ -46,6 +48,7 @@ on:
       - worker/src/admin-lesson-release-import-email-reconciled.js
       - worker/src/admin-lesson-release-import-manual-email.js
       - worker/src/admin-lesson-release-import-manual-email-reconciled.js
+      - worker/src/access-read-model-sync-v2.js
       - worker/src/access-read-model-sync.js
       - worker/src/parent-email.js
       - worker/src/parent-email-signature.js
@@ -60,6 +63,7 @@ on:
       - tests/admin-import-manual-email-verification.mjs
       - tests/admin-lesson-release-import-verification.mjs
       - tests/admin-lesson-release-y6-sats-verification.mjs
+      - tests/access-read-model-sync-v2-verification.mjs
       - tests/access-read-model-reconciliation-verification.mjs
       - tests/parent-email-import-verification.mjs
       - tests/parent-email-idempotency-verification.mjs
@@ -89,6 +93,7 @@ jobs:
           node --check worker/src/admin-lesson-release-import-email-reconciled.js
           node --check worker/src/admin-lesson-release-import-manual-email.js
           node --check worker/src/admin-lesson-release-import-manual-email-reconciled.js
+          node --check worker/src/access-read-model-sync-v2.js
           node --check worker/src/access-read-model-sync.js
           node --check worker/src/parent-email.js
           node --check worker/src/parent-email-signature.js
@@ -106,6 +111,7 @@ jobs:
           node tests/admin-import-manual-email-verification.mjs
           node tests/admin-lesson-release-import-verification.mjs
           node tests/admin-lesson-release-y6-sats-verification.mjs
+          node tests/access-read-model-sync-v2-verification.mjs
           node tests/access-read-model-reconciliation-verification.mjs
           node tests/parent-email-import-verification.mjs
           node tests/parent-email-idempotency-verification.mjs
