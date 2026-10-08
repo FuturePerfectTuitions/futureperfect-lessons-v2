@@ -85,7 +85,7 @@ const HTML = `<!doctype html>
         <section class="resource-section video-section">
           <div class="resource-section-heading">
             <p class="eyebrow">Inside our 11+ preparation</p>
-            <h2>See why our approach to the 11+ is different.</h2>\n            <p>Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think when the exam doesn’t look like the practice.</p>
+            <h2>See why our approach to the 11+ is different.</h2>\n            <p>Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think even in the face of unknown and unfamiliar questions in the 11+ exams.</p>
           </div>
           <div class="player-frame">
             <iframe
