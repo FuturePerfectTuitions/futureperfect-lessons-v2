@@ -1,0 +1,34 @@
+{
+  "schema": "fpt.portal.gch.override.admin-import-failed-reporting.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "SOURCE_FIX_IN_BRANCH_PENDING_REGRESSION_AND_DEPLOYMENT",
+  "effectiveDate": "2026-10-08",
+  "scope": "PORTAL_V2.Admin.LessonReleaseImport.FailedResultReporting",
+  "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
+  "precedence": "Higher authority within the admin lesson-release import failure-reporting scope only. No entitlement, lesson-access, notification, or deployment behaviour is overridden.",
+  "incident": {
+    "evidence": "Owner screenshot: 2026-10-08 Lesson Release Import, 5 imported rows, succeeded=4, failed=1, readModelsSucceeded=4, readModelsFailed=1, emailsSent=0, emailsFailed=0. All five displayed preview GRANT_FULL/UPGRADE_TO_FULL.",
+    "confirmedUiRootCause": "assets/admin-import.js rendered preview.results before confirmation and after POST /confirm only rendered summary counts; failed confirmed results never replaced preview row indicators.",
+    "confirmedBackendDiagnosticGap": "worker/src/admin-lesson-release-import-reconciled.js suppressed exception details in catch and did not return a machine-style failure reason. readModelResults already included portalUserIdNorm and status.",
+    "unknown": "Which of the five students failed the 2026-10-08 prepared-model publication, why publication failed for that student, and whether their live prepared scope is now current. Do not guess from the screenshot."
+  },
+  "sourceChange": {
+    "frontend": "Merge actual POST /confirm data.results with preview presentation metadata by original CSV index; present confirmed rows, highlight failure, display failed status before any preview action, and surface associated student/lesson/reason in status banner. Never display a preview GRANT_FULL as confirmation of successful prepared publication.",
+    "backend": "Return readModelErrorCode for failed confirmed rows and errorCode in readModelResults, including a single safe machine-readable error identifier. Restricted Worker logs retain original exception for diagnosis. Do not leak raw exception text into browser.",
+    "tests": [
+      "tests/admin-import-auto-process-static-verification.mjs",
+      "tests/access-read-model-reconciliation-verification.mjs"
+    ]
+  },
+  "preservation": {
+    "importBoundary": "Preview remains read-only. POST confirm remains the existing authenticated, idempotent canonical D1 release plus fail-closed prepared access publication. No automatic extra retries or D1 writes are added.",
+    "parentEmail": "Parent emails remain manual. Failure continues to disable Send Parent Emails; no email is sent by this change, no email idempotency rows are consumed.",
+    "studentAccess": "No user entitlement, D1, STUDENTS_KV, READ_MODELS_KV, lesson, session, quiz, SATS, L3 mapping, resource or answer-pack mutation is included.",
+    "productionRule": "FORWARD_ONLY. Preserve current composed shared Worker. Current worker/wrangler.toml references index-step11-year6-catalogue-boundary.js (which delegates to step10), while older GHC/CI text references step10 directly: verify exact live composition and adjust provenance before any backend deploy; do not deploy an older entrypoint."
+  },
+  "recoveryBoundary": {
+    "currentAttempt": "Read-only source diagnosis only; original failed student cannot be identified from screenshot or backend code. Do not pretend the original record was reconciled.",
+    "next": "First verify deployment provenance and per-student confirmed failure with authorized live response/logs or read-only audit. Once exact student is known, reconcile only that account's prepared access from existing canonical state, read back current access scope, and check student API/browser. Preserve other four grants. No parent emails.",
+    "acceptance": "CI and static tests pass; actual Admin confirmation table identifies failed student and lesson/code; actual successful rows remain successful; email not auto-sent; live production Worker composition unchanged except guarded forward-only deployment of exact changes; per-student readback plus owner verification before closing incident."
+  }
+}
