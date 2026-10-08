@@ -1,0 +1,64 @@
+name: Repair October 8 row 5 L3 Full prepared access (single student)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/repair-row5-full-l3-prepared-only-20261008.mjs'
+      - '.github/workflows/repair-row5-full-l3-prepared-only-20261008.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-row5-full-l3-prepared-only-20261008.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-v2-row5-full-l3-prepared-only-20261008
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify single-student prepared write path and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/repair-row5-full-l3-prepared-only-20261008.mjs
+          node --check worker/src/access-read-model-sync-v2.js
+          node tests/access-read-model-sync-v2-verification.mjs
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          grep -Fq "approvedScopePrefix='rm:v1:scope:'" scripts/repair-row5-full-l3-prepared-only-20261008.mjs
+          grep -Fq "publishScopeAtomic(store" scripts/repair-row5-full-l3-prepared-only-20261008.mjs
+          ! grep -Eq "(sendEmails:true|env.DB.prepare\([^)]*(DELETE|UPDATE|INSERT)|send_email|wrangler.*deploy)" scripts/repair-row5-full-l3-prepared-only-20261008.mjs
+          echo 'ROW5_FULL_L3_REPAIR_STATIC_PASS'
+
+  repair:
+    if: github.event_name == 'push' && github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Publish only CSV row 5 prepared Full L3 and verify readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/repair-row5-full-l3-prepared-only-20261008.mjs
