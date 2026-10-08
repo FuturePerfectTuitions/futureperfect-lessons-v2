@@ -108,6 +108,31 @@
       ],
       "deploymentGate": "Source patch alone is not production success. Pass L3 read-model tests, validate the current production composition before forward-only Worker deployment, then reconcile ONLY the affected student's existing canonical access in READ_MODELS_KV. Confirm the L3 Full Library and English lesson in public Student API/browser; do not rerun all rows or send emails."
     },
-    "fixStatus": "SOURCE_ONLY_PENDING_TEST_DEPLOYMENT_AND_PER_STUDENT_RECONCILIATION"
+    "fixStatus": "SOURCE_ONLY_PENDING_TEST_DEPLOYMENT_AND_PER_STUDENT_RECONCILIATION",
+    "singleStudentReconciliation": {
+      "status": "PREPARED_ONLY_PUBLICATION_STAGED_PENDING_RUN",
+      "ownerRequirement": "CSV row 5 must have full L3 Maths (not Previous) and the English lesson unblocked.",
+      "sourceFixMerged": "47cc63e12f0e7d400c7b610a5777b39bfe203b04",
+      "sourceFixPr": 255,
+      "sourceTests": "Admin lesson release import + V2 read-model sync regression and GHC validation PASS",
+      "readOnlyEvidence": [
+        37831045234,
+        37831410490
+      ],
+      "targetSelector": "From exactly 5 unique rows of the 2026-10-08 Y3FE/Y411OE/Y6FE2 Excel release footprint. Target 5th row after D1 last_confirmed_at ordering, require Y6FE2 + existing Year 6 English FULL.",
+      "preconditions": [
+        "MATHS_L3_FULL=true",
+        "MATHS_Y6_FULL=false",
+        "no current Maths D1 assignment",
+        "current L3 openLessonCount==visibleLessonCount, zero locked",
+        "Year6 not a duplicate current Maths card",
+        "English released lesson remains core"
+      ],
+      "scope": "Publish version and pointer only within target student's opaque READ_MODELS_KV access scope; do not modify STUDENTS_KV, D1, Lesson KV, Worker, email or other students.",
+      "script": "scripts/repair-row5-full-l3-prepared-only-20261008.mjs",
+      "workflow": ".github/workflows/repair-row5-full-l3-prepared-only-20261008.yml",
+      "successEvidence": "Workflow must print ADMIN_IMPORT_ROW5_L3_FULL_PREPARED_RECONCILIATION_PASS, matched scope readback, full L3 unlocked, English full, no duplicate Year6. Production Worker code deployment separately pending; future importer retry may remain defective until then.",
+      "stopCondition": "Any footprint, binding, assignment or entitlement drift => no mutation. If readback fails after version write, treat as partial failure; inspect before retry."
+    }
   }
 }
