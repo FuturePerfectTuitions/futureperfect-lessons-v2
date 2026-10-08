@@ -491,7 +491,7 @@
   },
   "latestAdminImportFailureReporting": {
     "date": "2026-10-08",
-    "status": "SOURCE_FIX_L3_FULL_ACTIVE_VIEW_PENDING_TEST_PRODUCTION_DEPLOYMENT_AND_RECONCILIATION",
+    "status": "ONE_STUDENT_FULL_L3_PRODUCTION_PREPARED_READBACK_PASS_IMPORTER_WORKER_DEPLOYMENT_PENDING",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
     "incidentSummary": {
       "total": 5,
@@ -552,7 +552,7 @@
       "deploymentGate": "Source patch alone is not production success. Pass L3 read-model tests, validate the current production composition before forward-only Worker deployment, then reconcile ONLY the affected student's existing canonical access in READ_MODELS_KV. Confirm the L3 Full Library and English lesson in public Student API/browser; do not rerun all rows or send emails."
     },
     "singleStudentReconciliation": {
-      "status": "PREPARED_ONLY_PUBLICATION_STAGED_PENDING_RUN",
+      "status": "PRODUCTION_PREPARED_ACCESS_REPAIRED_AND_READBACK_PASS",
       "ownerRequirement": "CSV row 5 must have full L3 Maths (not Previous) and the English lesson unblocked.",
       "sourceFixMerged": "47cc63e12f0e7d400c7b610a5777b39bfe203b04",
       "sourceFixPr": 255,
@@ -574,7 +574,39 @@
       "script": "scripts/repair-row5-full-l3-prepared-only-20261008.mjs",
       "workflow": ".github/workflows/repair-row5-full-l3-prepared-only-20261008.yml",
       "successEvidence": "Workflow must print ADMIN_IMPORT_ROW5_L3_FULL_PREPARED_RECONCILIATION_PASS, matched scope readback, full L3 unlocked, English full, no duplicate Year6. Production Worker code deployment separately pending; future importer retry may remain defective until then.",
-      "stopCondition": "Any footprint, binding, assignment or entitlement drift => no mutation. If readback fails after version write, treat as partial failure; inspect before retry."
+      "stopCondition": "Any footprint, binding, assignment or entitlement drift => no mutation. If readback fails after version write, treat as partial failure; inspect before retry.",
+      "sourceFixMerge": "47cc63e12f0e7d400c7b610a5777b39bfe203b04",
+      "singleStudentRepairPr": 256,
+      "singleStudentRepairMerge": "fb30d5baf372abd700a14fd4bbef27876470bd2c",
+      "productionWorkflowRun": 37832613387,
+      "workFlowConclusion": "SUCCESS",
+      "proofMarker": "ADMIN_IMPORT_ROW5_L3_FULL_PREPARED_RECONCILIATION_PASS",
+      "bindingChecks": "PASS",
+      "targetMatch": "exactly five original 2026-10-08 CSV rows, unique D1 confirmation timestamps and correct target English batch and canonical grant",
+      "verified": {
+        "mathsProgramme": "maths-level3",
+        "fullL3VisibleLessonCount": 43,
+        "fullL3OpenLessonCount": 43,
+        "fullL3LockedLessonCount": 0,
+        "duplicateCurrentYear6": false,
+        "englishLessonCore": true,
+        "publishedPreparedScope": true,
+        "previousScopeExisted": true,
+        "preparedVersionReused": false,
+        "readbackVerified": true,
+        "studentIdentityInLogs": false
+      },
+      "mutations": {
+        "canonicalD1": false,
+        "studentsKV": false,
+        "otherStudentPreparedScopes": false,
+        "emailsSent": 0,
+        "readModelsKvTarget": "SINGLE_OPAQUE_STUDENT_SCOPE_ONLY"
+      },
+      "remaining": [
+        "Authenticated student public API/browser check pending; current prepared model verified directly.",
+        "Shared production importer Worker still carries older source until separately guarded, forward-only Worker redeploy; future repeated CSV imports may continue to report READ_MODEL_SYNC_FAILED. Do not pretend the importer has been permanently repaired."
+      ]
     }
   }
 }
