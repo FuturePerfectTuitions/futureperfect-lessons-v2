@@ -1,0 +1,112 @@
+{
+  "schema": "fpt.portal.gch.override.public-marketing-video-11plus.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "status": "AUTHORITATIVE_CURRENT_OVERRIDE",
+  "effectiveDate": "2026-10-08",
+  "scope": "PORTAL_V2.PublicMarketingVideo11Plus",
+  "baseAuthority": "gch/portal-v2-current/GCH_STATE.json",
+  "precedence": "This override is authoritative only for the standalone public 11plus.futureperfect.education marketing-video surface. It does not alter authenticated Portal V2, Admin, Quiz, Trial, student access, lesson release, protected resources, parent email, catalogue, or read-model semantics.",
+  "ownerRequirement": {
+    "purpose": "A public URL that can be sent directly to prospective parents considering 11+ preparation and presents the 11+ marketing video in the same visual language and 16:9 player frame as 226.futureperfect.education and Portal V2 lesson videos.",
+    "publicHost": "11plus.futureperfect.education",
+    "access": "PUBLIC_NO_LOGIN",
+    "playback": "USER_INITIATED_PLAY_ONLY",
+    "autoplay": false,
+    "currentVideoShareUrl": "https://screenpal.com/content/video/cO6j27nxMMM",
+    "currentScreenPalId": "cO6j27nxMMM",
+    "currentEmbedUrl": "https://go.screenpal.com/player/cO6j27nxMMM?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+    "visibleCopy": {
+      "title": "Preparing for the 11+",
+      "eyebrow": "See how we prepare",
+      "description": "Discover how we strengthen core skills, develop reasoning and exam technique, and help children become confident, capable 11+ candidates."
+    }
+  },
+  "hostingDecision": {
+    "pageHosting": "Cloudflare Worker custom domain",
+    "worker": "fpt-marketing-video-11plus",
+    "videoHosting": "ScreenPal",
+    "r2VideoHosting": false,
+    "rationale": "Mirror the isolated 226.futureperfect.education pattern: keep ScreenPal for player/streaming behavior while the parent-facing URL and presentation remain FPT-controlled."
+  },
+  "implementation": {
+    "workerSource": "ops/marketing-video-11plus/index.js",
+    "wranglerConfig": "ops/marketing-video-11plus/wrangler.toml",
+    "deploymentWorkflow": ".github/workflows/deploy-marketing-video-11plus.yml",
+    "customDomainConfig": {
+      "pattern": "11plus.futureperfect.education",
+      "custom_domain": true
+    },
+    "sourceMarker": "FPT_MARKETING_VIDEO_11PLUS_V1",
+    "portalStyleReference": {
+      "frontendRepository": "FuturePerfectTuitions/futureperfect-lessons-test",
+      "branch": "source/live-v2-current",
+      "styleSource": "src/styles.css",
+      "presentationElementsCopied": [
+        "red/white/navy airmail border",
+        "white branded topbar",
+        "1120px responsive main width",
+        "white rounded portal card with navy top border",
+        "Portal typography/colors",
+        "16:9 rounded dark player frame"
+      ]
+    },
+    "brandAssets": {
+      "logoSourceAuthority": "FuturePerfectTuitions/futureperfect-lessons-test source/live-v2-current assets/fpt-logo.png",
+      "faviconSourceAuthority": "FuturePerfectTuitions/futureperfect-lessons-test source/live-v2-current favicon.ico",
+      "liveLogoRoute": "/assets/fpt-logo.png",
+      "liveFaviconRoute": "/favicon.ico",
+      "hosting": "served directly by isolated fpt-marketing-video-11plus Worker"
+    }
+  },
+  "isolationInvariant": {
+    "portalBindings": [],
+    "studentApiBinding": false,
+    "d1": false,
+    "kv": false,
+    "r2": false,
+    "authentication": false,
+    "sessions": false,
+    "lessonEntitlements": false,
+    "adminSurface": false,
+    "quizBridge": false,
+    "parentEmail": false,
+    "rule": "Changes to this marketing page must not deploy, replace, bind to, or mutate Portal V2/Quiz Workers or Portal data stores."
+  },
+  "browserAndEmbedContract": {
+    "iframeAllow": "fullscreen; picture-in-picture",
+    "autoplayPermission": false,
+    "autoplayQueryParameter": false,
+    "fullscreen": true,
+    "responsiveAspectRatio": "16/9",
+    "screenPalHost": "go.screenpal.com"
+  },
+  "publicVerification": {
+    "date": "2026-10-08",
+    "hostReachable": true,
+    "httpPageTitle": "Future Perfect Tuitions",
+    "robots": "noindex,nofollow",
+    "themeColor": "#012169",
+    "liveIframeVerified": true,
+    "liveIframeSrc": "https://go.screenpal.com/player/cO6j27nxMMM?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
+    "liveIframeAllow": "fullscreen; picture-in-picture",
+    "liveAutoplayAbsent": true,
+    "deploymentWorkflowRun": 37797569399,
+    "deploymentWorkflowResult": "PASS",
+    "sourceCommits": {
+      "worker": "1afa237bcbffb9e32c58ca2645fcb83c476a21dc",
+      "wrangler": "ddfe3d39320e0b8b10fb96af05d85eca5f1e4607",
+      "workflow": "ffb78a85e2b90c1856704168b26cd46fb71a026c"
+    }
+  },
+  "updateRule": {
+    "sameVideoProviderReplacement": "Replace only the ScreenPal ID/embed URL on this isolated Worker, preserve 11plus.futureperfect.education and the Portal-style presentation, verify live iframe source and absence of autoplay.",
+    "providerMigration": "The parent-facing hostname remains 11plus.futureperfect.education. A future move to R2/Cloudflare Stream/another provider must change only the isolated marketing surface unless separately authorised.",
+    "prohibited": [
+      "adding autoplay without a new owner instruction",
+      "routing the public marketing page through authenticated Portal APIs",
+      "adding Portal/Quiz data bindings to the marketing Worker",
+      "changing lessons.futureperfect.education or quiz.futureperfect.education to deploy this page",
+      "rollback/revert of Portal production state"
+    ]
+  }
+}
