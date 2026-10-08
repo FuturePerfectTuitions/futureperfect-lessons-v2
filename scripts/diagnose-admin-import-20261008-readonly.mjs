@@ -121,7 +121,23 @@ for(let index=0;index<entries.length;index++){
         d1AssignmentCount:(input.batchAssignments||[]).length,
         rawEquivalentViews:(raw?.snapshot?.views||[])
           .filter(v=>v?.viewId==='maths-year6'||v?.viewId==='maths-level3')
-          .map(v=>({viewId:v.viewId,current:v.current,group:v.group,lockedPreview:v.lockedPreview}))
+          .map(v=>({viewId:v.viewId,current:v.current,group:v.group,lockedPreview:v.lockedPreview})),
+        // Source flags and totals only. No identifying fields or lesson titles.
+        fullLibraryFlags:Object.fromEntries(
+          ['MATHS_L1_FULL','MATHS_L2_FULL','MATHS_L3_FULL','MATHS_Y6_FULL','ENGLISH_Y6_FULL']
+            .map(flag=>[flag,(input.user?.fullLibraries||[]).includes(flag)])
+        ),
+        englishYear6CanonicalFullCount:(input.entitlements||[])
+          .filter(v=>/^Y6E/i.test(clean(v.lesson_id))&&Number(v.core_access)===1).length,
+        englishYear6PrelessonCount:(input.onlinePreLessonEntitlements||[])
+          .filter(v=>/^Y6E/i.test(clean(v.lesson_id))).length,
+        mathsSatsCanonicalFullCount:(input.entitlements||[])
+          .filter(v=>/^Y6M(5[1-9]|6[0-9])$/i.test(clean(v.lesson_id))&&Number(v.core_access)===1).length,
+        mathsSatsPrelessonCount:(input.onlinePreLessonEntitlements||[])
+          .filter(v=>/^Y6M(5[1-9]|6[0-9])$/i.test(clean(v.lesson_id))).length,
+        preparedCards:(await resolveCurrentScope(store,'access:'+scopeId).catch(()=>null))?.payload?.snapshot?.views
+          ?.filter(v=>['maths-level1','maths-level2','maths-level3','maths-year6','maths-sats','english-year6'].includes(v.viewId))
+          .map(v=>({viewId:v.viewId,group:v.group,current:v.current,open:v.openLessonCount,locked:v.lockedLessonCount}))
       };
     }
     const compiled=compileAuthoritativeAccessScope(input,catalogue,scopeId,asOfDate);
