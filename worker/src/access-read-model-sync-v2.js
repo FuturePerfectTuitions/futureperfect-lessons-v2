@@ -233,16 +233,29 @@ function decorateAuthoritativeSnapshot(payload, originalInput, catalogue, asOfDa
       openLessonCount:open,
       lockedLessonCount:Math.max(0, lessons.length - open)
     };
-    const teachingIndex = snapshot.views.findIndex(view => {
-      const id = norm(view?.viewId);
-      return view?.current && (id === 'maths-year6' || id === 'maths-level3');
-    });
+    // Put SATS beside the actual L3 curriculum when the Year 6/L3
+    // equivalent views coexist in the compiled legacy catalogue.
+    let teachingIndex = snapshot.views.findIndex(view =>
+      view?.current && norm(view?.viewId) === 'maths-level3');
+    if (teachingIndex < 0) teachingIndex = snapshot.views.findIndex(view =>
+      view?.current && norm(view?.viewId) === 'maths-year6');
     snapshot.views.splice(teachingIndex >= 0 ? teachingIndex + 1 : snapshot.views.length, 0, sats);
   }
 
   // Full Library is access, not current programme identity. Preserve both
   // catalogues but show any non-D1 equivalent Full Library view under Previous.
   demoteDualFullLibraryViews(snapshot, originalInput, asOfDate);
+
+  // Year 6 teaching lessons and L3 share the canonical Maths curriculum.
+  // When L3 is current, keep the whole set of underlying entitlement records
+  // but do not expose a redundant Year 6 "Lessons" card under Previous.
+  // This also allows the existing live frontend's top-level SATS card to
+  // remain visible; otherwise a historical Year 6 card masks it.
+  // SATS lessons themselves remain governed only by their own releases.
+  if (snapshot.views.some(view => norm(view?.viewId) === 'maths-level3' &&
+      view?.current && !view?.lockedPreview)) {
+    snapshot.views = snapshot.views.filter(view => norm(view?.viewId) !== 'maths-year6');
+  }
 
   const currentTeaching = snapshot.views.filter(view => view?.current && !view?.lockedPreview &&
     (norm(view?.viewId) === 'maths-year6' || norm(view?.viewId) === 'maths-level3'));
