@@ -491,7 +491,7 @@
   },
   "latestAdminImportFailureReporting": {
     "date": "2026-10-08",
-    "status": "FRONTEND_GITHUB_PAGES_LIVE_VERIFIED_BACKEND_DEPLOYMENT_BLOCKED_ORIGINAL_STUDENT_UNKNOWN",
+    "status": "FOLLOWUP_2026_10_08_FRONTEND_CACHE_BUST_AND_READONLY_DIAGNOSTIC_STAGED",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
     "incidentSummary": {
       "total": 5,
@@ -514,6 +514,17 @@
         "failedPortalResults"
       ],
       "studentBrowserVerification": "PENDING_AUTHENTICATED_IMPORT_RETRY"
+    },
+    "followup": {
+      "ownerRerunEvidence": "2026-10-08 after initial PR #251: 5 ALREADY_FULL previews, 4 read-model successes, 1 failure, no emails. Banner still lacks failed student; new confirmed-results code expected to display failed row. Original cause not yet proven.",
+      "frontend": "Cache-bust admin-import.js with v=20261008-confirmed-v2 and render explicit JS-loaded diagnostic version.",
+      "readOnlyProductionDiagnostic": {
+        "path": ".github/workflows/admin-import-20261008-readonly-diagnostic.yml",
+        "source": "scripts/diagnose-admin-import-20261008-readonly.mjs",
+        "scope": "October 8 Excel English releases for three screenshot batches, require exactly five canonical rows and unique timestamps; compile/read prepared models without any D1/KV writes or email sends.",
+        "status": "SOURCE_STAGED_PENDING_WORKFLOW_EXECUTION"
+      },
+      "preservation": "Do not use broad current-student reconciler, do not auto-send email, no deploy/rollbacks; Worker diagnostics code from PR #251 remains un-deployed until production composition is verified."
     }
   }
 }
