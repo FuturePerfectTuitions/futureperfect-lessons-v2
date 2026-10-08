@@ -2,7 +2,7 @@
   "schema": "fpt.portal.gch.override.aarav-maths-sats-english-individual.v1",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "date": "2026-10-08",
-  "status": "SOURCE_STAGED_PENDING_PRODUCTION_SINGLE_STUDENT_READBACK",
+  "status": "SINGLE_ACCOUNT_PREPARED_PRODUCTION_REPAIR_PASS",
   "scope": "STUDENT_PORTAL_V2.AaravMathsEquivalentNavigationAndEnglishReleaseEntitlement",
   "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
   "precedence": "Owner-confirmed scope-only refinement preserving all unrelated navigation, release and account rules; SATS eligibility and Year6/L3 equivalence rules from the 26 Sep override remain authoritative.",
@@ -50,6 +50,41 @@
       "Target subject/profile and readback independently checked in authenticated browser later"
     ]
   },
-  "productionEvidence": "PENDING",
-  "notConfirmed": "Browser-visible outcome until independent authenticated live check; shared production Worker source still awaiting guarded deployment."
+  "productionEvidence": {
+    "sourceFixPr": 259,
+    "sourceFixMergedCommit": "b554819c7a79b2c3a9a733967d887085db774686",
+    "productionRepairRun": 37834319127,
+    "productionRepairResult": "PASS",
+    "proofMarker": "AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL_RELEASE_REPAIR_PASS",
+    "targetAccount": "Owner's original 2026-10-08 CSV row 5; matched exact 5-row D1 footprint without publishing IDs",
+    "maths": {
+      "L1": "FULL_RETAINED",
+      "L2": "FULL_RETAINED",
+      "L3": "CURRENT_43_OPEN_0_LOCKED",
+      "Year6LessonsCard": "REMOVED_FROM_NAVIGATION_ONLY",
+      "SATS": "CURRENT_2_OPEN_17_LOCKED",
+      "quizPractice": "PRESERVE"
+    },
+    "english": {
+      "fullLibraryFlag": "REMOVED_SINGLE_KV_PROFILE",
+      "individuallyReleased": "4_OPEN",
+      "unreleased": "27_LOCKED",
+      "futureRule": "Release only through existing lesson-specific CSV/manual grants"
+    },
+    "writes": {
+      "D1": 0,
+      "otherStudents": 0,
+      "parentEmails": 0,
+      "STUDENTS_KV": "EXACTLY_TARGET_PROFILE",
+      "READ_MODELS_KV": "EXACTLY_TARGET_OPAQUE_SCOPE"
+    },
+    "verification": {
+      "kvReadback": "PASS",
+      "preparedReadback": "PASS",
+      "regression": "PASS",
+      "browserAuthenticated": "PENDING_OWNER"
+    },
+    "remainingRisk": "Original live Worker bundle remains unchanged: Y6 SATS/Maths equivalent auto-deploy run 37834319151 failed at stale Step10-only source entrypoint preflight before deployment. Any later auto-reconciliation can regenerate old duplicate Year6 navigation or collision. Must verify live Worker provenance and forward-only deploy actual composition separately; do not rerun old CSV until that is done."
+  },
+  "notConfirmed": "Authenticated student browser navigation and after next importer read-model regeneration; shared Worker deployment pending."
 }
