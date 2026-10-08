@@ -63,7 +63,7 @@
     </section>
 
     <section class="admin-section" id="lessonReleaseSection">
-      <h2>Lesson Release Import</h2>
+      <h2>Lesson Release Import</h2><div id="importDiagnosticsVersion" class="muted" style="font-size:12px">Import diagnostics: loading current version…</div>
       <p class="muted">FuturePerfectLive creates <code>workFP.csv</code>. Once the CSV folder has been authorised, this page automatically loads the current CSV, validates every row and imports the Portal access changes. <strong>Parent emails are not sent automatically.</strong> Email sending remains a separate manual action below.</p>
       <div id="savedSourceBox" class="source-box"><div class="source-title">Automatic CSV source</div><div id="sourceMeta" class="source-meta muted">Checking for the saved CSV folder…</div><div class="row"><button id="setSourceBtn" type="button">Set CSV Source Folder</button><button id="loadLatestBtn" type="button" class="secondary" disabled>Process Latest CSV</button><button id="clearSourceBtn" type="button" class="ghost" disabled>Forget Source</button></div><div id="sourceStatus" class="status hidden"></div></div>
       <div id="status" class="status hidden"></div><div id="summary" class="summary"></div>
@@ -92,7 +92,7 @@
 })();
 </script>
 <script src="assets/admin-import-manual-email.js"></script>
-<script src="assets/admin-import.js"></script>
+<script src="assets/admin-import.js?v=20261008-confirmed-v2"></script>
 <script src="assets/admin-trials.js"></script>
 <script src="assets/admin-create-batch.js"></script>
 <script src="assets/admin-replace-resource.js"></script>
