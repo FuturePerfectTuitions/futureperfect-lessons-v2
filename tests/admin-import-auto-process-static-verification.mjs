@@ -18,4 +18,16 @@ assert.match(js, /await api\('\/api\/v1\/admin\/lesson-releases\/preview',\{ row
 assert.match(js, /await api\('\/api\/v1\/admin\/lesson-releases\/confirm',\{ rows \}\)/);
 assert.match(js, /await loadLatestAndProcess\(false\)/);
 
+// The preview is not a release result: after POST /confirm the UI must display
+// the actual per-student confirmation outcomes, with explicit failure details.
+assert.match(js, /const confirmedResults = Array\.isArray\(data\.results\)/);
+assert.match(js, /render\(confirmedResults, data\.summary\)/);
+assert.doesNotMatch(js, /renderSummary\(data\.summary\);/);
+assert.match(js, /failedPortalResults = confirmedResults\.filter\(r => r\.ok === false\)/);
+assert.match(js, /portalDetails\.join\('\s*\|\s*'\)/);
+assert.match(js, /tr\.classList\.add\('failed-import-row'\)/);
+assert.match(js, /r\.readModelErrorCode/);
+assert.match(html, /\.failed-import-row\{/);
+assert.match(html, /<th>Result \/ error<\/th>/);
+
 console.log('Automatic admin importer UI and persistent browser session wiring: PASS');
