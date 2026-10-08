@@ -195,8 +195,8 @@ function currentMaths(payload) {
   assert.equal(l3.lockedLessonCount,0);
   assert.equal(l3.lockedPreview,false);
   const year6=payload.snapshot.views.find(v=>v.viewId==='maths-year6');
-  assert.equal(year6.current,false);
-  assert.equal(year6.group,'previous');
+  assert.equal(Boolean(year6?.current),false,'No duplicate current Year 6 card');
+  if(year6) assert.equal(year6.group,'previous');
   assert.equal(payload.snapshot.lessonAccess.Y6M50.core,true,'Existing Y6/L3 canonical lesson entitlement remains open');
   assert.equal(payload.snapshot.lessonAccess.COMMON1.core,true,'Second L3 lesson must remain open under Full Library');
 }
