@@ -8,6 +8,7 @@ import {
   refreshStudentAccessReadModel
 } from '../worker/src/access-read-model-sync.js';
 import {
+  safeSyncErrorCode,
   successfulStudents,
   applySyncOutcome
 } from '../worker/src/admin-lesson-release-import-reconciled.js';
@@ -219,10 +220,15 @@ const decorated = applySyncOutcome({
   ok:true,
   results:[{ ok:true, portalUserId:'Alice', portalUserIdNorm:'alice', status:'CREATED' }],
   summary:{ total:1, succeeded:1, failed:0 }
-}, new Map([['alice', { ok:false }]]));
+}, new Map([['alice', { ok:false, errorCode:'D1_YEAR6_L3_PROGRAMME_COLLISION' }]]));
 assert.equal(decorated.results[0].ok, false);
 assert.equal(decorated.results[0].status, 'READ_MODEL_SYNC_FAILED');
 assert.equal(decorated.results[0].legacyApplied, true);
+assert.equal(decorated.results[0].readModelErrorCode, 'D1_YEAR6_L3_PROGRAMME_COLLISION');
+assert.equal(decorated.readModelResults[0].portalUserIdNorm, 'alice');
+assert.equal(decorated.readModelResults[0].errorCode, 'D1_YEAR6_L3_PROGRAMME_COLLISION');
+assert.equal(safeSyncErrorCode(new Error('READ_MODEL_FULL_PARITY_FAILED:Y6M1')), 'READ_MODEL_FULL_PARITY_FAILED:Y6M1');
+assert.equal(safeSyncErrorCode(new Error('secret credential or token=abc')), 'READ_MODEL_INTERNAL_ERROR');
 assert.equal(decorated.summary.succeeded, 0);
 assert.equal(decorated.summary.failed, 1);
 assert.equal(decorated.summary.readModelsFailed, 1);
