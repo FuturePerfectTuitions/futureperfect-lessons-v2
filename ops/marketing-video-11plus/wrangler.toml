@@ -1,0 +1,8 @@
+name = "fpt-marketing-video-11plus"
+main = "./index.js"
+compatibility_date = "2026-10-08"
+workers_dev = false
+
+[[routes]]
+pattern = "11plus.futureperfect.education"
+custom_domain = true
