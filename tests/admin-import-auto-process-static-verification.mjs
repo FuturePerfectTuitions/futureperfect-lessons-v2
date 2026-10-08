@@ -10,6 +10,9 @@ assert.doesNotMatch(html, /id="confirmBtn"/);
 assert.doesNotMatch(html, /Confirm Import &amp; Send Emails/);
 assert.match(html, /id="loadLatestBtn"[^>]*>Process Latest CSV</);
 assert.match(html, /data-import-state="idle"/);
+assert.match(html, /admin-import\.js\?v=20261008-confirmed-v2/);
+assert.match(html, /id="importDiagnosticsVersion"/);
+assert.match(js, /confirmed-results v2 \(8 October 2026\)/);
 
 assert.match(js, /localStorage\.getItem\(TOKEN_KEY\)/);
 assert.match(js, /localStorage\.setItem\(TOKEN_KEY,token\)/);

@@ -65,5 +65,19 @@
       "reconciled": false
     },
     "parentEmailsSentByRepair": 0
+  },
+  "followup20261008": {
+    "status": "SOURCE_STAGED_PENDING_READONLY_DIAGNOSTIC_RUN",
+    "incidentRepeat": "Five CSV rows now preview ALREADY_FULL; 4 read-model publication successes / 1 failure; banner still lacks failed student despite prior frontend fix; parent emails 0.",
+    "frontendFix": "Use versioned script URL to defeat a stale browser or CDN JavaScript cache and add a visible JS-loaded diagnostics marker; do not infer original hosting URL from screenshot.",
+    "readOnlyDiagnostic": {
+      "script": "scripts/diagnose-admin-import-20261008-readonly.mjs",
+      "workflow": ".github/workflows/admin-import-20261008-readonly-diagnostic.yml",
+      "constraints": "Fail if batch/date footprint not exactly 5 or confirmation timestamps not unique; check production IDs; only GET for KV/Worker settings and SELECT for D1; no student IDs/credentials in logs; no writes.",
+      "output": "Row-index and prepared-model status only, not private identity",
+      "limitation": "If the five-row footprint is not unique or timestamp ordering ambiguous, report inability to identify student; never guess."
+    },
+    "backendDeployment": "NOT_AUTHORISED_BY_THIS_DIAGNOSTIC; source-only worker exception reporting from prior PR has not been deployed",
+    "studentRecovery": "PENDING diagnostic proof; no replay or entitlement writes in this change"
   }
 }

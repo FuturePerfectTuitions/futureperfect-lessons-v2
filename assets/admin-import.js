@@ -3,6 +3,8 @@
   const $ = id => document.getElementById(id);
   const sourceApi = window.FPTAdminCsvSource || null;
   const TOKEN_KEY = 'fptAdminImportToken';
+  const diagnosticsVersion = $('importDiagnosticsVersion');
+  if (diagnosticsVersion) diagnosticsVersion.textContent = 'Import diagnostics: confirmed-results v2 (8 October 2026)';
 
   let token = localStorage.getItem(TOKEN_KEY) || '';
   let rows = [];
