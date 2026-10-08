@@ -211,7 +211,8 @@ function currentMaths(payload) {
     entitlements:[],onlinePreLessonEntitlements:[]
   };
   const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-y6-plus-full-l3',asOfDate);
-  assert.deepEqual(currentMaths(payload),['maths-year6:Lessons:0']);
+  // L3 Full Library opens the shared canonical lessons, but D1 Year 6 remains the sole current card.
+  assert.deepEqual(currentMaths(payload),['maths-year6:Lessons:2']);
   const other=payload.snapshot.views.find(v=>v.viewId==='maths-level3');
   assert.equal(other.current,false);
   assert.equal(other.group,'previous');
@@ -226,7 +227,8 @@ function currentMaths(payload) {
     entitlements:[],onlinePreLessonEntitlements:[]
   };
   const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-kv-fallback-with-full',asOfDate);
-  assert.deepEqual(currentMaths(payload),['maths-level3:L3:0']);
+  // The opposite Full Library can unlock shared Y6 canonical lessons without changing L3 identity.
+  assert.deepEqual(currentMaths(payload),['maths-level3:L3:2']);
 }
 
 console.log('ACCESS_READ_MODEL_SYNC_V2_VERIFICATION_PASS');
