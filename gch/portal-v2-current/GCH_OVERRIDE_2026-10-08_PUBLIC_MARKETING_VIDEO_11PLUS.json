@@ -101,7 +101,9 @@
     "latestRevision": {
       "date": "2026-10-08",
       "sourceCommit": "83aa3d59717e655287d4f9bfdcb9995e7aa2b633",
-      "liveCopyVerification": "PENDING_DEPLOYMENT_CHECK"
+      "deploymentWorkflowRun": 37822086314,
+      "deploymentWorkflowResult": "PASS",
+      "liveCopyVerification": "PASS"
     }
   },
   "updateRule": {
