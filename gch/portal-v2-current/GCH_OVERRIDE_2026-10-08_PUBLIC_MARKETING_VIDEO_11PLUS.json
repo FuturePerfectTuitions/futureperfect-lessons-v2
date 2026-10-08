@@ -19,7 +19,7 @@
       "title": "Preparing for the 11+",
       "eyebrow": "Inside our 11+ preparation",
       "description": "See why our approach to the 11+ is different.",
-      "supportingCopy": "Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think when the exam doesn’t look like the practice."
+      "supportingCopy": "Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think even in the face of unknown and unfamiliar questions in the 11+ exams."
     }
   },
   "hostingDecision": {
@@ -100,10 +100,9 @@
     },
     "latestRevision": {
       "date": "2026-10-08",
-      "sourceCommit": "83aa3d59717e655287d4f9bfdcb9995e7aa2b633",
-      "deploymentWorkflowRun": 37822086314,
-      "deploymentWorkflowResult": "PASS",
-      "liveCopyVerification": "PASS"
+      "sourceCommit": "4751582ee14e006d066f23c61f4f315a8d0bd6ee",
+      "deploymentWorkflowResult": "PENDING",
+      "liveCopyVerification": "PENDING"
     }
   },
   "updateRule": {
