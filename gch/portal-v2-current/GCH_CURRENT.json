@@ -524,7 +524,18 @@
         "scope": "October 8 Excel English releases for three screenshot batches, require exactly five canonical rows and unique timestamps; compile/read prepared models without any D1/KV writes or email sends.",
         "status": "SOURCE_STAGED_PENDING_WORKFLOW_EXECUTION"
       },
-      "preservation": "Do not use broad current-student reconciler, do not auto-send email, no deploy/rollbacks; Worker diagnostics code from PR #251 remains un-deployed until production composition is verified."
+      "preservation": "Do not use broad current-student reconciler, do not auto-send email, no deploy/rollbacks; Worker diagnostics code from PR #251 remains un-deployed until production composition is verified.",
+      "readOnlyAuditResult": {
+        "run": 37831045234,
+        "result": "PASS",
+        "bindingChecks": "PASS",
+        "row5": "COMPILED_YEAR6_L3_PROGRAMME_COLLISION",
+        "otherRows": "2,3,4,6 CURRENT_PREPARED_FULL",
+        "identityMapping": "CSV row 5 Aarav from owner screenshot; unique timestamps sorted in imported order",
+        "writes": 0,
+        "emails": 0
+      },
+      "secondReadOnlyAudit": "A source-of-collision drill-down (D1 authoritative current programme vs compiled Year6/L3 raw views and Full Library flags) is staged in the bounded read-only script. Do not modify D1 or KV until audit returns."
     }
   }
 }
