@@ -169,4 +169,57 @@ function currentMaths(payload) {
   assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
 }
 
+// Regression: an English-only current student may have a single L3 Full
+// Library grant. Shared canonical Y6 lesson membership must NOT create both
+// maths-year6 and maths-level3 as current and block the English import.
+{
+  const input = {
+    asOfDate,
+    user:{name:'Fixture',batches:[],upsellViews:[],fullLibraries:['MATHS_L3_FULL']},
+    batchDefinitions:definitions,
+    batchAssignments:[{
+      batch_key:'Y6FE2', subject:'english',school_year:6,stream:'normal',maths_level:null,
+      effective_from:'2026-09-01',effective_to:null,batch_active_from:'2026-09-01',batch_active_to:null
+    }],
+    entitlements:[{lesson_id:'Y6M50',core_access:1,source:'excel',source_batch_code:'Y511FM',source_lesson_date:asOfDate}],
+    onlinePreLessonEntitlements:[]
+  };
+  const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-single-full-l3',asOfDate);
+  assert.deepEqual(currentMaths(payload),[]);
+  for(const id of ['maths-year6','maths-level3']){
+    const view=payload.snapshot.views.find(v=>v.viewId===id);
+    assert.equal(view.current,false);
+    assert.equal(view.group,'previous');
+  }
+  assert.equal(payload.snapshot.lessonAccess.Y6M50.core,true,'Existing Y6/L3 canonical lesson entitlement remains open');
+}
+
+// D1 curriculum membership outranks an opposite Full Library entitlement.
+{
+  const input = {
+    asOfDate,
+    user:{name:'Fixture',batches:[],upsellViews:[],fullLibraries:['MATHS_L3_FULL']},
+    batchDefinitions:definitions,
+    batchAssignments:[assignment('Y611FM')],
+    entitlements:[],onlinePreLessonEntitlements:[]
+  };
+  const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-y6-plus-full-l3',asOfDate);
+  assert.deepEqual(currentMaths(payload),['maths-year6:Lessons:0']);
+  const other=payload.snapshot.views.find(v=>v.viewId==='maths-level3');
+  assert.equal(other.current,false);
+  assert.equal(other.group,'previous');
+}
+// Existing fallback: a current D1-defined KV batch stays current even when
+// the student has an opposite Full Library without a D1 assignment record.
+{
+  const input = {
+    asOfDate,
+    user:{name:'Fixture',batches:['Y511FM'],upsellViews:[],fullLibraries:['MATHS_Y6_FULL']},
+    batchDefinitions:definitions,batchAssignments:[],
+    entitlements:[],onlinePreLessonEntitlements:[]
+  };
+  const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-kv-fallback-with-full',asOfDate);
+  assert.deepEqual(currentMaths(payload),['maths-level3:L3:0']);
+}
+
 console.log('ACCESS_READ_MODEL_SYNC_V2_VERIFICATION_PASS');
