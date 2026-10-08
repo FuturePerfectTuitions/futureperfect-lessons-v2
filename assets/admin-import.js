@@ -126,6 +126,7 @@
     $('resultBody').innerHTML='';
     for (const r of results || []) {
       const tr=document.createElement('tr');
+      if (r.ok === false) tr.classList.add('failed-import-row');
       const emailAction=r.emailAction || r.emailType || 'None';
       const vals=[
         Number.isInteger(r.index) ? r.index+2 : '',
@@ -138,9 +139,9 @@
         r.lessonDateDisplay || r.lessonDate,
         r.lessonStatus,
         r.releaseType,
-        r.action || r.status,
+        r.ok === false ? (r.status || r.action || 'FAILED') : (r.action || r.status),
         emailAction,
-        r.message || ''
+        [r.message, r.readModelErrorCode && `Error code: ${r.readModelErrorCode}`].filter(Boolean).join(' — ')
       ];
       vals.forEach((v,i)=>{
         const td=document.createElement('td');
@@ -180,13 +181,28 @@
 
       setMainStatus('PROCESSING', `Validation passed. Applying ${releasable} Portal action${releasable===1?'':'s'} and processing ${emailEligible} parent email${emailEligible===1?'':'s'} now.`, 'warn', 'processing');
       const data=await api('/api/v1/admin/lesson-releases/confirm',{ rows });
-      renderSummary(data.summary);
+      // Confirmation is the source of truth. Preview GRANT_FULL is a prediction,
+      // not evidence that the student's prepared access was published.
+      const previewByIndex = new Map((preview.results || [])
+        .filter(r => Number.isInteger(r.index)).map(r => [r.index, r]));
+      const confirmedResults = Array.isArray(data.results)
+        ? data.results.map(r => ({ ...(previewByIndex.get(r.index) || {}), ...r }))
+        : [];
+      render(confirmedResults, data.summary);
 
       const portalFailed=Number(data.summary?.failed || 0);
       const portalSucceeded=Number(data.summary?.succeeded || 0);
       const emailsSent=Number(data.summary?.emailsSent || 0);
       const emailsFailed=Number(data.summary?.emailsFailed || 0);
       const emailsAlreadySent=Number(data.summary?.emailsAlreadySent || 0);
+      const failedPortalResults = confirmedResults.filter(r => r.ok === false);
+      const portalDetails = failedPortalResults.slice(0, 5).map(r => {
+        const identity = r.name || r.portalUserId || r.portalUserIdNorm || 'Unknown student';
+        const lesson = r.lessonLabel || r.inputLessonId || r.lessonId || 'unknown lesson';
+        const reason = r.readModelErrorCode || r.message || r.status || r.action || 'unknown error';
+        return `${identity} — ${lesson}: ${reason}`;
+      });
+      if (failedPortalResults.length > 5) portalDetails.push(`and ${failedPortalResults.length-5} more failed rows`);
       const failedEmailResults=(data.emailResults || []).filter(r=>!r.ok && r.status!=='ALREADY_SENT');
       const failedAddresses=failedEmailResults.map(r=>r.parentEmail).filter(Boolean);
       const failureMessages=[...new Set(failedEmailResults.map(r=>r.message || r.status).filter(Boolean))];
@@ -194,7 +210,7 @@
       if (portalFailed || emailsFailed) {
         const detail=failedAddresses.length ? ` Failed email recipient${failedAddresses.length===1?'':'s'}: ${failedAddresses.join(', ')}.` : '';
         const reason=failureMessages.length ? ` Email error: ${failureMessages.join(' | ')}` : '';
-        setMainStatus('IMPORT FAILED', `Processing finished with ${portalFailed} Portal failure${portalFailed===1?'':'s'} and ${emailsFailed} email failure${emailsFailed===1?'':'s'}. Successful actions were kept.${detail}${reason}`, 'bad', 'failed');
+        setMainStatus('IMPORT FAILED', `Processing finished with ${portalFailed} Portal failure${portalFailed===1?'':'s'} and ${emailsFailed} email failure${emailsFailed===1?'':'s'}. Successful actions were kept.${portalDetails.length ? ` Failed Portal rows: ${portalDetails.join(' | ')}.` : ''}${detail}${reason}`, 'bad', 'failed');
       } else {
         const duplicateNote=emailsAlreadySent ? ` ${emailsAlreadySent} previously sent email${emailsAlreadySent===1?' was':'s were'} safely skipped.` : '';
         setMainStatus('IMPORT COMPLETE', `${portalSucceeded} Portal action${portalSucceeded===1?'':'s'} confirmed and ${emailsSent} parent email${emailsSent===1?'':'s'} sent.${duplicateNote}`, 'good', 'complete');

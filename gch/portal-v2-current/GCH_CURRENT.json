@@ -24,7 +24,8 @@
     "gch/portal-v2-current/evidence/2026-10-04_Y6_CHRONOLOGICAL_LIVE_BROWSER_WORKER_FIX.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-06_PUBLIC_MARKETING_VIDEO_226.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json",
-    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_PUBLIC_MARKETING_VIDEO_11PLUS.json"
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_PUBLIC_MARKETING_VIDEO_11PLUS.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json"
   ],
   "authorityComposition": {
     "base": {
@@ -93,6 +94,10 @@
     "publicMarketingVideo11plusOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_PUBLIC_MARKETING_VIDEO_11PLUS.json",
       "role": "scope-specific authority for the isolated public 11plus.futureperfect.education parent 11+ marketing-video page: FPT-owned URL/presentation, ScreenPal-hosted video cO6j27nxMMM, user-initiated playback only, and zero Portal/Quiz data/service bindings"
+    },
+    "adminImportFailedReportingOverride": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
+      "role": "current scope authority for Admin lesson-release import confirmation-result reporting, prepared-access sync error attribution, manual-email preservation and read-only recovery gate"
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes. Treat 226.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them. For L3/Year6 stream-specific lesson incidents, also read the 2026-10-07 L3 prepared-consistency override before any mutation. Treat 11plus.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them.",
@@ -483,5 +488,20 @@
       "description": "See why our approach to the 11+ is different.",
       "supportingCopy": "Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think even in the face of unknown and unfamiliar questions in the 11+ exams."
     }
+  },
+  "latestAdminImportFailureReporting": {
+    "date": "2026-10-08",
+    "status": "SOURCE_FIX_STAGED_PENDING_REGRESSION_DEPLOYMENT_AND_FAILED_STUDENT_IDENTIFICATION",
+    "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
+    "incidentSummary": {
+      "total": 5,
+      "confirmedSuccess": 4,
+      "confirmedFailure": 1,
+      "readModelsFailed": 1,
+      "emailsSent": 0
+    },
+    "rootCauseConfirmed": "Frontend displayed preview rows after confirm instead of actual result rows; backend discarded technical sync exception.",
+    "notConfirmed": "Failed student identity and exact prepared-access error from original incident; production parity and deployment are not verified.",
+    "productionRecovery": "Forward-only; preserve composed current Worker including step11 -> step10; no email sending; no blind all-student replay."
   }
 }
