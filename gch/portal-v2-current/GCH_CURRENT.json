@@ -25,7 +25,8 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-06_PUBLIC_MARKETING_VIDEO_226.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_PUBLIC_MARKETING_VIDEO_11PLUS.json",
-    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json"
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL.json"
   ],
   "authorityComposition": {
     "base": {
@@ -98,6 +99,10 @@
     "adminImportFailedReportingOverride": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
       "role": "current scope authority for Admin lesson-release import confirmation-result reporting, prepared-access sync error attribution, manual-email preservation and read-only recovery gate"
+    },
+    "aaravSatsEnglishRelease20261008": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL.json",
+      "role": "Owner-scoped Maths Year6/L3 dedup and direct released-only SATS; full L1/L2/L3; English Year6 individual releases (4 D1 grants), excluding accidental ENGLISH_Y6_FULL."
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes. Treat 226.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them. For L3/Year6 stream-specific lesson incidents, also read the 2026-10-07 L3 prepared-consistency override before any mutation. Treat 11plus.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them.",
@@ -608,5 +613,14 @@
         "Shared production importer Worker still carries older source until separately guarded, forward-only Worker redeploy; future repeated CSV imports may continue to report READ_MODEL_SYNC_FAILED. Do not pretend the importer has been permanently repaired."
       ]
     }
+  },
+  "latestAaravMathsSatsEnglishIndividual": {
+    "date": "2026-10-08",
+    "status": "SOURCE_TESTS_PASS_PENDING_SINGLE_STUDENT_MUTATION_AND_BROWSER_VERIFICATION",
+    "scope": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL.json",
+    "previousEvidenceRun": 37833270927,
+    "sourceFix": "Remove only maths-year6 navigation card when L3 current; SATS already genuinely has 2 released lessons. Remove only user's ENGLISH_Y6_FULL flag then scoped prepared publish and strict readback. Preserve L1/L2/L3 full and individual English entitlements.",
+    "sourceFixPr": 259,
+    "remaining": "single-student safe repair workflow PASS and live authenticated browser validation. Shared Worker deployment separately guarded."
   }
 }
