@@ -169,9 +169,10 @@ function currentMaths(payload) {
   assert.deepEqual(currentMaths(payload), ['maths-year6:Lessons:0']);
 }
 
-// Regression: an English-only current student may have a single L3 Full
-// Library grant. Shared canonical Y6 lesson membership must NOT create both
-// maths-year6 and maths-level3 as current and block the English import.
+// Regression: an English-only current student with explicit MATHS_L3_FULL
+// retains the whole L3 Maths catalogue as CURRENT and FULL (all 2/2 lessons
+// open in this fixture). Shared canonical Y6 membership must not manufacture
+// a duplicate current Year 6 view or block an unrelated English import.
 {
   const input = {
     asOfDate,
@@ -185,13 +186,19 @@ function currentMaths(payload) {
     onlinePreLessonEntitlements:[]
   };
   const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-single-full-l3',asOfDate);
-  assert.deepEqual(currentMaths(payload),[]);
-  for(const id of ['maths-year6','maths-level3']){
-    const view=payload.snapshot.views.find(v=>v.viewId===id);
-    assert.equal(view.current,false);
-    assert.equal(view.group,'previous');
-  }
+  assert.deepEqual(currentMaths(payload),['maths-level3:L3:2']);
+  const l3=payload.snapshot.views.find(v=>v.viewId==='maths-level3');
+  assert.equal(l3.current,true);
+  assert.equal(l3.group,'current');
+  assert.equal(l3.visibleLessonCount,2);
+  assert.equal(l3.openLessonCount,2);
+  assert.equal(l3.lockedLessonCount,0);
+  assert.equal(l3.lockedPreview,false);
+  const year6=payload.snapshot.views.find(v=>v.viewId==='maths-year6');
+  assert.equal(year6.current,false);
+  assert.equal(year6.group,'previous');
   assert.equal(payload.snapshot.lessonAccess.Y6M50.core,true,'Existing Y6/L3 canonical lesson entitlement remains open');
+  assert.equal(payload.snapshot.lessonAccess.COMMON1.core,true,'Second L3 lesson must remain open under Full Library');
 }
 
 // D1 curriculum membership outranks an opposite Full Library entitlement.
