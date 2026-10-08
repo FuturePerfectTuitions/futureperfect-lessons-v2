@@ -1,7 +1,7 @@
 {
   "schema": "fpt.portal.gch.override.admin-import-failed-reporting.v1",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
-  "status": "SOURCE_FIX_IN_BRANCH_PENDING_REGRESSION_AND_DEPLOYMENT",
+  "status": "FRONTEND_LIVE_VERIFIED_BACKEND_DEPLOYMENT_BLOCKED",
   "effectiveDate": "2026-10-08",
   "scope": "PORTAL_V2.Admin.LessonReleaseImport.FailedResultReporting",
   "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
@@ -27,8 +27,43 @@
     "productionRule": "FORWARD_ONLY. Preserve current composed shared Worker. Current worker/wrangler.toml references index-step11-year6-catalogue-boundary.js (which delegates to step10), while older GHC/CI text references step10 directly: verify exact live composition and adjust provenance before any backend deploy; do not deploy an older entrypoint."
   },
   "recoveryBoundary": {
-    "currentAttempt": "Read-only source diagnosis only; original failed student cannot be identified from screenshot or backend code. Do not pretend the original record was reconciled.",
+    "currentAttempt": "Merged and public Admin JS live/verified, no production Worker or access data mutation. The original student's identity and publication exception remain unknown.",
     "next": "First verify deployment provenance and per-student confirmed failure with authorized live response/logs or read-only audit. Once exact student is known, reconcile only that account's prepared access from existing canonical state, read back current access scope, and check student API/browser. Preserve other four grants. No parent emails.",
     "acceptance": "CI and static tests pass; actual Admin confirmation table identifies failed student and lesson/code; actual successful rows remain successful; email not auto-sent; live production Worker composition unchanged except guarded forward-only deployment of exact changes; per-student readback plus owner verification before closing incident."
+  },
+  "deploymentEvidence": {
+    "mergedMainCommit": "c29ca41e863e7c6111fb2f9a221c39347fe9d7ce",
+    "pullRequest": 251,
+    "ci": {
+      "adminImportRun": 37827930505,
+      "result": "PASS",
+      "adminToolsRun": 37827930667,
+      "batchCreationRun": 37827930555,
+      "gchValidationRun": 37827930640
+    },
+    "githubPages": {
+      "run": 37828003650,
+      "result": "PASS",
+      "url": "https://futureperfecttuitions.github.io/futureperfect-lessons-v2/assets/admin-import.js",
+      "markersVerified": [
+        "const confirmedResults",
+        "failed-import-row",
+        "failedPortalResults"
+      ]
+    },
+    "worker": {
+      "status": "NOT_DEPLOYED",
+      "failedPreflightRuns": [
+        37828004687,
+        37828004729,
+        37828004748
+      ],
+      "cause": "Automated production deploy jobs still use stale Step10-only wrapper checks; current source entrypoint is index-step11-year6-catalogue-boundary.js -> Step10 Quiz Bridge -> Admin Tools. Jobs halted before production mutation. Additional live route/version/binding provenance proof required before forward-only backend deployment."
+    },
+    "originalStudent": {
+      "identity": "UNKNOWN",
+      "reconciled": false
+    },
+    "parentEmailsSentByRepair": 0
   }
 }
