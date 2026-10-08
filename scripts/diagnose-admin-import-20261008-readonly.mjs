@@ -3,10 +3,12 @@
 // Only Cloudflare Worker settings GET, KV GET, and D1 SELECT may be invoked.
 import {
   SCOPE_SALT_KEY, opaqueAccessScopeId, resolveCurrentScope,
-  globalToCatalogue, assertCanonicalAccessProjected
+  globalToCatalogue, assertCanonicalAccessProjected,
+  compileAccessScope as compileLegacyAccessScope
 } from '../worker/src/access-read-model-sync.js';
 import {
-  loadStudentAccessInput, compileAuthoritativeAccessScope
+  loadStudentAccessInput, compileAuthoritativeAccessScope,
+  currentEquivalentProgramme, normaliseAuthoritativeInput, explicitDualFullLibrary
 } from '../worker/src/access-read-model-sync-v2.js';
 
 const clean = v => String(v ?? '').trim();
@@ -102,10 +104,26 @@ if(counts.Y3FE!==2||counts.Y411OE!==1||counts.Y6FE2!==2)
 const results=[];
 for(let index=0;index<entries.length;index++){
   const e=entries[index],id=clean(e.portal_user_id_norm).toLowerCase(),lesson=clean(e.lesson_id);
-  let stage='compile', errorCode=null, projection='UNKNOWN';
+  let stage='compile', errorCode=null, projection='UNKNOWN', collisionContext=null;
   try{
     const input=await loadStudentAccessInput(env,id,asOfDate);
     const scopeId=await opaqueAccessScopeId(id,salt);
+    if(index===3){
+      // Metadata-only comparison; no account IDs, credentials or batch codes.
+      const normalized=normaliseAuthoritativeInput(input,asOfDate);
+      const raw=compileLegacyAccessScope(normalized,catalogue,scopeId,asOfDate);
+      collisionContext={
+        authoritativeD1CurrentProgramme:currentEquivalentProgramme(input,asOfDate)||'NONE',
+        explicitDualFullLibrary:explicitDualFullLibrary(input),
+        hasFullYear6:(input.user?.fullLibraries||[]).includes('MATHS_Y6_FULL'),
+        hasFullL3:(input.user?.fullLibraries||[]).includes('MATHS_L3_FULL'),
+        profileBatchCount:(input.user?.batches||[]).length,
+        d1AssignmentCount:(input.batchAssignments||[]).length,
+        rawEquivalentViews:(raw?.snapshot?.views||[])
+          .filter(v=>v?.viewId==='maths-year6'||v?.viewId==='maths-level3')
+          .map(v=>({viewId:v.viewId,current:v.current,group:v.group,lockedPreview:v.lockedPreview}))
+      };
+    }
     const compiled=compileAuthoritativeAccessScope(input,catalogue,scopeId,asOfDate);
     assertCanonicalAccessProjected(input,compiled);
     stage='prepared-read';
@@ -116,7 +134,7 @@ for(let index=0;index<entries.length;index++){
   }catch(error){errorCode=machineCode(error);}
   results.push({csvRow:index+2,batch:e.source_batch_code,stage,
     diagnosis:errorCode||(projection==='FULL_VISIBLE'?'CURRENT_PREPARED_FULL':'CURRENT_PREPARED_NOT_FULL'),
-    preparedLessonState:projection});
+    preparedLessonState:projection,...(collisionContext?{collisionContext}:{})});
 }
 console.log(JSON.stringify({
   marker:'ADMIN_IMPORT_20261008_READONLY_DIAGNOSTIC',
