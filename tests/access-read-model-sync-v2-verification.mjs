@@ -16,13 +16,16 @@ const catalogue = {
   views:{
     'maths-year6':{ viewId:'maths-year6', label:'Lessons', lessonCount:2, lessons:[{lessonId:'Y6M50'},{lessonId:'COMMON1'}] },
     'maths-level3':{ viewId:'maths-level3', label:'L3', lessonCount:2, lessons:[{lessonId:'Y6M50'},{lessonId:'COMMON1'}] },
-    'maths-sats':{ viewId:'maths-sats', label:'SATS', lessonCount:2, lessons:[{lessonId:'Y6M51'},{lessonId:'Y6M52'}] }
+    'maths-sats':{ viewId:'maths-sats', label:'SATS', lessonCount:2, lessons:[{lessonId:'Y6M51'},{lessonId:'Y6M52'}] },
+    'english-year6':{ viewId:'english-year6', label:'Year 6', lessonCount:2, lessons:[{lessonId:'Y6E01'},{lessonId:'Y6E02'}] }
   },
   lessonToViews:{
     Y6M50:['maths-year6','maths-level3'],
     COMMON1:['maths-year6','maths-level3'],
     Y6M51:['maths-sats'],
-    Y6M52:['maths-sats']
+    Y6M52:['maths-sats'],
+    Y6E01:['english-year6'],
+    Y6E02:['english-year6']
   }
 };
 
@@ -145,9 +148,7 @@ function currentMaths(payload) {
   const payload = compileAuthoritativeAccessScope(input, catalogue, 'fixture-current-plus-full', asOfDate);
   assert.deepEqual(currentMaths(payload), ['maths-level3:L3:2']);
   const y6 = payload.snapshot.views.find(view => view.viewId === 'maths-year6');
-  assert.equal(Boolean(y6), true);
-  assert.equal(y6.current, false);
-  assert.equal(y6.group, 'previous');
+  assert.equal(y6, undefined, 'L3 current eliminates the redundant Year 6 Lessons navigation card');
 }
 
 // Known D1 profile batch with no D1 assignment history remains a migration
@@ -195,8 +196,7 @@ function currentMaths(payload) {
   assert.equal(l3.lockedLessonCount,0);
   assert.equal(l3.lockedPreview,false);
   const year6=payload.snapshot.views.find(v=>v.viewId==='maths-year6');
-  assert.equal(Boolean(year6?.current),false,'No duplicate current Year 6 card');
-  if(year6) assert.equal(year6.group,'previous');
+  assert.equal(year6,undefined,'No redundant Year 6 Lessons card even under Previous');
   assert.equal(payload.snapshot.lessonAccess.Y6M50.core,true,'Existing Y6/L3 canonical lesson entitlement remains open');
   assert.equal(payload.snapshot.lessonAccess.COMMON1.core,true,'Second L3 lesson must remain open under Full Library');
 }
@@ -229,6 +229,48 @@ function currentMaths(payload) {
   const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-kv-fallback-with-full',asOfDate);
   // The opposite Full Library can unlock shared Y6 canonical lessons without changing L3 identity.
   assert.deepEqual(currentMaths(payload),['maths-level3:L3:2']);
+}
+
+// Owner's 2026-10-08 case: preserve full L3, present released-only SATS
+// directly, omit the redundant Year 6 Lessons card, and never infer English
+// full access from Maths full library.
+{
+  const input={
+    asOfDate,
+    user:{name:'Fixture',batches:[],upsellViews:[],
+      fullLibraries:['MATHS_L1_FULL','MATHS_L2_FULL','MATHS_L3_FULL']},
+    batchDefinitions:definitions,
+    batchAssignments:[{
+      batch_key:'Y6FE2', subject:'english',school_year:6,stream:'normal',
+      effective_from:'2026-09-01', effective_to:null,
+      batch_active_from:'2026-09-01',batch_active_to:null
+    }],
+    entitlements:[
+      {lesson_id:'Y6M51',core_access:1,source:'excel',source_batch_code:'Y611FM',source_lesson_date:asOfDate},
+      {lesson_id:'Y6E01',core_access:1,source:'excel',source_batch_code:'Y6FE2',source_lesson_date:asOfDate}
+    ],
+    onlinePreLessonEntitlements:[]
+  };
+  const payload=compileAuthoritativeAccessScope(input,catalogue,'fixture-released-only-sats-and-english',asOfDate);
+  const views=payload.snapshot.views;
+  assert.equal(views.some(v=>v.viewId==='maths-year6'),false);
+  const l3=views.find(v=>v.viewId==='maths-level3');
+  assert.equal(l3?.current,true);
+  assert.equal(l3.openLessonCount,l3.visibleLessonCount);
+  const sats=views.find(v=>v.viewId==='maths-sats');
+  assert.equal(sats?.current,true);
+  assert.equal(sats.openLessonCount,1);
+  assert.equal(sats.lockedLessonCount,1);
+  assert.notEqual(payload.snapshot.lessonAccess.Y6M52?.core,true);
+  const english=views.find(v=>v.viewId==='english-year6');
+  assert.equal(english?.current,true);
+  assert.equal(english.openLessonCount,1);
+  assert.equal(english.lockedLessonCount,1);
+  assert.equal(payload.snapshot.lessonAccess.Y6E01.core,true);
+  assert.notEqual(payload.snapshot.lessonAccess.Y6E02?.core,true);
+  const ordered=views.map(v=>v.viewId);
+  assert.equal(ordered.indexOf('maths-sats'),ordered.indexOf('maths-level3')+1,
+    'SATS must follow active L3 as a distinct navigation card');
 }
 
 console.log('ACCESS_READ_MODEL_SYNC_V2_VERIFICATION_PASS');

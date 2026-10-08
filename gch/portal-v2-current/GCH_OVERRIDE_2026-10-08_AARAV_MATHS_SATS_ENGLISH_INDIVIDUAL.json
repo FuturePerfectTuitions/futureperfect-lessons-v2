@@ -1,0 +1,55 @@
+{
+  "schema": "fpt.portal.gch.override.aarav-maths-sats-english-individual.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "date": "2026-10-08",
+  "status": "SOURCE_STAGED_PENDING_PRODUCTION_SINGLE_STUDENT_READBACK",
+  "scope": "STUDENT_PORTAL_V2.AaravMathsEquivalentNavigationAndEnglishReleaseEntitlement",
+  "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
+  "precedence": "Owner-confirmed scope-only refinement preserving all unrelated navigation, release and account rules; SATS eligibility and Year6/L3 equivalence rules from the 26 Sep override remain authoritative.",
+  "ownerRequirements": {
+    "maths": "Maths screenshot is the Maths page, not English. Preserve full L1, full L2, full L3 and 11+ Practice. No redundant previous Year6 'Lessons' card when L3 current; show SATS directly with only genuine released lessons open.",
+    "english": "Separate English Year6 subject remains lesson-by-lesson released. Remove Aarav's accidental ENGLISH_Y6_FULL profile grant; preserve all actual D1 lesson entitlements and continue weekly per-lesson import; never infer full English from Maths full access.",
+    "doNotChange": [
+      "D1 entitlement rows or batch memberships",
+      "MATHS_L1_FULL,MATHS_L2_FULL,MATHS_L3_FULL",
+      "Unreleased SATS access, or other students",
+      "Parent emails, quiz history, protected resources"
+    ]
+  },
+  "sourceEvidence": {
+    "ownerMathsScreenshot": "2026-10-08 shows CURRENT L1 35/35 L2 38/38 L3 43/43 and 11+ Practice, PREVIOUS Lessons 42 open 24 locked, SATS absent.",
+    "readOnlyWorkflow": 37833270927,
+    "readOnlyFindings": {
+      "mathsL1Full": true,
+      "mathsL2Full": true,
+      "mathsL3Full": true,
+      "mathsY6Full": false,
+      "englishY6Full": true,
+      "englishYear6CanonicalIndividualGrants": 4,
+      "englishYear6PreparedFullOpen": 31,
+      "satsCanonicallyReleased": 2,
+      "satsPreparedOpen": 2,
+      "satsPreparedLocked": 17,
+      "mathsYear6ViewPrevious": true,
+      "mathsSatsViewCurrent": true
+    },
+    "frontendCause": "Canonical live V2 front end hides maths-sats whenever any maths-year6 card exists, including historical card. Removing redundant Year6 view only when L3 is current restores released-only SATS directly without editing protected Oct2 frontend app.",
+    "sourceCode": "worker/src/access-read-model-sync-v2.js"
+  },
+  "implementation": {
+    "projection": "For current L3 students remove redundant maths-year6 from snapshot.views only; retain canonical lessonAccess. Insert released-only maths-sats directly after L3. Ordinary current Year6 teaching hub unchanged.",
+    "repairScript": "scripts/repair-aarav-maths-sats-english-individual-20261008.mjs",
+    "repairWorkflow": ".github/workflows/repair-aarav-maths-sats-english-individual-20261008.yml",
+    "mutationBoundary": "Single guarded user profile KV PUT removing only ENGLISH_Y6_FULL followed by atomic publish/readback of only that student's prepared access scope. D1 remains SELECT-only. No broad reimport or emails.",
+    "acceptance": [
+      "L1=35 open, L2=38 open, L3=43 open all full",
+      "No redundant previous Year6 Lessons card",
+      "SATS distinct current navigation with 2 open / 17 locked, not full library",
+      "English Year6 4 open / 27 locked; all four D1 entitlements preserved",
+      "No change to 11+ Practice",
+      "Target subject/profile and readback independently checked in authenticated browser later"
+    ]
+  },
+  "productionEvidence": "PENDING",
+  "notConfirmed": "Browser-visible outcome until independent authenticated live check; shared production Worker source still awaiting guarded deployment."
+}
