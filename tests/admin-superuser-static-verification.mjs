@@ -115,8 +115,14 @@ for (const viewId of requiredDirectAdminViews) {
   }
 }
 
-if (!wrangler.includes('main = "src/index-step10-quiz-bridge.js"')) {
-  throw new Error('Production entrypoint is not the composed Quiz Bridge -> Admin Tools wrapper.');
+if (!wrangler.includes('main = "src/index-step11-year6-catalogue-boundary.js"')) {
+  throw new Error('Production entrypoint is not the composed Year 6 boundary -> Quiz Bridge -> Admin Tools wrapper.');
+}
+const top = fs.readFileSync('worker/src/index-step11-year6-catalogue-boundary.js', 'utf8');
+const bridge = fs.readFileSync('worker/src/index-step10-quiz-bridge.js', 'utf8');
+if (!top.includes("import currentWorker from './index-step10-quiz-bridge.js'") ||
+    !bridge.includes("import currentWorker from './index-admin-tools.js'")) {
+  throw new Error('Current composition must retain the quiz bridge and Admin Tools.');
 }
 
 console.log('ADMIN_SUPERUSER_STATIC_VERIFICATION_PASS');
