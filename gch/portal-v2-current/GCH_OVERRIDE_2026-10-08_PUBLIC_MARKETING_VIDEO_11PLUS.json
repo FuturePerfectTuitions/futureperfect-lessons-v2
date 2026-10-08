@@ -17,8 +17,9 @@
     "currentEmbedUrl": "https://go.screenpal.com/player/cO6j27nxMMM?ff=1&ahc=1&dcc=1&tl=1&bg=transparent",
     "visibleCopy": {
       "title": "Preparing for the 11+",
-      "eyebrow": "See how we prepare",
-      "description": "Discover how we strengthen core skills, develop reasoning and exam technique, and help children become confident, capable 11+ candidates."
+      "eyebrow": "Inside our 11+ preparation",
+      "description": "See why our approach to the 11+ is different.",
+      "supportingCopy": "Small batches, personal attention and purposeful practice — designed to spot gaps early, keep learning secure and prepare children to think when the exam doesn’t look like the practice."
     }
   },
   "hostingDecision": {
@@ -96,6 +97,11 @@
       "worker": "1afa237bcbffb9e32c58ca2645fcb83c476a21dc",
       "wrangler": "ddfe3d39320e0b8b10fb96af05d85eca5f1e4607",
       "workflow": "ffb78a85e2b90c1856704168b26cd46fb71a026c"
+    },
+    "latestRevision": {
+      "date": "2026-10-08",
+      "sourceCommit": "83aa3d59717e655287d4f9bfdcb9995e7aa2b633",
+      "liveCopyVerification": "PENDING_DEPLOYMENT_CHECK"
     }
   },
   "updateRule": {
