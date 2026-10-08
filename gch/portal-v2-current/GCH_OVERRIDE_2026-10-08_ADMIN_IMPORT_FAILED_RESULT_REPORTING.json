@@ -93,6 +93,21 @@
       "writes": 0,
       "emails": 0
     },
-    "secondAudit": "Pending: log only classification flags for failing row, including current D1 programme, Full Library flags and raw compiled current Year6/L3 views."
+    "secondAudit": "Pending: log only classification flags for failing row, including current D1 programme, Full Library flags and raw compiled current Year6/L3 views.",
+    "ownerConfirmedFullL3Maths": {
+      "ownerConfirmed": "Student from CSV row 5 must have FULL L3 Maths access, with L3 shown as the active Maths curriculum. Full Library access is not to be revoked or demoted to Previous.",
+      "evidence": "2026-10-08 production read-only drilldown found no current Maths D1 assignment, explicit MATHS_L3_FULL, no MATHS_Y6_FULL, English assignment only, and duplicate Year6/L3 current raw views. READ_MODEL compile throws COMPILED_YEAR6_L3_PROGRAMME_COLLISION.",
+      "sourceFix": "When authoritative current Maths assignment exists, it retains current identity. Otherwise a single explicit MATHS_L3_FULL selects current L3; Year6 becomes previous to avoid duplicate current programme. Dual Full Library with no current assignment stays historical as already tested. Entitlements and all L3 catalogue access are preserved.",
+      "guarantees": [
+        "maths-level3 current true with full catalogue unlocked",
+        "maths-year6 not current in absence of Year6 teaching assignment",
+        "existing D1 Maths current assignment overrides Full Library presentation",
+        "no synthetic D1 assignments, no changes to explicit Full Library flags",
+        "English read-model publication not blocked by Year6/L3 collision",
+        "no parent emails, quizzes, student history or canonical grants changed"
+      ],
+      "deploymentGate": "Source patch alone is not production success. Pass L3 read-model tests, validate the current production composition before forward-only Worker deployment, then reconcile ONLY the affected student's existing canonical access in READ_MODELS_KV. Confirm the L3 Full Library and English lesson in public Student API/browser; do not rerun all rows or send emails."
+    },
+    "fixStatus": "SOURCE_ONLY_PENDING_TEST_DEPLOYMENT_AND_PER_STUDENT_RECONCILIATION"
   }
 }

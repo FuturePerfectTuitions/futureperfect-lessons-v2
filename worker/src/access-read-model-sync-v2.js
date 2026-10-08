@@ -171,12 +171,33 @@ function hasSatsPresentationAccess(input) {
 }
 
 function demoteDualFullLibraryViews(snapshot, originalInput, asOfDate) {
-  if (!explicitDualFullLibrary(originalInput) || !Array.isArray(snapshot?.views)) return;
-  const currentProgramme = currentEquivalentProgramme(originalInput, asOfDate);
+  if (!Array.isArray(snapshot?.views)) return;
+  // Only D1/current D1-defined KV membership establishes an ordinary Maths
+  // programme. A single *explicit* L3 Full Library must nevertheless remain
+  // accessible as the active L3 card when no Maths teaching assignment exists;
+  // the shared canonical Y6 lessons must never create a second Year 6 card.
+  const assignmentProgramme = currentEquivalentProgramme(originalInput, asOfDate) ||
+    currentEquivalentProgramme(normaliseAuthoritativeInput(originalInput, asOfDate), asOfDate);
+  const fullLibraries = new Set((originalInput?.user?.fullLibraries || []).map(upper));
+  const fullY6 = fullLibraries.has('MATHS_Y6_FULL');
+  const fullL3 = fullLibraries.has('MATHS_L3_FULL');
+  // An explicit current Maths batch outranks Full Library presentation. Do not
+  // infer a preference from dual Full Libraries alone (both stay Previous).
+  const selectedProgramme = assignmentProgramme ||
+    (fullL3 && !fullY6 ? 'maths-level3' : '');
+  if (!selectedProgramme && !fullY6 && !fullL3) return;
+
   for (const view of snapshot.views) {
     const id = norm(view?.viewId);
     if (id !== 'maths-year6' && id !== 'maths-level3') continue;
-    if (currentProgramme && id === currentProgramme) continue;
+    if (selectedProgramme && id === selectedProgramme) {
+      // Preserve the full-library open counts and lessonAccess as compiled.
+      view.current = true;
+      view.group = 'current';
+      continue;
+    }
+    // Hide only the *current programme duplicate*, not the actual access.
+    // Entitlements, lesson resources and the alternate catalogue stay intact.
     view.current = false;
     view.group = 'previous';
   }
