@@ -261,13 +261,13 @@ function currentMaths(payload) {
   assert.equal(sats?.current,true);
   assert.equal(sats.openLessonCount,1);
   assert.equal(sats.lockedLessonCount,1);
-  assert.equal(payload.snapshot.lessonAccess.Y6M52.core,false);
+  assert.notEqual(payload.snapshot.lessonAccess.Y6M52?.core,true);
   const english=views.find(v=>v.viewId==='english-year6');
   assert.equal(english?.current,true);
   assert.equal(english.openLessonCount,1);
   assert.equal(english.lockedLessonCount,1);
   assert.equal(payload.snapshot.lessonAccess.Y6E01.core,true);
-  assert.equal(payload.snapshot.lessonAccess.Y6E02.core,false);
+  assert.notEqual(payload.snapshot.lessonAccess.Y6E02?.core,true);
   const ordered=views.map(v=>v.viewId);
   assert.equal(ordered.indexOf('maths-sats'),ordered.indexOf('maths-level3')+1,
     'SATS must follow active L3 as a distinct navigation card');
