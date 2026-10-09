@@ -3,7 +3,7 @@
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "date": "2026-10-09",
   "scope": "PORTAL_V2.Admin.LessonImport.ReadModelPublicationLiveWorker",
-  "status": "LIVE_DEPLOYED_AND_ALL_FIVE_READ_ONLY_VERIFIED_ADMIN_CONFIRMATION_PENDING",
+  "status": "PRODUCTION_WORKER_AND_FIVE_EXISTING_MODELS_VERIFIED_OWNER_REPORTS_REIMPORT_DONE_RESULT_NOT_SUPPLIED",
   "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
   "precedence": "Within the October 9 Admin importer live Worker repair only; preserve all broader GHC and current source/branch states.",
   "ownerObservation": "Aarav's English and Maths and the 8 October English lesson work on the authenticated student portal, but the five-row Admin import still reports 1 READ_MODEL_SYNC_FAILED for Aarav; other 4 succeeded and no parent email sent.",
@@ -80,7 +80,8 @@
       "Original student portal access remains correct",
       "Any subsequent idempotent 5-row CSV run has readModelsFailed=0, provided all source records unchanged"
     ],
-    "status": "LIVE_CODE_AND_EXISTING_PREPARED_ACCESS_VERIFIED_ADMIN_REIMPORT_PENDING"
+    "status": "OWNER_REIMPORT_COMPLETED_NEW_CONFIRMATION_COUNTERS_UNVERIFIED",
+    "next": "Owner confirmation of the final 5/5, failed 0, readModelsFailed 0 summary (or screenshot) is the only unresolved acceptance item."
   },
   "productionEvidence": {
     "deployment": {
@@ -144,5 +145,29 @@
       "parentEmailsSent": 0
     },
     "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
+  },
+  "ownerFollowUpRerun20261009": {
+    "date": "2026-10-09",
+    "event": "OWNER_REPORTED_ADMIN_IMPORT_RERUN_COMPLETED",
+    "source": "Owner's latest message: 'Done update GHC please' following explicit instruction to Ctrl+F5 and reimport unchanged workFP.csv.",
+    "ownerReportedAction": "The user reports completion of the requested Admin Console rerun after the current shared Worker deployment.",
+    "ownerProvidedResultCounters": false,
+    "ownerProvidedScreenshotOfNewConfirmation": false,
+    "resultsStatus": "NOT_INDEPENDENTLY_CONFIRMED",
+    "expectedResultNotAnObservation": {
+      "total": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "readModelsFailed": 0
+    },
+    "lastVerifiedIndependentEvidence": {
+      "workerDeploymentRun": 37888685292,
+      "codeAndBindings": "PASS",
+      "postDeploymentReadOnlyRun": 37889038539,
+      "actualFivePreparedEntitlements": "CURRENT_PREPARED_FULL each of rows 2 through 6"
+    },
+    "parentEmailStatus": "No parent emails were sent by the Worker repair or read-only verification; the owner has not stated whether the separate manual Send Parent Emails control was used after their rerun.",
+    "operationalScope": "No additional CSV processing, D1/KV mutation, Worker deployment or email send is requested or performed by this GHC update.",
+    "remainingAcceptance": "Confirm actual Admin Console post-rerun counters/results from owner; do not claim authenticated importer confirmation is PASS until observed or explicitly reported."
   }
 }
