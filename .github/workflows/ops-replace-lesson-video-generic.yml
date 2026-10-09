@@ -67,12 +67,13 @@ jobs:
           const m=url.match(/^https:\/\/screenpal\.com\/content\/video\/([A-Za-z0-9]+)\/?$/);
           if(!m) throw new Error('REQUEST_SCREENPAL_URL_INVALID');
           const target=m[1];
+          const intent=clean(req.intent);
           const descriptionPolicy=clean(req.descriptionPolicy||'unchanged-no-source-supplied');
           const requestedDescription=String(req.newDescription??'');
           const updateDescription=descriptionPolicy==='source-derived';
           if(!displayId||!expectedSubject||!expectedTitle||!target) throw new Error('REQUEST_FIELDS_MISSING');
-          if(req.intent!=='replacement') throw new Error('REQUEST_INTENT_MUST_BE_REPLACEMENT');
-          if(req.classificationChange===true) throw new Error('GENERIC_REPLACER_REFUSES_CLASSIFICATION_CHANGE');
+          if(!['replacement','addition'].includes(intent)) throw new Error('REQUEST_INTENT_INVALID');
+          if(req.classificationChange===true) throw new Error('GENERIC_VIDEO_WORKFLOW_REFUSES_CLASSIFICATION_CHANGE');
           if(!['unchanged-no-source-supplied','source-derived'].includes(descriptionPolicy)) throw new Error('REQUEST_DESCRIPTION_POLICY_INVALID');
           if(updateDescription && !requestedDescription.trim()) throw new Error('REQUEST_DESCRIPTION_REQUIRED');
           if(!updateDescription && Object.prototype.hasOwnProperty.call(req,'newDescription')) throw new Error('REQUEST_DESCRIPTION_PRESENT_WITH_UNCHANGED_POLICY');
@@ -251,31 +252,49 @@ jobs:
           if(clean(preparedPayload?.lessonId)!==lessonId) throw new Error('PREPARED_LESSON_ID_GUARD_FAILED');
 
           const canonicalVideoRows=videoObjects(before);
-          if(!canonicalVideoRows.length) throw new Error('CANONICAL_VIDEO_OBJECT_MISSING');
           const canonicalRefs=canonicalVideoRows.flatMap(([path,obj])=>screenPalIds(obj,path));
           const canonicalOldIds=[...new Set(canonicalRefs.map(x=>x.id).filter(Boolean))];
           const preparedRefs=screenPalIds(preparedPayload);
           const preparedOldIds=[...new Set(preparedRefs.map(x=>x.id).filter(Boolean))];
           if(canonicalOldIds.length>1) throw new Error(`CANONICAL_MULTIPLE_SCREENPAL_IDS:${canonicalOldIds.join(',')}`);
           if(preparedOldIds.length>1) throw new Error(`PREPARED_MULTIPLE_SCREENPAL_IDS:${preparedOldIds.join(',')}`);
-          if(!preparedOldIds.length) throw new Error('PREPARED_SCREENPAL_REFERENCE_MISSING');
+          if(intent==='replacement'){
+            if(canonicalOldIds.length!==1) throw new Error('REPLACEMENT_CANONICAL_VIDEO_NOT_UNAMBIGUOUS');
+            if(preparedOldIds.length!==1) throw new Error('REPLACEMENT_PREPARED_VIDEO_NOT_UNAMBIGUOUS');
+          }
+          if(intent==='addition'){
+            if(canonicalOldIds.length!==0) throw new Error('ADDITION_CANONICAL_VIDEO_ALREADY_PRESENT');
+            if(preparedOldIds.length!==0) throw new Error('ADDITION_PREPARED_VIDEO_ALREADY_PRESENT');
+            if(preparedPayload?.videoVariants) throw new Error('ADDITION_PREPARED_VIDEO_VARIANTS_ALREADY_PRESENT');
+          }
 
           console.log('VIDEO_REPLACEMENT_PREFLIGHT=' + JSON.stringify({
-            displayId,lessonId,title:before.title,subject:before.subject,viewId,mappedViews,
+            displayId,lessonId,title:before.title,subject:before.subject,viewId,mappedViews,intent,
             canonicalOldId:canonicalOldIds[0]||null,preparedOldId:preparedOldIds[0]||null,target,
             descriptionPolicy,updateDescription
           }));
 
           // Same-classification replacement: canonical video fields only; description/catalogue/access untouched.
           const nextCanonical=clone(before);
-          if(nextCanonical.video&&typeof nextCanonical.video==='object') nextCanonical.video=replaceIds(nextCanonical.video,canonicalOldIds.length?canonicalOldIds:preparedOldIds);
-          if(nextCanonical?.core?.video&&typeof nextCanonical.core.video==='object') nextCanonical.core.video=replaceIds(nextCanonical.core.video,canonicalOldIds.length?canonicalOldIds:preparedOldIds);
-          for(const [,obj] of videoObjects(nextCanonical)){
-            if(Object.prototype.hasOwnProperty.call(obj,'screenpal')) obj.screenpal=target;
-            if(Object.prototype.hasOwnProperty.call(obj,'contentUrl')) obj.contentUrl=`https://screenpal.com/content/video/${target}`;
-            if(Object.prototype.hasOwnProperty.call(obj,'embedUrl')) obj.embedUrl=`https://go.screenpal.com/player/${target}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
-            if(Object.prototype.hasOwnProperty.call(obj,'playerUrl')) obj.playerUrl=`https://go.screenpal.com/player/${target}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
-            if(Object.prototype.hasOwnProperty.call(obj,'watchUrl')) obj.watchUrl=`https://go.screenpal.com/watch/${target}`;
+          const targetVideo={
+            screenpal:target,
+            contentUrl:`https://screenpal.com/content/video/${target}`,
+            embedUrl:`https://go.screenpal.com/player/${target}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`,
+            watchUrl:`https://go.screenpal.com/watch/${target}`
+          };
+          if(intent==='replacement'){
+            if(nextCanonical.video&&typeof nextCanonical.video==='object') nextCanonical.video=replaceIds(nextCanonical.video,canonicalOldIds);
+            if(nextCanonical?.core?.video&&typeof nextCanonical.core.video==='object') nextCanonical.core.video=replaceIds(nextCanonical.core.video,canonicalOldIds);
+            for(const [,obj] of videoObjects(nextCanonical)){
+              if(Object.prototype.hasOwnProperty.call(obj,'screenpal')) obj.screenpal=target;
+              if(Object.prototype.hasOwnProperty.call(obj,'contentUrl')) obj.contentUrl=targetVideo.contentUrl;
+              if(Object.prototype.hasOwnProperty.call(obj,'embedUrl')) obj.embedUrl=targetVideo.embedUrl;
+              if(Object.prototype.hasOwnProperty.call(obj,'playerUrl')) obj.playerUrl=targetVideo.embedUrl;
+              if(Object.prototype.hasOwnProperty.call(obj,'watchUrl')) obj.watchUrl=targetVideo.watchUrl;
+            }
+          }else{
+            nextCanonical.core=nextCanonical.core&&typeof nextCanonical.core==='object'?nextCanonical.core:{};
+            nextCanonical.core.video=targetVideo;
           }
           if(updateDescription) nextCanonical.description=requestedDescription;
           nextCanonical.contentStatus={
@@ -288,8 +307,8 @@ jobs:
           // Ensure nothing outside video fields/contentStatus and an explicitly authorised description changes canonically.
           const canonicalComparable=v=>{
             const x=clone(v);
-            if(x.video) x.video='__VIDEO__';
-            if(x.core?.video) x.core.video='__VIDEO__';
+            if(Object.prototype.hasOwnProperty.call(x,'video')) x.video='__VIDEO__';
+            if(x.core&&typeof x.core==='object') x.core.video='__VIDEO__';
             if(updateDescription) x.description='__DESCRIPTION__';
             if(x.contentStatus) x.contentStatus={
               ...x.contentStatus,
@@ -307,8 +326,14 @@ jobs:
           if(!afterCanonicalIds.includes(target)) throw new Error('CANONICAL_TARGET_NOT_PRESENT');
           for(const old of canonicalOldIds) if(old!==target&&afterCanonicalIds.includes(old)) throw new Error(`CANONICAL_OLD_ID_REMAINS:${old}`);
 
-          // Prepared lesson: preserve structure exactly, replacing only the old ScreenPal ID string(s).
-          const nextPrepared=replaceIds(preparedPayload,preparedOldIds);
+          // Prepared lesson: replacement preserves structure and swaps the old ID; first addition
+          // follows the production compiler's videoVariants shape and resourceCount rule.
+          const nextPrepared=intent==='replacement'?replaceIds(preparedPayload,preparedOldIds):clone(preparedPayload);
+          if(intent==='addition'){
+            const preparedVideo={displayName:'Lesson Video',targetUrl:targetVideo.embedUrl};
+            nextPrepared.videoVariants={normal:preparedVideo,elevenPlus:{...preparedVideo}};
+            nextPrepared.resourceCount=(Array.isArray(nextPrepared.resources)?nextPrepared.resources.length:0)+1;
+          }
           if(updateDescription) nextPrepared.description=requestedDescription;
           const preparedAfterIds=[...new Set(screenPalIds(nextPrepared).map(x=>x.id).filter(Boolean))];
           if(!preparedAfterIds.includes(target)) throw new Error('PREPARED_TARGET_NOT_PRESENT_IN_NEXT_PAYLOAD');
@@ -357,6 +382,7 @@ jobs:
             preparedVersion:publishResult.version,
             globalVersion:globalAfter.candidate.version,
             globalDescriptionPublished:Boolean(globalPublishResult),
+            intent,
             descriptionUpdated:updateDescription,
             descriptionUnchanged:!updateDescription
           }));
