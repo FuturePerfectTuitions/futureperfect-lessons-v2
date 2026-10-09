@@ -21,7 +21,7 @@ env:
   WORKER_NAME: fpt-portal-v2-worker
   WRANGLER_VERSION: 4.125.0
   DEPLOY_MESSAGE: Forward-only current Step11 Portal Worker with corrected Admin access reconciliation
-  EXPECTED_LIVE_PACKAGE_SHA256: 0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361
+  EXPECTED_LIVE_MODULE_SHA256: e4c35a9564db7a32aa58cb38976efc00237f90482ea2830dd51a5e4b3a627064
 
 jobs:
   validate:
@@ -104,8 +104,33 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/worker-predeploy.bin
-          echo "$EXPECTED_LIVE_PACKAGE_SHA256  /tmp/worker-predeploy.bin" | sha256sum -c -
+          curl -fsS -D /tmp/worker-predeploy.headers -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/worker-predeploy.bin
+          # Cloudflare's multipart boundary varies on every GET, even when
+          # the deployed JS bytes are identical. Pin the decoded Worker module
+          # from read-only audit 37888527135, not the outer MIME envelope.
+          python3 - <<'PY'
+          import os,re,hashlib
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          headers=Path('/tmp/worker-predeploy.headers').read_text('latin1')
+          body=Path('/tmp/worker-predeploy.bin').read_bytes()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          if not m: raise SystemExit('LIVE_WORKER_CONTENT_TYPE_MISSING')
+          parsed=BytesParser(policy=default).parsebytes(
+            ('Content-Type: '+m.group(1).strip()+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+body)
+          if not parsed.is_multipart(): raise SystemExit('LIVE_WORKER_MULTIPART_NOT_FOUND')
+          parts=list(parsed.iter_parts())
+          if len(parts)!=1: raise SystemExit('LIVE_WORKER_MODULE_COUNT_CHANGED')
+          module=parts[0]
+          name=module.get_filename() or module.get_param('name',header='content-disposition') or module.get_param('name')
+          if name!='index-step11-year6-catalogue-boundary.js':
+            raise SystemExit('LIVE_WORKER_TOP_LEVEL_MODULE_CHANGED')
+          sha=hashlib.sha256(module.get_payload(decode=True) or b'').hexdigest()
+          if sha!=os.environ['EXPECTED_LIVE_MODULE_SHA256']:
+            raise SystemExit('LIVE_WORKER_MODULE_SHA_DRIFT')
+          print('LIVE_WORKER_STABLE_MODULE_PINNED_PASS')
+          PY
           curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME/settings" -o /tmp/worker-settings-predeploy.json
           jq -e '.success == true and .result.compatibility_date == "2026-08-20"' /tmp/worker-settings-predeploy.json >/dev/null
           jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace" and .namespace_id=="77b35165c8694087bc1b0515c35a7e89")' /tmp/worker-settings-predeploy.json >/dev/null
@@ -128,7 +153,8 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/worker-postdeploy.bin
-          test "$(sha256sum /tmp/worker-postdeploy.bin | awk '{print $1}')" != "$EXPECTED_LIVE_PACKAGE_SHA256"
+          # Newly deployed source must contain the new importer marker; never
+          # compare dynamic multipart envelope checksums as a version test.
           grep -aFq 'readModelErrorCode' /tmp/worker-postdeploy.bin
           grep -aFq 'ADMIN_IMPORT_READ_MODEL_SYNC_FAILED' /tmp/worker-postdeploy.bin
           grep -aFq 'maths-equivalent-navigation-final-v8-owner-fast-home' /tmp/worker-postdeploy.bin
