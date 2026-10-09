@@ -1,0 +1,151 @@
+name: Forward-only live Portal importer read-model fix (9 Oct)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-importer-forward-only-20261009.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-importer-forward-only-20261009.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forward-only-portal-worker-importer-20261009
+  cancel-in-progress: false
+
+env:
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  DEPLOY_MESSAGE: Forward-only current Step11 Portal Worker with corrected Admin access reconciliation
+  EXPECTED_LIVE_PACKAGE_SHA256: 0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate actual Step11 -> Step10 -> Admin -> v8 chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'main = "src/index-step11-year6-catalogue-boundary.js"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-step10-quiz-bridge.js';" worker/src/index-step11-year6-catalogue-boundary.js
+          grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "import currentWorker from './index-maths-equivalent-navigation-final.js';" worker/src/index-admin-tools.js
+          grep -Fq "maths-equivalent-navigation-final-v8-owner-fast-home" worker/src/index-maths-equivalent-navigation-final.js
+          grep -Fq "from './access-read-model-sync-v2.js';" worker/src/admin-lesson-release-import-reconciled.js
+          grep -Fq "readModelErrorCode:outcome.errorCode" worker/src/admin-lesson-release-import-reconciled.js
+          grep -Fq "snapshot.views = snapshot.views.filter(view => norm(view?.viewId) !== 'maths-year6')" worker/src/access-read-model-sync-v2.js
+          node --check worker/src/index-step11-year6-catalogue-boundary.js
+          node --check worker/src/index-step10-quiz-bridge.js
+          node --check worker/src/access-read-model-sync-v2.js
+          node --check worker/src/admin-lesson-release-import-reconciled.js
+          echo PORTAL_IMPORTER_CURRENT_COMPOSITION_PASS
+      - name: Run preserved importer, student access, quiz and resource regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/access-read-model-sync-v2-verification.mjs
+          node tests/access-read-model-reconciliation-verification.mjs
+          node tests/admin-lesson-release-import-verification.mjs
+          node tests/admin-import-auto-process-static-verification.mjs
+          node tests/admin-import-manual-email-verification.mjs
+          node tests/parent-email-import-verification.mjs
+          node tests/parent-email-idempotency-verification.mjs
+          node tests/y6-sats-direct-release-verification.mjs
+          node tests/year6-catalogue-boundary-verification.mjs
+          node tests/final-maths-equivalent-navigation-verification.mjs
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/admin-resource-replace-consistency-verification.mjs
+          node tests/admin-batch-manager-verification.mjs
+          echo PORTAL_IMPORTER_REGRESSIONS_PASS
+      - name: Build an exact dry-run candidate without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/phase11-importer-preflight >/tmp/phase11-importer-preflight.log
+          grep -Fq 'Generated from the immutable Phase 11 canonical catalogue.' worker/src/phase11-navigation-manifest.generated.js
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy --config worker/wrangler.toml --dry-run --outdir /tmp/importer-worker-dryrun
+          grep -aFRq 'readModelErrorCode' /tmp/importer-worker-dryrun
+          grep -aFRq 'maths-equivalent-navigation-final-v8-owner-fast-home' /tmp/importer-worker-dryrun
+          grep -aFRq '/api/v1/quiz-bridge/redeem' /tmp/importer-worker-dryrun
+          grep -aFRq '/api/v1/admin/lesson-releases/confirm' /tmp/importer-worker-dryrun
+          grep -aFRq 'replace-resource-consistency-v1' /tmp/importer-worker-dryrun
+          echo PORTAL_IMPORTER_DRY_RUN_PRESERVED_PASS
+
+  deploy:
+    if: github.event_name == 'push' && github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fail closed if live Worker code or bindings drifted since read-only audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/worker-predeploy.bin
+          echo "$EXPECTED_LIVE_PACKAGE_SHA256  /tmp/worker-predeploy.bin" | sha256sum -c -
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME/settings" -o /tmp/worker-settings-predeploy.json
+          jq -e '.success == true and .result.compatibility_date == "2026-08-20"' /tmp/worker-settings-predeploy.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .type=="kv_namespace" and .namespace_id=="77b35165c8694087bc1b0515c35a7e89")' /tmp/worker-settings-predeploy.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="PARENT_EMAIL_TEST_TO" and .type=="plain_text" and .text=="")' /tmp/worker-settings-predeploy.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="EMAIL" and .type=="send_email")' /tmp/worker-settings-predeploy.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and .type=="secret_text")' /tmp/worker-settings-predeploy.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="CHECKPOINT4_SHADOW_MODE" and .type=="plain_text")' /tmp/worker-settings-predeploy.json >/dev/null
+          jq -cS '[.result.bindings[] | if .type=="secret_text" then {name,type} else . end] | sort_by(.name)' /tmp/worker-settings-predeploy.json > /tmp/safe-bindings-before.json
+          echo LIVE_WORKER_SHA_AND_BINDINGS_PINNED_PASS
+      - name: Deploy only the current full composed Worker, no CSV or email mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+          echo IMPORTER_WORKER_FORWARD_ONLY_DEPLOY_COMPLETE
+      - name: Verify new importer code, existing routes and identical bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/worker-postdeploy.bin
+          test "$(sha256sum /tmp/worker-postdeploy.bin | awk '{print $1}')" != "$EXPECTED_LIVE_PACKAGE_SHA256"
+          grep -aFq 'readModelErrorCode' /tmp/worker-postdeploy.bin
+          grep -aFq 'ADMIN_IMPORT_READ_MODEL_SYNC_FAILED' /tmp/worker-postdeploy.bin
+          grep -aFq 'maths-equivalent-navigation-final-v8-owner-fast-home' /tmp/worker-postdeploy.bin
+          grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/worker-postdeploy.bin
+          grep -aFq '/api/v1/admin/lesson-releases/confirm' /tmp/worker-postdeploy.bin
+          grep -aFq 'replace-resource-consistency-v1' /tmp/worker-postdeploy.bin
+          grep -aFq 'trial-runtime-access-v2' /tmp/worker-postdeploy.bin
+          grep -aFq 'maths_l3_11p_t3m43_2026' /tmp/worker-postdeploy.bin
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME/settings" -o /tmp/worker-settings-postdeploy.json
+          jq -cS '[.result.bindings[] | if .type=="secret_text" then {name,type} else . end] | sort_by(.name)' /tmp/worker-settings-postdeploy.json > /tmp/safe-bindings-after.json
+          cmp -s /tmp/safe-bindings-before.json /tmp/safe-bindings-after.json
+          echo IMPORTER_WORKER_CODE_AND_ALL_BINDINGS_PRESERVED_PASS
+      - name: Verify protected live API endpoints without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://fpt-portal-v2-worker.futureperfectlessons.workers.dev"
+          STATUS="$(curl -sS -o /tmp/admin-import-unauth.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{}' "$BASE/api/v1/admin/lesson-releases/confirm")"
+          test "$STATUS" = 401 || test "$STATUS" = 403
+          QUIZ_STATUS="$(curl -sS -o /tmp/quiz-redeem-unauth.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{"code":"invalid-composition-probe"}' "$BASE/api/v1/quiz-bridge/redeem")"
+          test "$QUIZ_STATUS" = 401 || test "$QUIZ_STATUS" = 403
+          echo IMPORTER_WORKER_UNAUTHENTICATED_ROUTE_SAFETY_PASS
