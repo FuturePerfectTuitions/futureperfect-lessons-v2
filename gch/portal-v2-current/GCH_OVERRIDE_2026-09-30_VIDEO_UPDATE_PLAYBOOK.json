@@ -129,7 +129,7 @@
     "repairResult": "PASS",
     "browserFollowUp": "After the backend/prepared repair, the owner still reported seeing a 'Lessons' card on the Maths landing page. Treat that as a separate navigation/presentation investigation; do not use it as evidence that the prepared video replacement itself reverted."
   },
-  "futureOperatorRule": "For ordinary same-classification video work, use .github/workflows/ops-replace-lesson-video-generic.yml by updating .github/ops-replace-lesson-video-request.json. Use intent=replacement when an existing video is present and intent=addition when canonical/prepared state has no video. Supply descriptionPolicy=source-derived plus newDescription only when the owner supplied a script/source. The workflow must resolve lesson -> guard canonical/prepared identity -> update/add canonical video -> republish current prepared lesson -> verify exact target and old-ID absence where applicable -> publish/verify description if authorised -> prove lessonToViews/catalogue classification unchanged. Escalate to case C only when owner intent actually changes stream/catalogue membership.",
+  "futureOperatorRule": "For ordinary same-classification video work, update .github/ops-replace-lesson-video-request.json and normally use intent=auto. The generic workflow must fail closed unless it can prove either an unambiguous replacement (one canonical + one prepared ScreenPal ID) or an unambiguous first addition (none in either layer and no prepared videoVariants). With a supplied script/source, use descriptionPolicy=source-derived and publish/verify description parity across canonical lesson, prepared lesson and matching prepared global catalogue row. Never change lessonToViews/catalogue/access classification unless the owner explicitly requests a classification change.",
   "completionLanguage": {
     "allowedWhenAllBackendChecksPass": "Canonical and current prepared lesson state both verified against the exact ScreenPal ID.",
     "browserCaveat": "If no authenticated browser smoke-check was executed, say browser rendering is not yet independently confirmed.",
@@ -171,6 +171,7 @@
       "catalogueClassificationUnchanged": true
     },
     "supportedIntents": [
+      "auto",
       "replacement",
       "addition"
     ],
@@ -193,6 +194,29 @@
         "globalVersion": "video-desc-y3t1e06-1791569339737-5adb67ea6436e8df9b",
         "catalogueClassificationUnchanged": true
       }
-    ]
+    ],
+    "intentResolution": {
+      "auto": "If exactly one canonical and one prepared ScreenPal ID exist, treat as replacement. If neither exists and prepared videoVariants is absent, treat as first addition. Any mixed/ambiguous state fails closed.",
+      "replacement": "Requires exactly one canonical and one prepared ScreenPal ID.",
+      "addition": "Requires no canonical/prepared ScreenPal ID and no prepared videoVariants."
+    },
+    "latestProductionProof": {
+      "displayLessonId": "L3T3M43",
+      "canonicalLessonId": "MATHS_L3_11P_T3M43_2026",
+      "title": "Advanced Statistics",
+      "viewId": "maths-level3",
+      "mappedViews": [
+        "maths-level3"
+      ],
+      "requestedIntent": "auto",
+      "resolvedIntent": "addition",
+      "newScreenPalId": "cO6QFunxP2E",
+      "sourceDerivedDescription": true,
+      "workflowRun": 37974308068,
+      "result": "PASS",
+      "preparedVersion": "video-l3t3m43-1791570923849-ac65b91984e415db77",
+      "globalVersion": "video-desc-l3t3m43-1791570924953-32d8505ea96c5b825c",
+      "catalogueClassificationUnchanged": true
+    }
   }
 }
