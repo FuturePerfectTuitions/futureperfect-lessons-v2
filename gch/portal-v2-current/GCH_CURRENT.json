@@ -501,7 +501,7 @@
   },
   "latestAdminImportFailureReporting": {
     "date": "2026-10-08",
-    "status": "ONE_STUDENT_FULL_L3_PRODUCTION_PREPARED_READBACK_PASS_IMPORTER_WORKER_DEPLOYMENT_PENDING",
+    "status": "CLOSED_PASS_PRODUCTION_WORKER_AND_ADMIN_IMPORT",
     "authority": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
     "incidentSummary": {
       "total": 5,
@@ -665,11 +665,81 @@
       "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
     },
     "latestOwnerFollowUpRerun20261009": {
-      "state": "OWNER_REPORTS_DONE",
-      "actualCounters": "NOT_PROVIDED",
+      "state": "OWNER_CONFIRMED_PASS",
+      "actualCounters": {
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "readModelsFailed": 0
+      },
       "priorVerifiedFivePreparedReadbacks": 37889038539,
       "liveImporterDeployment": 37888685292,
-      "action": "No further automatic replay or email. Await owner-observed result counters to fully close."
+      "action": "NONE; incident fully closed."
+    },
+    "incidentClosure20261009": {
+      "incidentId": "PORTAL_V2_ADMIN_IMPORT_READ_MODEL_SYNC_FAILED_2026_10_08",
+      "lifecycle": "CLOSED",
+      "closedDate": "2026-10-09",
+      "closedBy": "Owner explicitly confirmed the authenticated Admin Console CSV rerun worked and instructed full closure, following a direct yes/no question asking whether it showed 5 succeeded and 0 failed.",
+      "ownerVerifiedOutcome": {
+        "importCsv": "workFP.csv",
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "readModelsFailed": 0,
+        "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+        "ownerReply": "Yes it worked, fully close it",
+        "screenshotOfFinalRun": "NOT_PROVIDED"
+      },
+      "independentProductionEvidence": {
+        "forwardOnlyWorkerDeployment": {
+          "run": 37888685292,
+          "conclusion": "PASS",
+          "sourceChain": "Step11 -> Step10 -> Admin Tools -> current equivalent-navigation v8",
+          "bindingPreservation": "PASS",
+          "unauthorizedQuizAdminRoutes": "PROTECTED",
+          "autoParentEmailSend": "NOT_TRIGGERED_BY_REPAIR"
+        },
+        "allFiveReadOnlyPreparedAccess": {
+          "run": 37889038539,
+          "conclusion": "PASS",
+          "rows": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "resultPerRow": "CURRENT_PREPARED_FULL"
+        },
+        "earlierAaravPreparedScopeRepair": {
+          "run": 37834319127,
+          "conclusion": "PASS",
+          "maths": {
+            "L1": "FULL",
+            "L2": "FULL",
+            "L3": "43_OPEN_0_LOCKED",
+            "sats": "2_OPEN_17_LOCKED",
+            "redundantYear6MathsCard": false
+          },
+          "englishYear6": "4_INDIVIDUAL_RELEASES_OPEN_27_LOCKED"
+        },
+        "siteErrorReporting": "Admin confirmed failure row and student in prior owner screenshot, and production importer diagnostic marker was verified after Worker deployment."
+      },
+      "rootCauseAndResolution": {
+        "initial": "Admin import preview results remained visible after confirm and were incorrectly green; per-student read-model compiler failed on a dual Year6/L3 programme collision for full L3 student; old shared Worker remained live due to obsolete Step10-only CI deploy gate.",
+        "frontend": "Show confirmed results and failed student/reason; cache-bust and show diagnostic JS version.",
+        "compiler": "Preserve L3 full as current, remove redundant Year6 Maths navigation view, keep separately released SATS and English access.",
+        "worker": "Forward-only deploy of current Step11-composed Worker using stable decoded-module fingerprint guard instead of variable Cloudflare multipart envelope hash; preserve live bindings and Quiz/Admin/Trial/Replace Resource functionality.",
+        "verification": "Owner explicitly confirms actual authenticated Admin Console rerun worked (5/5, zero failures) after independent 5/5 read-only prepared scope verification."
+      },
+      "safeguard": {
+        "preserveOwnerDecisions": "Aarav full L1/L2/L3; SATS individually released only; Year6 English individually released only; no duplicate Maths Year6 'Lessons' card. All other student releases preserved.",
+        "emails": "Manual parent-email send remains separate. No parent emails were sent by repair/deployment/audits. Do not assert whether owner clicked Send Parent Emails following the final rerun; not reported.",
+        "rollbacks": "None. No further code changes, data replay, credential changes, or scheduled remediation are required for this closed incident."
+      },
+      "openIncidentActions": [],
+      "verificationBoundary": "The final successful Admin result is confirmed by the owner, not by a supplied screenshot or access to the authenticated Admin response. Independent verification covers the deployed backend and all five existing prepared releases."
     }
   },
   "latestAaravMathsSatsEnglishIndividual": {
@@ -719,11 +789,11 @@
   },
   "latestAdminImporterLiveWorker20261009": {
     "date": "2026-10-09",
-    "status": "OWNER_REPORTED_REIMPORT_COMPLETED_POST_DEPLOY_COUNTERS_PENDING_CONFIRMATION",
+    "status": "CLOSED_PASS_OWNER_CONFIRMED_AUTHENTICATED_ADMIN_IMPORT_5_OF_5",
     "ownerConfirmedStudentAccess": "Aarav's authenticated Maths and English and last English lesson all function. Do not change their canonical D1 or prepared model in this repair.",
     "readOnlyProductionProvenanceRun": 37887955156,
     "liveBundleSha256": "0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361",
-    "outstandingFault": "Admin importer runs old Worker source; screenshot shows READ_MODEL_SYNC_FAILED for Aarav after successful targeted access repair.",
+    "outstandingFault": "HISTORICAL_RESOLVED: prior Worker had older reconciliation implementation; current Step11 Worker deployed with fix.",
     "intendedWorkerMain": "worker/src/index-step11-year6-catalogue-boundary.js",
     "sourceCommitAuthority": "Use current main with preserved Step11->Step10->AdminTools->v8. No old source rollback.",
     "workflow": ".github/workflows/admin-importer-forward-only-20261009.yml",
@@ -771,7 +841,18 @@
         "studentPreparedModelsModified": false,
         "parentEmailsSent": 0
       },
-      "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
+      "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails.",
+      "ownerConfirmedAdminRerun": {
+        "importCsv": "workFP.csv",
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "readModelsFailed": 0,
+        "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+        "ownerReply": "Yes it worked, fully close it",
+        "screenshotOfFinalRun": "NOT_PROVIDED"
+      },
+      "finalStatus": "CLOSED_PASS"
     },
     "stablePackageCorrection": {
       "auditedTwoGetRun": 37888527135,
@@ -805,18 +886,12 @@
     "userFacing": "The old failure banner is a historical import result. Only a new authorised idempotent confirmation can show 5/5; no emails sent in this repair.",
     "ownerRerun20261009": {
       "date": "2026-10-09",
-      "event": "OWNER_REPORTED_ADMIN_IMPORT_RERUN_COMPLETED",
+      "event": "OWNER_CONFIRMED_ADMIN_IMPORT_RERUN_PASS",
       "source": "Owner's latest message: 'Done update GHC please' following explicit instruction to Ctrl+F5 and reimport unchanged workFP.csv.",
       "ownerReportedAction": "The user reports completion of the requested Admin Console rerun after the current shared Worker deployment.",
-      "ownerProvidedResultCounters": false,
+      "ownerProvidedResultCounters": true,
       "ownerProvidedScreenshotOfNewConfirmation": false,
-      "resultsStatus": "NOT_INDEPENDENTLY_CONFIRMED",
-      "expectedResultNotAnObservation": {
-        "total": 5,
-        "succeeded": 5,
-        "failed": 0,
-        "readModelsFailed": 0
-      },
+      "resultsStatus": "OWNER_CONFIRMED_PASS",
       "lastVerifiedIndependentEvidence": {
         "workerDeploymentRun": 37888685292,
         "codeAndBindings": "PASS",
@@ -825,7 +900,143 @@
       },
       "parentEmailStatus": "No parent emails were sent by the Worker repair or read-only verification; the owner has not stated whether the separate manual Send Parent Emails control was used after their rerun.",
       "operationalScope": "No additional CSV processing, D1/KV mutation, Worker deployment or email send is requested or performed by this GHC update.",
-      "remainingAcceptance": "Confirm actual Admin Console post-rerun counters/results from owner; do not claim authenticated importer confirmation is PASS until observed or explicitly reported."
+      "remainingAcceptance": "NONE",
+      "confirmedResult": {
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "readModelsFailed": 0
+      }
+    },
+    "incidentClosure20261009": {
+      "incidentId": "PORTAL_V2_ADMIN_IMPORT_READ_MODEL_SYNC_FAILED_2026_10_08",
+      "lifecycle": "CLOSED",
+      "closedDate": "2026-10-09",
+      "closedBy": "Owner explicitly confirmed the authenticated Admin Console CSV rerun worked and instructed full closure, following a direct yes/no question asking whether it showed 5 succeeded and 0 failed.",
+      "ownerVerifiedOutcome": {
+        "importCsv": "workFP.csv",
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "readModelsFailed": 0,
+        "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+        "ownerReply": "Yes it worked, fully close it",
+        "screenshotOfFinalRun": "NOT_PROVIDED"
+      },
+      "independentProductionEvidence": {
+        "forwardOnlyWorkerDeployment": {
+          "run": 37888685292,
+          "conclusion": "PASS",
+          "sourceChain": "Step11 -> Step10 -> Admin Tools -> current equivalent-navigation v8",
+          "bindingPreservation": "PASS",
+          "unauthorizedQuizAdminRoutes": "PROTECTED",
+          "autoParentEmailSend": "NOT_TRIGGERED_BY_REPAIR"
+        },
+        "allFiveReadOnlyPreparedAccess": {
+          "run": 37889038539,
+          "conclusion": "PASS",
+          "rows": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "resultPerRow": "CURRENT_PREPARED_FULL"
+        },
+        "earlierAaravPreparedScopeRepair": {
+          "run": 37834319127,
+          "conclusion": "PASS",
+          "maths": {
+            "L1": "FULL",
+            "L2": "FULL",
+            "L3": "43_OPEN_0_LOCKED",
+            "sats": "2_OPEN_17_LOCKED",
+            "redundantYear6MathsCard": false
+          },
+          "englishYear6": "4_INDIVIDUAL_RELEASES_OPEN_27_LOCKED"
+        },
+        "siteErrorReporting": "Admin confirmed failure row and student in prior owner screenshot, and production importer diagnostic marker was verified after Worker deployment."
+      },
+      "rootCauseAndResolution": {
+        "initial": "Admin import preview results remained visible after confirm and were incorrectly green; per-student read-model compiler failed on a dual Year6/L3 programme collision for full L3 student; old shared Worker remained live due to obsolete Step10-only CI deploy gate.",
+        "frontend": "Show confirmed results and failed student/reason; cache-bust and show diagnostic JS version.",
+        "compiler": "Preserve L3 full as current, remove redundant Year6 Maths navigation view, keep separately released SATS and English access.",
+        "worker": "Forward-only deploy of current Step11-composed Worker using stable decoded-module fingerprint guard instead of variable Cloudflare multipart envelope hash; preserve live bindings and Quiz/Admin/Trial/Replace Resource functionality.",
+        "verification": "Owner explicitly confirms actual authenticated Admin Console rerun worked (5/5, zero failures) after independent 5/5 read-only prepared scope verification."
+      },
+      "safeguard": {
+        "preserveOwnerDecisions": "Aarav full L1/L2/L3; SATS individually released only; Year6 English individually released only; no duplicate Maths Year6 'Lessons' card. All other student releases preserved.",
+        "emails": "Manual parent-email send remains separate. No parent emails were sent by repair/deployment/audits. Do not assert whether owner clicked Send Parent Emails following the final rerun; not reported.",
+        "rollbacks": "None. No further code changes, data replay, credential changes, or scheduled remediation are required for this closed incident."
+      },
+      "openIncidentActions": [],
+      "verificationBoundary": "The final successful Admin result is confirmed by the owner, not by a supplied screenshot or access to the authenticated Admin response. Independent verification covers the deployed backend and all five existing prepared releases."
     }
+  },
+  "latestClosedAdminImportIncident": {
+    "incidentId": "PORTAL_V2_ADMIN_IMPORT_READ_MODEL_SYNC_FAILED_2026_10_08",
+    "lifecycle": "CLOSED",
+    "closedDate": "2026-10-09",
+    "closedBy": "Owner explicitly confirmed the authenticated Admin Console CSV rerun worked and instructed full closure, following a direct yes/no question asking whether it showed 5 succeeded and 0 failed.",
+    "ownerVerifiedOutcome": {
+      "importCsv": "workFP.csv",
+      "total": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "readModelsFailed": 0,
+      "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+      "ownerReply": "Yes it worked, fully close it",
+      "screenshotOfFinalRun": "NOT_PROVIDED"
+    },
+    "independentProductionEvidence": {
+      "forwardOnlyWorkerDeployment": {
+        "run": 37888685292,
+        "conclusion": "PASS",
+        "sourceChain": "Step11 -> Step10 -> Admin Tools -> current equivalent-navigation v8",
+        "bindingPreservation": "PASS",
+        "unauthorizedQuizAdminRoutes": "PROTECTED",
+        "autoParentEmailSend": "NOT_TRIGGERED_BY_REPAIR"
+      },
+      "allFiveReadOnlyPreparedAccess": {
+        "run": 37889038539,
+        "conclusion": "PASS",
+        "rows": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "resultPerRow": "CURRENT_PREPARED_FULL"
+      },
+      "earlierAaravPreparedScopeRepair": {
+        "run": 37834319127,
+        "conclusion": "PASS",
+        "maths": {
+          "L1": "FULL",
+          "L2": "FULL",
+          "L3": "43_OPEN_0_LOCKED",
+          "sats": "2_OPEN_17_LOCKED",
+          "redundantYear6MathsCard": false
+        },
+        "englishYear6": "4_INDIVIDUAL_RELEASES_OPEN_27_LOCKED"
+      },
+      "siteErrorReporting": "Admin confirmed failure row and student in prior owner screenshot, and production importer diagnostic marker was verified after Worker deployment."
+    },
+    "rootCauseAndResolution": {
+      "initial": "Admin import preview results remained visible after confirm and were incorrectly green; per-student read-model compiler failed on a dual Year6/L3 programme collision for full L3 student; old shared Worker remained live due to obsolete Step10-only CI deploy gate.",
+      "frontend": "Show confirmed results and failed student/reason; cache-bust and show diagnostic JS version.",
+      "compiler": "Preserve L3 full as current, remove redundant Year6 Maths navigation view, keep separately released SATS and English access.",
+      "worker": "Forward-only deploy of current Step11-composed Worker using stable decoded-module fingerprint guard instead of variable Cloudflare multipart envelope hash; preserve live bindings and Quiz/Admin/Trial/Replace Resource functionality.",
+      "verification": "Owner explicitly confirms actual authenticated Admin Console rerun worked (5/5, zero failures) after independent 5/5 read-only prepared scope verification."
+    },
+    "safeguard": {
+      "preserveOwnerDecisions": "Aarav full L1/L2/L3; SATS individually released only; Year6 English individually released only; no duplicate Maths Year6 'Lessons' card. All other student releases preserved.",
+      "emails": "Manual parent-email send remains separate. No parent emails were sent by repair/deployment/audits. Do not assert whether owner clicked Send Parent Emails following the final rerun; not reported.",
+      "rollbacks": "None. No further code changes, data replay, credential changes, or scheduled remediation are required for this closed incident."
+    },
+    "openIncidentActions": [],
+    "verificationBoundary": "The final successful Admin result is confirmed by the owner, not by a supplied screenshot or access to the authenticated Admin response. Independent verification covers the deployed backend and all five existing prepared releases."
   }
 }
