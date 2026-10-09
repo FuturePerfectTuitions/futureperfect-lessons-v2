@@ -89,7 +89,7 @@
   "notConfirmed": "Full access readback and independent read-only five-row audit PASS; only a new authenticated Admin import confirmation remains unverified.",
   "latestSharedImporterRecovery20261009": {
     "date": "2026-10-09",
-    "status": "LIVE_WORKER_DEPLOY_AND_READ_ONLY_ALL_FIVE_PASS",
+    "status": "CLOSED_PASS_OWNER_CONFIRMED_5_OF_5",
     "workflowDeploy": 37888685292,
     "workflowReadOnlyFive": 37889038539,
     "liveImporterCode": "CONFIRMED_DEPLOYED",
@@ -131,6 +131,35 @@
       "studentPreparedModelsModified": false,
       "parentEmailsSent": 0
     },
-    "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
+    "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails.",
+    "ownerAuthenticatedImport": {
+      "importCsv": "workFP.csv",
+      "total": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "readModelsFailed": 0,
+      "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+      "ownerReply": "Yes it worked, fully close it",
+      "screenshotOfFinalRun": "NOT_PROVIDED"
+    },
+    "readOnlyVerificationRun": 37889038539
+  },
+  "incidentClosure20261009": {
+    "incidentId": "PORTAL_V2_ADMIN_IMPORT_READ_MODEL_SYNC_FAILED_2026_10_08",
+    "lifecycle": "CLOSED",
+    "closedDate": "2026-10-09",
+    "ownerConfirmedResult": {
+      "importCsv": "workFP.csv",
+      "total": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "readModelsFailed": 0,
+      "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+      "ownerReply": "Yes it worked, fully close it",
+      "screenshotOfFinalRun": "NOT_PROVIDED"
+    },
+    "workerDeploymentRun": 37888685292,
+    "preparedScopeVerificationRun": 37889038539,
+    "ownerMathsEnglishAccess": "Owner previously confirmed correct on portal; preserve lesson-by-lesson English and SATS rules."
   }
 }
