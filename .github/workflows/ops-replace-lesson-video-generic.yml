@@ -67,9 +67,15 @@ jobs:
           const m=url.match(/^https:\/\/screenpal\.com\/content\/video\/([A-Za-z0-9]+)\/?$/);
           if(!m) throw new Error('REQUEST_SCREENPAL_URL_INVALID');
           const target=m[1];
+          const descriptionPolicy=clean(req.descriptionPolicy||'unchanged-no-source-supplied');
+          const requestedDescription=String(req.newDescription??'');
+          const updateDescription=descriptionPolicy==='source-derived';
           if(!displayId||!expectedSubject||!expectedTitle||!target) throw new Error('REQUEST_FIELDS_MISSING');
           if(req.intent!=='replacement') throw new Error('REQUEST_INTENT_MUST_BE_REPLACEMENT');
           if(req.classificationChange===true) throw new Error('GENERIC_REPLACER_REFUSES_CLASSIFICATION_CHANGE');
+          if(!['unchanged-no-source-supplied','source-derived'].includes(descriptionPolicy)) throw new Error('REQUEST_DESCRIPTION_POLICY_INVALID');
+          if(updateDescription && !requestedDescription.trim()) throw new Error('REQUEST_DESCRIPTION_REQUIRED');
+          if(!updateDescription && Object.prototype.hasOwnProperty.call(req,'newDescription')) throw new Error('REQUEST_DESCRIPTION_PRESENT_WITH_UNCHANGED_POLICY');
 
           const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
           const token=clean(process.env.CLOUDFLARE_API_TOKEN);
@@ -256,7 +262,8 @@ jobs:
 
           console.log('VIDEO_REPLACEMENT_PREFLIGHT=' + JSON.stringify({
             displayId,lessonId,title:before.title,subject:before.subject,viewId,mappedViews,
-            canonicalOldId:canonicalOldIds[0]||null,preparedOldId:preparedOldIds[0]||null,target
+            canonicalOldId:canonicalOldIds[0]||null,preparedOldId:preparedOldIds[0]||null,target,
+            descriptionPolicy,updateDescription
           }));
 
           // Same-classification replacement: canonical video fields only; description/catalogue/access untouched.
@@ -270,14 +277,26 @@ jobs:
             if(Object.prototype.hasOwnProperty.call(obj,'playerUrl')) obj.playerUrl=`https://go.screenpal.com/player/${target}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
             if(Object.prototype.hasOwnProperty.call(obj,'watchUrl')) obj.watchUrl=`https://go.screenpal.com/watch/${target}`;
           }
-          nextCanonical.contentStatus={...(nextCanonical.contentStatus||{}),mainVideo:'available',ownerConfirmedPending:false};
+          if(updateDescription) nextCanonical.description=requestedDescription;
+          nextCanonical.contentStatus={
+            ...(nextCanonical.contentStatus||{}),
+            mainVideo:'available',
+            ownerConfirmedPending:false,
+            ...(updateDescription?{description:'available'}:{})
+          };
 
-          // Ensure nothing outside video fields/contentStatus changes canonically.
+          // Ensure nothing outside video fields/contentStatus and an explicitly authorised description changes canonically.
           const canonicalComparable=v=>{
             const x=clone(v);
             if(x.video) x.video='__VIDEO__';
             if(x.core?.video) x.core.video='__VIDEO__';
-            if(x.contentStatus) x.contentStatus={...x.contentStatus,mainVideo:'__MAIN__',ownerConfirmedPending:'__OWNER__'};
+            if(updateDescription) x.description='__DESCRIPTION__';
+            if(x.contentStatus) x.contentStatus={
+              ...x.contentStatus,
+              mainVideo:'__MAIN__',
+              ownerConfirmedPending:'__OWNER__',
+              ...(updateDescription?{description:'__DESCRIPTION_STATUS__'}:{})
+            };
             return stableStringify(x);
           };
           if(canonicalComparable(before)!==canonicalComparable(nextCanonical)) throw new Error('CANONICAL_UNRELATED_FIELD_MUTATION');
@@ -290,6 +309,7 @@ jobs:
 
           // Prepared lesson: preserve structure exactly, replacing only the old ScreenPal ID string(s).
           const nextPrepared=replaceIds(preparedPayload,preparedOldIds);
+          if(updateDescription) nextPrepared.description=requestedDescription;
           const preparedAfterIds=[...new Set(screenPalIds(nextPrepared).map(x=>x.id).filter(Boolean))];
           if(!preparedAfterIds.includes(target)) throw new Error('PREPARED_TARGET_NOT_PRESENT_IN_NEXT_PAYLOAD');
           for(const old of preparedOldIds) if(old!==target&&preparedAfterIds.includes(old)) throw new Error(`PREPARED_OLD_ID_REMAINS_IN_NEXT_PAYLOAD:${old}`);
@@ -299,25 +319,46 @@ jobs:
           const finalPreparedIds=[...new Set(screenPalIds(preparedAfter.env.payload).map(x=>x.id).filter(Boolean))];
           if(!finalPreparedIds.includes(target)) throw new Error('PREPARED_CURRENT_TARGET_NOT_PRESENT');
           for(const old of preparedOldIds) if(old!==target&&finalPreparedIds.includes(old)) throw new Error(`PREPARED_CURRENT_OLD_ID_REMAINS:${old}`);
+          if(updateDescription && String(preparedAfter.env.payload?.description??'')!==requestedDescription) throw new Error('PREPARED_DESCRIPTION_VERIFY_FAILED');
 
-          // Same-classification invariant: global prepared pointer must not change.
+          // Same-classification invariant: catalogue membership cannot change. If description changes,
+          // update only the matching catalogue-row description; otherwise the global pointer must stay unchanged.
+          let globalPublishResult=null;
+          if(updateDescription){
+            const nextGlobal=clone(globalPayload);
+            const rows=nextGlobal?.catalogues?.[viewId]?.lessons;
+            if(!Array.isArray(rows)) throw new Error('GLOBAL_CATALOGUE_ROWS_MISSING');
+            const rowMatches=rows.filter(r=>clean(r?.lessonId)===lessonId||clean(r?.displayLessonId)===displayId);
+            if(rowMatches.length!==1) throw new Error(`GLOBAL_DESCRIPTION_ROW_MATCH_COUNT:${rowMatches.length}`);
+            rowMatches[0].description=requestedDescription;
+            globalPublishResult=await publish('global',nextGlobal,`video-desc-${displayId.toLowerCase()}-${Date.now()}`);
+          }
+
           const globalAfter=await resolve('global');
-          if(globalAfter.candidate.version!==globalBefore.candidate.version||globalAfter.candidate.sha256!==globalBefore.candidate.sha256){
+          if(!updateDescription && (globalAfter.candidate.version!==globalBefore.candidate.version||globalAfter.candidate.sha256!==globalBefore.candidate.sha256)){
             throw new Error('GLOBAL_PREPARED_CHANGED_DURING_VIDEO_ONLY_REPLACEMENT');
           }
           const mappedAfter=Array.isArray(globalAfter.env.payload?.lessonToViews?.[lessonId])?globalAfter.env.payload.lessonToViews[lessonId]:[];
           if(stableStringify(mappedAfter)!==stableStringify(mappedViews)) throw new Error('LESSON_VIEW_CLASSIFICATION_CHANGED');
+          const catalogueMatchesAfter=(globalAfter.env.payload?.catalogues?.[viewId]?.lessons||[]).filter(r=>clean(r?.lessonId)===lessonId||clean(r?.displayLessonId)===displayId);
+          if(catalogueMatchesAfter.length!==1) throw new Error('GLOBAL_CATALOGUE_MATCH_CHANGED');
+          if(updateDescription && String(catalogueMatchesAfter[0]?.description??'')!==requestedDescription) throw new Error('GLOBAL_DESCRIPTION_VERIFY_FAILED');
 
-          // Description must remain byte-for-byte unchanged because no replacement script/source was supplied.
-          if(String(canonicalAfter?.description??'')!==String(before?.description??'')) throw new Error('DESCRIPTION_CHANGED_WITHOUT_SOURCE');
+          if(updateDescription){
+            if(String(canonicalAfter?.description??'')!==requestedDescription) throw new Error('CANONICAL_DESCRIPTION_VERIFY_FAILED');
+          }else if(String(canonicalAfter?.description??'')!==String(before?.description??'')){
+            throw new Error('DESCRIPTION_CHANGED_WITHOUT_SOURCE');
+          }
 
           console.log('VIDEO_REPLACEMENT_VERIFIED=' + JSON.stringify({
             displayId,lessonId,title:canonicalAfter.title,viewId,target,
             canonicalOldId:canonicalOldIds[0]||null,
             preparedOldId:preparedOldIds[0]||null,
             preparedVersion:publishResult.version,
-            globalVersionUnchanged:globalAfter.candidate.version,
-            descriptionUnchanged:true
+            globalVersion:globalAfter.candidate.version,
+            globalDescriptionPublished:Boolean(globalPublishResult),
+            descriptionUpdated:updateDescription,
+            descriptionUnchanged:!updateDescription
           }));
           console.log('OPS_REPLACE_LESSON_VIDEO_GENERIC_PASS');
           NODE
