@@ -663,6 +663,13 @@
         "parentEmailsSent": 0
       },
       "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
+    },
+    "latestOwnerFollowUpRerun20261009": {
+      "state": "OWNER_REPORTS_DONE",
+      "actualCounters": "NOT_PROVIDED",
+      "priorVerifiedFivePreparedReadbacks": 37889038539,
+      "liveImporterDeployment": 37888685292,
+      "action": "No further automatic replay or email. Await owner-observed result counters to fully close."
     }
   },
   "latestAaravMathsSatsEnglishIndividual": {
@@ -712,7 +719,7 @@
   },
   "latestAdminImporterLiveWorker20261009": {
     "date": "2026-10-09",
-    "status": "DEPLOY_PASS_EXISTING_FIVE_PREPARED_MODELS_PASS_ADMIN_REIMPORT_NOT_YET_CHECKED",
+    "status": "OWNER_REPORTED_REIMPORT_COMPLETED_POST_DEPLOY_COUNTERS_PENDING_CONFIRMATION",
     "ownerConfirmedStudentAccess": "Aarav's authenticated Maths and English and last English lesson all function. Do not change their canonical D1 or prepared model in this repair.",
     "readOnlyProductionProvenanceRun": 37887955156,
     "liveBundleSha256": "0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361",
@@ -795,6 +802,30 @@
       "observed": "Live script marker verified. Canonical and prepared model parity test for all five October 8 rows passed before final jq output failed with a display-only undefined safeReadOnly/0 expression.",
       "pending": "Correct jq field reference and repeat exact read-only check."
     },
-    "userFacing": "The old failure banner is a historical import result. Only a new authorised idempotent confirmation can show 5/5; no emails sent in this repair."
+    "userFacing": "The old failure banner is a historical import result. Only a new authorised idempotent confirmation can show 5/5; no emails sent in this repair.",
+    "ownerRerun20261009": {
+      "date": "2026-10-09",
+      "event": "OWNER_REPORTED_ADMIN_IMPORT_RERUN_COMPLETED",
+      "source": "Owner's latest message: 'Done update GHC please' following explicit instruction to Ctrl+F5 and reimport unchanged workFP.csv.",
+      "ownerReportedAction": "The user reports completion of the requested Admin Console rerun after the current shared Worker deployment.",
+      "ownerProvidedResultCounters": false,
+      "ownerProvidedScreenshotOfNewConfirmation": false,
+      "resultsStatus": "NOT_INDEPENDENTLY_CONFIRMED",
+      "expectedResultNotAnObservation": {
+        "total": 5,
+        "succeeded": 5,
+        "failed": 0,
+        "readModelsFailed": 0
+      },
+      "lastVerifiedIndependentEvidence": {
+        "workerDeploymentRun": 37888685292,
+        "codeAndBindings": "PASS",
+        "postDeploymentReadOnlyRun": 37889038539,
+        "actualFivePreparedEntitlements": "CURRENT_PREPARED_FULL each of rows 2 through 6"
+      },
+      "parentEmailStatus": "No parent emails were sent by the Worker repair or read-only verification; the owner has not stated whether the separate manual Send Parent Emails control was used after their rerun.",
+      "operationalScope": "No additional CSV processing, D1/KV mutation, Worker deployment or email send is requested or performed by this GHC update.",
+      "remainingAcceptance": "Confirm actual Admin Console post-rerun counters/results from owner; do not claim authenticated importer confirmation is PASS until observed or explicitly reported."
+    }
   }
 }
