@@ -1,0 +1,68 @@
+name: Diagnose stable live Worker module fingerprint (read only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-live-worker-stable-fingerprint-20261009.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-live-worker-stable-fingerprint-20261009.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch two independent copies of unchanged deployed Worker (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -D /tmp/fingerprint-1.headers -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker" -o /tmp/fingerprint-1.bin
+          curl -fsS -D /tmp/fingerprint-2.headers -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker" -o /tmp/fingerprint-2.bin
+          curl -fsS -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker/deployments" -o /tmp/live-deployments-response.json
+          python3 - <<'PY'
+          import re,hashlib,json
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          def canonical(index):
+              head=Path(f'/tmp/fingerprint-{index}.headers').read_text('latin1')
+              body=Path(f'/tmp/fingerprint-{index}.bin').read_bytes()
+              m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',head)
+              if not m: raise RuntimeError('MISSING_CONTENT_TYPE')
+              ct=m.group(1).strip()
+              raw=hashlib.sha256(body).hexdigest()
+              parsed=BytesParser(policy=default).parsebytes(
+                ('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+body)
+              if parsed.is_multipart():
+                  parts=[]
+                  for p in parsed.iter_parts():
+                      name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name') or 'unnamed'
+                      bs=p.get_payload(decode=True) or b''
+                      parts.append((name,hashlib.sha256(bs).hexdigest(),len(bs),bs))
+                  parts.sort(key=lambda x:x[0])
+              else:
+                  parts=[('index.js',hashlib.sha256(body).hexdigest(),len(body),body)]
+              stable=hashlib.sha256('\n'.join(f'{a}:{b}:{c}' for a,b,c,_ in parts).encode()).hexdigest()
+              combined=b'\n'.join(bs for _,_,_,bs in parts)
+              checks=['readModelErrorCode','ADMIN_IMPORT_READ_MODEL_SYNC_FAILED','maths-equivalent-navigation-final-v8-owner-fast-home','/api/v1/quiz-bridge/redeem','/api/v1/admin/lesson-releases/confirm']
+              markers={term:term.encode() in combined for term in checks}
+              return dict(rawSha256=raw,stableModuleDigest=stable,packageParts=[dict(name=n,sha256=h,length=l) for n,h,l,_ in parts],markers=markers)
+          a,b=canonical(1),canonical(2)
+          d=json.loads(Path('/tmp/live-deployments-response.json').read_text())
+          print(json.dumps({'marker':'STABLE_WORKER_FINGERPRINT_READ_ONLY_V1','mutations':0,
+            'first':a,'second':b,'rawPackageSame':a['rawSha256']==b['rawSha256'],
+            'stableModulesSame':a['stableModuleDigest']==b['stableModuleDigest'],
+            'deploymentsRequestSuccess':d.get('success',False)},indent=2))
+          if not a['stableModuleDigest']==b['stableModuleDigest']: raise RuntimeError('LIVE_MODULE_CONTENT_CHANGED_DURING_READ')
+          PY
