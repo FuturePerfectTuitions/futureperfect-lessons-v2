@@ -316,8 +316,8 @@ jobs:
             x.core=x.core&&typeof x.core==='object'?x.core:{};
             x.core.video='__VIDEO__';
             if(updateDescription) x.description='__DESCRIPTION__';
-            if(x.contentStatus) x.contentStatus={
-              ...x.contentStatus,
+            x.contentStatus={
+              ...(x.contentStatus||{}),
               mainVideo:'__MAIN__',
               ownerConfirmedPending:'__OWNER__',
               ...(updateDescription?{description:'__DESCRIPTION_STATUS__'}:{})
