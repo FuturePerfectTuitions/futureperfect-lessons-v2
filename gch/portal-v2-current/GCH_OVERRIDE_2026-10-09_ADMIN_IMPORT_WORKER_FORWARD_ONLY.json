@@ -3,7 +3,7 @@
   "documentType": "CURRENT_SCOPE_OVERRIDE",
   "date": "2026-10-09",
   "scope": "PORTAL_V2.Admin.LessonImport.ReadModelPublicationLiveWorker",
-  "status": "GUARDED_DEPLOYMENT_STAGED_PENDING_PR_CHECKS",
+  "status": "STABLE_MODULE_GATE_SOURCE_STAGED_PENDING_CI_AND_PRODUCTION",
   "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
   "precedence": "Within the October 9 Admin importer live Worker repair only; preserve all broader GHC and current source/branch states.",
   "ownerObservation": "Aarav's English and Maths and the 8 October English lesson work on the authenticated student portal, but the five-row Admin import still reports 1 READ_MODEL_SYNC_FAILED for Aarav; other 4 succeeded and no parent email sent.",
@@ -27,6 +27,19 @@
       "readModelsKV": "77b35165c8694087bc1b0515c35a7e89",
       "operationalBindings": "Email binding, Quiz bridge secret, student KV, lesson KV, DB, R2, plain vars and the existing extra CHECKPOINT4_SHADOW_MODE all present.",
       "liveSourceMismatch": "Repository main uses Step11 top-level to preserve Year6 catalogue boundary (delegates to Step10 bridge and Admin Tools). The stale deployment workflows expect Step10 top-level and fail before deploying."
+    },
+    "stablePackageCorrection": {
+      "auditedTwoGetRun": 37888527135,
+      "rawPackageHashesDiffer": true,
+      "normalizedWorkerModuleName": "index-step11-year6-catalogue-boundary.js",
+      "stableJavaScriptSha256": "e4c35a9564db7a32aa58cb38976efc00237f90482ea2830dd51a5e4b3a627064",
+      "twoCopiesSameModule": true,
+      "importerNewMarkerStillAbsent": true,
+      "firstDeploymentRun": 37888384055,
+      "firstDeploymentResult": "BLOCKED_PREDEPLOY_ONLY_RAW_PACKAGE_SHA_VARIABLE",
+      "deploymentCodeChanges": 0,
+      "newGate": "Pin stable decoded MIME Worker module SHA256 and exact module name, preserving fail-closed source proof. Never rely on raw Cloudflare multipart package hash.",
+      "postDeploymentState": "PENDING_SAFE_DEPLOYMENT"
     }
   },
   "release": {
@@ -35,7 +48,20 @@
     "deployment": "Call the current source's existing ops/deploy_current_worker_preserve.sh with Step11 canonical entrypoint. No blanket replay of CSV, entitlement mutation, profile change or email sending.",
     "verification": "New live code markers and importer error code, binding fingerprint unchanged, protected unauthenticated Admin import and quiz redeem endpoints, no Worker rollback.",
     "scope": "Shared fpt-portal-v2-worker live runtime only; no change to browser ASSETS Worker or student Worker.",
-    "caveat": "Live production importer acceptance still requires a successful authenticated import of the same idempotent CSV or equivalent per-student proof; an earlier failed result on the Admin screen does not automatically clear."
+    "caveat": "Live production importer acceptance still requires a successful authenticated import of the same idempotent CSV or equivalent per-student proof; an earlier failed result on the Admin screen does not automatically clear.",
+    "workflowCorrection": {
+      "auditedTwoGetRun": 37888527135,
+      "rawPackageHashesDiffer": true,
+      "normalizedWorkerModuleName": "index-step11-year6-catalogue-boundary.js",
+      "stableJavaScriptSha256": "e4c35a9564db7a32aa58cb38976efc00237f90482ea2830dd51a5e4b3a627064",
+      "twoCopiesSameModule": true,
+      "importerNewMarkerStillAbsent": true,
+      "firstDeploymentRun": 37888384055,
+      "firstDeploymentResult": "BLOCKED_PREDEPLOY_ONLY_RAW_PACKAGE_SHA_VARIABLE",
+      "deploymentCodeChanges": 0,
+      "newGate": "Pin stable decoded MIME Worker module SHA256 and exact module name, preserving fail-closed source proof. Never rely on raw Cloudflare multipart package hash.",
+      "postDeploymentState": "PENDING_SAFE_DEPLOYMENT"
+    }
   },
   "preservation": [
     "Aarav L1/L2/L3 Maths full; direct SATS 2 open of 19; no duplicate Year6 Lessons",
