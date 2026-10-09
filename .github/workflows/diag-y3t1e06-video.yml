@@ -44,7 +44,7 @@ jobs:
           function enc(scope){return encodeURIComponent(scope).replace(/%/g,'_');}
           const keys=await list(process.env.LESSONS_NS,'lesson:');
           const found=[];
-          for(let i=0;i<keys.length;i+=30){const batch=keys.slice(i,i+30);const rows=await Promise.all(batch.map(async key=>({key,rec:await get(process.env.LESSONS_NS,key)})));for(const row of rows)if(Object.values(row.rec?.displayIds||{}).includes('Y3T1E06'))found.push(row);}
+          for(let i=0;i<keys.length;i+=30){const batch=keys.slice(i,i+30);const rows=await Promise.all(batch.map(async key=>({key,rec:await get(process.env.LESSONS_NS,key)})));for(const row of rows)if(Object.values(row.rec?.displayIds||{}).includes('Y3T1E03'))found.push(row);}
           if(found.length!==1) throw new Error('match count '+found.length);
           const {key,rec}=found[0];
           console.log('CANONICAL_SUMMARY='+JSON.stringify({key,lessonId:rec.lessonId,title:rec.title,subject:rec.subject,displayIds:rec.displayIds,topKeys:Object.keys(rec),coreKeys:Object.keys(rec.core||{}),video:rec.video||null,coreVideo:rec?.core?.video||null,contentStatus:rec.contentStatus||null,description:rec.description||null}));
