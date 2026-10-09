@@ -1,0 +1,56 @@
+name: Diagnose Y3T1E06 video state
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/diag-y3t1e06-video.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  LEGACY_WORKER: fpt-portal-v2-worker
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+
+jobs:
+  inspect:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect canonical and prepared video state
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER}/settings" > /tmp/legacy.json
+          curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${STUDENT_WORKER}/settings" > /tmp/student.json
+          LESSONS_NS="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy.json)"
+          READ_NS="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/student.json)"
+          export LESSONS_NS READ_NS
+          node --input-type=module <<'NODE'
+          const clean=v=>String(v??'').trim();
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID, token=process.env.CLOUDFLARE_API_TOKEN;
+          const auth={Authorization:`Bearer ${token}`};
+          const base=ns=>`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
+          async function get(ns,key){const r=await fetch(`${base(ns)}/values/${encodeURIComponent(key)}`,{headers:auth}); if(!r.ok) throw new Error(`GET ${key} ${r.status}`); return JSON.parse(await r.text());}
+          async function list(ns,prefix){const out=[];let cursor='';do{const u=new URL(`${base(ns)}/keys`);u.searchParams.set('prefix',prefix);u.searchParams.set('limit','1000');if(cursor)u.searchParams.set('cursor',cursor);const r=await fetch(u,{headers:auth});const b=await r.json();for(const x of b.result||[])out.push(x.name);cursor=clean(b?.result_info?.cursor);}while(cursor);return out;}
+          function enc(scope){return encodeURIComponent(scope).replace(/%/g,'_');}
+          const keys=await list(process.env.LESSONS_NS,'lesson:');
+          const found=[];
+          for(let i=0;i<keys.length;i+=30){const batch=keys.slice(i,i+30);const rows=await Promise.all(batch.map(async key=>({key,rec:await get(process.env.LESSONS_NS,key)})));for(const row of rows)if(Object.values(row.rec?.displayIds||{}).includes('Y3T1E06'))found.push(row);}
+          if(found.length!==1) throw new Error('match count '+found.length);
+          const {key,rec}=found[0];
+          console.log('CANONICAL_SUMMARY='+JSON.stringify({key,lessonId:rec.lessonId,title:rec.title,subject:rec.subject,displayIds:rec.displayIds,topKeys:Object.keys(rec),coreKeys:Object.keys(rec.core||{}),video:rec.video||null,coreVideo:rec?.core?.video||null,contentStatus:rec.contentStatus||null,description:rec.description||null}));
+          const scope='lesson:'+rec.lessonId;
+          const pointer=await get(process.env.READ_NS,`rm:v1:scope:${enc(scope)}:current`);
+          const ver=pointer.current.version;
+          const env=await get(process.env.READ_NS,`rm:v1:scope:${enc(scope)}:version:${enc(ver)}`);
+          console.log('PREPARED_SUMMARY='+JSON.stringify({scope,version:ver,payloadKeys:Object.keys(env.payload||{}),payload:env.payload}));
+          NODE
