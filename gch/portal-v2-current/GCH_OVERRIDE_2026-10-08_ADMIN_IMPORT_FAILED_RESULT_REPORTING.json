@@ -1,7 +1,7 @@
 {
   "schema": "fpt.portal.gch.override.admin-import-failed-reporting.v1",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
-  "status": "FRONTEND_LIVE_VERIFIED_BACKEND_DEPLOYMENT_BLOCKED",
+  "status": "HISTORICAL_IMPORT_INCIDENT_ACCESS_FIXED_LIVE_WORKER_FIXED_NEW_ADMIN_CONFIRM_PENDING",
   "effectiveDate": "2026-10-08",
   "scope": "PORTAL_V2.Admin.LessonReleaseImport.FailedResultReporting",
   "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
@@ -202,5 +202,51 @@
       },
       "remainingRisk": "Original live Worker bundle remains unchanged: Y6 SATS/Maths equivalent auto-deploy run 37834319151 failed at stale Step10-only source entrypoint preflight before deployment. Any later auto-reconciliation can regenerate old duplicate Year6 navigation or collision. Must verify live Worker provenance and forward-only deploy actual composition separately; do not rerun old CSV until that is done."
     }
+  },
+  "latestSharedImporterRecovery20261009": {
+    "date": "2026-10-09",
+    "status": "LIVE_WORKER_DEPLOY_AND_READ_ONLY_ALL_FIVE_PASS",
+    "workflowDeploy": 37888685292,
+    "workflowReadOnlyFive": 37889038539,
+    "liveImporterCode": "CONFIRMED_DEPLOYED",
+    "liveBindings": "ALL_ORIGINAL_BOUND_BINDINGS_IDENTICAL",
+    "unauthenticatedAdminAndQuizRoutes": "PROTECTED",
+    "readOnlyScopeResults": [
+      {
+        "row": 2,
+        "result": "CURRENT_PREPARED_FULL"
+      },
+      {
+        "row": 3,
+        "result": "CURRENT_PREPARED_FULL"
+      },
+      {
+        "row": 4,
+        "result": "CURRENT_PREPARED_FULL"
+      },
+      {
+        "row": 5,
+        "result": "CURRENT_PREPARED_FULL"
+      },
+      {
+        "row": 6,
+        "result": "CURRENT_PREPARED_FULL"
+      }
+    ],
+    "latestAarav": {
+      "fullL1": true,
+      "fullL2": true,
+      "fullL3": true,
+      "sats": "2 of 19 individually released",
+      "englishYear6": "4 of 31 individually released",
+      "duplicateYear6MathsCard": false
+    },
+    "sideEffects": {
+      "D1GrantsModified": false,
+      "studentProfilesModified": false,
+      "studentPreparedModelsModified": false,
+      "parentEmailsSent": 0
+    },
+    "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
   }
 }
