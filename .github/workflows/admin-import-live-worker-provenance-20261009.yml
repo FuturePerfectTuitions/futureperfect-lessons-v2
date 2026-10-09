@@ -1,0 +1,80 @@
+name: Inspect deployed Portal importer Worker (read only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-import-live-worker-provenance-20261009.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-import-live-worker-provenance-20261009.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Worker source composition invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'main = "src/index-step11-year6-catalogue-boundary.js"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-step10-quiz-bridge.js';" worker/src/index-step11-year6-catalogue-boundary.js
+          grep -Fq "import currentWorker from './index-admin-tools.js';" worker/src/index-step10-quiz-bridge.js
+          grep -Fq "import currentWorker from './index-maths-equivalent-navigation-final.js';" worker/src/index-admin-tools.js
+          grep -Fq 'READ_MODEL_SYNC_FAILED' worker/src/admin-lesson-release-import-reconciled.js
+          grep -Fq "const selectedProgramme = assignmentProgramme" worker/src/access-read-model-sync-v2.js
+          echo SOURCE_COMPOSED_STEP11_STEP10_ADMIN_IMPORT_V2_PASS
+      - name: Read deployed Worker package and settings without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker/settings" -o /tmp/current-worker-settings.json
+          jq -e '.success == true' /tmp/current-worker-settings.json >/dev/null
+          curl -fsS -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker" -o /tmp/current-worker-package.bin
+          curl -fsS -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker/deployments" -o /tmp/current-worker-deployments.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const settings=JSON.parse(fs.readFileSync('/tmp/current-worker-settings.json','utf8')).result;
+          const buffer=fs.readFileSync('/tmp/current-worker-package.bin');
+          const binary=buffer.toString('latin1');
+          const checks=[
+            'maths_l3_11p_t3m43_2026',
+            '/api/v1/quiz-bridge/redeem',
+            '/api/v1/admin/lesson-releases/confirm',
+            'replace-resource-consistency-v1',
+            'trial-runtime-access-v2',
+            'readModelErrorCode',
+            'COMPILED_YEAR6_L3_PROGRAMME_COLLISION',
+            'maths-equivalent-navigation-final-v8-owner-fast-home',
+            'ADMIN_IMPORT_READ_MODEL_SYNC_FAILED',
+            'Year 6',
+            'READ_MODEL_INTERNAL_ERROR'
+          ];
+          const bindings=(settings.bindings||[]).map(b=>({name:b.name,type:b.type,...(b.type==='kv_namespace'?{matchesPrepared: b.name==='READ_MODELS_KV'&&b.namespace_id==='77b35165c8694087bc1b0515c35a7e89'}:{})}));
+          const out={
+            marker:'LIVE_ADMIN_IMPORT_WORKER_READONLY_PROVENANCE_V1',
+            mutated:false,
+            liveBundleSha256:crypto.createHash('sha256').update(buffer).digest('hex'),
+            livePackageBytes:buffer.length,
+            compatibilityDate:settings.compatibility_date,
+            bindingInventory:bindings,
+            runtimeSourceMarkers:Object.fromEntries(checks.map(s=>[s,binary.includes(s)]))
+          };
+          console.log(JSON.stringify(out,null,2));
+          if(out.runtimeSourceMarkers['/api/v1/quiz-bridge/redeem']!==true ||
+             out.runtimeSourceMarkers['/api/v1/admin/lesson-releases/confirm']!==true) throw Error('LIVE_WORKER_ROUTE_MARKER_MISSING');
+          NODE
