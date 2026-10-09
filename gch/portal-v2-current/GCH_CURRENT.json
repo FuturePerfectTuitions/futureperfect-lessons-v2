@@ -3,7 +3,7 @@
   "documentType": "CURRENT_GCH_AUTHORITY_MANIFEST",
   "status": "AUTHORITATIVE_CURRENT",
   "effectiveDate": "2026-10-09",
-  "authorityVersion": "6.16-generic-video-add-replace-description",
+  "authorityVersion": "6.17-video-auto-add-replace",
   "humanReadableZipRequired": false,
   "repository": "FuturePerfectTuitions/futureperfect-lessons-v2",
   "purpose": "Provide one machine-oriented restart entrypoint for the complete FPT Portal V2 website/Admin system. Current authority includes owner-verified Admin batch creation and Portal Login Details, Replace Resource, quiz-bridge shared-Worker composition, Year 6 SAT direct-release semantics, authoritative Y6SM CSV/display mapping, batch-definition-aware Maths equivalent Year/L-level access classification, conditional L3 SATS presentation, the owner-authoritative ordinary Year 6 teaching-card label Year 6 rather than Lessons, primary frontend home-response normalization before history grouping/rendering, manual parent-email delivery, and the permanent forward-only production-recovery rule, plus the owner-authoritative L3T2M24 Linear Sequences L3-only exception and its canonical/prepared-state enforcement, plus an authoritative lesson-video update playbook that requires canonical and prepared lesson parity, exact case-sensitive ScreenPal IDs, and stream-aware catalogue/access handling. Current live V2 frontend preserves the exact accepted 2026-10-02 V2 application source and restores the owner-proven September ordering architecture as a separate cache-busted browser guard: visible Y6TnMm rows are ordered by term then lesson, Y6SMn/Y6MSn numerically, and MutationObserver reapplies the invariant after DOM changes. The live frontend serving path is the ASSETS binding of fpt-portal-v2-rebuild-browser-prod, not GitHub Pages while the lessons.futureperfect.education/* Worker route is active. The repository also owns an explicitly isolated public parent-facing marketing-video surface at 226.futureperfect.education: Cloudflare Worker fpt-marketing-video-226, ScreenPal cO61ifnxHQI, Portal-style 16:9 presentation, public/no-login access, and user-initiated playback only. This surface has no Portal/Quiz data or service bindings and must remain operationally isolated from authenticated Portal V2. The repository also owns an explicitly isolated public parent-facing 11+ marketing-video surface at 11plus.futureperfect.education: Cloudflare Worker fpt-marketing-video-11plus, ScreenPal cO6j27nxMMM, the same Portal-style 16:9 presentation as 226.futureperfect.education, public/no-login access, and user-initiated playback only. This surface has no Portal/Quiz data or service bindings and is operationally isolated from authenticated Portal V2.",
@@ -1055,20 +1055,25 @@
       "result": "PASS"
     },
     "supportedIntents": [
+      "auto",
       "replacement",
       "addition"
     ],
     "sourceDerivedDescriptionSupported": true,
     "latestProductionProof": {
-      "displayLessonId": "Y3T1E06",
-      "lessonId": "Y3E7",
-      "title": "Adverbs",
-      "intent": "addition",
-      "to": "cO6QFnnxP6z",
-      "run": 37971231424,
+      "displayLessonId": "L3T3M43",
+      "lessonId": "MATHS_L3_11P_T3M43_2026",
+      "title": "Advanced Statistics",
+      "mappedViews": [
+        "maths-level3"
+      ],
+      "resolvedIntent": "addition",
+      "to": "cO6QFunxP2E",
+      "run": 37974308068,
       "result": "PASS",
       "descriptionUpdated": true,
       "catalogueClassificationUnchanged": true
-    }
+    },
+    "defaultIntent": "auto"
   }
 }
