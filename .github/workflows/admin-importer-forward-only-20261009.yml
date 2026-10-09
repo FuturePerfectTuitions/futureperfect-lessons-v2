@@ -65,7 +65,7 @@ jobs:
           node tests/final-maths-equivalent-navigation-verification.mjs
           node tests/step10-quiz-bridge-static-verification.mjs
           node tests/admin-resource-replace-consistency-verification.mjs
-          node tests/admin-batch-manager-verification.mjs
+          node tests/admin-student-manager-verification.mjs
           echo PORTAL_IMPORTER_REGRESSIONS_PASS
       - name: Build an exact dry-run candidate without publishing
         shell: bash
