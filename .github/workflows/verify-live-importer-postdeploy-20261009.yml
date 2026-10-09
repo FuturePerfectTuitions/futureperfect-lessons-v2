@@ -1,0 +1,67 @@
+name: Verify live importer and existing student access without reimport
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/verify-live-importer-postdeploy-20261009.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-live-importer-postdeploy-20261009.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify read-only existing diagnostic has no mutation API
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/diagnose-admin-import-20261008-readonly.mjs
+          grep -Fq "throw Error('READ_ONLY_NO_KV_WRITES')" scripts/diagnose-admin-import-20261008-readonly.mjs
+          grep -Fq "throw Error('READ_ONLY_NO_STUDENT_WRITES')" scripts/diagnose-admin-import-20261008-readonly.mjs
+          grep -Fq "throw Error('D1_READ_ONLY_SELECT')" scripts/diagnose-admin-import-20261008-readonly.mjs
+          echo POST_DEPLOY_READ_ONLY_DIAGNOSTIC_SAFE
+
+  inspect:
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify currently served production importer Worker code (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "$API/workers/scripts/fpt-portal-v2-worker" -o /tmp/live-importer-postdeploy-script.bin
+          grep -aFq 'readModelErrorCode' /tmp/live-importer-postdeploy-script.bin
+          grep -aFq 'ADMIN_IMPORT_READ_MODEL_SYNC_FAILED' /tmp/live-importer-postdeploy-script.bin
+          grep -aFq 'maths-equivalent-navigation-final-v8-owner-fast-home' /tmp/live-importer-postdeploy-script.bin
+          grep -aFq '/api/v1/quiz-bridge/redeem' /tmp/live-importer-postdeploy-script.bin
+          grep -aFq '/api/v1/admin/lesson-releases/confirm' /tmp/live-importer-postdeploy-script.bin
+          echo LIVE_IMPORTER_NEW_CODE_AND_ROUTES_PRESENT
+      - name: Verify all five October 8 student models still agree with canonical releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/diagnose-admin-import-20261008-readonly.mjs > /tmp/verified-existing-five.json
+          jq -e '.marker=="ADMIN_IMPORT_20261008_READONLY_DIAGNOSTIC" and .bindingChecks=="PASS" and .safeReadOnly==true and .canonicalWrites==0 and .preparedWrites==0 and .emailsSent==0' /tmp/verified-existing-five.json >/dev/null
+          jq -e '(.results|length)==5 and ([.results[]|select(.diagnosis!="CURRENT_PREPARED_FULL")]|length)==0' /tmp/verified-existing-five.json >/dev/null
+          jq -c '{marker,readOnly:safeReadOnly,results:[.results[]|{csvRow,diagnosis,preparedLessonState}],successCount:([.results[]|select(.diagnosis=="CURRENT_PREPARED_FULL")]|length)}' /tmp/verified-existing-five.json
+          echo ALL_FIVE_EXISTING_STUDENT_READ_MODELS_READBACK_PASS
