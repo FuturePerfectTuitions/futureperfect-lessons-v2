@@ -1,1 +1,1 @@
-2026-10-09 inspect Y3T1E03 prepared video shape
+2026-10-09 inspect L3T3M43 canonical video shape
