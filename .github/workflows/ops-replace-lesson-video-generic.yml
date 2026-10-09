@@ -1,0 +1,323 @@
+name: Replace Portal lesson video (generic)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops-replace-lesson-video-request.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-video-replacement
+  cancel-in-progress: false
+
+env:
+  CF_API: https://api.cloudflare.com/client/v4
+  LEGACY_WORKER: fpt-portal-v2-worker
+  STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
+
+jobs:
+  replace:
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard production bindings and replace canonical + prepared lesson video
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -f .github/ops-replace-lesson-video-request.json
+
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
+          curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${LEGACY_WORKER}/settings" > /tmp/legacy-settings.json
+          curl -fsS "${auth[@]}" "${CF_API}/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${STUDENT_WORKER}/settings" > /tmp/student-settings.json
+          jq -e '.success==true' /tmp/legacy-settings.json >/dev/null
+          jq -e '.success==true' /tmp/student-settings.json >/dev/null
+          jq -e '.result.bindings[]? | select(.name=="ENVIRONMENT" and .type=="plain_text" and .text=="production")' /tmp/legacy-settings.json >/dev/null
+
+          LESSONS_NS="$(jq -r '.result.bindings[]? | select(.name=="LESSONS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy-settings.json)"
+          READ_NS="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/student-settings.json)"
+          LEGACY_READ_NS="$(jq -r '.result.bindings[]? | select(.name=="READ_MODELS_KV" and .type=="kv_namespace") | .namespace_id' /tmp/legacy-settings.json)"
+          test -n "$LESSONS_NS"; test "$LESSONS_NS" != null
+          test -n "$READ_NS"; test "$READ_NS" != null
+          if [ -n "$LEGACY_READ_NS" ] && [ "$LEGACY_READ_NS" != null ]; then test "$LEGACY_READ_NS" = "$READ_NS"; fi
+          export LESSONS_NS READ_NS
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+
+          const req=JSON.parse(fs.readFileSync('.github/ops-replace-lesson-video-request.json','utf8'));
+          const clean=v=>String(v??'').trim();
+          const norm=v=>clean(v).toLowerCase();
+          const displayId=clean(req.displayLessonId);
+          const expectedSubject=norm(req.expectedSubject);
+          const expectedTitle=clean(req.expectedTitle);
+          const url=clean(req.screenPalUrl);
+          const m=url.match(/^https:\/\/screenpal\.com\/content\/video\/([A-Za-z0-9]+)\/?$/);
+          if(!m) throw new Error('REQUEST_SCREENPAL_URL_INVALID');
+          const target=m[1];
+          if(!displayId||!expectedSubject||!expectedTitle||!target) throw new Error('REQUEST_FIELDS_MISSING');
+          if(req.intent!=='replacement') throw new Error('REQUEST_INTENT_MUST_BE_REPLACEMENT');
+          if(req.classificationChange===true) throw new Error('GENERIC_REPLACER_REFUSES_CLASSIFICATION_CHANGE');
+
+          const account=clean(process.env.CLOUDFLARE_ACCOUNT_ID);
+          const token=clean(process.env.CLOUDFLARE_API_TOKEN);
+          const lessonsNs=clean(process.env.LESSONS_NS);
+          const readNs=clean(process.env.READ_NS);
+          const auth={Authorization:`Bearer ${token}`};
+          const kvBase=ns=>`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
+          const clone=value=>structuredClone(value);
+          const stableValue=value=>{
+            if(Array.isArray(value)) return value.map(stableValue);
+            if(!value||typeof value!=='object') return value;
+            const out={};
+            for(const key of Object.keys(value).sort()) out[key]=stableValue(value[key]);
+            return out;
+          };
+          const stableStringify=value=>JSON.stringify(stableValue(value));
+          const sha=value=>crypto.createHash('sha256').update(String(value)).digest('hex');
+          const encodedScope=scope=>encodeURIComponent(clean(scope)).replace(/%/g,'_');
+          const pointerKey=scope=>`rm:v1:scope:${encodedScope(scope)}:current`;
+          const versionKey=(scope,version)=>`rm:v1:scope:${encodedScope(scope)}:version:${encodeURIComponent(clean(version)).replace(/%/g,'_')}`;
+
+          async function kvGet(ns,key){
+            const r=await fetch(`${kvBase(ns)}/values/${encodeURIComponent(key)}`,{headers:auth});
+            if(r.status===404) return null;
+            if(!r.ok) throw new Error(`KV_GET_FAILED:${r.status}:${key}`);
+            return r.text();
+          }
+          async function kvGetJson(ns,key){
+            const raw=await kvGet(ns,key);
+            if(raw==null) return null;
+            try{return JSON.parse(raw);}catch{throw new Error(`KV_JSON_INVALID:${key}`);}
+          }
+          async function kvPut(ns,key,value,contentType='text/plain;charset=UTF-8'){
+            const body=typeof value==='string'?value:JSON.stringify(value);
+            const r=await fetch(`${kvBase(ns)}/values/${encodeURIComponent(key)}`,{
+              method:'PUT',headers:{...auth,'Content-Type':contentType},body
+            });
+            const txt=await r.text();
+            if(!r.ok) throw new Error(`KV_PUT_FAILED:${r.status}:${key}:${txt}`);
+            let parsed=null; try{parsed=JSON.parse(txt);}catch{}
+            if(parsed&&parsed.success===false) throw new Error(`KV_PUT_API_FAILED:${key}`);
+          }
+          async function kvList(ns,prefix){
+            const out=[]; let cursor='';
+            do{
+              const u=new URL(`${kvBase(ns)}/keys`);
+              u.searchParams.set('limit','1000');
+              if(prefix) u.searchParams.set('prefix',prefix);
+              if(cursor) u.searchParams.set('cursor',cursor);
+              const r=await fetch(u,{headers:auth});
+              if(!r.ok) throw new Error(`KV_LIST_FAILED:${r.status}`);
+              const body=await r.json();
+              if(!body?.success||!Array.isArray(body.result)) throw new Error('KV_LIST_PAYLOAD_INVALID');
+              for(const row of body.result) if(row?.name) out.push(row.name);
+              cursor=clean(body?.result_info?.cursor);
+            }while(cursor);
+            return out;
+          }
+
+          async function verifyEnvelope(scope,candidate){
+            if(!candidate?.version||!candidate?.sha256) return null;
+            const raw=await kvGet(readNs,versionKey(scope,candidate.version));
+            if(raw==null) return null;
+            let env; try{env=JSON.parse(raw);}catch{return null;}
+            if(env?.schemaVersion!==1||env?.kind!=='prepared-read-model-envelope'||clean(env.scope)!==clean(scope)||clean(env.version)!==clean(candidate.version)) return null;
+            const payloadSha=sha(stableStringify(env.payload));
+            if(payloadSha!==clean(env.sha256)||payloadSha!==clean(candidate.sha256)) return null;
+            const envelopeSha=sha(raw);
+            if(candidate.envelopeSha256&&envelopeSha!==candidate.envelopeSha256) return null;
+            return {env,payloadSha,envelopeSha};
+          }
+          async function resolve(scope){
+            const pointer=await kvGetJson(readNs,pointerKey(scope));
+            if(!pointer||pointer.kind!=='prepared-read-model-pointer') throw new Error(`READ_MODEL_POINTER_UNAVAILABLE:${scope}`);
+            for(const candidate of [pointer.current,pointer.previous]){
+              const verified=await verifyEnvelope(scope,candidate);
+              if(verified) return {pointer,candidate,...verified};
+            }
+            throw new Error(`READ_MODEL_NO_VERIFIED_VERSION:${scope}`);
+          }
+          async function publish(scope,payload,label){
+            const current=await resolve(scope);
+            const payloadText=stableStringify(payload);
+            const payloadSha=sha(payloadText);
+            if(current.candidate.sha256===payloadSha) return {reused:true,version:current.candidate.version,sha256:payloadSha};
+            const version=`${label}-${payloadSha.slice(0,18)}`;
+            const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha,payload};
+            const envelopeText=stableStringify(envelope);
+            const candidate={version,sha256:payloadSha,envelopeSha256:sha(envelopeText)};
+            await kvPut(readNs,versionKey(scope,version),envelopeText);
+            if(!(await verifyEnvelope(scope,candidate))) throw new Error(`PREPARED_CANDIDATE_VERIFY_FAILED:${scope}`);
+            const previous={
+              version:clean(current.candidate.version),
+              sha256:clean(current.candidate.sha256),
+              envelopeSha256:clean(current.candidate.envelopeSha256)
+            };
+            const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope,current:candidate,previous,updatedAt:new Date().toISOString()};
+            await kvPut(readNs,pointerKey(scope),stableStringify(pointer));
+            const confirmed=await resolve(scope);
+            if(confirmed.candidate.version!==version||confirmed.candidate.sha256!==payloadSha) throw new Error(`PREPARED_POINTER_VERIFY_FAILED:${scope}`);
+            return {reused:false,version,sha256:payloadSha};
+          }
+
+          function screenPalIds(value,path='root',out=[]){
+            if(value==null) return out;
+            if(typeof value==='string'){
+              const patterns=[
+                /screenpal\.com\/content\/video\/([A-Za-z0-9]+)/g,
+                /go\.screenpal\.com\/player\/([A-Za-z0-9]+)/g,
+                /go\.screenpal\.com\/watch\/([A-Za-z0-9]+)/g
+              ];
+              for(const re of patterns){ let mm; while((mm=re.exec(value))) out.push({path,id:mm[1]}); }
+              if(/screenpal/i.test(path)&&/^[A-Za-z0-9]+$/.test(value)) out.push({path,id:value});
+              return out;
+            }
+            if(Array.isArray(value)){ value.forEach((v,i)=>screenPalIds(v,`${path}[${i}]`,out)); return out; }
+            if(typeof value==='object'){ for(const [k,v] of Object.entries(value)) screenPalIds(v,`${path}.${k}`,out); }
+            return out;
+          }
+          function replaceIds(value,oldIds){
+            if(typeof value==='string'){
+              let s=value;
+              for(const old of oldIds) s=s.split(old).join(target);
+              return s;
+            }
+            if(Array.isArray(value)) return value.map(v=>replaceIds(v,oldIds));
+            if(value&&typeof value==='object'){
+              const out={};
+              for(const [k,v] of Object.entries(value)) out[k]=replaceIds(v,oldIds);
+              return out;
+            }
+            return value;
+          }
+          function videoObjects(rec){
+            const rows=[];
+            if(rec?.video&&typeof rec.video==='object') rows.push(['video',rec.video]);
+            if(rec?.core?.video&&typeof rec.core.video==='object') rows.push(['core.video',rec.core.video]);
+            return rows;
+          }
+
+          // Resolve canonical lesson exactly by display ID.
+          const lessonKeys=await kvList(lessonsNs,'lesson:');
+          const matches=[];
+          for(let i=0;i<lessonKeys.length;i+=30){
+            const batch=lessonKeys.slice(i,i+30);
+            const rows=await Promise.all(batch.map(async key=>({key,rec:await kvGetJson(lessonsNs,key)})));
+            for(const row of rows){
+              if(Object.values(row.rec?.displayIds||{}).includes(displayId)) matches.push(row);
+            }
+          }
+          if(matches.length!==1) throw new Error(`DISPLAY_ID_MATCH_COUNT:${displayId}:${matches.length}`);
+          const {key:lessonKey,rec:before}=matches[0];
+          const lessonId=clean(before?.lessonId);
+          if(!lessonId||before?.active===false) throw new Error('CANONICAL_LESSON_INACTIVE_OR_ID_MISSING');
+          if(norm(before?.subject)!==expectedSubject) throw new Error(`SUBJECT_GUARD_FAILED:${before?.subject}`);
+          if(norm(before?.title)!==norm(expectedTitle)) throw new Error(`TITLE_GUARD_FAILED:${before?.title}`);
+          const displayEntry=Object.entries(before?.displayIds||{}).find(([,v])=>clean(v)===displayId);
+          if(!displayEntry) throw new Error('DISPLAY_MAPPING_GUARD_FAILED');
+          const viewId=displayEntry[0];
+
+          // Prove catalogue classification and freeze global pointer/version.
+          const globalBefore=await resolve('global');
+          const globalPayload=globalBefore.env.payload;
+          const mappedViews=Array.isArray(globalPayload?.lessonToViews?.[lessonId])?[...globalPayload.lessonToViews[lessonId]]:[];
+          if(!mappedViews.includes(viewId)) throw new Error(`GLOBAL_VIEW_MAPPING_MISSING:${viewId}`);
+          const catalogueMatches=(globalPayload?.catalogues?.[viewId]?.lessons||[]).filter(r=>clean(r?.lessonId)===lessonId||clean(r?.displayLessonId)===displayId);
+          if(catalogueMatches.length!==1) throw new Error(`GLOBAL_CATALOGUE_MATCH_COUNT:${catalogueMatches.length}`);
+
+          // Prove current prepared lesson exists before touching canonical state.
+          const lessonScope=`lesson:${lessonId}`;
+          const preparedBefore=await resolve(lessonScope);
+          const preparedPayload=preparedBefore.env.payload;
+          if(clean(preparedPayload?.lessonId)!==lessonId) throw new Error('PREPARED_LESSON_ID_GUARD_FAILED');
+
+          const canonicalVideoRows=videoObjects(before);
+          if(!canonicalVideoRows.length) throw new Error('CANONICAL_VIDEO_OBJECT_MISSING');
+          const canonicalRefs=canonicalVideoRows.flatMap(([path,obj])=>screenPalIds(obj,path));
+          const canonicalOldIds=[...new Set(canonicalRefs.map(x=>x.id).filter(Boolean))];
+          const preparedRefs=screenPalIds(preparedPayload);
+          const preparedOldIds=[...new Set(preparedRefs.map(x=>x.id).filter(Boolean))];
+          if(canonicalOldIds.length>1) throw new Error(`CANONICAL_MULTIPLE_SCREENPAL_IDS:${canonicalOldIds.join(',')}`);
+          if(preparedOldIds.length>1) throw new Error(`PREPARED_MULTIPLE_SCREENPAL_IDS:${preparedOldIds.join(',')}`);
+          if(!preparedOldIds.length) throw new Error('PREPARED_SCREENPAL_REFERENCE_MISSING');
+
+          console.log('VIDEO_REPLACEMENT_PREFLIGHT=' + JSON.stringify({
+            displayId,lessonId,title:before.title,subject:before.subject,viewId,mappedViews,
+            canonicalOldId:canonicalOldIds[0]||null,preparedOldId:preparedOldIds[0]||null,target
+          }));
+
+          // Same-classification replacement: canonical video fields only; description/catalogue/access untouched.
+          const nextCanonical=clone(before);
+          if(nextCanonical.video&&typeof nextCanonical.video==='object') nextCanonical.video=replaceIds(nextCanonical.video,canonicalOldIds.length?canonicalOldIds:preparedOldIds);
+          if(nextCanonical?.core?.video&&typeof nextCanonical.core.video==='object') nextCanonical.core.video=replaceIds(nextCanonical.core.video,canonicalOldIds.length?canonicalOldIds:preparedOldIds);
+          for(const [,obj] of videoObjects(nextCanonical)){
+            if(Object.prototype.hasOwnProperty.call(obj,'screenpal')) obj.screenpal=target;
+            if(Object.prototype.hasOwnProperty.call(obj,'contentUrl')) obj.contentUrl=`https://screenpal.com/content/video/${target}`;
+            if(Object.prototype.hasOwnProperty.call(obj,'embedUrl')) obj.embedUrl=`https://go.screenpal.com/player/${target}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
+            if(Object.prototype.hasOwnProperty.call(obj,'playerUrl')) obj.playerUrl=`https://go.screenpal.com/player/${target}?ff=1&ahc=1&dcc=1&tl=1&bg=transparent`;
+            if(Object.prototype.hasOwnProperty.call(obj,'watchUrl')) obj.watchUrl=`https://go.screenpal.com/watch/${target}`;
+          }
+          nextCanonical.contentStatus={...(nextCanonical.contentStatus||{}),mainVideo:'available',ownerConfirmedPending:false};
+
+          // Ensure nothing outside video fields/contentStatus changes canonically.
+          const canonicalComparable=v=>{
+            const x=clone(v);
+            if(x.video) x.video='__VIDEO__';
+            if(x.core?.video) x.core.video='__VIDEO__';
+            if(x.contentStatus) x.contentStatus={...x.contentStatus,mainVideo:'__MAIN__',ownerConfirmedPending:'__OWNER__'};
+            return stableStringify(x);
+          };
+          if(canonicalComparable(before)!==canonicalComparable(nextCanonical)) throw new Error('CANONICAL_UNRELATED_FIELD_MUTATION');
+
+          await kvPut(lessonsNs,lessonKey,nextCanonical,'application/json; charset=utf-8');
+          const canonicalAfter=await kvGetJson(lessonsNs,lessonKey);
+          const afterCanonicalIds=[...new Set(videoObjects(canonicalAfter).flatMap(([p,o])=>screenPalIds(o,p)).map(x=>x.id))];
+          if(!afterCanonicalIds.includes(target)) throw new Error('CANONICAL_TARGET_NOT_PRESENT');
+          for(const old of canonicalOldIds) if(old!==target&&afterCanonicalIds.includes(old)) throw new Error(`CANONICAL_OLD_ID_REMAINS:${old}`);
+
+          // Prepared lesson: preserve structure exactly, replacing only the old ScreenPal ID string(s).
+          const nextPrepared=replaceIds(preparedPayload,preparedOldIds);
+          const preparedAfterIds=[...new Set(screenPalIds(nextPrepared).map(x=>x.id).filter(Boolean))];
+          if(!preparedAfterIds.includes(target)) throw new Error('PREPARED_TARGET_NOT_PRESENT_IN_NEXT_PAYLOAD');
+          for(const old of preparedOldIds) if(old!==target&&preparedAfterIds.includes(old)) throw new Error(`PREPARED_OLD_ID_REMAINS_IN_NEXT_PAYLOAD:${old}`);
+          const publishResult=await publish(lessonScope,nextPrepared,`video-${displayId.toLowerCase()}-${Date.now()}`);
+
+          const preparedAfter=await resolve(lessonScope);
+          const finalPreparedIds=[...new Set(screenPalIds(preparedAfter.env.payload).map(x=>x.id).filter(Boolean))];
+          if(!finalPreparedIds.includes(target)) throw new Error('PREPARED_CURRENT_TARGET_NOT_PRESENT');
+          for(const old of preparedOldIds) if(old!==target&&finalPreparedIds.includes(old)) throw new Error(`PREPARED_CURRENT_OLD_ID_REMAINS:${old}`);
+
+          // Same-classification invariant: global prepared pointer must not change.
+          const globalAfter=await resolve('global');
+          if(globalAfter.candidate.version!==globalBefore.candidate.version||globalAfter.candidate.sha256!==globalBefore.candidate.sha256){
+            throw new Error('GLOBAL_PREPARED_CHANGED_DURING_VIDEO_ONLY_REPLACEMENT');
+          }
+          const mappedAfter=Array.isArray(globalAfter.env.payload?.lessonToViews?.[lessonId])?globalAfter.env.payload.lessonToViews[lessonId]:[];
+          if(stableStringify(mappedAfter)!==stableStringify(mappedViews)) throw new Error('LESSON_VIEW_CLASSIFICATION_CHANGED');
+
+          // Description must remain byte-for-byte unchanged because no replacement script/source was supplied.
+          if(String(canonicalAfter?.description??'')!==String(before?.description??'')) throw new Error('DESCRIPTION_CHANGED_WITHOUT_SOURCE');
+
+          console.log('VIDEO_REPLACEMENT_VERIFIED=' + JSON.stringify({
+            displayId,lessonId,title:canonicalAfter.title,viewId,target,
+            canonicalOldId:canonicalOldIds[0]||null,
+            preparedOldId:preparedOldIds[0]||null,
+            preparedVersion:publishResult.version,
+            globalVersionUnchanged:globalAfter.candidate.version,
+            descriptionUnchanged:true
+          }));
+          console.log('OPS_REPLACE_LESSON_VIDEO_GENERIC_PASS');
+          NODE
