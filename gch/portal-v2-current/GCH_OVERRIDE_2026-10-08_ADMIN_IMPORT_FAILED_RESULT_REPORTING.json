@@ -1,7 +1,7 @@
 {
   "schema": "fpt.portal.gch.override.admin-import-failed-reporting.v1",
   "documentType": "CURRENT_SCOPE_OVERRIDE",
-  "status": "HISTORICAL_IMPORT_INCIDENT_ACCESS_FIXED_LIVE_WORKER_FIXED_NEW_ADMIN_CONFIRM_PENDING",
+  "status": "CLOSED_PASS_SUPERSEDED_BY_2026_10_09_AUTHENTICATED_REIMPORT",
   "effectiveDate": "2026-10-08",
   "scope": "PORTAL_V2.Admin.LessonReleaseImport.FailedResultReporting",
   "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
@@ -27,9 +27,9 @@
     "productionRule": "FORWARD_ONLY. Preserve current composed shared Worker. Current worker/wrangler.toml references index-step11-year6-catalogue-boundary.js (which delegates to step10), while older GHC/CI text references step10 directly: verify exact live composition and adjust provenance before any backend deploy; do not deploy an older entrypoint."
   },
   "recoveryBoundary": {
-    "currentAttempt": "Merged and public Admin JS live/verified, no production Worker or access data mutation. The original student's identity and publication exception remain unknown.",
-    "next": "First verify deployment provenance and per-student confirmed failure with authorized live response/logs or read-only audit. Once exact student is known, reconcile only that account's prepared access from existing canonical state, read back current access scope, and check student API/browser. Preserve other four grants. No parent emails.",
-    "acceptance": "CI and static tests pass; actual Admin confirmation table identifies failed student and lesson/code; actual successful rows remain successful; email not auto-sent; live production Worker composition unchanged except guarded forward-only deployment of exact changes; per-student readback plus owner verification before closing incident."
+    "currentAttempt": "HISTORICAL_DETAIL: original diagnostic and repaired controls. Final current status is CLOSED_PASS, see incidentClosure20261009.",
+    "next": "NONE. Successfully reimported 5/5 confirmed by owner.",
+    "acceptance": "CLOSED: current source Worker deployed, five prepared releases independently verified, and owner confirms fresh authenticated Admin import succeeded with zero failures."
   },
   "deploymentEvidence": {
     "mergedMainCommit": "c29ca41e863e7c6111fb2f9a221c39347fe9d7ce",
@@ -248,5 +248,70 @@
       "parentEmailsSent": 0
     },
     "limitation": "A new authenticated Admin Console /confirm call was NOT executed as part of repair. The old red banner is historical and persists until the console performs another confirm. Confirm success counter 5/5 only after re-running unchanged CSV without parent emails."
+  },
+  "incidentClosure20261009": {
+    "incidentId": "PORTAL_V2_ADMIN_IMPORT_READ_MODEL_SYNC_FAILED_2026_10_08",
+    "lifecycle": "CLOSED",
+    "closedDate": "2026-10-09",
+    "closedBy": "Owner explicitly confirmed the authenticated Admin Console CSV rerun worked and instructed full closure, following a direct yes/no question asking whether it showed 5 succeeded and 0 failed.",
+    "ownerVerifiedOutcome": {
+      "importCsv": "workFP.csv",
+      "total": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "readModelsFailed": 0,
+      "verificationBasis": "OWNER_CONFIRMED_AUTHENTICATED_ADMIN_CONSOLE_RERUN",
+      "ownerReply": "Yes it worked, fully close it",
+      "screenshotOfFinalRun": "NOT_PROVIDED"
+    },
+    "independentProductionEvidence": {
+      "forwardOnlyWorkerDeployment": {
+        "run": 37888685292,
+        "conclusion": "PASS",
+        "sourceChain": "Step11 -> Step10 -> Admin Tools -> current equivalent-navigation v8",
+        "bindingPreservation": "PASS",
+        "unauthorizedQuizAdminRoutes": "PROTECTED",
+        "autoParentEmailSend": "NOT_TRIGGERED_BY_REPAIR"
+      },
+      "allFiveReadOnlyPreparedAccess": {
+        "run": 37889038539,
+        "conclusion": "PASS",
+        "rows": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "resultPerRow": "CURRENT_PREPARED_FULL"
+      },
+      "earlierAaravPreparedScopeRepair": {
+        "run": 37834319127,
+        "conclusion": "PASS",
+        "maths": {
+          "L1": "FULL",
+          "L2": "FULL",
+          "L3": "43_OPEN_0_LOCKED",
+          "sats": "2_OPEN_17_LOCKED",
+          "redundantYear6MathsCard": false
+        },
+        "englishYear6": "4_INDIVIDUAL_RELEASES_OPEN_27_LOCKED"
+      },
+      "siteErrorReporting": "Admin confirmed failure row and student in prior owner screenshot, and production importer diagnostic marker was verified after Worker deployment."
+    },
+    "rootCauseAndResolution": {
+      "initial": "Admin import preview results remained visible after confirm and were incorrectly green; per-student read-model compiler failed on a dual Year6/L3 programme collision for full L3 student; old shared Worker remained live due to obsolete Step10-only CI deploy gate.",
+      "frontend": "Show confirmed results and failed student/reason; cache-bust and show diagnostic JS version.",
+      "compiler": "Preserve L3 full as current, remove redundant Year6 Maths navigation view, keep separately released SATS and English access.",
+      "worker": "Forward-only deploy of current Step11-composed Worker using stable decoded-module fingerprint guard instead of variable Cloudflare multipart envelope hash; preserve live bindings and Quiz/Admin/Trial/Replace Resource functionality.",
+      "verification": "Owner explicitly confirms actual authenticated Admin Console rerun worked (5/5, zero failures) after independent 5/5 read-only prepared scope verification."
+    },
+    "safeguard": {
+      "preserveOwnerDecisions": "Aarav full L1/L2/L3; SATS individually released only; Year6 English individually released only; no duplicate Maths Year6 'Lessons' card. All other student releases preserved.",
+      "emails": "Manual parent-email send remains separate. No parent emails were sent by repair/deployment/audits. Do not assert whether owner clicked Send Parent Emails following the final rerun; not reported.",
+      "rollbacks": "None. No further code changes, data replay, credential changes, or scheduled remediation are required for this closed incident."
+    },
+    "openIncidentActions": [],
+    "verificationBoundary": "The final successful Admin result is confirmed by the owner, not by a supplied screenshot or access to the authenticated Admin response. Independent verification covers the deployed backend and all five existing prepared releases."
   }
 }
