@@ -129,10 +129,45 @@
     "repairResult": "PASS",
     "browserFollowUp": "After the backend/prepared repair, the owner still reported seeing a 'Lessons' card on the Maths landing page. Treat that as a separate navigation/presentation investigation; do not use it as evidence that the prepared video replacement itself reverted."
   },
-  "futureOperatorRule": "For a normal future video replacement, do not invent a one-off workflow first. Follow case A/B above: resolve lesson -> guard canonical/prepared identity -> update canonical video/description -> republish current prepared lesson variant -> read back exact ID -> smoke-check. Escalate to case C only when owner intent actually changes stream/catalogue membership.",
+  "futureOperatorRule": "For an ordinary same-classification replacement, use .github/workflows/ops-replace-lesson-video-generic.yml by updating .github/ops-replace-lesson-video-request.json; do not create another lesson-specific workflow. The generic workflow resolves lesson -> guards canonical/prepared identity -> updates canonical video -> republishes current prepared lesson -> verifies exact target/old-ID absence -> proves global catalogue classification unchanged. Escalate to case C only when owner intent actually changes stream/catalogue membership.",
   "completionLanguage": {
     "allowedWhenAllBackendChecksPass": "Canonical and current prepared lesson state both verified against the exact ScreenPal ID.",
     "browserCaveat": "If no authenticated browser smoke-check was executed, say browser rendering is not yet independently confirmed.",
     "prohibited": "Do not say a video is live merely because LESSONS_KV changed or a GitHub workflow succeeded without prepared readback."
+  },
+  "genericExecutionWorkflow": {
+    "status": "ACTIVE_PRODUCTION",
+    "workflow": ".github/workflows/ops-replace-lesson-video-generic.yml",
+    "requestFile": ".github/ops-replace-lesson-video-request.json",
+    "purpose": "Execute ordinary same-classification lesson-video replacements through one guarded path that updates and read-backs both canonical LESSONS_KV and the current prepared lesson scope.",
+    "requestContract": {
+      "displayLessonId": "exact Portal display lesson code",
+      "expectedSubject": "guard only",
+      "expectedTitle": "exact title guard",
+      "screenPalUrl": "exact owner-pasted https://screenpal.com/content/video/<ID> URL",
+      "intent": "replacement",
+      "classificationChange": false,
+      "descriptionPolicy": "unchanged-no-source-supplied unless a separately supported description update is authorised"
+    },
+    "safety": [
+      "Refuses classificationChange=true; stream/catalogue changes still require the case-C path.",
+      "Freezes and verifies the prepared global version so a video-only replacement cannot silently alter catalogue membership.",
+      "Requires the current prepared lesson scope to exist before any canonical mutation.",
+      "Fails closed if multiple distinct ScreenPal IDs are present in canonical or prepared video state.",
+      "Replaces the exact old ScreenPal ID in both canonical video fields and current prepared lesson payload, then verifies the old ID is absent and the new ID is present.",
+      "Leaves the description byte-for-byte unchanged when no source/script was supplied."
+    ],
+    "firstProductionProof": {
+      "displayLessonId": "Y3T1E03",
+      "canonicalLessonId": "Y3E4",
+      "title": "Present Perfect Tense",
+      "viewId": "english-year3",
+      "oldScreenPalId": "cOjTrJnwnLG",
+      "newScreenPalId": "cO6Q29nx85g",
+      "workflowRun": 37948945866,
+      "result": "PASS",
+      "descriptionUnchanged": true,
+      "catalogueClassificationUnchanged": true
+    }
   }
 }
