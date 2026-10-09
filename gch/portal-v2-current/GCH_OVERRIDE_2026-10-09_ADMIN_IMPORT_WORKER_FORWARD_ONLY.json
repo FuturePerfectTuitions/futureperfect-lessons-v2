@@ -1,0 +1,59 @@
+{
+  "schema": "fpt.portal.gch.override.admin-import-worker-forward-only.v1",
+  "documentType": "CURRENT_SCOPE_OVERRIDE",
+  "date": "2026-10-09",
+  "scope": "PORTAL_V2.Admin.LessonImport.ReadModelPublicationLiveWorker",
+  "status": "GUARDED_DEPLOYMENT_STAGED_PENDING_PR_CHECKS",
+  "baseAuthority": "gch/portal-v2-current/GCH_CURRENT.json",
+  "precedence": "Within the October 9 Admin importer live Worker repair only; preserve all broader GHC and current source/branch states.",
+  "ownerObservation": "Aarav's English and Maths and the 8 October English lesson work on the authenticated student portal, but the five-row Admin import still reports 1 READ_MODEL_SYNC_FAILED for Aarav; other 4 succeeded and no parent email sent.",
+  "primaryDiagnosis": {
+    "canonicalD1": "Aarav English lesson entitlement saved and independently verified.",
+    "preparedStudentReadModel": "One-student repairs on 2026-10-08 verified Maths L1/L2/L3 full, SATS 2/19, English Year6 4 individually open/27 locked; owner confirms authenticated browser shows current access.",
+    "importerProblem": "Live shared Worker still calls older read-model compiler and emits the failure rather than using tested repository fix.",
+    "auditedRuntime": {
+      "run": 37887955156,
+      "result": "PASS_READ_ONLY",
+      "deployedPackageSha256": "0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361",
+      "loadedLiveMarkers": {
+        "quizBridge": true,
+        "adminImport": true,
+        "replaceResource": true,
+        "trial": true,
+        "mathsPresentationV8": true,
+        "newPerStudentErrorCode": false,
+        "newSyncExceptionLogMarker": false
+      },
+      "readModelsKV": "77b35165c8694087bc1b0515c35a7e89",
+      "operationalBindings": "Email binding, Quiz bridge secret, student KV, lesson KV, DB, R2, plain vars and the existing extra CHECKPOINT4_SHADOW_MODE all present.",
+      "liveSourceMismatch": "Repository main uses Step11 top-level to preserve Year6 catalogue boundary (delegates to Step10 bridge and Admin Tools). The stale deployment workflows expect Step10 top-level and fail before deploying."
+    }
+  },
+  "release": {
+    "workflow": ".github/workflows/admin-importer-forward-only-20261009.yml",
+    "policy": "Pin exact live Worker bundle hash and deployment settings; source Step11→Step10→Admin→v8 guard; run import/access/SATS/quiz/Trial/Replace Resource regressions; dry-run bundle; refuse deployment if live code or bindings drift from audited baseline.",
+    "deployment": "Call the current source's existing ops/deploy_current_worker_preserve.sh with Step11 canonical entrypoint. No blanket replay of CSV, entitlement mutation, profile change or email sending.",
+    "verification": "New live code markers and importer error code, binding fingerprint unchanged, protected unauthenticated Admin import and quiz redeem endpoints, no Worker rollback.",
+    "scope": "Shared fpt-portal-v2-worker live runtime only; no change to browser ASSETS Worker or student Worker.",
+    "caveat": "Live production importer acceptance still requires a successful authenticated import of the same idempotent CSV or equivalent per-student proof; an earlier failed result on the Admin screen does not automatically clear."
+  },
+  "preservation": [
+    "Aarav L1/L2/L3 Maths full; direct SATS 2 open of 19; no duplicate Year6 Lessons",
+    "English Year6 exactly four individually released, no ENGLISH_Y6_FULL; future lessons release one by one",
+    "Four other successful 2026-10-08 student entitlements and read models",
+    "Parent email manual send and no notification as part of repair",
+    "Current Quiz bridge launch/redeem, Admin operations, Replace Resource, Trial/protected answers, Year6 catalogue boundary",
+    "Source-generated Phase11 canonical navigation manifest and live extra plain vars",
+    "Forbid reverting to old Worker version or deploying Step10-only."
+  ],
+  "acceptance": {
+    "expected": [
+      "Production Worker has readModelErrorCode and latest access compiler",
+      "All original Cloudflare binding types/names/values remain unchanged",
+      "Unauthorized Admin/Quiz requests stay protected",
+      "Original student portal access remains correct",
+      "Any subsequent idempotent 5-row CSV run has readModelsFailed=0, provided all source records unchanged"
+    ],
+    "status": "PENDING_DEPLOYMENT"
+  }
+}

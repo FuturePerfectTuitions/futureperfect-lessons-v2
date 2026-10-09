@@ -26,7 +26,8 @@
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-07_L3_PREPARED_CONSISTENCY.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_PUBLIC_MARKETING_VIDEO_11PLUS.json",
     "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_ADMIN_IMPORT_FAILED_RESULT_REPORTING.json",
-    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL.json"
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL.json",
+    "gch/portal-v2-current/GCH_OVERRIDE_2026-10-09_ADMIN_IMPORT_WORKER_FORWARD_ONLY.json"
   ],
   "authorityComposition": {
     "base": {
@@ -103,6 +104,10 @@
     "aaravSatsEnglishRelease20261008": {
       "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-08_AARAV_MATHS_SATS_ENGLISH_INDIVIDUAL.json",
       "role": "Owner-scoped Maths Year6/L3 dedup and direct released-only SATS; full L1/L2/L3; English Year6 individual releases (4 D1 grants), excluding accidental ENGLISH_Y6_FULL."
+    },
+    "adminImporterLiveWorker20261009": {
+      "path": "gch/portal-v2-current/GCH_OVERRIDE_2026-10-09_ADMIN_IMPORT_WORKER_FORWARD_ONLY.json",
+      "role": "Current forward-only live shared Worker Admin import reconciliation repair, Step11 exact deployment/binding baseline guard and preserved user prepared access."
     }
   },
   "restartInstruction": "Read the complete authority set above before diagnosing or changing Portal/Admin behaviour. Freshly prove current main, live route, deployed Worker composition, bindings and data-store ownership. Preserve every shared Worker capability. Production recovery is FORWARD-ONLY: never revert, restore an older Worker, use wrangler rollback, or deploy an older entrypoint to recover one feature. If current-state preservation cannot be proved, fail closed and diagnose before mutation. Update this manifest and the applicable authority file in the same coherent change whenever authority or workflow behaviour changes. Treat 226.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them. For L3/Year6 stream-specific lesson incidents, also read the 2026-10-07 L3 prepared-consistency override before any mutation. Treat 11plus.futureperfect.education as a separate public marketing surface: preserve its isolated Worker/custom domain, no-login/no-data-binding topology and no-autoplay contract unless the owner explicitly changes them.",
@@ -658,5 +663,17 @@
       },
       "remainingRisk": "Original live Worker bundle remains unchanged: Y6 SATS/Maths equivalent auto-deploy run 37834319151 failed at stale Step10-only source entrypoint preflight before deployment. Any later auto-reconciliation can regenerate old duplicate Year6 navigation or collision. Must verify live Worker provenance and forward-only deploy actual composition separately; do not rerun old CSV until that is done."
     }
+  },
+  "latestAdminImporterLiveWorker20261009": {
+    "date": "2026-10-09",
+    "status": "LIVE_RUNTIME_STALE_CONFIRMED_DEPLOYMENT_GUARDED_PENDING",
+    "ownerConfirmedStudentAccess": "Aarav's authenticated Maths and English and last English lesson all function. Do not change their canonical D1 or prepared model in this repair.",
+    "readOnlyProductionProvenanceRun": 37887955156,
+    "liveBundleSha256": "0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361",
+    "outstandingFault": "Admin importer runs old Worker source; screenshot shows READ_MODEL_SYNC_FAILED for Aarav after successful targeted access repair.",
+    "intendedWorkerMain": "worker/src/index-step11-year6-catalogue-boundary.js",
+    "sourceCommitAuthority": "Use current main with preserved Step11->Step10->AdminTools->v8. No old source rollback.",
+    "workflow": ".github/workflows/admin-importer-forward-only-20261009.yml",
+    "completion": "No successful live deployment or successful fresh Admin import yet verified. Keep as OPEN."
   }
 }
