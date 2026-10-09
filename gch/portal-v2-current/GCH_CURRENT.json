@@ -666,7 +666,7 @@
   },
   "latestAdminImporterLiveWorker20261009": {
     "date": "2026-10-09",
-    "status": "LIVE_WORKER_STABLE_SOURCE_PIN_VALIDATED_DEPLOYMENT_PENDING",
+    "status": "PRODUCTION_WORKER_DEPLOYED_IMPORTER_CORRECTED_EXISTING_FIVE_ASSERTIONS_PASS_RECHECK_PENDING",
     "ownerConfirmedStudentAccess": "Aarav's authenticated Maths and English and last English lesson all function. Do not change their canonical D1 or prepared model in this repair.",
     "readOnlyProductionProvenanceRun": 37887955156,
     "liveBundleSha256": "0b89428f182ea90d8f0b3db2606a2eeaf09d1f2240d4a00caca1dc190975d361",
@@ -687,6 +687,23 @@
       "deploymentCodeChanges": 0,
       "newGate": "Pin stable decoded MIME Worker module SHA256 and exact module name, preserving fail-closed source proof. Never rely on raw Cloudflare multipart package hash.",
       "postDeploymentState": "PENDING_SAFE_DEPLOYMENT"
-    }
+    },
+    "deployment": {
+      "run": 37888685292,
+      "result": "SUCCESS",
+      "code": "Latest Admin read-model sync implementation and error codes LIVE",
+      "sourceChain": "Step11→Step10→Admin→v8 preserved",
+      "allBindingsUnchanged": true,
+      "unauthorizedQuizAndImporter": "PASS",
+      "noCsvReimport": true,
+      "noParentEmailsSent": true,
+      "readModelContentsNotRewritten": true
+    },
+    "postDeploymentReadOnlyVerification": {
+      "run": 37888898246,
+      "observed": "Live script marker verified. Canonical and prepared model parity test for all five October 8 rows passed before final jq output failed with a display-only undefined safeReadOnly/0 expression.",
+      "pending": "Correct jq field reference and repeat exact read-only check."
+    },
+    "userFacing": "The old failure banner is a historical import result. Only a new authorised idempotent confirmation can show 5/5; no emails sent in this repair."
   }
 }
