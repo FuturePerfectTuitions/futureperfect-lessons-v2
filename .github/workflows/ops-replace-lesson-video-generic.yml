@@ -313,7 +313,8 @@ jobs:
           const canonicalComparable=v=>{
             const x=clone(v);
             if(Object.prototype.hasOwnProperty.call(x,'video')) x.video='__VIDEO__';
-            if(x.core&&typeof x.core==='object') x.core.video='__VIDEO__';
+            x.core=x.core&&typeof x.core==='object'?x.core:{};
+            x.core.video='__VIDEO__';
             if(updateDescription) x.description='__DESCRIPTION__';
             if(x.contentStatus) x.contentStatus={
               ...x.contentStatus,
