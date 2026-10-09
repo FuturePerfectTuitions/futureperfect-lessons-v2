@@ -67,12 +67,12 @@ jobs:
           const m=url.match(/^https:\/\/screenpal\.com\/content\/video\/([A-Za-z0-9]+)\/?$/);
           if(!m) throw new Error('REQUEST_SCREENPAL_URL_INVALID');
           const target=m[1];
-          const intent=clean(req.intent);
+          let intent=clean(req.intent||'auto');
           const descriptionPolicy=clean(req.descriptionPolicy||'unchanged-no-source-supplied');
           const requestedDescription=String(req.newDescription??'');
           const updateDescription=descriptionPolicy==='source-derived';
           if(!displayId||!expectedSubject||!expectedTitle||!target) throw new Error('REQUEST_FIELDS_MISSING');
-          if(!['replacement','addition'].includes(intent)) throw new Error('REQUEST_INTENT_INVALID');
+          if(!['replacement','addition','auto'].includes(intent)) throw new Error('REQUEST_INTENT_INVALID');
           if(req.classificationChange===true) throw new Error('GENERIC_VIDEO_WORKFLOW_REFUSES_CLASSIFICATION_CHANGE');
           if(!['unchanged-no-source-supplied','source-derived'].includes(descriptionPolicy)) throw new Error('REQUEST_DESCRIPTION_POLICY_INVALID');
           if(updateDescription && !requestedDescription.trim()) throw new Error('REQUEST_DESCRIPTION_REQUIRED');
@@ -258,6 +258,11 @@ jobs:
           const preparedOldIds=[...new Set(preparedRefs.map(x=>x.id).filter(Boolean))];
           if(canonicalOldIds.length>1) throw new Error(`CANONICAL_MULTIPLE_SCREENPAL_IDS:${canonicalOldIds.join(',')}`);
           if(preparedOldIds.length>1) throw new Error(`PREPARED_MULTIPLE_SCREENPAL_IDS:${preparedOldIds.join(',')}`);
+          if(intent==='auto'){
+            if(canonicalOldIds.length===1 && preparedOldIds.length===1) intent='replacement';
+            else if(canonicalOldIds.length===0 && preparedOldIds.length===0 && !preparedPayload?.videoVariants) intent='addition';
+            else throw new Error(`AUTO_INTENT_AMBIGUOUS:canonical=${canonicalOldIds.length}:prepared=${preparedOldIds.length}:variants=${Boolean(preparedPayload?.videoVariants)}`);
+          }
           if(intent==='replacement'){
             if(canonicalOldIds.length!==1) throw new Error('REPLACEMENT_CANONICAL_VIDEO_NOT_UNAMBIGUOUS');
             if(preparedOldIds.length!==1) throw new Error('REPLACEMENT_PREPARED_VIDEO_NOT_UNAMBIGUOUS');
