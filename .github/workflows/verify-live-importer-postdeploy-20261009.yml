@@ -63,5 +63,5 @@ jobs:
           node scripts/diagnose-admin-import-20261008-readonly.mjs > /tmp/verified-existing-five.json
           jq -e '.marker=="ADMIN_IMPORT_20261008_READONLY_DIAGNOSTIC" and .bindingChecks=="PASS" and .safeReadOnly==true and .canonicalWrites==0 and .preparedWrites==0 and .emailsSent==0' /tmp/verified-existing-five.json >/dev/null
           jq -e '(.results|length)==5 and ([.results[]|select(.diagnosis!="CURRENT_PREPARED_FULL")]|length)==0' /tmp/verified-existing-five.json >/dev/null
-          jq -c '{marker,readOnly:safeReadOnly,results:[.results[]|{csvRow,diagnosis,preparedLessonState}],successCount:([.results[]|select(.diagnosis=="CURRENT_PREPARED_FULL")]|length)}' /tmp/verified-existing-five.json
+          jq -c '{marker,readOnly:.safeReadOnly,results:[.results[]|{csvRow,diagnosis,preparedLessonState}],successCount:([.results[]|select(.diagnosis=="CURRENT_PREPARED_FULL")]|length)}' /tmp/verified-existing-five.json
           echo ALL_FIVE_EXISTING_STUDENT_READ_MODELS_READBACK_PASS
