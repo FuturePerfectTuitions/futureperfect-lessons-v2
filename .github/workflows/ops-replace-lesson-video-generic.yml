@@ -71,10 +71,12 @@ jobs:
           const descriptionPolicy=clean(req.descriptionPolicy||'unchanged-no-source-supplied');
           const requestedDescription=String(req.newDescription??'');
           const updateDescription=descriptionPolicy==='source-derived';
+          const variantPolicy=clean(req.variantPolicy||'preserve');
           if(!displayId||!expectedSubject||!expectedTitle||!target) throw new Error('REQUEST_FIELDS_MISSING');
           if(!['replacement','addition','auto'].includes(intent)) throw new Error('REQUEST_INTENT_INVALID');
           if(req.classificationChange===true) throw new Error('GENERIC_VIDEO_WORKFLOW_REFUSES_CLASSIFICATION_CHANGE');
           if(!['unchanged-no-source-supplied','source-derived'].includes(descriptionPolicy)) throw new Error('REQUEST_DESCRIPTION_POLICY_INVALID');
+          if(!['preserve','same-video-all'].includes(variantPolicy)) throw new Error('REQUEST_VARIANT_POLICY_INVALID');
           if(updateDescription && !requestedDescription.trim()) throw new Error('REQUEST_DESCRIPTION_REQUIRED');
           if(!updateDescription && Object.prototype.hasOwnProperty.call(req,'newDescription')) throw new Error('REQUEST_DESCRIPTION_PRESENT_WITH_UNCHANGED_POLICY');
 
@@ -276,7 +278,7 @@ jobs:
           console.log('VIDEO_REPLACEMENT_PREFLIGHT=' + JSON.stringify({
             displayId,lessonId,title:before.title,subject:before.subject,viewId,mappedViews,intent,
             canonicalOldId:canonicalOldIds[0]||null,preparedOldId:preparedOldIds[0]||null,target,
-            descriptionPolicy,updateDescription
+            descriptionPolicy,updateDescription,variantPolicy
           }));
 
           // Same-classification replacement: canonical video fields only; description/catalogue/access untouched.
@@ -296,6 +298,7 @@ jobs:
               if(Object.prototype.hasOwnProperty.call(obj,'embedUrl')) obj.embedUrl=targetVideo.embedUrl;
               if(Object.prototype.hasOwnProperty.call(obj,'playerUrl')) obj.playerUrl=targetVideo.embedUrl;
               if(Object.prototype.hasOwnProperty.call(obj,'watchUrl')) obj.watchUrl=targetVideo.watchUrl;
+              if(variantPolicy==='same-video-all' && Object.prototype.hasOwnProperty.call(obj,'quiz')) delete obj.quiz;
             }
           }else{
             nextCanonical.core=nextCanonical.core&&typeof nextCanonical.core==='object'?nextCanonical.core:{};
@@ -340,6 +343,10 @@ jobs:
             nextPrepared.videoVariants={normal:preparedVideo,elevenPlus:{...preparedVideo}};
             nextPrepared.resourceCount=(Array.isArray(nextPrepared.resources)?nextPrepared.resources.length:0)+1;
           }
+          if(variantPolicy==='same-video-all'){
+            const preparedVideo={displayName:'Lesson Video',targetUrl:targetVideo.embedUrl};
+            nextPrepared.videoVariants={normal:preparedVideo,elevenPlus:{...preparedVideo}};
+          }
           if(updateDescription) nextPrepared.description=requestedDescription;
           const preparedAfterIds=[...new Set(screenPalIds(nextPrepared).map(x=>x.id).filter(Boolean))];
           if(!preparedAfterIds.includes(target)) throw new Error('PREPARED_TARGET_NOT_PRESENT_IN_NEXT_PAYLOAD');
@@ -351,6 +358,12 @@ jobs:
           if(!finalPreparedIds.includes(target)) throw new Error('PREPARED_CURRENT_TARGET_NOT_PRESENT');
           for(const old of preparedOldIds) if(old!==target&&finalPreparedIds.includes(old)) throw new Error(`PREPARED_CURRENT_OLD_ID_REMAINS:${old}`);
           if(updateDescription && String(preparedAfter.env.payload?.description??'')!==requestedDescription) throw new Error('PREPARED_DESCRIPTION_VERIFY_FAILED');
+          if(variantPolicy==='same-video-all'){
+            const normalUrl=clean(preparedAfter.env.payload?.videoVariants?.normal?.targetUrl);
+            const elevenUrl=clean(preparedAfter.env.payload?.videoVariants?.elevenPlus?.targetUrl);
+            if(normalUrl!==targetVideo.embedUrl||elevenUrl!==targetVideo.embedUrl) throw new Error('SAME_VIDEO_ALL_PREPARED_VERIFY_FAILED');
+            if(canonicalAfter?.video?.quiz||canonicalAfter?.core?.video?.quiz) throw new Error('SAME_VIDEO_ALL_CANONICAL_QUIZ_REMAINS');
+          }
 
           // Same-classification invariant: catalogue membership cannot change. If description changes,
           // update only the matching catalogue-row description; otherwise the global pointer must stay unchanged.
@@ -390,7 +403,8 @@ jobs:
             globalDescriptionPublished:Boolean(globalPublishResult),
             intent,
             descriptionUpdated:updateDescription,
-            descriptionUnchanged:!updateDescription
+            descriptionUnchanged:!updateDescription,
+            variantPolicy
           }));
           console.log('OPS_REPLACE_LESSON_VIDEO_GENERIC_PASS');
           NODE
