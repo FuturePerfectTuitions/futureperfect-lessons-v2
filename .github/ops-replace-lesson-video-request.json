@@ -1,10 +1,11 @@
 {
-  "displayLessonId": "Y6T1M07",
+  "displayLessonId": "L3T1M07",
   "expectedSubject": "maths",
   "expectedTitle": "Multiplication",
   "screenPalUrl": "https://screenpal.com/content/video/cO6rQnnyZ0m",
   "intent": "replacement",
   "classificationChange": false,
   "descriptionPolicy": "unchanged-no-source-supplied",
+  "variantPolicy": "same-video-all",
   "requestedAt": "2026-10-21"
 }
