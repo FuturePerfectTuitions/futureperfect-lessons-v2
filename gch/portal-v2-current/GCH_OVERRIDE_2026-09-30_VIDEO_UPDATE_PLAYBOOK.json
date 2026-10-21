@@ -129,7 +129,7 @@
     "repairResult": "PASS",
     "browserFollowUp": "After the backend/prepared repair, the owner still reported seeing a 'Lessons' card on the Maths landing page. Treat that as a separate navigation/presentation investigation; do not use it as evidence that the prepared video replacement itself reverted."
   },
-  "futureOperatorRule": "For ordinary same-classification video work, update .github/ops-replace-lesson-video-request.json and normally use intent=auto. The generic workflow must fail closed unless it can prove either an unambiguous replacement (one canonical + one prepared ScreenPal ID) or an unambiguous first addition (none in either layer and no prepared videoVariants). With a supplied script/source, use descriptionPolicy=source-derived and publish/verify description parity across canonical lesson, prepared lesson and matching prepared global catalogue row. Never change lessonToViews/catalogue/access classification unless the owner explicitly requests a classification change.",
+  "futureOperatorRule": "For ordinary same-classification video work, update .github/ops-replace-lesson-video-request.json. Use intent=auto unless an exact mode is required. For shared normal/11+ lessons, inspect prepared videoVariants before mutation. If the owner wants the same lesson video for both audiences, set variantPolicy=same-video-all so canonical quiz metadata is removed and both prepared variants point to the same lesson-video embed. If a distinct 11+ quiz is intentional, preserve that variant and validate its quiz_id separately. Never assume replacing the base ScreenPal ID alone makes the 11+ route valid.",
   "completionLanguage": {
     "allowedWhenAllBackendChecksPass": "Canonical and current prepared lesson state both verified against the exact ScreenPal ID.",
     "browserCaveat": "If no authenticated browser smoke-check was executed, say browser rendering is not yet independently confirmed.",
@@ -216,6 +216,28 @@
       "result": "PASS",
       "preparedVersion": "video-l3t3m43-1791570923849-ac65b91984e415db77",
       "globalVersion": "video-desc-l3t3m43-1791570924953-32d8505ea96c5b825c",
+      "catalogueClassificationUnchanged": true
+    }
+  },
+  "sharedNormalElevenPlusVariantRule": {
+    "status": "ACTIVE_PRODUCTION",
+    "incident": "Y6T1M07/L3T1M07 Multiplication shared canonical lesson Y6M5",
+    "finding": "A shared Year 6/L3 lesson can have separate prepared videoVariants.normal and videoVariants.elevenPlus. Replacing only the base ScreenPal ID is insufficient when elevenPlus still points at a ScreenPal quiz URL with a quiz_id. The 11+ route can fail even while the normal route works.",
+    "requiredAction": "When owner intent is that the same lesson video must serve both normal and 11+ students, use request variantPolicy='same-video-all'. The workflow must remove canonical video.quiz metadata and publish identical Lesson Video targetUrl values to prepared normal and elevenPlus variants.",
+    "guard": "Do not use same-video-all when a distinct 11+ ScreenPal quiz is intentionally required; in that case preserve the variant and supply/validate the correct quiz configuration separately.",
+    "productionProof": {
+      "displayLessonId": "L3T1M07",
+      "canonicalLessonId": "Y6M5",
+      "pairedDisplayIds": {
+        "maths-year6": "Y6T1M07",
+        "maths-level3": "L3T1M07"
+      },
+      "target": "cO6rQnnyZ0m",
+      "priorElevenPlusProblem": "prepared elevenPlus variant retained quiz_id cOiQ2TINS and therefore did not behave like the normal lesson-video route",
+      "workflowRun": 39574999366,
+      "result": "PASS",
+      "variantPolicy": "same-video-all",
+      "descriptionUnchanged": true,
       "catalogueClassificationUnchanged": true
     }
   }
