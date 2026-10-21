@@ -1,11 +1,10 @@
 {
-  "displayLessonId": "Y6T1E08",
-  "expectedSubject": "english",
-  "expectedTitle": "Comprehension",
-  "screenPalUrl": "https://screenpal.com/content/video/cO6YhYnyruH",
-  "intent": "auto",
+  "displayLessonId": "Y6T1M07",
+  "expectedSubject": "maths",
+  "expectedTitle": "Multiplication",
+  "screenPalUrl": "https://screenpal.com/content/video/cO6rQnnyZ0m",
+  "intent": "replacement",
   "classificationChange": false,
-  "descriptionPolicy": "source-derived",
-  "newDescription": "In this Year 6 English lesson, pupils develop a complete set of reading-comprehension strategies and apply them across fiction, non-fiction, biography, discussion, explanation and poetry.\n\nThis lesson includes:\n✔ Making predictions using titles, illustrations, prior knowledge and evidence from a text\n✔ Revising and improving predictions as new information becomes available\n✔ Making text-to-self, text-to-text and text-to-world connections\n✔ Asking and answering questions before, during and after reading\n✔ Combining prior knowledge with information from the text to build fuller answers\n✔ Monitoring understanding and using strategies such as rereading, reading on, sounding out, dictionaries, thesauruses and reading aloud\n✔ Summarising by identifying the main points, using your own words and keeping answers concise\n✔ Visualising characters, settings and events by building detailed mental images from the author’s words\n✔ Applying comprehension skills to a biography of Wally Funk\n✔ Analysing a discussion text about whether trading cards should be banned at school\n✔ Following an explanation text about how chocolate is made\n✔ Exploring fiction through The Mansion of the Hill\n✔ Analysing poetry through From a Railway Carriage by Robert Louis Stevenson\n\nPupils begin with the Super Six comprehension strategies: predicting, connecting, questioning, monitoring, summarising and visualising. Each strategy is introduced explicitly, modelled with examples and supported by sentence starters or practical techniques.\n\nThey then apply these strategies to a range of texts. Pupils answer retrieval, vocabulary, inference, prediction, explanation and opinion questions, use evidence from the text, and distinguish between information stated directly and sensible inferences.\n\nThe later sections broaden the practice across different genres, including biography, discussion, explanation, fiction and poetry, so pupils learn to adapt their reading strategies to different text types.\n\nBy the end of the lesson, learners will be able to select and use appropriate comprehension strategies independently, support answers with evidence, summarise key information and explain their thinking across a wide range of texts.",
-  "requestedAt": "2026-10-20"
+  "descriptionPolicy": "unchanged-no-source-supplied",
+  "requestedAt": "2026-10-21"
 }
