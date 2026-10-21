@@ -1,11 +1,12 @@
 {
-  "displayLessonId": "L3T1M07",
+  "displayLessonId": "Y3T1M06",
   "expectedSubject": "maths",
-  "expectedTitle": "Multiplication",
-  "screenPalUrl": "https://screenpal.com/content/video/cO6rQnnyZ0m",
-  "intent": "replacement",
+  "expectedTitle": "Multiplication & Division",
+  "screenPalUrl": "https://screenpal.com/content/video/cO6r6bnyZvz",
+  "intent": "auto",
   "classificationChange": false,
-  "descriptionPolicy": "unchanged-no-source-supplied",
-  "variantPolicy": "same-video-all",
+  "descriptionPolicy": "source-derived",
+  "variantPolicy": "preserve",
+  "newDescription": "In this Year 3 Maths lesson, pupils develop fluency in multiplication and division by using arrays, grouping, doubling and halving, times-table facts, factors, remainders and related calculations.\n\nThis lesson includes:\n✔ Writing multiplication and division facts from arrays and bar models\n✔ Using doubling and halving to solve calculations and connect times tables\n✔ Grouping numbers equally and identifying remainders\n✔ Using known multiplication facts to solve related division facts\n✔ Finding factors and factor pairs\n✔ Solving practical multiplication and division problems involving money, measures, groups and sharing\n✔ Multiplying and dividing by 10 and 100 using place value\n✔ Using related facts, inverse operations and commutativity\n✔ Solving missing-number calculations and checking errors\n✔ Comparing calculations and using efficient strategies to derive new facts from known ones\n\nPupils begin with familiar multiplication and division relationships using arrays, equal groups, doubling and halving. They then move through increasingly challenging problems involving remainders, factors, times-table connections and real-life contexts.\n\nLater activities develop place-value reasoning through multiplication and division by 10 and 100, and use known facts to derive new ones efficiently. Pupils also practise choosing suitable methods, checking calculations and explaining their reasoning.\n\nBy the end of the lesson, learners will be able to use multiplication and division facts flexibly, connect multiplication with its inverse division facts, and solve a wide range of practical and reasoning problems.",
   "requestedAt": "2026-10-21"
 }
