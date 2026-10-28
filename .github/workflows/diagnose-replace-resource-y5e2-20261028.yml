@@ -68,7 +68,19 @@ jobs:
           canonical_keys=set(x['key'] for x in canonical_rows if '/vr/homework/sheets/' in x['key'])
           prepared_keys=set(x['key'] for x in prepared_rows if '/vr/homework/sheets/' in x['key'])
           script=get('/workers/scripts/fpt-portal-v2-worker',False)
+          student_settings=get('/workers/scripts/fpt-portal-v2-rebuild-student-prod/settings')
+          browser_settings=get('/workers/scripts/fpt-portal-v2-rebuild-browser-prod/settings')
+          student_bindings=student_settings.get('result',{}).get('bindings',[])
+          browser_bindings=browser_settings.get('result',{}).get('bindings',[])
+          binding=lambda rows,name:next((b for b in rows if b.get('name')==name),{})
+          student_namespace=binding(student_bindings,'READ_MODELS_KV').get('namespace_id')
+          student_bucket=binding(student_bindings,'MATERIALS_R2').get('bucket_name')
+          admin_bucket=binding(bindings,'MATERIALS_R2').get('bucket_name')
           report={
+              'studentNamespaceMatchesAdmin':student_namespace==ids['READ_MODELS_KV'],
+              'studentR2BucketMatchesAdmin':student_bucket==admin_bucket,
+              'studentR2Bucket':student_bucket,
+              'browserStudentService':binding(browser_bindings,'STAGING_API').get('service'),
               'status':'READ_ONLY',
               'lessonId':'Y5E2',
               'worker':'fpt-portal-v2-worker',
@@ -87,3 +99,23 @@ jobs:
           print(json.dumps(report,indent=2,sort_keys=True))
           print('Y5E2_READ_ONLY_DIAGNOSTIC_END')
           PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify live replacement and original R2 PDF bytes (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT="fpt-materials-dev/english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01A__replacement_20261028T071709Z_jgid79.pdf"
+          ORIGINAL="fpt-materials-dev/english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf"
+          npx --yes wrangler@4.125.0 r2 object get "$CURRENT" --remote --file /tmp/y5e2-current.pdf >/dev/null
+          npx --yes wrangler@4.125.0 r2 object get "$ORIGINAL" --remote --file /tmp/y5e2-original.pdf >/dev/null
+          python3 - <<'PYCODE'
+          import hashlib,json
+          def info(path):
+              with open(path,'rb') as f: data=f.read()
+              return {'exists':True,'bytes':len(data),'pdfMagic':data[:5]==b'%PDF-','sha256':hashlib.sha256(data).hexdigest()}
+          a=info('/tmp/y5e2-current.pdf');b=info('/tmp/y5e2-original.pdf')
+          print('R2_READ_ONLY_CHECK',json.dumps({'current':a,'original':b,'differentContent':a['sha256']!=b['sha256']},sort_keys=True))
+          PYCODE
