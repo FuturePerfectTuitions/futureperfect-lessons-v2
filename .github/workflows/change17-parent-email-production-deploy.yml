@@ -1,11 +1,10 @@
 name: Change 17 parent email production deploy
+# Frontend-only Admin HTML changes must not redeploy the shared production Worker.
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/change17-parent-email-production-deploy.yml'
-      - 'admin-import.html'
       - 'assets/admin-import.js'
       - 'assets/sej-email-signature-clean.png'
       - 'worker/wrangler.toml'
