@@ -23,7 +23,7 @@ assert.match(html, /id="replacePublicationVerification"/);
 assert.match(html, /id="replaceCanonicalVerification"/);
 assert.match(html, /id="replacePreparedVerification"/);
 assert.match(html, /id="replaceVerifiedCurrentFile"/);
-assert.match(html, /admin-replace-resource\.js\?v=20261028-replace-feedback-1/);
+assert.match(html, /admin-replace-resource\.js\?v=20261028-student-filename-2/);
 assert.match(html, /assets\/admin-replace-resource\.js/);
 assert.match(html, /assets\/admin-trials\.js/);
 assert.match(html, /previous R2 object is deliberately retained for rollback/i);
