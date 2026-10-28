@@ -21,14 +21,14 @@ jobs:
           set -euo pipefail
           BASE='https://futureperfecttuitions.github.io/futureperfect-lessons-v2'
           HTML="$BASE/admin-import.html?verify=$GITHUB_SHA"
-          JS="$BASE/assets/admin-replace-resource.js?v=20261028-replace-feedback-1&verify=$GITHUB_SHA"
+          JS="$BASE/assets/admin-replace-resource.js?v=20261028-student-filename-2&verify=$GITHUB_SHA"
           for attempt in $(seq 1 24); do
             if curl -fLsS --max-time 15 -H 'Cache-Control: no-cache' "$HTML" -o /tmp/admin-live.html \
               && curl -fLsS --max-time 15 -H 'Cache-Control: no-cache' "$JS" -o /tmp/admin-live-replace.js \
               && cmp -s admin-import.html /tmp/admin-live.html \
               && cmp -s assets/admin-replace-resource.js /tmp/admin-live-replace.js; then
               grep -Fq 'id="replacePublicationVerification"' /tmp/admin-live.html
-              grep -Fq 'Current PDF:' /tmp/admin-live-replace.js
+              grep -Fq 'data.newDisplayName' /tmp/admin-live-replace.js
               grep -Fq 'replace-resource-consistency-v1' /tmp/admin-live-replace.js
               echo 'ADMIN_REPLACE_RESOURCE_PAGES_EXACT_READBACK_PASS'
               sha256sum admin-import.html assets/admin-replace-resource.js
