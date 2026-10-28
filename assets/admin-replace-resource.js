@@ -198,8 +198,8 @@
       `Replace this Portal resource?\n\n` +
       `Lesson: ${loadedLesson.lessonId} — ${loadedLesson.title}\n` +
       `Resource: ${resource.displayName || resource.resourceId}\n` +
-      `New file: ${file.name}\n\n` +
-      `The existing Portal resource reference will be changed. The previous R2 object will be retained for rollback safety.`
+      `New student-facing name: ${file.name}\n\n` +
+      `Students will see the uploaded PDF filename instead of the old resource name. The previous R2 object will be retained for rollback safety.`
     );
     if (!confirmed) return;
 
@@ -221,7 +221,7 @@
       const canonicalVerified = Boolean(
         refreshed.ok && current && loadedLesson?.lessonId === data.lessonId &&
         current.pathToken === resource.pathToken && current.r2Key === data.newR2Key &&
-        current.displayName === resource.displayName
+        current.displayName === data.newDisplayName && data.newDisplayName === file.name
       );
       const r2Verified = Boolean(data.newR2Key && /^[a-f0-9]{64}$/i.test(data.sha256 || ''));
       const preparedStatus = data.consistency === CONSISTENCY_MARKER ? data.preparedReadModel?.status : null;
@@ -237,12 +237,12 @@
         prepared: preparedLabel,
         r2: r2Verified ? `Verified by upload/readback SHA-256: ${data.sha256}` : 'Not verified from replacement response',
         currentFile: canonicalVerified ? basename(current.r2Key) : basename(data.newR2Key) || 'Unknown',
-        displayName: canonicalVerified ? current.displayName : data.displayName || resource.displayName || 'Unknown'
+        displayName: canonicalVerified ? current.displayName : data.newDisplayName || 'Not verified'
       });
       if (canonicalVerified && r2Verified && preparedVerified) {
         setStatus(
           `Replacement verified for ${data.lessonId}. Canonical lesson, prepared student lesson and R2 PDF all passed readback. ` +
-          'The student-facing name is unchanged; the previous R2 object is retained.',
+          `Students now see ${data.newDisplayName}. The previous R2 object is retained.`,
           'good'
         );
       } else {
@@ -255,6 +255,8 @@
     } catch (error) {
       if (error.code === 'RESOURCE_CHANGED') {
         setStatus('This resource changed after you loaded the lesson. Reload the lesson and check the current resource before trying again.', 'bad');
+      } else if (error.code === 'PDF_FILENAME_INVALID') {
+        setStatus('The selected PDF filename is invalid. Choose a PDF whose original filename is suitable for students.', 'bad');
       } else if (error.code === 'INVALID_PDF') {
         setStatus('The selected file does not contain a valid PDF header.', 'bad');
       } else if (error.code === 'UNAUTHORISED') {
