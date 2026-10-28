@@ -155,7 +155,7 @@
       resources.forEach((resource, index) => {
         const option = document.createElement('option');
         option.value = String(index);
-        option.textContent = `${resource.kind || 'Resource'} — ${resource.displayName || resource.resourceId || 'Resource'} | Current PDF: ${basename(resource.r2Key)}`;
+        option.textContent = `${resource.kind || 'Resource'} — ${resource.displayName || resource.resourceId || basename(resource.r2Key)}`;
         select.appendChild(option);
       });
       select.disabled = false;
