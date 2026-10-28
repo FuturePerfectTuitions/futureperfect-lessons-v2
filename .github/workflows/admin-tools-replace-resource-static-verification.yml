@@ -12,6 +12,7 @@ on:
       - 'worker/wrangler.toml'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-resource-replace-consistency-verification.mjs'
+      - 'tests/admin-resource-replace-filename-consistency-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-replace-resource-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
@@ -29,6 +30,7 @@ on:
       - 'worker/wrangler.toml'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-resource-replace-consistency-verification.mjs'
+      - 'tests/admin-resource-replace-filename-consistency-verification.mjs'
       - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-replace-resource-ui-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
@@ -64,6 +66,7 @@ jobs:
         run: |
           node tests/admin-resource-replace-verification.mjs
           node tests/admin-resource-replace-consistency-verification.mjs
+          node tests/admin-resource-replace-filename-consistency-verification.mjs
       - name: Admin Tools UI verification
         run: |
           node tests/admin-tools-ui-verification.mjs
