@@ -75,7 +75,7 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
   assert.equal(el('replaceVerifiedCurrentFile').textContent,newKey.split('/').pop());
   const fullyVerified=prepared==='published' && marker && canonicalReadback && !reloadFails;
   assert.equal(el('replaceResourceStatus').className,fullyVerified?'status good':'status warn');
-  assert.match(el('replacePreparedVerification').textContent,fullyVerified?/Verified: current student lesson/:/Not (?:published|verified)/);
+  assert.match(el('replacePreparedVerification').textContent,prepared==='published' && marker?/Verified: current student lesson/:/Not (?:published|verified)/);
   if (fullyVerified) {
     assert.equal(el('replaceResourceSelect').value,'0','Stable pathToken retains selection despite empty resourceId');
     assert.equal(el('replaceCurrentResourceFile').textContent,newKey.split('/').pop());
