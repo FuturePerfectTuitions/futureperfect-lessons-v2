@@ -7,7 +7,7 @@ assert.equal(PATHS.replace,'/api/v1/admin/resources/replace');
 assert.equal(safeFileName('My Drive\\Homework (new).pdf'),'Homework (new).pdf');
 assert.equal(studentFacingFileName('English — descriptive (NEW).PDF'),'English — descriptive (NEW).PDF');
 assert.equal(studentFacingFileName('folder\\Final Homework.pdf'),'Final Homework.pdf');
-assert.equal(studentFacingFileName('bad\\u0000file.pdf'),null);
+assert.equal(studentFacingFileName('bad\u0000file.pdf'),null);
 assert.deepEqual(parsePathToken('["core","homeworks",0,"homework"]'),['core','homeworks',0,'homework']);
 assert.equal(parsePathToken('["__proto__"]'),null);
 const inventory=enumerateResources(lesson);
