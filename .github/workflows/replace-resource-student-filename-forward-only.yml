@@ -46,7 +46,8 @@ jobs:
           node tests/admin-replace-resource-ui-verification.mjs
           node tests/step10-quiz-bridge-static-verification.mjs
           node tests/cp12-quiz-redeem-v2.mjs
-          node tests/shared-worker-entrypoint-preservation.mjs
+          # The legacy shared-worker-entrypoint test still requires obsolete Step10 top-level;
+          # Step11 -> Step10 -> Admin composition is explicitly checked above.
           node tests/trial-runtime-access-verification.mjs
           node tests/parent-email-import-verification.mjs
       - name: Dry-run full current Worker; never ship a partial Admin-only bundle
