@@ -1,0 +1,89 @@
+name: Diagnose Y5E2 Replace Resource (read-only)
+on:
+  push:
+    branches:
+      - diagnose/replace-resource-y5e2-20261028
+    paths:
+      - .github/workflows/diagnose-replace-resource-y5e2-20261028.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read production canonical/prepared Y5E2 keys without writing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,hashlib,sys
+          acct=os.environ.get('CLOUDFLARE_ACCOUNT_ID','')
+          token=os.environ.get('CLOUDFLARE_API_TOKEN','')
+          if not acct or not token:
+              raise SystemExit('Missing Cloudflare credentials (no mutations performed)')
+          base='https://api.cloudflare.com/client/v4/accounts/'+acct
+          def get(path,json_mode=True):
+              req=urllib.request.Request(base+path, headers={'Authorization':'Bearer '+token,'Accept':'application/json'})
+              with urllib.request.urlopen(req,timeout=35) as resp: body=resp.read()
+              if json_mode: return json.loads(body)
+              return body
+          def kv(ns,key):
+              return get('/storage/kv/namespaces/'+ns+'/values/'+urllib.parse.quote(key,safe=''))
+          def safe_rows(node,key_field,match,limit=24):
+              out=[]
+              def walk(value,path):
+                  if len(out)>=limit: return
+                  if isinstance(value,dict):
+                      if isinstance(value.get(key_field),str):
+                          label=str(value.get('displayName') or value.get('resourceId') or '')
+                          k=value[key_field]
+                          if match in label or '/vr/homework/sheets/' in k or match in k:
+                              out.append({'path':path,'displayName':label,'resourceId':value.get('resourceId'),'key':k})
+                      for k,v in value.items(): walk(v,path+'.'+k)
+                  elif isinstance(value,list):
+                      for i,v in enumerate(value): walk(v,path+'['+str(i)+']')
+              walk(node,'$')
+              return out
+          def encoded_scope(s): return urllib.parse.quote(s,safe='').replace('%','_')
+          settings=get('/workers/scripts/fpt-portal-v2-worker/settings')
+          if not settings.get('success'): raise SystemExit('Worker settings read failed')
+          bindings=settings['result'].get('bindings',[])
+          ids={b.get('name'):b.get('namespace_id') for b in bindings if b.get('type')=='kv_namespace'}
+          if not ids.get('LESSONS_KV') or not ids.get('READ_MODELS_KV'):
+              raise SystemExit('Required canonical/prepared bindings missing')
+          canonical=kv(ids['LESSONS_KV'],'lesson:Y5E2')
+          scope='lesson:Y5E2'
+          pointer=kv(ids['READ_MODELS_KV'],'rm:v1:scope:'+encoded_scope(scope)+':current')
+          version=pointer.get('current',{}).get('version','')
+          if not version: raise SystemExit('No current prepared scope version')
+          envelope=kv(ids['READ_MODELS_KV'],'rm:v1:scope:'+encoded_scope(scope)+':version:'+encoded_scope(version))
+          prepared=envelope.get('payload',{})
+          target='FAR210225Y5E2'
+          canonical_rows=safe_rows(canonical,'r2Key',target)
+          prepared_rows=safe_rows(prepared,'objectKey',target)
+          canonical_keys=set(x['key'] for x in canonical_rows if '/vr/homework/sheets/' in x['key'])
+          prepared_keys=set(x['key'] for x in prepared_rows if '/vr/homework/sheets/' in x['key'])
+          script=get('/workers/scripts/fpt-portal-v2-worker',False)
+          report={
+              'status':'READ_ONLY',
+              'lessonId':'Y5E2',
+              'worker':'fpt-portal-v2-worker',
+              'bindingsPresent':sorted([n for n in ('LESSONS_KV','READ_MODELS_KV','MATERIALS_R2') if any(b.get('name')==n for b in bindings)]),
+              'scriptSha256':hashlib.sha256(script).hexdigest(),
+              'scriptGuards':{x:x.encode() in script for x in ('replace-resource-consistency-v1','replace-resource-preflight-pass-v1','RESOURCE_REPLACE_PROJECTION_FAILED')},
+              'pointerVersion':version,
+              'pointerPayloadSha256':pointer.get('current',{}).get('sha256'),
+              'canonicalTarget':canonical_rows,
+              'preparedTarget':prepared_rows,
+              'canonicalHomeworkKeys':sorted(canonical_keys),
+              'preparedHomeworkKeys':sorted(prepared_keys),
+              'keysMatch':canonical_keys==prepared_keys and len(canonical_keys)==1
+          }
+          print('Y5E2_READ_ONLY_DIAGNOSTIC_BEGIN')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          print('Y5E2_READ_ONLY_DIAGNOSTIC_END')
+          PY
