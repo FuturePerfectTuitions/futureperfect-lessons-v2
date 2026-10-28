@@ -1,0 +1,57 @@
+name: Verify Replace Resource Admin Pages deployment
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-import.html'
+      - 'assets/admin-replace-resource.js'
+      - '.github/workflows/verify-admin-replace-resource-pages-live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Independently verify exact live GitHub Pages Admin assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://futureperfecttuitions.github.io/futureperfect-lessons-v2'
+          HTML="$BASE/admin-import.html?verify=$GITHUB_SHA"
+          JS="$BASE/assets/admin-replace-resource.js?v=20261028-replace-feedback-1&verify=$GITHUB_SHA"
+          for attempt in $(seq 1 24); do
+            if curl -fLsS --max-time 15 -H 'Cache-Control: no-cache' "$HTML" -o /tmp/admin-live.html \
+              && curl -fLsS --max-time 15 -H 'Cache-Control: no-cache' "$JS" -o /tmp/admin-live-replace.js \
+              && cmp -s admin-import.html /tmp/admin-live.html \
+              && cmp -s assets/admin-replace-resource.js /tmp/admin-live-replace.js; then
+              grep -Fq 'id="replacePublicationVerification"' /tmp/admin-live.html
+              grep -Fq 'Current PDF:' /tmp/admin-live-replace.js
+              grep -Fq 'replace-resource-consistency-v1' /tmp/admin-live-replace.js
+              echo 'ADMIN_REPLACE_RESOURCE_PAGES_EXACT_READBACK_PASS'
+              sha256sum admin-import.html assets/admin-replace-resource.js
+              exit 0
+            fi
+            echo "Admin Pages not converged on attempt $attempt; retrying without modification"
+            sleep 8
+          done
+          echo 'Admin Pages did not serve exact authorised assets; no backend changes made' >&2
+          sha256sum admin-import.html assets/admin-replace-resource.js /tmp/admin-live.html /tmp/admin-live-replace.js || true
+          exit 1
+      - name: Verify unchanged production Worker API transport and authentication guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+          preflight="$(curl -sS --max-time 15 -X OPTIONS -H "Origin: $ORIGIN" -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization' -D /tmp/replace-preflight.h -o /tmp/replace-preflight.json -w '%{http_code}' "$BASE/api/v1/admin/resources/replace")"
+          test "$preflight" = '200'
+          grep -iFq "access-control-allow-origin: $ORIGIN" /tmp/replace-preflight.h
+          grep -iFq 'x-fpt-replace-resource-preflight-guard: replace-resource-preflight-pass-v1' /tmp/replace-preflight.h
+          grep -Fq '"ok":true' /tmp/replace-preflight.json
+          protected="$(curl -sS --max-time 15 -X POST -H "Origin: $ORIGIN" -H 'content-type: application/json' --data '{"lessonId":"Y5E2"}' -o /tmp/replace-unauth.json -w '%{http_code}' "$BASE/api/v1/admin/resources/lesson")"
+          test "$protected" = '401'
+          grep -Fq 'UNAUTHORISED' /tmp/replace-unauth.json
+          echo 'ADMIN_REPLACE_RESOURCE_BACKEND_UNCHANGED_AUTH_PREFLIGHT_PASS'
