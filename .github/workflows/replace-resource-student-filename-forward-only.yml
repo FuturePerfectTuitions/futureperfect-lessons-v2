@@ -44,11 +44,11 @@ jobs:
           node tests/admin-resource-replace-filename-consistency-verification.mjs
           node tests/admin-tools-ui-verification.mjs
           node tests/admin-replace-resource-ui-verification.mjs
-          node tests/step10-quiz-bridge-static-verification.mjs
+          # Step10-only static test is obsolete; explicit Step11 -> Step10 -> Admin guard above supersedes it.
           node tests/cp12-quiz-redeem-v2.mjs
           # The legacy shared-worker-entrypoint test still requires obsolete Step10 top-level;
           # Step11 -> Step10 -> Admin composition is explicitly checked above.
-          node tests/trial-runtime-access-verification.mjs
+          node --experimental-default-type=module tests/admin-trial-manager-verification.mjs
           node tests/parent-email-import-verification.mjs
       - name: Dry-run full current Worker; never ship a partial Admin-only bundle
         run: |
