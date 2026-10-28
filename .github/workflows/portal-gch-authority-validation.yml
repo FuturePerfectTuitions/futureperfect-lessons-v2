@@ -55,7 +55,9 @@ jobs:
               '6.6-year6-label-year6',
               '6.7-video-playbook-plus-year6-label',
               '6.11-v2-year6-live-browser-worker-ordering',
-              '6.14-public-marketing-video-11plus'
+              '6.14-public-marketing-video-11plus',
+              '6.19-shared-video-variant-handling',
+              '6.20-replace-resource-admin-verification-feedback'
           }
           assert base['status'] == 'AUTHORITATIVE_CURRENT'
           assert replace_override['status'] == 'AUTHORITATIVE_CURRENT_OVERRIDE'
