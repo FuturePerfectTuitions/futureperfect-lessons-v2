@@ -243,5 +243,31 @@
     "liveBackendMutated": false,
     "authenticatedPostUploadStudentBrowserTest": "NOT_PERFORMED",
     "unrelatedLegacyParentEmailTrigger": "Earlier legacy workflow 40652974166 failed before deployment; removed HTML-only trigger in b19047a01c38732cedde0325cf6c438dfa4fb93b"
+  },
+  "ownerSupersession20261028": {
+    "authority": "Explicit new owner instruction superseding the previous preserve-student-displayName rule ONLY for Admin Replace Resource.",
+    "newStudentFacingNameRule": "After an Admin replacement, use the uploaded PDF File.name basename as displayName in canonical LESSONS_KV and current prepared lesson READ_MODELS_KV, while retaining the unique R2 object key solely for storage. This applies to Homework, PreLesson and other replaceable PDFs selected by Admin.",
+    "preserving": [
+      "unchanged student entitlements",
+      "unchanged resource IDs and ordering",
+      "unchanged protected answers/credentials",
+      "previous R2 object retained for rollback",
+      "all other composed Worker routes"
+    ],
+    "studentLabelAndKeyMustBothMatch": true,
+    "failClosedOnPreparedNameMismatch": true,
+    "rollbackRestoresBothDisplayNameAndObjectKey": true,
+    "previousAdminUiPreserveNameLanguage": "SUPERSEDED",
+    "existingY5E2Target": {
+      "lessonId": "Y5E2",
+      "resourcePath": [
+        "vr",
+        "homeworks",
+        0,
+        "homework"
+      ],
+      "desiredDisplayName": "FAR210225Y5T1EE01VRH01A.pdf",
+      "method": "guarded metadata-only canonical and prepared publication; no duplicate upload"
+    }
   }
 }
