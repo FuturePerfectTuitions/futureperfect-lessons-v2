@@ -1,14 +1,13 @@
 name: Admin superuser production deploy
 # Production Worker gate for authenticated Admin operations, quiz-bridge compatibility and protected-view stability.
+# Static Admin HTML/JS is served by GitHub Pages and MUST NOT trigger a shared Worker redeploy.
 
 on:
   push:
     branches: [main]
     paths:
-      - 'admin-import.html'
       - 'assets/admin-trials.js'
       - 'assets/admin-create-batch.js'
-      - 'assets/admin-replace-resource.js'
       - 'worker/src/admin-trial-manager.js'
       - 'worker/src/admin-batch-manager-v2.js'
       - 'worker/src/admin-resource-replace.js'
@@ -33,14 +32,12 @@ on:
       - 'tests/admin-student-manager-verification.mjs'
       - 'tests/admin-resource-replace-verification.mjs'
       - 'tests/admin-resource-replace-consistency-verification.mjs'
-      - 'tests/admin-tools-ui-verification.mjs'
       - 'tests/admin-lesson-release-import-verification.mjs'
       - 'tests/parent-email-import-verification.mjs'
       - 'tests/parent-email-completed-status-verification.mjs'
       - 'tests/admin-superuser-static-verification.mjs'
       - 'tests/protected-view-stability-static-verification.mjs'
       - 'tests/trial-runtime-access-verification.mjs'
-      - '.github/workflows/admin-superuser-production-deploy.yml'
 
 permissions:
   contents: read
