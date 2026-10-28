@@ -1,0 +1,136 @@
+name: Guarded Replace Resource student filename production deployment
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/replace-resource-student-filename-forward-only.yml'
+      - 'worker/src/admin-resource-replace.js'
+      - 'worker/src/admin-resource-replace-consistency.js'
+      - 'tests/admin-resource-replace-filename-consistency-verification.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: portal-shared-worker-replace-resource-20261028
+  cancel-in-progress: false
+env:
+  WORKER_NAME: fpt-portal-v2-worker
+  WRANGLER_VERSION: 4.125.0
+  DEPLOY_MESSAGE: Forward-only current Step11 Portal Worker with student PDF filename replacement
+  EXPECTED_LIVE_MODULE_SHA256: 8f495f96b02be1a7f9a2b6a31ecd6099e9741c88592dc1560a92e62c3ab0edc2
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify complete Step11 and Admin composition
+        run: |
+          set -euo pipefail
+          grep -Fq 'main = "src/index-step11-year6-catalogue-boundary.js"' worker/wrangler.toml
+          grep -Fq "import currentWorker from './index-step10-quiz-bridge.js'" worker/src/index-step11-year6-catalogue-boundary.js
+          grep -Fq "import currentWorker from './index-admin-tools.js'" worker/src/index-step10-quiz-bridge.js
+          grep -Fq './admin-resource-replace-consistency.js' worker/src/index-admin-tools.js
+          node --check worker/src/admin-resource-replace.js
+          node --check worker/src/admin-resource-replace-consistency.js
+          node --check assets/admin-replace-resource.js
+      - name: Verify replacement label, prepared publication and unrelated routes
+        run: |
+          set -euo pipefail
+          node tests/admin-resource-replace-verification.mjs
+          node tests/admin-resource-replace-consistency-verification.mjs
+          node tests/admin-resource-replace-filename-consistency-verification.mjs
+          node tests/admin-tools-ui-verification.mjs
+          node tests/admin-replace-resource-ui-verification.mjs
+          node tests/step10-quiz-bridge-static-verification.mjs
+          node tests/cp12-quiz-redeem-v2.mjs
+          node tests/shared-worker-entrypoint-preservation.mjs
+          node tests/trial-runtime-access-verification.mjs
+          node tests/parent-email-import-verification.mjs
+      - name: Dry-run full current Worker; never ship a partial Admin-only bundle
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module scripts/phase11-apply-package.mjs --write-dir /tmp/replace-filename-navigation
+          npx --yes wrangler@4.125.0 deploy --config worker/wrangler.toml --dry-run --outdir /tmp/replace-filename-bundle
+          grep -aFRq 'PREPARED_FILENAME_READBACK_MISMATCH' /tmp/replace-filename-bundle
+          grep -aFRq 'CANONICAL_FILENAME_READBACK_MISMATCH' /tmp/replace-filename-bundle
+          grep -aFRq '/api/v1/quiz-bridge/redeem' /tmp/replace-filename-bundle
+          grep -aFRq 'trial-runtime-access-v2' /tmp/replace-filename-bundle
+          grep -aFRq '/api/v1/admin/lesson-releases/confirm' /tmp/replace-filename-bundle
+  deploy:
+    needs: validate
+    if: github.repository == 'FuturePerfectTuitions/futureperfect-lessons-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin exact currently deployed Worker module and all bindings
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl -fsS -D /tmp/replace-before.headers -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/replace-before.bin
+          python3 - <<'PY'
+          import re,hashlib,os
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          headers=Path('/tmp/replace-before.headers').read_text('latin1')
+          body=Path('/tmp/replace-before.bin').read_bytes()
+          m=re.search(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          assert m,'Missing live MIME headers'
+          parsed=BytesParser(policy=default).parsebytes(('Content-Type: '+m.group(1).strip()+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+body)
+          parts=list(parsed.iter_parts())
+          if len(parts)!=1:raise SystemExit('SHARED_WORKER_MODULE_COUNT_DRIFT')
+          mod=parts[0]
+          name=mod.get_filename() or mod.get_param('name',header='content-disposition') or mod.get_param('name')
+          digest=hashlib.sha256(mod.get_payload(decode=True) or b'').hexdigest()
+          if name!='index-step11-year6-catalogue-boundary.js':raise SystemExit('SHARED_WORKER_MODULE_NAME_DRIFT')
+          if digest!=os.environ['EXPECTED_LIVE_MODULE_SHA256']:raise SystemExit('SHARED_WORKER_MODULE_SHA_DRIFT')
+          print('FORWARD_ONLY_LIVE_SHA_MATCH_PASS')
+          PY
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME/settings" -o /tmp/replace-settings-before.json
+          jq -e '.success == true' /tmp/replace-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="READ_MODELS_KV" and .namespace_id=="77b35165c8694087bc1b0515c35a7e89")' /tmp/replace-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="EMAIL" and .type=="send_email")' /tmp/replace-settings-before.json >/dev/null
+          jq -e '.result.bindings[] | select(.name=="QUIZ_BRIDGE_SECRET" and .type=="secret_text")' /tmp/replace-settings-before.json >/dev/null
+          jq -cS '[.result.bindings[] | if .type=="secret_text" then {name,type} else . end] | sort_by(.name)' /tmp/replace-settings-before.json > /tmp/replace-bindings-before.json
+          echo 'SHARED_WORKER_BINDINGS_PREFLIGHT_PASS'
+      - name: Deploy forward-only exact current Step11 composed Worker
+        run: |
+          set -euo pipefail
+          bash ops/deploy_current_worker_preserve.sh
+          echo 'REPLACE_STUDENT_FILENAME_WORKER_DEPLOY_SUBMITTED'
+      - name: Verify deployed implementation, bindings and protected endpoints
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          AUTH="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME" -o /tmp/replace-worker-after.bin
+          for marker in 'PREPARED_FILENAME_READBACK_MISMATCH' 'CANONICAL_FILENAME_READBACK_MISMATCH' 'replace-resource-consistency-v1' '/api/v1/quiz-bridge/redeem' 'trial-runtime-access-v2' '/api/v1/admin/lesson-releases/confirm'; do
+            grep -aFq "$marker" /tmp/replace-worker-after.bin
+          done
+          curl -fsS -H "$AUTH" "$API/workers/scripts/$WORKER_NAME/settings" -o /tmp/replace-settings-after.json
+          jq -cS '[.result.bindings[] | if .type=="secret_text" then {name,type} else . end] | sort_by(.name)' /tmp/replace-settings-after.json > /tmp/replace-bindings-after.json
+          cmp -s /tmp/replace-bindings-before.json /tmp/replace-bindings-after.json
+          BASE='https://fpt-portal-v2-worker.futureperfectlessons.workers.dev'
+          ORIGIN='https://futureperfecttuitions.github.io'
+          STATUS=$(curl -sS -X OPTIONS -H "Origin: $ORIGIN" -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization' -D /tmp/name-preflight.headers -o /tmp/name-preflight.json -w '%{http_code}' "$BASE/api/v1/admin/resources/replace")
+          test "$STATUS" = 200
+          grep -iFq 'x-fpt-replace-resource-preflight-guard: replace-resource-preflight-pass-v1' /tmp/name-preflight.headers
+          STATUS=$(curl -sS -X POST -H "Origin: $ORIGIN" -H 'Content-Type: application/json' --data '{"lessonId":"Y5E2"}' -o /tmp/name-unauth.json -w '%{http_code}' "$BASE/api/v1/admin/resources/lesson")
+          test "$STATUS" = 401
+          grep -Fq 'UNAUTHORISED' /tmp/name-unauth.json
+          STATUS=$(curl -sS -X POST -H 'Content-Type: application/json' --data '{"code":"guard-only-invalid"}' -o /tmp/name-quiz.json -w '%{http_code}' "$BASE/api/v1/quiz-bridge/redeem")
+          test "$STATUS" = 401
+          echo 'REPLACE_STUDENT_FILENAME_LIVE_WORKER_BINDINGS_ROUTES_PASS'
