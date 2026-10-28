@@ -1109,7 +1109,7 @@
   },
   "latestReplaceResourceStudentFilename": {
     "date": "2026-10-28",
-    "status": "CODE_TESTED_PENDING_GUARDED_PRODUCTION_DEPLOYMENT_AND_Y5E2_NAME_REPAIR",
+    "status": "LIVE_WORKER_DEPLOYMENT_VERIFIED_Y5E2_EXISTING_LABEL_REPAIR_PENDING",
     "ownerDecision": "The uploaded PDF filename must be the actual student-facing resource name. The previous rule to preserve the student-facing displayName is explicitly superseded for Replace Resource.",
     "canonical": "Update only selected LESSONS_KV resource r2Key and displayName from uploaded File.name basename.",
     "prepared": "Update only matching prepared lesson resource objectKey and displayName, atomically publish and verify exact new name and key.",
@@ -1118,6 +1118,19 @@
     "noEntitlementsChanged": true,
     "noProtectedAnswerPolicyChange": true,
     "ui": "Report the uploaded basename as student-facing PDF filename and keep actual suffixed R2 key as technical diagnostic only.",
-    "existingY5E2": "Repair current Y5E2 VR Homework displayName to FAR210225Y5T1EE01VRH01A.pdf with guarded canonical and prepared readback; reuse current R2 object, no new PDF upload."
+    "existingY5E2": "Repair current Y5E2 VR Homework displayName to FAR210225Y5T1EE01VRH01A.pdf with guarded canonical and prepared readback; reuse current R2 object, no new PDF upload.",
+    "guardedWorkerRun": 40657204255,
+    "guardedWorkerResult": "PASS",
+    "sourceTestResult": "PASS_ADMIN_REPLACE_RESOURCE_FILENAME_CONSISTENCY",
+    "deploymentTopology": "Step11 -> Step10 Quiz bridge -> Admin Tools; all bindings unchanged",
+    "currentY5E2BeforeRepair": {
+      "canonicalDisplayName": "FAR210225Y5E2.pdf",
+      "preparedDisplayName": "FAR210225Y5E2.pdf",
+      "r2Key": "english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01A__replacement_20261028T071709Z_jgid79.pdf"
+    },
+    "correctionWorkflow": ".github/workflows/repair-existing-y5e2-student-filename.yml",
+    "correctionStatus": "NOT_EXECUTED",
+    "requires": "Explicit workflow_dispatch from GitHub Actions if automated trigger cannot be initiated",
+    "adminDropdown": "Show only student-facing name; R2 storage filename appears separately in selected resource details"
   }
 }
