@@ -8,6 +8,7 @@ const oldKey = 'english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5E2.pdf';
 const newKey = 'english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01A__replacement_20261028T071709Z_jgid79.pdf';
 const pathToken = JSON.stringify(['vr', 'homeworks', 0, 'homework']);
 const displayName = 'FAR210225Y5E2.pdf';
+const newDisplayName = 'FAR210225Y5T1EE01VRH01A.pdf';
 
 class FakeElement {
   constructor() {
@@ -25,7 +26,7 @@ class FakeElement {
 async function scenario({ prepared = 'published', marker = true, canonicalReadback = true, reloadFails = false } = {}) {
   const elements = new Map();
   const el = id => { if (!elements.has(id)) elements.set(id, new FakeElement()); return elements.get(id); };
-  let currentKey = oldKey, replaceCalls = 0, lessonCalls = 0;
+  let currentKey = oldKey, currentDisplayName = displayName, replaceCalls = 0, lessonCalls = 0;
   el('replaceLessonId').value = 'Y5T1E01';
   el('replacementFile').files = [new File(['%PDF-1.7\nreplacement'], 'FAR210225Y5T1EE01VRH01A.pdf', {type:'application/pdf'})];
   const doc = {
@@ -40,7 +41,7 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
       lessonCalls++;
       if (reloadFails && lessonCalls > 1) return Response.json({ok:false,error:'LESSON_LOOKUP_FAILED'},{status:500});
       return Response.json({ok:true,lesson:{lessonId:'Y5E2',title:'Settings and Atmosphere',subject:'english'},resources:[{
-        resourceId:'', displayName, kind:'Homework', pathToken, r2Key:currentKey
+        resourceId:'', displayName:currentDisplayName, kind:'Homework', pathToken, r2Key:currentKey
       }]});
     }
     if (url.endsWith('/api/v1/admin/resources/replace')) {
@@ -48,8 +49,8 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
       assert.equal(options.body.get('resourcePath'), pathToken);
       assert.equal(options.body.get('expectedR2Key'), oldKey);
       assert.equal(options.body.get('file').name, 'FAR210225Y5T1EE01VRH01A.pdf');
-      if (canonicalReadback) currentKey = newKey;
-      return Response.json({ok:true,lessonId:'Y5E2',displayName,oldR2Key:oldKey,newR2Key:newKey,
+      if (canonicalReadback) { currentKey = newKey; currentDisplayName = newDisplayName; }
+      return Response.json({ok:true,lessonId:'Y5E2',displayName:newDisplayName,oldDisplayName:displayName,newDisplayName,oldR2Key:oldKey,newR2Key:newKey,
         sha256:'a'.repeat(64),consistency:marker?'replace-resource-consistency-v1':null,
         preparedReadModel:{status:prepared,version:prepared==='published'?'v42':null,sha256:prepared==='published'?'b'.repeat(64):null}
       });
@@ -71,7 +72,7 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
   await el('replaceResourceBtn').dispatch('click');
   assert.equal(replaceCalls,1,'Never repeat a replacement upload automatically');
   assert.equal(lessonCalls,2,'Must independently reload canonical resources after upload');
-  assert.equal(el('replaceVerifiedDisplayName').textContent,displayName,'Student-visible name must remain identical');
+  assert.equal(el('replaceVerifiedDisplayName').textContent,newDisplayName,'Uploaded PDF filename must become student-facing name');
   assert.equal(el('replaceVerifiedCurrentFile').textContent,newKey.split('/').pop());
   const fullyVerified=prepared==='published' && marker && canonicalReadback && !reloadFails;
   assert.equal(el('replaceResourceStatus').className,fullyVerified?'status good':'status warn');
@@ -79,6 +80,8 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
   if (fullyVerified) {
     assert.equal(el('replaceResourceSelect').value,'0','Stable pathToken retains selection despite empty resourceId');
     assert.equal(el('replaceCurrentResourceFile').textContent,newKey.split('/').pop());
+    assert.equal(el('replaceCurrentResourceName').textContent,newDisplayName);
+    assert.match(el('replaceResourceSelect').children[1].textContent,/Homework — FAR210225Y5T1EE01VRH01A\.pdf/);
     assert.match(el('replaceResourceSelect').children[1].textContent,/Current PDF: FAR210225Y5T1EE01VRH01A__replacement_/);
     assert.match(el('replaceCanonicalVerification').textContent,/Verified/);
     assert.match(el('replaceR2Verification').textContent,/SHA-256/);
