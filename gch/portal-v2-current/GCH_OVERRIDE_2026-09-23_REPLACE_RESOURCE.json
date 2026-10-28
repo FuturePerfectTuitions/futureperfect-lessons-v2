@@ -210,7 +210,7 @@
     "Never infer student-visible success solely from R2 presence, LESSONS_KV state, or the Admin Console success message."
   ],
   "adminUiFeedback20261028": {
-    "status": "IMPLEMENTED_PENDING_PRODUCTION_READBACK",
+    "status": "DEPLOYED_AND_EXACT_PUBLIC_READBACK_VERIFIED",
     "surface": "https://futureperfecttuitions.github.io/futureperfect-lessons-v2/admin-import.html",
     "source": [
       "assets/admin-replace-resource.js",
@@ -228,6 +228,20 @@
       "no Quiz bridge or shared Worker mutation",
       "retain previous R2 PDF"
     ],
-    "deployment": "GitHub Pages UI assets only; disable UI-only trigger of shared Worker deploy."
+    "deployment": "GitHub Pages UI assets only; disable UI-only trigger of shared Worker deploy.",
+    "deploymentDate": "2026-10-28",
+    "sourceCommit": "77f0f2461fb55af7ac35b8b0a99f5a77a812750f",
+    "guardWorkflow": ".github/workflows/verify-admin-replace-resource-pages-live.yml",
+    "guardRunId": 40652974133,
+    "guardConclusion": "SUCCESS",
+    "adminUrl": "https://futureperfecttuitions.github.io/futureperfect-lessons-v2/admin-import.html",
+    "publicHtmlSha256": "ce024d02283bd5e445ef6f6c08d0c7bfef38ad395a4ab9f1124ee5f38ae32121",
+    "publicResourceJsSha256": "c38355edf5078e0017b865ba5303cdb1ebf82e48698dfb39a5dee13cecfaba3c",
+    "publicBytesMatchCommittedSource": true,
+    "livePreflightGuard": "PASS_200",
+    "unauthenticatedAdminLessonEndpoint": "PASS_401",
+    "liveBackendMutated": false,
+    "authenticatedPostUploadStudentBrowserTest": "NOT_PERFORMED",
+    "unrelatedLegacyParentEmailTrigger": "Earlier legacy workflow 40652974166 failed before deployment; removed HTML-only trigger in b19047a01c38732cedde0325cf6c438dfa4fb93b"
   }
 }
