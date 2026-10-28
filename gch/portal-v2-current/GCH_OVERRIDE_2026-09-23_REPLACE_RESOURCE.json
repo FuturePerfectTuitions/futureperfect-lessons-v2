@@ -208,5 +208,26 @@
     "For an actual replacement, verify the returned operation succeeded only after the wrapper completed prepared publication.",
     "When incident-driven, verify representative live /api/v2 resource delivery/browser behaviour before closing the incident if credentials/test persona are available.",
     "Never infer student-visible success solely from R2 presence, LESSONS_KV state, or the Admin Console success message."
-  ]
+  ],
+  "adminUiFeedback20261028": {
+    "status": "IMPLEMENTED_PENDING_PRODUCTION_READBACK",
+    "surface": "https://futureperfecttuitions.github.io/futureperfect-lessons-v2/admin-import.html",
+    "source": [
+      "assets/admin-replace-resource.js",
+      "admin-import.html"
+    ],
+    "contract": "Selected resource shows unchanged student-facing name separately from actual currently referenced R2 PDF filename. After a replacement POST, Admin rereads canonical LESSONS_KV via the Admin resource lesson endpoint and reports a verified canonical match only if the pathToken, newR2Key, displayName and canonical lesson ID agree. Prepared publication is reported verified only from the consistency wrapper's returned marker and published-status version/digest. R2 SHA-256 proof is shown separately. Absent prepared scope or failed reread must not be called fully verified.",
+    "regressionTests": [
+      "tests/admin-tools-ui-verification.mjs",
+      "tests/admin-replace-resource-ui-verification.mjs"
+    ],
+    "preservation": [
+      "no student-facing displayName changes",
+      "no entitlement mutations",
+      "no protected Answer Pack change",
+      "no Quiz bridge or shared Worker mutation",
+      "retain previous R2 PDF"
+    ],
+    "deployment": "GitHub Pages UI assets only; disable UI-only trigger of shared Worker deploy."
+  }
 }
