@@ -8,6 +8,7 @@
   let loadedLesson = null;
   let resources = [];
   let replacing = false;
+  const CONSISTENCY_MARKER = 'replace-resource-consistency-v1';
 
   function setStatus(text, kind='') {
     const el = $('replaceResourceStatus');
@@ -61,9 +62,22 @@
     return parts[parts.length - 1] || '';
   }
 
+  function clearVerification() {
+    $('replacePublicationVerification')?.classList.add('hidden');
+  }
+
+  function showVerification({ canonical, prepared, r2, currentFile, displayName }) {
+    $('replaceCanonicalVerification').textContent = canonical;
+    $('replacePreparedVerification').textContent = prepared;
+    $('replaceR2Verification').textContent = r2;
+    $('replaceVerifiedCurrentFile').textContent = currentFile;
+    $('replaceVerifiedDisplayName').textContent = displayName;
+    $('replacePublicationVerification').classList.remove('hidden');
+  }
   function clearLoadedLesson() {
     loadedLesson = null;
     resources = [];
+    clearVerification();
     $('replaceLessonSummary').classList.add('hidden');
     $('replaceResourceSelect').innerHTML = '<option value="">Load a lesson first</option>';
     $('replaceResourceSelect').disabled = true;
@@ -104,9 +118,10 @@
     refreshReplaceButton();
   }
 
-  async function loadLesson(preferredResourceId='') {
+  async function loadLesson(preferredResourcePathToken='') {
     const input = $('replaceLessonId').value.trim();
-    if (!input) return setStatus('Enter a lesson code first.', 'bad');
+    if (!input) { setStatus('Enter a lesson code first.', 'bad'); return { ok:false }; }
+    clearVerification();
     $('loadReplaceLessonBtn').disabled = true;
     $('replaceResourceBtn').disabled = true;
     setStatus('Loading the current lesson resources…', 'warn');
@@ -130,7 +145,7 @@
         $('replacementFile').disabled = true;
         $('replaceResourceDetail').classList.add('hidden');
         setStatus('Lesson loaded, but it has no R2-backed resources that can be replaced.', 'warn');
-        return;
+        return { ok:true, resource:null };
       }
 
       const placeholder = document.createElement('option');
@@ -140,17 +155,19 @@
       resources.forEach((resource, index) => {
         const option = document.createElement('option');
         option.value = String(index);
-        option.textContent = `${resource.kind || 'Resource'} — ${resource.displayName || resource.resourceId || basename(resource.r2Key)}`;
+        option.textContent = `${resource.kind || 'Resource'} — ${resource.displayName || resource.resourceId || 'Resource'} | Current PDF: ${basename(resource.r2Key)}`;
         select.appendChild(option);
       });
       select.disabled = false;
 
-      if (preferredResourceId) {
-        const matchIndex = resources.findIndex(resource => resource.resourceId === preferredResourceId);
+      if (preferredResourcePathToken) {
+        // A resourceId can be absent; the canonical object path remains stable.
+        const matchIndex = resources.findIndex(resource => resource.pathToken === preferredResourcePathToken);
         if (matchIndex >= 0) select.value = String(matchIndex);
       }
       renderResourceDetail();
       setStatus(`Loaded ${resources.length} replaceable resource${resources.length === 1 ? '' : 's'} for ${loadedLesson.lessonId}.`, 'good');
+      return { ok:true, resource:selectedResource() };
     } catch (error) {
       clearLoadedLesson();
       if (error.code === 'UNAUTHORISED') {
@@ -163,6 +180,7 @@
       } else {
         setStatus(`Could not load lesson resources: ${error.message}`, 'bad');
       }
+      return { ok:false, error };
     } finally {
       $('loadReplaceLessonBtn').disabled = false;
       refreshReplaceButton();
@@ -196,12 +214,44 @@
       form.append('file', file, file.name);
       const data = await formApi('/api/v1/admin/resources/replace', form);
       $('replacementFile').value = '';
-      await loadLesson(resource.resourceId);
-      setStatus(
-        `Replacement published for ${data.lessonId}: ${data.displayName || resource.displayName}. ` +
-        `The uploaded PDF was hash-verified in R2; the previous object remains available for rollback.`,
-        'good'
+      // The consistency Worker verifies prepared publication before returning success.
+      // Independently reload the canonical resource for a second readback.
+      const refreshed = await loadLesson(resource.pathToken);
+      const current = refreshed.resource;
+      const canonicalVerified = Boolean(
+        refreshed.ok && current && loadedLesson?.lessonId === data.lessonId &&
+        current.pathToken === resource.pathToken && current.r2Key === data.newR2Key &&
+        current.displayName === resource.displayName
       );
+      const r2Verified = Boolean(data.newR2Key && /^[a-f0-9]{64}$/i.test(data.sha256 || ''));
+      const preparedStatus = data.consistency === CONSISTENCY_MARKER ? data.preparedReadModel?.status : null;
+      const preparedVerified = preparedStatus === 'published' &&
+        Boolean(data.preparedReadModel?.version && /^[a-f0-9]{64}$/i.test(data.preparedReadModel?.sha256 || ''));
+      const preparedLabel = preparedVerified
+        ? 'Verified: current student lesson published and read back'
+        : preparedStatus === 'not-published'
+          ? 'Not published: no current prepared student lesson exists'
+          : 'Not verified: no confirmed prepared-model readback';
+      showVerification({
+        canonical: canonicalVerified ? 'Verified: current canonical resource points to replacement' : 'Not verified: current canonical resource could not be confirmed',
+        prepared: preparedLabel,
+        r2: r2Verified ? `Verified by upload/readback SHA-256: ${data.sha256}` : 'Not verified from replacement response',
+        currentFile: canonicalVerified ? basename(current.r2Key) : basename(data.newR2Key) || 'Unknown',
+        displayName: canonicalVerified ? current.displayName : data.displayName || resource.displayName || 'Unknown'
+      });
+      if (canonicalVerified && r2Verified && preparedVerified) {
+        setStatus(
+          `Replacement verified for ${data.lessonId}. Canonical lesson, prepared student lesson and R2 PDF all passed readback. ` +
+          'The student-facing name is unchanged; the previous R2 object is retained.',
+          'good'
+        );
+      } else {
+        setStatus(
+          'The upload returned a response, but complete student-facing publication verification was not established. ' +
+          'Check the details below before attempting another upload.',
+          'warn'
+        );
+      }
     } catch (error) {
       if (error.code === 'RESOURCE_CHANGED') {
         setStatus('This resource changed after you loaded the lesson. Reload the lesson and check the current resource before trying again.', 'bad');
@@ -223,7 +273,7 @@
   $('replaceLessonId')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') { event.preventDefault(); loadLesson(); }
   });
-  $('replaceResourceSelect')?.addEventListener('change', renderResourceDetail);
+  $('replaceResourceSelect')?.addEventListener('change', () => { clearVerification(); renderResourceDetail(); });
   $('replacementFile')?.addEventListener('change', refreshReplaceButton);
   $('replaceResourceBtn')?.addEventListener('click', replaceResource);
 
