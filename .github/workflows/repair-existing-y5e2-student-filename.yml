@@ -1,0 +1,117 @@
+name: Repair existing Y5E2 VR Homework student-facing PDF name
+on:
+  push:
+    branches: [main]
+    paths: ['.github/repair-y5e2-student-filename.trigger']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: portal-y5e2-student-filename-20261028
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Guarded metadata-only canonical and prepared publication; never upload another PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { publishScopeAtomic,resolveCurrentScope,pointerKey } from './worker/src/access-read-model-sync.js';
+          const token=process.env.CLOUDFLARE_API_TOKEN, acct=process.env.CLOUDFLARE_ACCOUNT_ID;
+          assert.ok(token && acct,'Cloudflare credentials required');
+          const base='https://api.cloudflare.com/client/v4/accounts/'+acct;
+          const worker='fpt-portal-v2-worker';
+          const original='FAR210225Y5E2.pdf';
+          const desired='FAR210225Y5T1EE01VRH01A.pdf';
+          const expectedKey='english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01A__replacement_20261028T071709Z_jgid79.pdf';
+          const expectedPointerVersion='resource-replace-1793171830329-ochmzl';
+          const scope='lesson:Y5E2';
+          const headers={Authorization:'Bearer '+token};
+          const cf=async(method,path,body)=>{
+            const res=await fetch(base+path,{method,headers:{...headers,...(body===undefined?{}:{'content-type':'text/plain'})},body});
+            if(!res.ok)throw Error('CLOUDFLARE_HTTP_'+res.status+'_'+method);
+            return res.text();
+          };
+          const settings=JSON.parse(await cf('GET','/workers/scripts/'+worker+'/settings'));
+          assert.equal(settings.success,true);
+          const bindings=Object.fromEntries(settings.result.bindings.map(b=>[b.name,b]));
+          assert.equal(bindings.READ_MODELS_KV.namespace_id,'77b35165c8694087bc1b0515c35a7e89');
+          const lessonNs=bindings.LESSONS_KV.namespace_id,modelNs=bindings.READ_MODELS_KV.namespace_id;
+          assert.ok(lessonNs && modelNs && bindings.MATERIALS_R2.bucket_name);
+          const kvStore=ns=>({
+            async get(key){return cf('GET','/storage/kv/namespaces/'+ns+'/values/'+encodeURIComponent(key));},
+            async put(key,value){
+              const data=JSON.parse(await cf('PUT','/storage/kv/namespaces/'+ns+'/values/'+encodeURIComponent(key),String(value)));
+              if(data.success!==true)throw Error('KV_PUT_NOT_SUCCESSFUL');
+            }
+          });
+          const lessons=kvStore(lessonNs),preparedKv=kvStore(modelNs);
+          const currentRaw=await lessons.get(scope),current=JSON.parse(currentRaw);
+          const target=current?.vr?.homeworks?.[0]?.homework;
+          assert.equal(target?.r2Key,expectedKey,'Current R2 object must remain exactly the previously verified PDF');
+          const pre=await resolveCurrentScope(preparedKv,scope);
+          const resourceMatches=pre.payload.resources.filter(r=>r?.objectKey===expectedKey);
+          assert.equal(resourceMatches.length,1,'Exactly one prepared resource must be targeted');
+          assert.equal(resourceMatches[0].displayName,target.displayName,'Canonical/prepared name drift');
+          if(target.displayName===desired){
+            console.log('Y5E2_STUDENT_FILENAME_ALREADY_CORRECT_PASS');
+            process.exit(0);
+          }
+          assert.equal(target.displayName,original,'Unexpected existing student-facing name');
+          assert.equal(pre.version,expectedPointerVersion,'Prepared pointer drift: manual review required');
+          const pointerAtStart=await preparedKv.get(pointerKey(scope));
+          const next=structuredClone(pre.payload);
+          const match=next.resources.filter(r=>r?.objectKey===expectedKey);
+          assert.equal(match.length,1);
+          match[0].displayName=desired;
+          const nextCanonical=structuredClone(current);
+          nextCanonical.vr.homeworks[0].homework.displayName=desired;
+          // Final guard immediately before the first mutation.
+          assert.equal(await lessons.get(scope),currentRaw,'Canonical record changed during preflight');
+          assert.equal(await preparedKv.get(pointerKey(scope)),pointerAtStart,'Prepared pointer changed during preflight');
+          let canonicalWritten=false;
+          try {
+            await lessons.put(scope,JSON.stringify(nextCanonical));
+            canonicalWritten=true;
+            const updated=JSON.parse(await lessons.get(scope));
+            assert.equal(updated.vr.homeworks[0].homework.displayName,desired);
+            assert.equal(updated.vr.homeworks[0].homework.r2Key,expectedKey);
+            await publishScopeAtomic(preparedKv,{scope,payload:next,version:'y5e2-student-filename-20261028'});
+            const confirmed=await resolveCurrentScope(preparedKv,scope);
+            const matching=confirmed.payload.resources.filter(r=>r?.objectKey===expectedKey && r?.displayName===desired);
+            assert.equal(matching.length,1,'Prepared student name readback failed');
+            assert.equal(confirmed.payload.resources.filter(r=>r?.objectKey===expectedKey).length,1);
+            assert.equal(confirmed.version,'y5e2-student-filename-20261028');
+            const reread=JSON.parse(await lessons.get(scope));
+            assert.equal(reread.vr.homeworks[0].homework.displayName,desired);
+            assert.equal(reread.vr.homeworks[0].homework.r2Key,expectedKey);
+            console.log('Y5E2_STUDENT_FILENAME_CANONICAL_PREPARED_READBACK_PASS');
+            console.log('STUDENT_FACING_PDF='+desired);
+            console.log('PREPARED_SCOPE_VERSION='+confirmed.version);
+            console.log('R2_FILE_UNCHANGED='+expectedKey.split('/').pop());
+          } catch(error) {
+            if(canonicalWritten){
+              try {
+                await preparedKv.put(pointerKey(scope),pointerAtStart);
+                assert.equal(await preparedKv.get(pointerKey(scope)),pointerAtStart);
+                await lessons.put(scope,currentRaw);
+                assert.equal(await lessons.get(scope),currentRaw);
+                console.error('Y5E2_NAME_REPAIR_ROLLED_BACK_VERIFIED');
+              } catch(restoreError){
+                console.error('Y5E2_NAME_REPAIR_MANUAL_INTERVENTION_REQUIRED',String(restoreError));
+              }
+            }
+            throw error;
+          }
+          NODE
