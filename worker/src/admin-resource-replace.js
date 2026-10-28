@@ -214,11 +214,12 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function replaceR2KeyAtPath(lesson, path, nextR2Key) {
+function replaceR2KeyAtPath(lesson, path, nextR2Key, nextDisplayName = null) {
   const cloned = cloneJson(lesson);
   const target = objectAtPath(cloned, path);
   if (!isResourceObject(target)) throw new Error('RESOURCE_NOT_FOUND');
   target.r2Key = nextR2Key;
+  if (nextDisplayName !== null) target.displayName = nextDisplayName;
   return cloned;
 }
 
@@ -232,6 +233,15 @@ function safeFileName(value) {
     .trim()
     .slice(0, 140) || 'replacement';
   return `${stem}.pdf`;
+}
+
+// File.name, not the uniquely suffixed R2 key, is the student-facing name.
+// Preserve the original basename (including punctuation and case) and reject
+// control characters instead of silently changing the filename.
+function studentFacingFileName(uploadedName) {
+  const input = clean(uploadedName).replace(/\\/g, '/').split('/').pop() || '';
+  if (!input || input.length > 200 || /[\u0000-\u001f\u007f]/.test(input) || !/\.pdf$/i.test(input)) return null;
+  return input;
 }
 
 function stampForKey(date = new Date()) {
@@ -330,9 +340,9 @@ async function handleReplace(request, env) {
     }, 409, request, env);
   }
 
-  const fileName = clean(file.name);
-  if (!/\.pdf$/i.test(fileName)) {
-    return json({ ok: false, error: 'PDF_REQUIRED' }, 400, request, env);
+  const fileName = studentFacingFileName(file.name);
+  if (!fileName) {
+    return json({ ok: false, error: 'PDF_FILENAME_INVALID' }, 400, request, env);
   }
 
   const bytes = await file.arrayBuffer();
@@ -359,7 +369,7 @@ async function handleReplace(request, env) {
     const readbackHash = await sha256Hex(readbackBytes);
     if (readbackHash !== inputHash) throw new Error('R2_VERIFY_HASH_MISMATCH');
 
-    const nextLesson = replaceR2KeyAtPath(resolved.lesson, path, newR2Key);
+    const nextLesson = replaceR2KeyAtPath(resolved.lesson, path, newR2Key, fileName);
     await env.LESSONS_KV.put(`lesson:${resolved.lessonId}`, JSON.stringify(nextLesson));
 
     return json({
@@ -367,7 +377,10 @@ async function handleReplace(request, env) {
       lessonId: resolved.lessonId,
       title: clean(resolved.lesson.title),
       resourceId: clean(target.resourceId),
-      displayName: clean(target.displayName),
+      displayName: fileName,
+      oldDisplayName: clean(target.displayName),
+      newDisplayName: fileName,
+      resourcePath: JSON.stringify(path),
       oldR2Key: currentR2Key,
       newR2Key,
       sha256: inputHash,
@@ -408,6 +421,7 @@ export {
   replaceR2KeyAtPath,
   resolveLesson,
   safeFileName,
+  studentFacingFileName,
   sessionAuthorised,
   sha256Hex
 };
