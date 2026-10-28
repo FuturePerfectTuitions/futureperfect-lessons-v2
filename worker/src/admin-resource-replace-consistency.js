@@ -1,4 +1,4 @@
-import { handleAdminResourceRequest as baseHandleAdminResourceRequest } from './admin-resource-replace.js';
+import { handleAdminResourceRequest as baseHandleAdminResourceRequest, objectAtPath, parsePathToken } from './admin-resource-replace.js';
 import {
   pointerKey,
   publishScopeAtomic,
@@ -41,12 +41,14 @@ function countR2Key(value, key) {
   return count;
 }
 
-function replaceUniqueR2Key(value, fromKey, toKey) {
+function replaceUniqueR2Key(value, fromKey, toKey, previousDisplayName, expectedCurrentDisplayName) {
   let count = 0;
   const visit = current => {
     if (!current || typeof current !== 'object') return;
     if (!Array.isArray(current) && clean(current.r2Key) === fromKey) {
+      if (clean(current.displayName) !== expectedCurrentDisplayName) throw new Error('CANONICAL_ROLLBACK_NAME_CHANGED');
       current.r2Key = toKey;
+      current.displayName = previousDisplayName;
       count += 1;
     }
     if (Array.isArray(current)) {
@@ -63,28 +65,36 @@ function replaceUniqueR2Key(value, fromKey, toKey) {
   return value;
 }
 
-function projectPreparedPayload(payload, oldObjectKey, newObjectKey) {
+function projectPreparedPayload(payload, oldObjectKey, newObjectKey, oldDisplayName, newDisplayName) {
   const next = cloneJson(payload);
   if (!Array.isArray(next?.resources)) throw new Error('PREPARED_RESOURCES_UNAVAILABLE');
   const matches = next.resources.filter(resource => clean(resource?.objectKey) === oldObjectKey);
   if (matches.length !== 1) throw new Error(`PREPARED_RESOURCE_TARGET_COUNT_${matches.length}`);
+  if (clean(matches[0].displayName) !== oldDisplayName) throw new Error('PREPARED_ORIGINAL_DISPLAY_NAME_MISMATCH');
   matches[0].objectKey = newObjectKey;
+  matches[0].displayName = newDisplayName;
   return next;
 }
 
-async function verifyCanonical(env, lessonId, newR2Key) {
+async function verifyCanonical(env, lessonId, newR2Key, newDisplayName, resourcePath) {
   const lesson = await env.LESSONS_KV.get(`lesson:${lessonId}`, { type: 'json' });
   if (!lesson || countR2Key(lesson, newR2Key) !== 1) throw new Error('CANONICAL_READBACK_MISMATCH');
+  const target = objectAtPath(lesson, parsePathToken(resourcePath) || []);
+  if (clean(target?.r2Key) !== newR2Key || clean(target?.displayName) !== newDisplayName) {
+    throw new Error('CANONICAL_FILENAME_READBACK_MISMATCH');
+  }
   return lesson;
 }
 
-async function restoreCanonical(env, lessonId, oldR2Key, newR2Key) {
+async function restoreCanonical(env, lessonId, oldR2Key, newR2Key, oldDisplayName, newDisplayName, resourcePath) {
   const current = await env.LESSONS_KV.get(`lesson:${lessonId}`, { type: 'json' });
   if (!current) throw new Error('CANONICAL_ROLLBACK_LESSON_MISSING');
-  const restored = replaceUniqueR2Key(cloneJson(current), newR2Key, oldR2Key);
+  const restored = replaceUniqueR2Key(cloneJson(current), newR2Key, oldR2Key, oldDisplayName, newDisplayName);
   await env.LESSONS_KV.put(`lesson:${lessonId}`, JSON.stringify(restored));
   const readback = await env.LESSONS_KV.get(`lesson:${lessonId}`, { type: 'json' });
-  if (!readback || countR2Key(readback, newR2Key) !== 0 || countR2Key(readback, oldR2Key) < 1) {
+  const target = objectAtPath(readback, parsePathToken(resourcePath) || []);
+  if (!readback || countR2Key(readback, newR2Key) !== 0 || countR2Key(readback, oldR2Key) < 1 ||
+      clean(target?.r2Key) !== oldR2Key || clean(target?.displayName) !== oldDisplayName) {
     throw new Error('CANONICAL_ROLLBACK_VERIFY_FAILED');
   }
 }
@@ -96,7 +106,7 @@ async function restorePointer(store, key, rawPointer) {
   if (String(confirmed ?? '') !== String(rawPointer)) throw new Error('PREPARED_POINTER_ROLLBACK_VERIFY_FAILED');
 }
 
-async function publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key) {
+async function publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key, oldDisplayName, newDisplayName) {
   if (!env?.READ_MODELS_KV || typeof env.READ_MODELS_KV.get !== 'function' || typeof env.READ_MODELS_KV.put !== 'function') {
     throw new Error('READ_MODELS_KV_REQUIRED');
   }
@@ -109,7 +119,7 @@ async function publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key) {
   }
 
   const current = await resolveCurrentScope(env.READ_MODELS_KV, scope);
-  const nextPayload = projectPreparedPayload(current.payload, oldR2Key, newR2Key);
+  const nextPayload = projectPreparedPayload(current.payload, oldR2Key, newR2Key, oldDisplayName, newDisplayName);
   const version = `resource-replace-${Date.now()}-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 
   try {
@@ -120,12 +130,12 @@ async function publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key) {
     });
     const confirmed = await resolveCurrentScope(env.READ_MODELS_KV, scope);
     const newMatches = Array.isArray(confirmed?.payload?.resources)
-      ? confirmed.payload.resources.filter(resource => clean(resource?.objectKey) === newR2Key).length
+      ? confirmed.payload.resources.filter(resource => clean(resource?.objectKey) === newR2Key && clean(resource?.displayName) === newDisplayName).length
       : 0;
     const oldMatches = Array.isArray(confirmed?.payload?.resources)
       ? confirmed.payload.resources.filter(resource => clean(resource?.objectKey) === oldR2Key).length
       : 0;
-    if (newMatches !== 1 || oldMatches !== 0) throw new Error('PREPARED_READBACK_MISMATCH');
+    if (newMatches !== 1 || oldMatches !== 0) throw new Error('PREPARED_FILENAME_READBACK_MISMATCH');
     return {
       status: 'published',
       scope,
@@ -163,18 +173,22 @@ async function handleAdminResourceRequest(request, env, ctx) {
   try { result = await baseResponse.clone().json(); } catch {
     return jsonFrom(baseResponse, { ok: false, error: 'RESOURCE_REPLACE_INVALID_SUCCESS_RESPONSE' }, 500);
   }
-  if (!result?.ok || !clean(result.lessonId) || !clean(result.oldR2Key) || !clean(result.newR2Key)) {
+  if (!result?.ok || !clean(result.lessonId) || !clean(result.oldR2Key) || !clean(result.newR2Key) ||
+      !clean(result.oldDisplayName) || !clean(result.newDisplayName) || !clean(result.resourcePath)) {
     return jsonFrom(baseResponse, { ok: false, error: 'RESOURCE_REPLACE_INCOMPLETE_SUCCESS_RESPONSE' }, 500);
   }
 
   const lessonId = clean(result.lessonId);
   const oldR2Key = clean(result.oldR2Key);
   const newR2Key = clean(result.newR2Key);
+  const oldDisplayName = clean(result.oldDisplayName);
+  const newDisplayName = clean(result.newDisplayName);
+  const resourcePath = clean(result.resourcePath);
   let projection = null;
 
   try {
-    await verifyCanonical(env, lessonId, newR2Key);
-    projection = await publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key);
+    await verifyCanonical(env, lessonId, newR2Key, newDisplayName, resourcePath);
+    projection = await publishPreparedReplacement(env, lessonId, oldR2Key, newR2Key, oldDisplayName, newDisplayName);
     return jsonFrom(baseResponse, {
       ...result,
       preparedReadModel: {
@@ -199,7 +213,7 @@ async function handleAdminResourceRequest(request, env, ctx) {
       }
     }
     try {
-      await restoreCanonical(env, lessonId, oldR2Key, newR2Key);
+      await restoreCanonical(env, lessonId, oldR2Key, newR2Key, oldDisplayName, newDisplayName, resourcePath);
       rollback.canonical = 'restored';
       try {
         if (env?.MATERIALS_R2?.delete) {
