@@ -57,7 +57,9 @@
       <div class="row"><div><label for="replaceLessonId">Lesson code</label><input id="replaceLessonId" type="text" autocomplete="off" placeholder="e.g. Y5T1M06 or L2T1M06"></div><button id="loadReplaceLessonBtn" type="button">Load Lesson</button></div>
       <div id="replaceLessonSummary" class="resource-summary hidden"><div>Canonical lesson</div><div id="replaceLessonCode"></div><div>Title</div><div id="replaceLessonTitle"></div><div>Subject</div><div id="replaceLessonSubject"></div></div>
       <div class="row" style="margin-top:14px"><div><label for="replaceResourceSelect">Existing resource</label><select id="replaceResourceSelect" disabled><option value="">Load a lesson first</option></select></div><div><label for="replacementFile">Replacement PDF</label><input id="replacementFile" type="file" accept=".pdf,application/pdf" disabled></div><button id="replaceResourceBtn" type="button" disabled>Replace Resource</button></div>
-      <div id="replaceResourceDetail" class="resource-summary hidden"><div>Resource</div><div id="replaceCurrentResourceName"></div><div>Type</div><div id="replaceCurrentResourceKind"></div><div>Current file</div><div id="replaceCurrentResourceFile" class="resource-file"></div></div>
+      <p class="muted">The dropdown shows the unchanged student-facing resource name and the <strong>actual current R2 PDF filename</strong>. Select a resource to inspect its current file.</p>
+      <div id="replaceResourceDetail" class="resource-summary hidden"><div>Student-facing resource name</div><div id="replaceCurrentResourceName"></div><div>Type</div><div id="replaceCurrentResourceKind"></div><div>Actual current R2 PDF</div><div id="replaceCurrentResourceFile" class="resource-file"></div></div>
+      <div id="replacePublicationVerification" class="resource-summary hidden" role="status" aria-live="polite"><div>Canonical lesson</div><div id="replaceCanonicalVerification"></div><div>Prepared student lesson</div><div id="replacePreparedVerification"></div><div>R2 integrity</div><div id="replaceR2Verification" class="resource-file"></div><div>Actual current R2 PDF</div><div id="replaceVerifiedCurrentFile" class="resource-file"></div><div>Unchanged student-facing name</div><div id="replaceVerifiedDisplayName"></div></div>
       <div class="safety-note"><strong>Safety:</strong> the replacement is written to a new R2 object and hash-verified before the lesson record is changed. The previous R2 object is deliberately retained for rollback.</div>
       <div id="replaceResourceStatus" class="status hidden"></div>
     </section>
@@ -95,6 +97,6 @@
 <script src="assets/admin-import.js?v=20261008-confirmed-v2"></script>
 <script src="assets/admin-trials.js"></script>
 <script src="assets/admin-create-batch.js"></script>
-<script src="assets/admin-replace-resource.js"></script>
+<script src="assets/admin-replace-resource.js?v=20261028-replace-feedback-1"></script>
 </body>
 </html>
