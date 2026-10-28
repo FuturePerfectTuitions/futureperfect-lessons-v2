@@ -1,0 +1,60 @@
+name: Replace Resource uploaded-filename read-only production preflight
+on:
+  push:
+    branches: [fix/replace-resource-student-filename-20261028]
+    paths: ['.github/workflows/replace-resource-student-filename-readonly-preflight.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read worker module fingerprint, bindings and Y5E2 name parity
+        run: |
+          python3 - <<'PY'
+          import os,urllib.request,urllib.parse,json,hashlib,re
+          from email.parser import BytesParser
+          from email.policy import default
+          acct=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
+          api='https://api.cloudflare.com/client/v4/accounts/'+acct
+          def get(p):
+            req=urllib.request.Request(api+p,headers={'Authorization':'Bearer '+token})
+            with urllib.request.urlopen(req,timeout=30) as r: return r.headers,r.read()
+          worker='fpt-portal-v2-worker'
+          h,body=get('/workers/scripts/'+worker)
+          m=BytesParser(policy=default).parsebytes(('Content-Type: '+h.get('Content-Type')+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+body)
+          parts=list(m.iter_parts())
+          assert len(parts)==1,'Expected a single live module'
+          p=parts[0]
+          name=p.get_filename() or p.get_param('name',header='content-disposition') or p.get_param('name')
+          sha=hashlib.sha256(p.get_payload(decode=True)).hexdigest()
+          settings=json.loads(get('/workers/scripts/'+worker+'/settings')[1])['result']
+          b={x['name']:x for x in settings['bindings']}
+          assert name=='index-step11-year6-catalogue-boundary.js',name
+          assert b['READ_MODELS_KV']['namespace_id']=='77b35165c8694087bc1b0515c35a7e89'
+          assert b['LESSONS_KV']['namespace_id'] and b['MATERIALS_R2']['bucket_name']
+          def kv(ns,k):
+            return json.loads(get('/storage/kv/namespaces/'+ns+'/values/'+urllib.parse.quote(k,safe=''))[1])
+          canonical=kv(b['LESSONS_KV']['namespace_id'],'lesson:Y5E2')
+          hw=canonical['vr']['homeworks'][0]['homework']
+          key=hw['r2Key']
+          target='english/year5/Y5T1E01/vr/homework/sheets/FAR210225Y5T1EE01VRH01A__replacement_20261028T071709Z_jgid79.pdf'
+          assert key==target,'CANONICAL_Y5E2_KEY_DRIFT'
+          pointer=kv(b['READ_MODELS_KV']['namespace_id'],'rm:v1:scope:lesson_3AY5E2:current')
+          ver=pointer['current']['version']
+          envelope=kv(b['READ_MODELS_KV']['namespace_id'],'rm:v1:scope:lesson_3AY5E2:version:'+urllib.parse.quote(ver,safe='').replace('%','_'))
+          matches=[x for x in envelope['payload']['resources'] if x.get('objectKey')==key]
+          assert len(matches)==1,'PREPARED_Y5E2_TARGET_COUNT_NOT_ONE'
+          assert matches[0]['displayName']==hw['displayName'],'PREPARED_CANONICAL_LABEL_DRIFT'
+          print('CURRENT_LIVE_MODULE_SHA256='+sha)
+          print('LIVE_MODULE_NAME='+name)
+          print('Y5E2_CANONICAL_KEY='+key)
+          print('Y5E2_CURRENT_STUDENT_NAME='+hw['displayName'])
+          print('Y5E2_CURRENT_PREPARED_NAME='+matches[0]['displayName'])
+          print('Y5E2_POINTER_VERSION='+ver)
+          print('LIVE_WORKER_BINDINGS_EXPECTED_PASS')
+          PY
