@@ -63,7 +63,7 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
   await el('loadReplaceLessonBtn').dispatch('click');
   assert.equal(el('replaceResourceSelect').children.length,2);
   assert.match(el('replaceResourceSelect').children[1].textContent, /FAR210225Y5E2\.pdf/);
-  assert.match(el('replaceResourceSelect').children[1].textContent, /Current PDF: FAR210225Y5E2\.pdf/);
+  assert.doesNotMatch(el('replaceResourceSelect').children[1].textContent, /__replacement_|Current PDF:/);
   el('replaceResourceSelect').value='0';
   await el('replaceResourceSelect').dispatch('change');
   assert.equal(el('replaceCurrentResourceFile').textContent, 'FAR210225Y5E2.pdf');
@@ -82,7 +82,7 @@ async function scenario({ prepared = 'published', marker = true, canonicalReadba
     assert.equal(el('replaceCurrentResourceFile').textContent,newKey.split('/').pop());
     assert.equal(el('replaceCurrentResourceName').textContent,newDisplayName);
     assert.match(el('replaceResourceSelect').children[1].textContent,/Homework — FAR210225Y5T1EE01VRH01A\.pdf/);
-    assert.match(el('replaceResourceSelect').children[1].textContent,/Current PDF: FAR210225Y5T1EE01VRH01A__replacement_/);
+    assert.doesNotMatch(el('replaceResourceSelect').children[1].textContent,/__replacement_|Current PDF:/);
     assert.match(el('replaceCanonicalVerification').textContent,/Verified/);
     assert.match(el('replaceR2Verification').textContent,/SHA-256/);
   }
