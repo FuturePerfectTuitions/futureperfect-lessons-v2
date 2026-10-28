@@ -174,7 +174,7 @@ async function handleAdminResourceRequest(request, env, ctx) {
     return jsonFrom(baseResponse, { ok: false, error: 'RESOURCE_REPLACE_INVALID_SUCCESS_RESPONSE' }, 500);
   }
   if (!result?.ok || !clean(result.lessonId) || !clean(result.oldR2Key) || !clean(result.newR2Key) ||
-      !clean(result.oldDisplayName) || !clean(result.newDisplayName) || !clean(result.resourcePath)) {
+      !Object.prototype.hasOwnProperty.call(result, 'oldDisplayName') || !clean(result.newDisplayName) || !clean(result.resourcePath)) {
     return jsonFrom(baseResponse, { ok: false, error: 'RESOURCE_REPLACE_INCOMPLETE_SUCCESS_RESPONSE' }, 500);
   }
 
