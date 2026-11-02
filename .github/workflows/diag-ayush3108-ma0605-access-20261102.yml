@@ -1,0 +1,103 @@
+name: Read-only Portal V2 English Maths access comparison
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-ayush3108-ma0605-access-20261102.yml'
+permissions:
+  contents: read
+concurrency:
+  group: portal-v2-20261102-access-read-only
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read prepared access and canonical student existence without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { SCOPE_SALT_KEY, opaqueAccessScopeId, resolveCurrentScope, globalToCatalogue } from './worker/src/access-read-model-sync.js';
+          const account = String(process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+          const token = String(process.env.CLOUDFLARE_API_TOKEN || '').trim();
+          if (!account || !token) throw Error('CLOUDFLARE_SECRET_MISSING');
+          const expected = {
+            STUDENTS_KV:'c9723c8806334e4ea54d1b456d31b794',
+            READ_MODELS_KV:'77b35165c8694087bc1b0515c35a7e89',
+            DB:'97250a54-fa91-45ad-a002-3c4566b1fc38'
+          };
+          const api = 'https://api.cloudflare.com/client/v4';
+          const auth = {Authorization:'Bearer '+token};
+          async function read(path) {
+            const r = await fetch(api + path, {headers:auth});
+            if (!r.ok) throw Error('CLOUDFLARE_READ_HTTP_'+r.status);
+            return r.json();
+          }
+          const settings = await read('/accounts/'+account+'/workers/scripts/fpt-portal-v2-worker/settings');
+          if (settings.success !== true) throw Error('CLOUDFLARE_SETTINGS_FAILED');
+          const binding = n => (settings.result?.bindings||[]).find(b=>b.name===n)||{};
+          for(const [n,v] of Object.entries(expected)) {
+            const found = n==='DB'?(binding(n).database_id||binding(n).id):binding(n).namespace_id;
+            if(found!==v) throw Error('PRODUCTION_BINDING_DRIFT_'+n);
+          }
+          async function kvGet(ns,key) {
+            const r = await fetch(api+'/accounts/'+account+'/storage/kv/namespaces/'+expected[ns]+'/values/'+encodeURIComponent(key),{headers:auth});
+            if(r.status===404) return null;
+            if(!r.ok) throw Error('CLOUDFLARE_KV_READ_HTTP_'+r.status);
+            return r.text();
+          }
+          const store={get:key=>kvGet('READ_MODELS_KV',key)};
+          const salt=String(await store.get(SCOPE_SALT_KEY)||'').trim();
+          if(!/^[0-9a-f]{64}$/i.test(salt)) throw Error('SCOPE_SALT_INVALID');
+          const global=await resolveCurrentScope(store,'global');
+          const catalogue=globalToCatalogue(global.payload);
+          const ids=[['source','ma0605'],['target','ayush3108']];
+          const result={marker:'PORTAL_V2_READ_ONLY_ACCESS_COMPARE',status:'PASS',canonicalProfilesFound:{},views:{},specialAreas:{},fullLibraries:{},accessCounts:{},missingFromTarget:{},noWrites:true,noCredentialsDisclosed:true};
+          const snapshots={};
+          const profiles={};
+          for(const [label,id] of ids) {
+            const text=await kvGet('STUDENTS_KV','user:'+id);
+            if(!text) throw Error('CANONICAL_PROFILE_NOT_FOUND_'+label.toUpperCase());
+            let profile; try{profile=JSON.parse(text)}catch{throw Error('BAD_CANONICAL_PROFILE_'+label.toUpperCase())}
+            if(String(profile.portalUserId||id).trim().toLowerCase()!==id) throw Error('PROFILE_ID_MISMATCH_'+label.toUpperCase());
+            if(['withdrawn','disabled','inactive','expired'].includes(String(profile.accountStatus||profile.status||'active').toLowerCase())) throw Error('PROFILE_NOT_ACTIVE_'+label.toUpperCase());
+            profiles[label]=profile;
+            const scope=await opaqueAccessScopeId(id,salt);
+            const prepared=await resolveCurrentScope(store,'access:'+scope);
+            const snapshot=prepared.payload?.snapshot;
+            if(!snapshot || !snapshot.lessonAccess || !Array.isArray(snapshot.views)) throw Error('PREPARED_SNAPSHOT_INVALID_'+label.toUpperCase());
+            snapshots[label]=snapshot;
+            result.canonicalProfilesFound[label]=true;
+            result.views[label]=snapshot.views.filter(v=>v.subject==='maths'||v.subject==='english').map(v=>({viewId:v.viewId,open:v.openLessonCount,visible:v.visibleLessonCount,group:v.group,preview:v.lockedPreview}));
+            result.specialAreas[label]=snapshot.specialAreas||[];
+            result.fullLibraries[label]=(profile.fullLibraries||[]).filter(x=>/^(MATHS|ENGLISH)_/i.test(String(x)));
+            const state=Object.entries(snapshot.lessonAccess).filter(([lesson,access])=>(catalogue.lessonToViews?.[lesson]||[]).some(v=>/^(maths|english)-/.test(v)) && access.blocked!==true);
+            result.accessCounts[label]={core:state.filter(([,a])=>a.core===true).length,vr:state.filter(([,a])=>a.vr===true).length,preLessonOnly:state.filter(([,a])=>a.preLessonOnly===true).length};
+          }
+          const source=snapshots.source.lessonAccess, target=snapshots.target.lessonAccess;
+          const missing={core:[],vr:[],preLessonOnly:[],specialAreas:[],fullLibraries:[]};
+          for(const [lesson,a] of Object.entries(source)){
+            if(!(catalogue.lessonToViews?.[lesson]||[]).some(v=>/^(maths|english)-/.test(v))) continue;
+            if(a.blocked) continue;
+            const b=target[lesson]||{};
+            if(a.core===true && b.core!==true) missing.core.push(lesson);
+            if(a.vr===true && b.vr!==true) missing.vr.push(lesson);
+            if(a.preLessonOnly===true && !b.core && !b.preLessonOnly) missing.preLessonOnly.push(lesson);
+          }
+          for(const x of result.fullLibraries.source) if(!result.fullLibraries.target.includes(x)) missing.fullLibraries.push(x);
+          for(const x of result.specialAreas.source) if(!result.specialAreas.target.includes(x)) missing.specialAreas.push(x);
+          result.missingFromTarget={coreCount:missing.core.length,vrCount:missing.vr.length,preLessonOnlyCount:missing.preLessonOnly.length,fullLibraries:missing.fullLibraries,specialAreas:missing.specialAreas};
+          result.anyTargetExplicitBlocks=(profiles.target.blockedLessons||[]).some(x=>missing.core.includes(x)||missing.vr.includes(x)||missing.preLessonOnly.includes(x));
+          result.sourceHasTemporaryOrPreLessonAccess=result.accessCounts.source.preLessonOnly>0;
+          result.preparedSourceAndTargetVerified=true;
+          console.log(JSON.stringify(result,null,2));
+          NODE
