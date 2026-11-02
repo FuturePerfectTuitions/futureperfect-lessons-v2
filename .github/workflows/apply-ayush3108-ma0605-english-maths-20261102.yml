@@ -1,0 +1,47 @@
+name: One-off Portal V2 Ayush English Maths mirror
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ops/copy-ma0605-access-to-ayush3108-20261102.mjs'
+      - '.github/workflows/apply-ayush3108-ma0605-english-maths-20261102.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-ayush3108-ma0605-english-maths-20261102.yml'
+permissions:
+  contents: read
+concurrency:
+  group: portal-v2-one-off-20261102-ayush-effective-english-maths
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          set -euo pipefail
+          node --check ops/copy-ma0605-access-to-ayush3108-20261102.mjs
+          node --check worker/src/access-read-model-sync.js
+          node --check worker/src/access-read-model-sync-v2.js
+  apply:
+    if: github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply source-verified, target-scoped effective access copy with rollback
+        run: |
+          set -euo pipefail
+          node ops/copy-ma0605-access-to-ayush3108-20261102.mjs
