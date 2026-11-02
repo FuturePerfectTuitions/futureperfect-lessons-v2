@@ -101,3 +101,5 @@ jobs:
           result.preparedSourceAndTargetVerified=true;
           console.log(JSON.stringify(result,null,2));
           NODE
+
+# Independent post-grant read-only parity verification on 2026-11-02.
