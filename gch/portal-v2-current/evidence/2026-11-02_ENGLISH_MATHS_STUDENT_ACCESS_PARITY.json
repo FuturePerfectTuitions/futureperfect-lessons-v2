@@ -1,0 +1,52 @@
+{
+  "schema": "fpt.portal-v2.one-student-access-mirror-evidence.v1",
+  "date": "2026-11-02",
+  "status": "PASS",
+  "ownerRequest": "Grant target all currently effective English and Maths access held by source without changing unrelated profile fields",
+  "sourcePortalUserId": "Ma0605",
+  "targetPortalUserId": "Ayush3108",
+  "verifiedSourceEffective": {
+    "coreLessons": 129,
+    "vrLessons": 8,
+    "preLessonOnly": 0,
+    "fullLibraries": [
+      "ENGLISH_Y4_11PLUS_FULL",
+      "MATHS_L1_FULL",
+      "MATHS_L2_FULL"
+    ],
+    "specialAreas": [
+      "VR_HOWTO"
+    ]
+  },
+  "targetChanges": {
+    "fullLibraryGrants": 3,
+    "individualCoreGrants": 22,
+    "individualVrGrants": 8,
+    "specialAreaGrants": [
+      "VR_HOWTO"
+    ]
+  },
+  "independentPostChangeReadOnlyVerification": {
+    "sourceCore": 129,
+    "targetCore": 129,
+    "sourceVr": 8,
+    "targetVr": 8,
+    "missingCore": 0,
+    "missingVr": 0,
+    "missingPreLesson": 0,
+    "missingFullLibraries": 0,
+    "missingSpecialAreas": 0
+  },
+  "canonicalProfileReadback": "PASS",
+  "preparedAccessReadback": "PASS",
+  "identityAndCredentialsPreserved": true,
+  "unrelatedFieldsPreserved": true,
+  "parentEmailsSent": 0,
+  "browserLoginVerification": "NOT_PERFORMED",
+  "proof": {
+    "preflightRun": "https://github.com/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/41531635472",
+    "publicationRun": "https://github.com/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/41532117891",
+    "independentPostPublicationRun": "https://github.com/FuturePerfectTuitions/futureperfect-lessons-v2/actions/runs/41532246068"
+  },
+  "cleanup": "Temporary one-off diagnostic and mutating workflow/scripts should be removed after closure; their commit history and Action results retain audit evidence."
+}
