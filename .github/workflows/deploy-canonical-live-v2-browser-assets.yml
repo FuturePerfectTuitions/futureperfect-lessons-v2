@@ -1,4 +1,5 @@
 name: Deploy canonical live V2 Browser assets
+# Retry requested 2026-11-04: same pinned Kiaan source; preserve all deployment gates.
 
 on:
   push:
