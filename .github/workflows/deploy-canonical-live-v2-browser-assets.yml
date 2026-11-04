@@ -22,13 +22,15 @@ env:
   BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
   STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
   FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
-  FRONTEND_REF: 0018a098b4fcfd523c49106fdca836ff4d9c2198
+  FRONTEND_REF: 84237b611130e0bb5988843fe505f13fe6b7d2ce
   EXACT_OCT2_APP_REF: e5e833a9b956a6985bb5a76e7dd056b897b7d76e
   EXPECTED_SOURCE_INDEX_SHA256: 2257d56c5cd930dacfefa00f310eb5f9bc2db6cd18e3ebf16fb7d8c4ad4c3cbd
   EXPECTED_DEPLOYED_INDEX_SHA256: 975d5193073d52663b8dbbee5ccf0387d589fe00cb42c836c58354848c39b2d8
   GUARD_ASSET: year6-display-sequence-fix-v2.js
   GUARD_MARKER: YEAR6_STANDALONE_VISIBLE_ORDER_GUARD_V2_20261004
   GUARD_QUERY: v=20261004-september-port-2
+  KIAAN_ASSET: kiaan-11plus-maths-cards-v1.js
+  KIAAN_QUERY: v=20261104-1
 
 jobs:
   deploy:
@@ -68,6 +70,10 @@ jobs:
           grep -q 'ra.term - rb.term' frontend/public/assets/"$GUARD_ASSET"
           grep -q 'ra.lesson - rb.lesson' frontend/public/assets/"$GUARD_ASSET"
           grep -q "$GUARD_ASSET?$GUARD_QUERY" frontend/index.html
+          grep -Fq "$KIAAN_ASSET?$KIAAN_QUERY" frontend/index.html
+          grep -Fq "Kiaan's Portal" frontend/public/assets/"$KIAAN_ASSET"
+          grep -Fq "year 4" frontend/public/assets/"$KIAAN_ASSET"
+          grep -Fq "year 5" frontend/public/assets/"$KIAAN_ASSET"
           echo EXACT_OCT2_V2_SOURCE_PLUS_STANDALONE_GUARD_PASS
 
       - name: Build and run browser regressions
@@ -79,6 +85,8 @@ jobs:
           npm run build
           grep -q "$GUARD_ASSET?$GUARD_QUERY" dist/index.html
           grep -q "$GUARD_MARKER" dist/assets/"$GUARD_ASSET"
+          grep -Fq "$KIAAN_ASSET?$KIAAN_QUERY" dist/index.html
+          grep -Fq "Kiaan's Portal" dist/assets/"$KIAAN_ASSET"
           npx playwright install --with-deps chromium
           npx playwright test tests/year6-nested-v2.spec.mjs --project=desktop-chromium
           npx playwright test tests/year6-nested-v2.spec.mjs --project=mobile-chromium
@@ -96,6 +104,7 @@ jobs:
           cp -a frontend/dist/. portal/ops/live-browser-worker-prod/site/
           test -f portal/ops/live-browser-worker-prod/site/index.html
           test -f portal/ops/live-browser-worker-prod/site/assets/"$GUARD_ASSET"
+          test -f portal/ops/live-browser-worker-prod/site/assets/"$KIAAN_ASSET"
           core="$(find portal/ops/live-browser-worker-prod/site/assets -maxdepth 1 -type f -name 'portal-*.js' ! -name 'portal-protected-viewer-*' ! -name '*.map' -print -quit)"
           test -n "$core"
           CORE_BUNDLE="$(basename "$core")"
@@ -154,7 +163,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@"$WRANGLER_VERSION" deploy             --config ops/live-browser-worker-prod/wrangler.toml             --keep-vars             --message 'Forward-only: restore proven standalone Year 6 chronological-order guard'
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy             --config ops/live-browser-worker-prod/wrangler.toml             --keep-vars             --message 'Forward-only: retain Year 6 guard and hide Kiaan duplicate Year cards'
           echo LIVE_BROWSER_ASSET_DEPLOY_COMPLETE
 
       - name: Verify topology and runtime were preserved
@@ -180,10 +189,11 @@ jobs:
           for attempt in $(seq 1 60); do
             stamp="${GITHUB_RUN_ID}-${attempt}"
             curl -fsS -H 'Cache-Control: no-cache' "$BASE/?deploy=$stamp" -o /tmp/live-index.html || true
-            if grep -Fq "$CORE_BUNDLE" /tmp/live-index.html && grep -Fq "$GUARD_ASSET?$GUARD_QUERY" /tmp/live-index.html; then
+            if grep -Fq "$CORE_BUNDLE" /tmp/live-index.html && grep -Fq "$GUARD_ASSET?$GUARD_QUERY" /tmp/live-index.html && grep -Fq "$KIAAN_ASSET?$KIAAN_QUERY" /tmp/live-index.html; then
               guard_status="$(curl -sS -H 'Cache-Control: no-cache' -o /tmp/live-guard.js -w '%{http_code}' "$BASE/assets/$GUARD_ASSET?$GUARD_QUERY&deploy=$stamp")"
               core_status="$(curl -sS -H 'Cache-Control: no-cache' -o /tmp/live-core.js -w '%{http_code}' "$BASE/assets/$CORE_BUNDLE?deploy=$stamp")"
-              if [ "$guard_status" = 200 ] && [ "$core_status" = 200 ] && grep -Fq "$GUARD_MARKER" /tmp/live-guard.js && [ "$(sha256sum /tmp/live-core.js | awk '{print $1}')" = "$CORE_SHA" ]; then
+              kiaan_status="$(curl -sS -H 'Cache-Control: no-cache' -o /tmp/live-kiaan.js -w '%{http_code}' "$BASE/assets/$KIAAN_ASSET?$KIAAN_QUERY&deploy=$stamp")"
+              if [ "$guard_status" = 200 ] && [ "$core_status" = 200 ] && [ "$kiaan_status" = 200 ] && grep -Fq "$GUARD_MARKER" /tmp/live-guard.js && grep -Fq "Kiaan's Portal" /tmp/live-kiaan.js && [ "$(sha256sum /tmp/live-core.js | awk '{print $1}')" = "$CORE_SHA" ]; then
                 LIVE=1
                 echo "LIVE_ASSETS_MATCH attempt=$attempt core=$CORE_BUNDLE sha=$CORE_SHA"
                 break
@@ -208,6 +218,9 @@ jobs:
           curl -fsS -H 'Cache-Control: no-cache' "$BASE/?deploy=$stamp" -o /tmp/stable-index.html
           grep -Fq "$CORE_BUNDLE" /tmp/stable-index.html
           grep -Fq "$GUARD_ASSET?$GUARD_QUERY" /tmp/stable-index.html
+          grep -Fq "$KIAAN_ASSET?$KIAAN_QUERY" /tmp/stable-index.html
           curl -fsS -H 'Cache-Control: no-cache' "$BASE/assets/$GUARD_ASSET?$GUARD_QUERY&deploy=$stamp" -o /tmp/stable-guard.js
           grep -Fq "$GUARD_MARKER" /tmp/stable-guard.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE/assets/$KIAAN_ASSET?$KIAAN_QUERY&deploy=$stamp" -o /tmp/stable-kiaan.js
+          grep -Fq "Kiaan's Portal" /tmp/stable-kiaan.js
           echo LIVE_BROWSER_STABLE_RECHECK_PASS
