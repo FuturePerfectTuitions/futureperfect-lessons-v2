@@ -11,6 +11,18 @@
   let savedDirectory = null;
   let processing = false;
   let sourceInitialised = false;
+  const AUTH_TIMEOUT_MS = 12000;
+  const FOLDER_TIMEOUT_MS = 8000;
+
+  function withTimeout(promise, ms, message) {
+    let timeoutId;
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), ms);
+      })
+    ]).finally(() => clearTimeout(timeoutId));
+  }
 
   function setStatus(el, text, kind='') {
     el.textContent = text;
@@ -54,18 +66,21 @@
     $('importCard').classList.remove('hidden');
     if (!sourceInitialised) {
       sourceInitialised = true;
-      await initSavedSource();
+      // Folder permissions are independent of authentication and must never hold the login button.
+      void initSavedSource().catch(error => {
+        setStatus($('sourceStatus'), error.message || 'Could not check the saved CSV folder.', 'bad');
+      });
     }
   }
 
   async function api(path, body, auth=true) {
     const headers = { 'content-type':'application/json' };
     if (auth && token) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(`${worker}${path}`, {
+    const response = await withTimeout(fetch(`${worker}${path}`, {
       method:'POST',
       headers,
       body:JSON.stringify(body)
-    });
+    }), AUTH_TIMEOUT_MS, 'The Portal Worker did not respond. Check your connection and try again.');
     const data = await response.json().catch(() => ({ ok:false, error:'INVALID_RESPONSE' }));
     if (response.status === 401 && auth) {
       token = '';
@@ -263,7 +278,7 @@
 
     $('savedSourceBox').classList.remove('hidden');
     try {
-      savedDirectory=await sourceApi.getSavedDirectory();
+      savedDirectory=await withTimeout(sourceApi.getSavedDirectory(), FOLDER_TIMEOUT_MS, 'Saved-folder storage is not responding. Choose Set CSV Source Folder or use Manual CSV fallback.');
       if (!savedDirectory) {
         $('sourceMeta').textContent='No folder has been saved yet. Choose the folder containing workFP.csv once; Chrome will remember the folder handle.';
         $('loadLatestBtn').disabled=true;
@@ -275,8 +290,14 @@
       $('sourceMeta').textContent=`Saved folder: ${savedDirectory.name}. Checking permission…`;
       $('clearSourceBtn').disabled=false;
 
-      const permissionFromLogin=await Promise.resolve(window.FPTAdminSourcePermissionReady).catch(()=>false);
-      const granted=permissionFromLogin || await sourceApi.permission(savedDirectory,false).catch(()=>false);
+      const permissionFromLogin=await withTimeout(
+        Promise.resolve(window.FPTAdminSourcePermissionReady).catch(()=>false),
+        FOLDER_TIMEOUT_MS, 'Folder permission check timed out.'
+      ).catch(()=>false);
+      const granted=permissionFromLogin || await withTimeout(
+        sourceApi.permission(savedDirectory,false).catch(()=>false),
+        FOLDER_TIMEOUT_MS, 'Folder permission check timed out.'
+      ).catch(()=>false);
       $('loadLatestBtn').disabled=false;
 
       if (granted) {
@@ -288,7 +309,7 @@
       }
     } catch(e) {
       savedDirectory=null;
-      $('sourceMeta').textContent='The saved CSV source could not be restored. Choose the folder again or use the manual CSV fallback.';
+      $('sourceMeta').textContent='The saved CSV source could not be restored or its permission check timed out. Choose the folder again or use the manual CSV fallback.';
       $('loadLatestBtn').disabled=true;
       $('clearSourceBtn').disabled=true;
       setMainStatus('CSV SOURCE REQUIRED', 'The saved folder could not be restored.', 'bad', 'needs-source');
@@ -303,10 +324,12 @@
       token=data.token;
       localStorage.setItem(TOKEN_KEY,token);
       $('password').value='';
-      await Promise.resolve(window.FPTAdminSourcePermissionReady).catch(()=>false);
+      // Never await browser folder permission here: the Admin login must finish independently.
       await showImport();
     } catch(e) {
-      setStatus($('loginStatus'), e.data?.error==='ADMIN_IMPORT_NOT_CONFIGURED' ? 'Admin import has not yet been configured on the Worker.' : 'Sign-in failed.', 'bad');
+      setStatus($('loginStatus'), e.data?.error==='ADMIN_IMPORT_NOT_CONFIGURED'
+        ? 'Admin import has not yet been configured on the Worker.'
+        : (e.message?.includes('did not respond') ? e.message : 'Sign-in failed. Check your password or connection.'), 'bad');
     } finally {
       $('loginBtn').disabled=false;
     }
@@ -359,6 +382,20 @@
 
   $('processSelectedBtn').addEventListener('click', processCurrentRows);
 
-  if (token) showImport();
-  else showLogin();
+  async function restoreSession() {
+    if (!token) { showLogin(); return; }
+    try {
+      // Read-only endpoint; do not expose Admin tools based solely on a stored token.
+      await api('/api/v1/admin/trials/list', {});
+      await showImport();
+    } catch (error) {
+      // api() already clears expired tokens on 401.
+      showLogin();
+      setStatus($('loginStatus'), error.message?.includes('did not respond')
+        ? 'Could not verify your saved Admin session. Sign in again when the connection is available.'
+        : 'Your saved Admin session could not be verified. Please sign in again.', 'warn');
+    }
+  }
+
+  void restoreSession();
 })();
