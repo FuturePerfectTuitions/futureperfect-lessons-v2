@@ -1,6 +1,15 @@
 name: Guarded two-account English access correction
 on:
   workflow_dispatch:
+    inputs:
+      student_login:
+        description: 'Exact second student portal login'
+        required: true
+        type: string
+      student_name:
+        description: 'Exact second student first name'
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -11,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      TARGET_2_LOGIN: ${{ inputs.student_login }}
+      TARGET_2_NAME: ${{ inputs.student_name }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -53,7 +64,8 @@ jobs:
           const catalogue=globalToCatalogue((await resolveCurrentScope(store,'global')).payload);
           const targets=['849cb0835c0b1d1ef6f57e936929e5acd32ffbb5384fac81ca4ceb08f955c397','40fc3451e882282df7cc37fdc6d3fd9b4a1d3673c1a05c0350ed4ce31a3ce49b'];
           const matches=[[],[]];let cursor='',count=0;
-          do {const j=await api(ns('STUDENTS_KV')+'/keys?limit=1000&prefix=user%3A'+(cursor?'&cursor='+encodeURIComponent(cursor):''));for(const k of j.result){if(++count>1500)throw Error('SCAN_LIMIT');const p=await students.get(k.name,{type:'json'});const i=targets.indexOf(hash(p?.firstName));if(i>=0 && norm(p.accountStatus||p.status||'active')==='active' && !p.isAdmin && !p.superuser && !norm(p.role||p.accountType).includes('admin'))matches[i].push(k.name);}cursor=j.result_info?.cursor||'';}while(cursor);
+          do {const j=await api(ns('STUDENTS_KV')+'/keys?limit=1000&prefix=user%3A'+(cursor?'&cursor='+encodeURIComponent(cursor):''));for(const k of j.result){if(++count>1500)throw Error('SCAN_LIMIT');const p=await students.get(k.name,{type:'json'});const i=targets.indexOf(hash(p?.firstName));if(i===0 && norm(p.accountStatus||p.status||'active')==='active' && !p.isAdmin && !p.superuser && !norm(p.role||p.accountType).includes('admin'))matches[i].push(k.name);}cursor=j.result_info?.cursor||'';}while(cursor);
+          matches[1]=['user:'+String(process.env.TARGET_2_LOGIN||'').trim().toLowerCase()].filter(k=>k!=='user:');
           const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
           const same=(a,b)=>stableStringify(a)===stableStringify(b);
           let failures=0;
@@ -63,7 +75,7 @@ jobs:
            console.log('TARGET_'+(i+1)+'_ACTIVE_MATCH_COUNT_'+matches[i].length);if(matches[i].length!==1)throw Error('IDENTITY_NOT_UNIQUE');
            studentKey=matches[i][0];id=studentKey.slice(5);
            oldText=await get('STUDENTS_KV',studentKey);const old=JSON.parse(oldText);
-           if(norm(old.portalUserId)!==id||hash(old.firstName)!==targets[i]||norm(old.accountStatus||old.status||'active')!=='active'||old.isAdmin||old.superuser||norm(old.role||old.accountType).includes('admin'))throw Error('IDENTITY_GUARD');
+           if(norm(old.portalUserId)!==id||(i===0?hash(old.firstName)!==targets[i]:norm(old.firstName)!==norm(process.env.TARGET_2_NAME))||norm(old.accountStatus||old.status||'active')!=='active'||old.isAdmin||old.superuser||norm(old.role||old.accountType).includes('admin'))throw Error('IDENTITY_GUARD');
            const opaque=await opaqueAccessScopeId(id,salt);scope='access:'+opaque;scopePrefix=pointerKey(scope).slice(0,-7);
            prior=await resolveCurrentScope(store,scope);
            const input=await loadStudentAccessInput(env,id,date);
