@@ -53,14 +53,14 @@ jobs:
           const catalogue=globalToCatalogue((await resolveCurrentScope(store,'global')).payload);
           const targets=['849cb0835c0b1d1ef6f57e936929e5acd32ffbb5384fac81ca4ceb08f955c397','40fc3451e882282df7cc37fdc6d3fd9b4a1d3673c1a05c0350ed4ce31a3ce49b'];
           const matches=[[],[]];let cursor='',count=0;
-          do {const j=await api(ns('STUDENTS_KV')+'/keys?limit=1000&prefix=user%3A'+(cursor?'&cursor='+encodeURIComponent(cursor):''));for(const k of j.result){if(++count>1500)throw Error('SCAN_LIMIT');const p=await students.get(k.name,{type:'json'});const i=targets.indexOf(hash(p?.firstName));if(i>=0)matches[i].push(k.name);}cursor=j.result_info?.cursor||'';}while(cursor);
+          do {const j=await api(ns('STUDENTS_KV')+'/keys?limit=1000&prefix=user%3A'+(cursor?'&cursor='+encodeURIComponent(cursor):''));for(const k of j.result){if(++count>1500)throw Error('SCAN_LIMIT');const p=await students.get(k.name,{type:'json'});const i=targets.indexOf(hash(p?.firstName));if(i>=0 && norm(p.accountStatus||p.status||'active')==='active' && !p.isAdmin && !p.superuser && !norm(p.role||p.accountType).includes('admin'))matches[i].push(k.name);}cursor=j.result_info?.cursor||'';}while(cursor);
           const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
           const same=(a,b)=>stableStringify(a)===stableStringify(b);
           let failures=0;
           for(let i=0;i<2;i++){
            let stage='IDENTITY',written=false,oldText,newText,id,scope,prior;
            try{
-           if(matches[i].length!==1)throw Error('IDENTITY_NOT_UNIQUE');
+           console.log('TARGET_'+(i+1)+'_ACTIVE_MATCH_COUNT_'+matches[i].length);if(matches[i].length!==1)throw Error('IDENTITY_NOT_UNIQUE');
            studentKey=matches[i][0];id=studentKey.slice(5);
            oldText=await get('STUDENTS_KV',studentKey);const old=JSON.parse(oldText);
            if(norm(old.portalUserId)!==id||hash(old.firstName)!==targets[i]||norm(old.accountStatus||old.status||'active')!=='active'||old.isAdmin||old.superuser||norm(old.role||old.accountType).includes('admin'))throw Error('IDENTITY_GUARD');
@@ -82,7 +82,12 @@ jobs:
            const a=before.snapshot,b=planned.snapshot;
            if(!same(a.lessonAccess,b.lessonAccess))throw Error('LESSON_ACCESS_DRIFT');
            if(i===0){
-            if(b.views.some(v=>v.viewId==='english-year4'))throw Error('DUPLICATE_DERIVED_FROM_OTHER_CANONICAL_SOURCE');
+            if(b.views.some(v=>v.viewId==='english-year4')){
+            const normalBatch=x=>norm(x?.subject)==='english'&&Number(x?.school_year)===4&&norm(x?.stream)!=='11plus';
+            const legacyNormal=x=>/^Y4E(?!11)/i.test(String(x||''));
+            console.log(JSON.stringify({target:1,normalBatchAssignments:input.batchAssignments.filter(normalBatch).length,normalProfileBatches:(old.batches||[]).filter(legacyNormal).length,normalEntitlementSources:input.entitlements.filter(x=>legacyNormal(x.source_batch_code)).length,normalPreLessonSources:input.onlinePreLessonEntitlements.filter(x=>legacyNormal(x.batch_key)).length,manualYear4CoreCount:(old.manualAccess?.coreLessons||[]).filter(x=>/^Y4E/i.test(x)).length,standardFullLibrary:(old.fullLibraries||[]).some(x=>norm(x)==='english_y4_full'),standardHistoricalView:(old.historicalViews||[]).some(x=>norm(x)==='english-year4')}));
+            throw Error('DUPLICATE_DERIVED_FROM_OTHER_CANONICAL_SOURCE');
+           }
             if(!same(a.views.filter(v=>v.viewId!=='english-year4'),b.views)||!same(a.specialAreas,b.specialAreas))throw Error('UNRELATED_VIEW_DRIFT');
            }else{
             if(!b.specialAreas.includes('VR_HOWTO')||!same(a.specialAreas.filter(v=>v!=='VR_HOWTO'),b.specialAreas.filter(v=>v!=='VR_HOWTO'))||!same(a.views,b.views))throw Error('SPECIAL_ACCESS_DRIFT');
