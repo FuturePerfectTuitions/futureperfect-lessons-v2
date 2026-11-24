@@ -23,7 +23,7 @@ env:
   BROWSER_WORKER: fpt-portal-v2-rebuild-browser-prod
   STUDENT_WORKER: fpt-portal-v2-rebuild-student-prod
   FRONTEND_REPO: FuturePerfectTuitions/futureperfect-lessons-test
-  FRONTEND_REF: 84237b611130e0bb5988843fe505f13fe6b7d2ce
+  FRONTEND_REF: 76535698f5106a748e53336b23bccd31b966351a
   EXACT_OCT2_APP_REF: e5e833a9b956a6985bb5a76e7dd056b897b7d76e
   EXPECTED_SOURCE_INDEX_SHA256: 2257d56c5cd930dacfefa00f310eb5f9bc2db6cd18e3ebf16fb7d8c4ad4c3cbd
   EXPECTED_DEPLOYED_INDEX_SHA256: 975d5193073d52663b8dbbee5ccf0387d589fe00cb42c836c58354848c39b2d8
@@ -63,7 +63,16 @@ jobs:
           set -euo pipefail
           test "$(git -C frontend rev-parse HEAD)" = "$FRONTEND_REF"
           git -C frontend show "$EXACT_OCT2_APP_REF:src/app.js" > /tmp/exact-oct2-app.js
-          cmp -s /tmp/exact-oct2-app.js frontend/src/app.js
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('frontend/src/app.js').read_text()
+          start=s.index('// MATHS_REVISIT_DEEP_LINK_V1')
+          end=s.index('function subjectViews',start)
+          restored=(s[:start]+s[end:]).replace('if (!await openRecommendedMathsLesson()) renderSubjects();','renderSubjects();',1)
+          assert restored==Path('/tmp/exact-oct2-app.js').read_text(), 'Unrelated frontend change'
+          PY
+          grep -q 'MATHS_REVISIT_DEEP_LINK_V1' frontend/src/app.js
+          grep -q 'locked recommendation fails closed' frontend/tests/step10-v2-maths-practice.spec.mjs
           ! grep -q 'YEAR6_CHRONOLOGICAL_ORDER_V2_20261004' frontend/src/app.js
           ! grep -q 'YEAR6_VISIBLE_ORDER_GUARD_V2_20261004' frontend/src/app.js
           grep -q "$GUARD_MARKER" frontend/public/assets/"$GUARD_ASSET"
@@ -164,7 +173,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@"$WRANGLER_VERSION" deploy             --config ops/live-browser-worker-prod/wrangler.toml             --keep-vars             --message 'Forward-only: retain Year 6 guard and hide Kiaan duplicate Year cards'
+          npx --yes wrangler@"$WRANGLER_VERSION" deploy             --config ops/live-browser-worker-prod/wrangler.toml             --keep-vars             --message 'Forward-only: add authenticated Maths revisit navigation; preserve existing guards'
           echo LIVE_BROWSER_ASSET_DEPLOY_COMPLETE
 
       - name: Verify topology and runtime were preserved
