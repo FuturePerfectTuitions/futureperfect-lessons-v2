@@ -330,10 +330,20 @@ jobs:
           if(canonicalComparable(before)!==canonicalComparable(nextCanonical)) throw new Error('CANONICAL_UNRELATED_FIELD_MUTATION');
 
           await kvPut(lessonsNs,lessonKey,nextCanonical,'application/json; charset=utf-8');
-          const canonicalAfter=await kvGetJson(lessonsNs,lessonKey);
-          const afterCanonicalIds=[...new Set(videoObjects(canonicalAfter).flatMap(([p,o])=>screenPalIds(o,p)).map(x=>x.id))];
-          if(!afterCanonicalIds.includes(target)) throw new Error('CANONICAL_TARGET_NOT_PRESENT');
-          for(const old of canonicalOldIds) if(old!==target&&afterCanonicalIds.includes(old)) throw new Error(`CANONICAL_OLD_ID_REMAINS:${old}`);
+          // Cloudflare KV reads can briefly return the previous value after a successful write.
+          // Retry the production read-back before declaring verification failure.
+          let canonicalAfter=null;
+          let afterCanonicalIds=[];
+          for(let attempt=0;attempt<8;attempt++){
+            canonicalAfter=await kvGetJson(lessonsNs,lessonKey);
+            afterCanonicalIds=[...new Set(videoObjects(canonicalAfter).flatMap(([p,o])=>screenPalIds(o,p)).map(x=>x.id))];
+            const targetPresent=afterCanonicalIds.includes(target);
+            const oldAbsent=canonicalOldIds.every(old=>old===target||!afterCanonicalIds.includes(old));
+            if(targetPresent&&oldAbsent) break;
+            if(attempt<7) await new Promise(resolve=>setTimeout(resolve,1500));
+          }
+          if(!afterCanonicalIds.includes(target)) throw new Error('CANONICAL_TARGET_NOT_PRESENT_AFTER_RETRIES');
+          for(const old of canonicalOldIds) if(old!==target&&afterCanonicalIds.includes(old)) throw new Error(`CANONICAL_OLD_ID_REMAINS_AFTER_RETRIES:${old}`);
 
           // Prepared lesson: replacement preserves structure and swaps the old ID; first addition
           // follows the production compiler's videoVariants shape and resourceCount rule.
