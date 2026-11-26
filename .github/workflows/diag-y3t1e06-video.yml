@@ -61,5 +61,16 @@ jobs:
           const catRows=Array.isArray(globalEnv?.payload?.catalogues?.[viewId]?.lessons)?globalEnv.payload.catalogues[viewId].lessons:[];
           const catMatch=catRows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y3T2M13');
           console.log('GLOBAL_SUMMARY='+JSON.stringify({version:globalVer,viewId,lessonToViews:globalEnv?.payload?.lessonToViews?.[rec.lessonId]||null,catalogueMatches:catMatch}));
+          const globalVersionKeys=(await list(process.env.READ_NS,`rm:v1:scope:${enc('global')}:version:`)).filter(k=>k.includes('video-desc-y3t2m13'));
+          const globalCandidateDetails=await Promise.all(globalVersionKeys.map(async k=>{
+            try{
+              const env=await get(process.env.READ_NS,k);
+              const rows=env?.payload?.catalogues?.[viewId]?.lessons||[];
+              const matching=rows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y3T2M13');
+              return {key:k,kind:env?.kind,scope:env?.scope,version:env?.version,sha256:env?.sha256,matchingRows:matching.map(r=>({lessonId:r.lessonId,displayLessonId:r.displayLessonId,description:r.description})),payloadKeys:Object.keys(env?.payload||{})};
+            }catch(e){return {key:k,error:String(e)};}
+          }));
+          console.log('GLOBAL_CANDIDATES='+JSON.stringify({count:globalVersionKeys.length,details:globalCandidateDetails}));
+
 
           NODE
