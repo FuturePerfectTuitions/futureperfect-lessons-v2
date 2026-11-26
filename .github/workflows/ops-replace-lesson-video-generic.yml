@@ -169,7 +169,13 @@ jobs:
             const envelopeText=stableStringify(envelope);
             const candidate={version,sha256:payloadSha,envelopeSha256:sha(envelopeText)};
             await kvPut(readNs,versionKey(scope,version),envelopeText);
-            if(!(await verifyEnvelope(scope,candidate))) throw new Error(`PREPARED_CANDIDATE_VERIFY_FAILED:${scope}`);
+            let candidateVerified=null;
+            for(let attempt=0;attempt<8;attempt++){
+              candidateVerified=await verifyEnvelope(scope,candidate);
+              if(candidateVerified) break;
+              if(attempt<7) await new Promise(resolve=>setTimeout(resolve,1500));
+            }
+            if(!candidateVerified) throw new Error(`PREPARED_CANDIDATE_VERIFY_FAILED_AFTER_RETRIES:${scope}`);
             const previous={
               version:clean(current.candidate.version),
               sha256:clean(current.candidate.sha256),
@@ -177,8 +183,13 @@ jobs:
             };
             const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope,current:candidate,previous,updatedAt:new Date().toISOString()};
             await kvPut(readNs,pointerKey(scope),stableStringify(pointer));
-            const confirmed=await resolve(scope);
-            if(confirmed.candidate.version!==version||confirmed.candidate.sha256!==payloadSha) throw new Error(`PREPARED_POINTER_VERIFY_FAILED:${scope}`);
+            let confirmed=null;
+            for(let attempt=0;attempt<8;attempt++){
+              try{ confirmed=await resolve(scope); }catch{ confirmed=null; }
+              if(confirmed?.candidate?.version===version&&confirmed?.candidate?.sha256===payloadSha) break;
+              if(attempt<7) await new Promise(resolve=>setTimeout(resolve,1500));
+            }
+            if(confirmed?.candidate?.version!==version||confirmed?.candidate?.sha256!==payloadSha) throw new Error(`PREPARED_POINTER_VERIFY_FAILED_AFTER_RETRIES:${scope}`);
             return {reused:false,version,sha256:payloadSha};
           }
 
