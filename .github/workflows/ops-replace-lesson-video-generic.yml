@@ -164,18 +164,39 @@ jobs:
             const payloadText=stableStringify(payload);
             const payloadSha=sha(payloadText);
             if(current.candidate.sha256===payloadSha) return {reused:true,version:current.candidate.version,sha256:payloadSha};
-            const version=`${label}-${payloadSha.slice(0,18)}`;
-            const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha,payload};
-            const envelopeText=stableStringify(envelope);
-            const candidate={version,sha256:payloadSha,envelopeSha256:sha(envelopeText)};
-            await kvPut(readNs,versionKey(scope,version),envelopeText);
+            // A prior attempt may have written a valid immutable envelope but failed its
+            // immediate KV read-back. Reuse an existing envelope with the exact payload hash
+            // rather than creating another version and waiting for propagation again.
+            let candidate=null;
             let candidateVerified=null;
-            for(let attempt=0;attempt<20;attempt++){
-              candidateVerified=await verifyEnvelope(scope,candidate);
-              if(candidateVerified) break;
-              if(attempt<19) await new Promise(resolve=>setTimeout(resolve,2000));
+            let reusedExisting=false;
+            const versionPrefix=`rm:v1:scope:${encodedScope(scope)}:version:`;
+            const existingKeys=await kvList(readNs,versionPrefix);
+            const matchingKeys=existingKeys.filter(key=>key.endsWith(`-${payloadSha.slice(0,18)}`));
+            for(const key of matchingKeys){
+              const raw=await kvGet(readNs,key);
+              if(raw==null) continue;
+              let env=null; try{env=JSON.parse(raw);}catch{continue;}
+              if(env?.schemaVersion!==1||env?.kind!=='prepared-read-model-envelope'||clean(env.scope)!==clean(scope)) continue;
+              if(clean(env.sha256)!==payloadSha||sha(stableStringify(env.payload))!==payloadSha) continue;
+              const found={version:clean(env.version),sha256:payloadSha,envelopeSha256:sha(raw)};
+              const verified=await verifyEnvelope(scope,found);
+              if(verified){candidate=found;candidateVerified=verified;reusedExisting=true;break;}
+            }
+            if(!candidate){
+              const version=`${label}-${payloadSha.slice(0,18)}`;
+              const envelope={schemaVersion:1,kind:'prepared-read-model-envelope',scope,version,sha256:payloadSha,payload};
+              const envelopeText=stableStringify(envelope);
+              candidate={version,sha256:payloadSha,envelopeSha256:sha(envelopeText)};
+              await kvPut(readNs,versionKey(scope,version),envelopeText);
+              for(let attempt=0;attempt<20;attempt++){
+                candidateVerified=await verifyEnvelope(scope,candidate);
+                if(candidateVerified) break;
+                if(attempt<19) await new Promise(resolve=>setTimeout(resolve,2000));
+              }
             }
             if(!candidateVerified) throw new Error(`PREPARED_CANDIDATE_VERIFY_FAILED_AFTER_RETRIES:${scope}`);
+            const version=candidate.version;
             const previous={
               version:clean(current.candidate.version),
               sha256:clean(current.candidate.sha256),
@@ -190,7 +211,7 @@ jobs:
               if(attempt<59) await new Promise(resolve=>setTimeout(resolve,2000));
             }
             if(confirmed?.candidate?.version!==version||confirmed?.candidate?.sha256!==payloadSha) throw new Error(`PREPARED_POINTER_VERIFY_FAILED_AFTER_RETRIES:${scope}`);
-            return {reused:false,version,sha256:payloadSha};
+            return {reused:reusedExisting,version,sha256:payloadSha};
           }
 
           function screenPalIds(value,path='root',out=[]){
