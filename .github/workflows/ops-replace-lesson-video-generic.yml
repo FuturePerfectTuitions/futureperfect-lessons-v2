@@ -290,6 +290,8 @@ jobs:
           const canonicalOldIds=[...new Set(canonicalRefs.map(x=>x.id).filter(Boolean))];
           const preparedRefs=screenPalIds(preparedPayload);
           const preparedOldIds=[...new Set(preparedRefs.map(x=>x.id).filter(Boolean))];
+          const canonicalAlreadyTarget=canonicalOldIds.length===1&&canonicalOldIds[0]===target;
+          const preparedAlreadyTarget=preparedOldIds.length===1&&preparedOldIds[0]===target;
           if(canonicalOldIds.length>1) throw new Error(`CANONICAL_MULTIPLE_SCREENPAL_IDS:${canonicalOldIds.join(',')}`);
           if(preparedOldIds.length>1) throw new Error(`PREPARED_MULTIPLE_SCREENPAL_IDS:${preparedOldIds.join(',')}`);
           if(intent==='auto'){
@@ -302,9 +304,12 @@ jobs:
             if(preparedOldIds.length!==1) throw new Error('REPLACEMENT_PREPARED_VIDEO_NOT_UNAMBIGUOUS');
           }
           if(intent==='addition'){
-            if(canonicalOldIds.length!==0) throw new Error('ADDITION_CANONICAL_VIDEO_ALREADY_PRESENT');
-            if(preparedOldIds.length!==0) throw new Error('ADDITION_PREPARED_VIDEO_ALREADY_PRESENT');
-            if(preparedPayload?.videoVariants) throw new Error('ADDITION_PREPARED_VIDEO_VARIANTS_ALREADY_PRESENT');
+            // Recover safely if an earlier addition wrote the canonical record but stopped
+            // before publishing the prepared lesson, or vice versa. Only the requested
+            // ScreenPal ID is accepted as an already-applied partial addition.
+            if(canonicalOldIds.length!==0&&!canonicalAlreadyTarget) throw new Error('ADDITION_CANONICAL_VIDEO_ALREADY_PRESENT');
+            if(preparedOldIds.length!==0&&!preparedAlreadyTarget) throw new Error('ADDITION_PREPARED_VIDEO_ALREADY_PRESENT');
+            if(preparedPayload?.videoVariants&&!preparedAlreadyTarget) throw new Error('ADDITION_PREPARED_VIDEO_VARIANTS_ALREADY_PRESENT');
           }
 
           console.log('VIDEO_REPLACEMENT_PREFLIGHT=' + JSON.stringify({
@@ -361,18 +366,21 @@ jobs:
           };
           if(canonicalComparable(before)!==canonicalComparable(nextCanonical)) throw new Error('CANONICAL_UNRELATED_FIELD_MUTATION');
 
-          await kvPut(lessonsNs,lessonKey,nextCanonical,'application/json; charset=utf-8');
-          // Cloudflare KV reads can briefly return the previous value after a successful write.
-          // Retry the production read-back before declaring verification failure.
+          // Avoid a redundant write when recovering a partial addition whose canonical
+          // record already contains this exact video and description.
+          const canonicalWriteNeeded=stableStringify(nextCanonical)!==stableStringify(before);
+          if(canonicalWriteNeeded) await kvPut(lessonsNs,lessonKey,nextCanonical,'application/json; charset=utf-8');
+          // Cloudflare KV reads can remain stale beyond 40 seconds after a successful write.
+          // Allow the full propagation window before treating the write as failed.
           let canonicalAfter=null;
           let afterCanonicalIds=[];
-          for(let attempt=0;attempt<20;attempt++){
+          for(let attempt=0;attempt<60;attempt++){
             canonicalAfter=await kvGetJson(lessonsNs,lessonKey);
             afterCanonicalIds=[...new Set(videoObjects(canonicalAfter).flatMap(([p,o])=>screenPalIds(o,p)).map(x=>x.id))];
             const targetPresent=afterCanonicalIds.includes(target);
             const oldAbsent=canonicalOldIds.every(old=>old===target||!afterCanonicalIds.includes(old));
             if(targetPresent&&oldAbsent) break;
-            if(attempt<19) await new Promise(resolve=>setTimeout(resolve,2000));
+            if(attempt<59) await new Promise(resolve=>setTimeout(resolve,2000));
           }
           if(!afterCanonicalIds.includes(target)) throw new Error('CANONICAL_TARGET_NOT_PRESENT_AFTER_RETRIES');
           for(const old of canonicalOldIds) if(old!==target&&afterCanonicalIds.includes(old)) throw new Error(`CANONICAL_OLD_ID_REMAINS_AFTER_RETRIES:${old}`);
@@ -383,7 +391,9 @@ jobs:
           if(intent==='addition'){
             const preparedVideo={displayName:'Lesson Video',targetUrl:targetVideo.embedUrl};
             nextPrepared.videoVariants={normal:preparedVideo,elevenPlus:{...preparedVideo}};
-            nextPrepared.resourceCount=(Array.isArray(nextPrepared.resources)?nextPrepared.resources.length:0)+1;
+            if(!preparedAlreadyTarget){
+              nextPrepared.resourceCount=(Array.isArray(nextPrepared.resources)?nextPrepared.resources.length:0)+1;
+            }
           }
           if(variantPolicy==='same-video-all'){
             const preparedVideo={displayName:'Lesson Video',targetUrl:targetVideo.embedUrl};
