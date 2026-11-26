@@ -71,6 +71,25 @@ jobs:
             }catch(e){return {key:k,error:String(e)};}
           }));
           console.log('GLOBAL_CANDIDATES='+JSON.stringify({count:globalVersionKeys.length,details:globalCandidateDetails}));
+          const crypto=await import('node:crypto');
+          const stableValue=value=>{
+            if(Array.isArray(value)) return value.map(stableValue);
+            if(!value||typeof value!=='object') return value;
+            const out={}; for(const key of Object.keys(value).sort()) out[key]=stableValue(value[key]); return out;
+          };
+          const stableStringify=value=>JSON.stringify(stableValue(value));
+          const rawChecks=await Promise.all(globalVersionKeys.map(async k=>{
+            const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${process.env.READ_NS}/values/${encodeURIComponent(k)}`,{headers:{Authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`}});
+            const raw=await response.text();
+            let env=null; try{env=JSON.parse(raw);}catch{}
+            const hash=value=>crypto.createHash('sha256').update(String(value)).digest('hex');
+            const payloadHash=env?hash(stableStringify(env.payload)):null;
+            const rawHash=hash(raw);
+            const stableEnvelopeHash=env?hash(stableStringify(env)):null;
+            return {key:k,status:response.status,rawLength:raw.length,rawPrefix:raw.slice(0,30),rawSuffix:raw.slice(-30),version:env?.version,scope:env?.scope,kind:env?.kind,storedPayloadHash:env?.sha256,computedPayloadHash:payloadHash,payloadHashMatches:payloadHash===env?.sha256,rawHash,stableEnvelopeHash,rawEqualsStableEnvelope:raw===stableStringify(env)};
+          }));
+          console.log('GLOBAL_RAW_HASH_CHECKS='+JSON.stringify(rawChecks));
+
 
 
           NODE
