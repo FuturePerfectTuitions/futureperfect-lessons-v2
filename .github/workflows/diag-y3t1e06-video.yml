@@ -1,4 +1,4 @@
-name: Diagnose Y3T2M13 video state
+name: Diagnose Y4T2E11 video state
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
           function enc(scope){return encodeURIComponent(scope).replace(/%/g,'_');}
           const keys=await list(process.env.LESSONS_NS,'lesson:');
           const found=[];
-          for(let i=0;i<keys.length;i+=30){const batch=keys.slice(i,i+30);const rows=await Promise.all(batch.map(async key=>({key,rec:await get(process.env.LESSONS_NS,key)})));for(const row of rows)if(Object.values(row.rec?.displayIds||{}).includes('Y3T2M13'))found.push(row);}
+          for(let i=0;i<keys.length;i+=30){const batch=keys.slice(i,i+30);const rows=await Promise.all(batch.map(async key=>({key,rec:await get(process.env.LESSONS_NS,key)})));for(const row of rows)if(Object.values(row.rec?.displayIds||{}).includes('Y4T2E11'))found.push(row);}
           if(found.length!==1) throw new Error('match count '+found.length);
           const {key,rec}=found[0];
           console.log('CANONICAL_SUMMARY='+JSON.stringify({key,lessonId:rec.lessonId,title:rec.title,subject:rec.subject,displayIds:rec.displayIds,topKeys:Object.keys(rec),coreKeys:Object.keys(rec.core||{}),video:rec.video||null,coreVideo:rec?.core?.video||null,contentStatus:rec.contentStatus||null,description:rec.description||null}));
@@ -57,16 +57,16 @@ jobs:
           const globalPointer=await get(process.env.READ_NS,`rm:v1:scope:${enc(globalScope)}:current`);
           const globalVer=globalPointer.current.version;
           const globalEnv=await get(process.env.READ_NS,`rm:v1:scope:${enc(globalScope)}:version:${enc(globalVer)}`);
-          const viewId=Object.entries(rec.displayIds||{}).find(([,v])=>v==='Y3T2M13')?.[0]||null;
+          const viewId=Object.entries(rec.displayIds||{}).find(([,v])=>v==='Y4T2E11')?.[0]||null;
           const catRows=Array.isArray(globalEnv?.payload?.catalogues?.[viewId]?.lessons)?globalEnv.payload.catalogues[viewId].lessons:[];
-          const catMatch=catRows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y3T2M13');
+          const catMatch=catRows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y4T2E11');
           console.log('GLOBAL_SUMMARY='+JSON.stringify({version:globalVer,viewId,lessonToViews:globalEnv?.payload?.lessonToViews?.[rec.lessonId]||null,catalogueMatches:catMatch}));
-          const globalVersionKeys=(await list(process.env.READ_NS,`rm:v1:scope:${enc('global')}:version:`)).filter(k=>k.includes('video-desc-y3t2m13'));
+          const globalVersionKeys=(await list(process.env.READ_NS,`rm:v1:scope:${enc('global')}:version:`)).filter(k=>k.includes('video-desc-y4t2e11'));
           const globalCandidateDetails=await Promise.all(globalVersionKeys.map(async k=>{
             try{
               const env=await get(process.env.READ_NS,k);
               const rows=env?.payload?.catalogues?.[viewId]?.lessons||[];
-              const matching=rows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y3T2M13');
+              const matching=rows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y4T2E11');
               return {key:k,kind:env?.kind,scope:env?.scope,version:env?.version,sha256:env?.sha256,matchingRows:matching.map(r=>({lessonId:r.lessonId,displayLessonId:r.displayLessonId,description:r.description})),payloadKeys:Object.keys(env?.payload||{})};
             }catch(e){return {key:k,error:String(e)};}
           }));
