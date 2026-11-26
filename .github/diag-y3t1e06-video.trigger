@@ -1,1 +1,1 @@
-2026-11-26 inspect Y4T2E11 Term Starter canonical and prepared state
+2026-11-26 inspect Y4T2E11 catalogue rows across both mapped views
