@@ -61,6 +61,10 @@ jobs:
           const catRows=Array.isArray(globalEnv?.payload?.catalogues?.[viewId]?.lessons)?globalEnv.payload.catalogues[viewId].lessons:[];
           const catMatch=catRows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y4T2E11');
           console.log('GLOBAL_SUMMARY='+JSON.stringify({version:globalVer,viewId,lessonToViews:globalEnv?.payload?.lessonToViews?.[rec.lessonId]||null,catalogueMatches:catMatch}));
+          const allMappedViewRows=Object.fromEntries((globalEnv?.payload?.lessonToViews?.[rec.lessonId]||[]).map(view=>
+            [view,(globalEnv?.payload?.catalogues?.[view]?.lessons||[]).filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y4T2E11'||clean(r?.displayLessonId)==='Y4T2EE11').map(r=>({lessonId:r.lessonId,displayLessonId:r.displayLessonId,title:r.title,description:r.description}))]));
+          console.log('ALL_MAPPED_VIEW_ROWS='+JSON.stringify(allMappedViewRows));
+
           const globalVersionKeys=(await list(process.env.READ_NS,`rm:v1:scope:${enc('global')}:version:`)).filter(k=>k.includes('video-desc-y4t2e11'));
           const globalCandidateDetails=await Promise.all(globalVersionKeys.map(async k=>{
             try{
