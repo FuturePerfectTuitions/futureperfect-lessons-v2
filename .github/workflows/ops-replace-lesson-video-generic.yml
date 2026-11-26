@@ -412,11 +412,16 @@ jobs:
           let globalPublishResult=null;
           if(updateDescription){
             const nextGlobal=clone(globalPayload);
-            const rows=nextGlobal?.catalogues?.[viewId]?.lessons;
-            if(!Array.isArray(rows)) throw new Error('GLOBAL_CATALOGUE_ROWS_MISSING');
-            const rowMatches=rows.filter(r=>clean(r?.lessonId)===lessonId||clean(r?.displayLessonId)===displayId);
-            if(rowMatches.length!==1) throw new Error(`GLOBAL_DESCRIPTION_ROW_MATCH_COUNT:${rowMatches.length}`);
-            rowMatches[0].description=requestedDescription;
+            // A canonical lesson can appear in more than one student view (for example,
+            // standard and 11+). Keep the shared lesson description consistent in every
+            // view mapped to this canonical lesson, without changing catalogue membership.
+            for(const mappedView of mappedViews){
+              const rows=nextGlobal?.catalogues?.[mappedView]?.lessons;
+              if(!Array.isArray(rows)) throw new Error(`GLOBAL_CATALOGUE_ROWS_MISSING:${mappedView}`);
+              const rowMatches=rows.filter(r=>clean(r?.lessonId)===lessonId);
+              if(rowMatches.length!==1) throw new Error(`GLOBAL_DESCRIPTION_ROW_MATCH_COUNT:${mappedView}:${rowMatches.length}`);
+              rowMatches[0].description=requestedDescription;
+            }
             globalPublishResult=await publish('global',nextGlobal,`video-desc-${displayId.toLowerCase()}-${Date.now()}`);
           }
 
@@ -428,7 +433,14 @@ jobs:
           if(stableStringify(mappedAfter)!==stableStringify(mappedViews)) throw new Error('LESSON_VIEW_CLASSIFICATION_CHANGED');
           const catalogueMatchesAfter=(globalAfter.env.payload?.catalogues?.[viewId]?.lessons||[]).filter(r=>clean(r?.lessonId)===lessonId||clean(r?.displayLessonId)===displayId);
           if(catalogueMatchesAfter.length!==1) throw new Error('GLOBAL_CATALOGUE_MATCH_CHANGED');
-          if(updateDescription && String(catalogueMatchesAfter[0]?.description??'')!==requestedDescription) throw new Error('GLOBAL_DESCRIPTION_VERIFY_FAILED');
+          if(updateDescription){
+            for(const mappedView of mappedViews){
+              const rows=globalAfter.env.payload?.catalogues?.[mappedView]?.lessons||[];
+              const rowMatches=rows.filter(r=>clean(r?.lessonId)===lessonId);
+              if(rowMatches.length!==1) throw new Error(`GLOBAL_CATALOGUE_MATCH_CHANGED:${mappedView}`);
+              if(String(rowMatches[0]?.description??'')!==requestedDescription) throw new Error(`GLOBAL_DESCRIPTION_VERIFY_FAILED:${mappedView}`);
+            }
+          }
 
           if(updateDescription){
             if(String(canonicalAfter?.description??'')!==requestedDescription) throw new Error('CANONICAL_DESCRIPTION_VERIFY_FAILED');
