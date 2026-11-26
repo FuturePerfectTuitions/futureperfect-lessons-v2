@@ -53,4 +53,13 @@ jobs:
           const ver=pointer.current.version;
           const env=await get(process.env.READ_NS,`rm:v1:scope:${enc(scope)}:version:${enc(ver)}`);
           console.log('PREPARED_SUMMARY='+JSON.stringify({scope,version:ver,payloadKeys:Object.keys(env.payload||{}),payload:env.payload}));
+          const globalScope='global';
+          const globalPointer=await get(process.env.READ_NS,`rm:v1:scope:${enc(globalScope)}:current`);
+          const globalVer=globalPointer.current.version;
+          const globalEnv=await get(process.env.READ_NS,`rm:v1:scope:${enc(globalScope)}:version:${enc(globalVer)}`);
+          const viewId=Object.entries(rec.displayIds||{}).find(([,v])=>v==='Y3T1M12')?.[0]||null;
+          const catRows=Array.isArray(globalEnv?.payload?.catalogues?.[viewId]?.lessons)?globalEnv.payload.catalogues[viewId].lessons:[];
+          const catMatch=catRows.filter(r=>clean(r?.lessonId)===clean(rec.lessonId)||clean(r?.displayLessonId)==='Y3T1M12');
+          console.log('GLOBAL_SUMMARY='+JSON.stringify({version:globalVer,viewId,lessonToViews:globalEnv?.payload?.lessonToViews?.[rec.lessonId]||null,catalogueMatches:catMatch}));
+
           NODE
