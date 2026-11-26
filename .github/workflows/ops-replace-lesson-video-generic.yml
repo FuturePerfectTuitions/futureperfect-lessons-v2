@@ -170,10 +170,10 @@ jobs:
             const candidate={version,sha256:payloadSha,envelopeSha256:sha(envelopeText)};
             await kvPut(readNs,versionKey(scope,version),envelopeText);
             let candidateVerified=null;
-            for(let attempt=0;attempt<8;attempt++){
+            for(let attempt=0;attempt<20;attempt++){
               candidateVerified=await verifyEnvelope(scope,candidate);
               if(candidateVerified) break;
-              if(attempt<7) await new Promise(resolve=>setTimeout(resolve,1500));
+              if(attempt<19) await new Promise(resolve=>setTimeout(resolve,2000));
             }
             if(!candidateVerified) throw new Error(`PREPARED_CANDIDATE_VERIFY_FAILED_AFTER_RETRIES:${scope}`);
             const previous={
@@ -184,10 +184,10 @@ jobs:
             const pointer={schemaVersion:1,kind:'prepared-read-model-pointer',scope,current:candidate,previous,updatedAt:new Date().toISOString()};
             await kvPut(readNs,pointerKey(scope),stableStringify(pointer));
             let confirmed=null;
-            for(let attempt=0;attempt<8;attempt++){
+            for(let attempt=0;attempt<60;attempt++){
               try{ confirmed=await resolve(scope); }catch{ confirmed=null; }
               if(confirmed?.candidate?.version===version&&confirmed?.candidate?.sha256===payloadSha) break;
-              if(attempt<7) await new Promise(resolve=>setTimeout(resolve,1500));
+              if(attempt<59) await new Promise(resolve=>setTimeout(resolve,2000));
             }
             if(confirmed?.candidate?.version!==version||confirmed?.candidate?.sha256!==payloadSha) throw new Error(`PREPARED_POINTER_VERIFY_FAILED_AFTER_RETRIES:${scope}`);
             return {reused:false,version,sha256:payloadSha};
@@ -345,13 +345,13 @@ jobs:
           // Retry the production read-back before declaring verification failure.
           let canonicalAfter=null;
           let afterCanonicalIds=[];
-          for(let attempt=0;attempt<8;attempt++){
+          for(let attempt=0;attempt<20;attempt++){
             canonicalAfter=await kvGetJson(lessonsNs,lessonKey);
             afterCanonicalIds=[...new Set(videoObjects(canonicalAfter).flatMap(([p,o])=>screenPalIds(o,p)).map(x=>x.id))];
             const targetPresent=afterCanonicalIds.includes(target);
             const oldAbsent=canonicalOldIds.every(old=>old===target||!afterCanonicalIds.includes(old));
             if(targetPresent&&oldAbsent) break;
-            if(attempt<7) await new Promise(resolve=>setTimeout(resolve,1500));
+            if(attempt<19) await new Promise(resolve=>setTimeout(resolve,2000));
           }
           if(!afterCanonicalIds.includes(target)) throw new Error('CANONICAL_TARGET_NOT_PRESENT_AFTER_RETRIES');
           for(const old of canonicalOldIds) if(old!==target&&afterCanonicalIds.includes(old)) throw new Error(`CANONICAL_OLD_ID_REMAINS_AFTER_RETRIES:${old}`);
